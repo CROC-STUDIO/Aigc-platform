@@ -1,0 +1,314 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 游戏漫剧</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <button id="comicChangelogBtn" class="topbar-link" type="button">更新日志</button>
+      </nav>
+      <div class="topbar-account">
+        <span id="comicCurrentUserBadge">未登录</span>
+        <button id="comicLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item active" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>v1.0.29</small>
+      </div>
+    </aside>
+
+    <main class="app comic-app">
+      <section class="operation-pane">
+        <section class="topbar">
+          <div>
+            <h1>游戏漫剧工作台 <span class="app-version">v1.0.29</span></h1>
+            <div class="path-editor">
+              <select id="comicProjectSelect" title="切换项目"></select>
+              <button id="comicRenameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
+              <button id="comicDeleteProjectBtn" class="mini ghost danger admin-project-action" type="button" hidden>删除</button>
+              <span class="page-hint">基于 Seedance 2.0 提示词指南：主体、运动、环境、运镜、美学、音频、多模态参考</span>
+            </div>
+          </div>
+          <div class="status">
+            <span>Seedance 2.0</span>
+            <span id="comicRefCount">0 个参考</span>
+          </div>
+        </section>
+
+        <section class="metrics">
+          <div><strong id="comicShotCount">3</strong><span>分镜</span></div>
+          <div><strong id="comicDialogueCount">0</strong><span>台词</span></div>
+          <div><strong id="comicRoleCount">0</strong><span>角色</span></div>
+          <div><strong id="comicSceneCount">0</strong><span>场景</span></div>
+          <div><strong id="comicVideoRefCount">0</strong><span>视频</span></div>
+        </section>
+
+        <section class="workspace comic-workspace">
+          <div class="asset-column">
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>角色图</h2>
+                <div class="head-actions">
+                  <button id="comicUploadRoleBtn" class="mini" type="button">上传角色</button>
+                  <label><input id="comicToggleRoles" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="comicRoleGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>怪物图</h2>
+                <div class="head-actions">
+                  <button id="comicUploadMonsterBtn" class="mini" type="button">上传怪物</button>
+                  <label><input id="comicToggleMonsters" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="comicMonsterGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>场景图</h2>
+                <div class="head-actions">
+                  <button id="comicUploadSceneBtn" class="mini" type="button">上传场景</button>
+                  <label><input id="comicToggleScenes" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="comicSceneGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>参考视频</h2>
+                <div class="head-actions">
+                  <button id="comicUploadRefVideoBtn" class="mini" type="button">上传视频</button>
+                  <label><input id="comicToggleRefVideos" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="comicRefVideoGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+          </div>
+
+          <div class="workspace-main">
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>项目设定</h2>
+                <span>游戏漫剧</span>
+              </div>
+              <div class="comic-form-grid">
+                <label>项目名 <input id="comicProjectName" type="text" value="暴雨玄门国漫短片" /></label>
+                <label>生成类型
+                  <select id="comicMode">
+                    <option value="I2V">I2V：图片生成视频</option>
+                    <option value="T2V">T2V：文本生成视频</option>
+                    <option value="R2V">R2V：参考生成视频</option>
+                    <option value="V2V">V2V：视频编辑/参考</option>
+                  </select>
+                </label>
+                <label>比例
+                  <select id="comicAspect">
+                    <option value="9:16">9:16 竖屏</option>
+                    <option value="16:9">16:9 横屏</option>
+                    <option value="1:1">1:1 方屏</option>
+                  </select>
+                </label>
+                <label>时长
+                  <select id="comicDuration">
+                    <option value="15秒以内">15秒以内</option>
+                    <option value="10秒">10秒</option>
+                    <option value="5秒">5秒</option>
+                  </select>
+                </label>
+                <label>画面风格
+                  <select id="comicStyle">
+                    <option value="3D国漫电影短片风格，东方玄学视觉，暴雨夜，体积云，电影级光影，超写实材质，强烈仪式感">3D国漫电影</option>
+                    <option value="高质量游戏漫剧风格，角色表情夸张清晰，节奏强，画面像手游剧情广告">游戏漫剧</option>
+                    <option value="3D卡通动画风格，干净高饱和，角色轮廓清晰">3D卡通</option>
+                    <option value="手绘漫画风格，分镜感强，线条清楚">手绘漫画</option>
+                    <option value="赛博朋克科幻动画风格，霓虹光效，未来城市氛围">赛博科幻</option>
+                  </select>
+                </label>
+                <fieldset class="dimension-toggle">
+                  <legend>画面维度</legend>
+                  <label><input type="radio" name="comicDimension" value="2D" /> <span>2D</span></label>
+                  <label><input type="radio" name="comicDimension" value="3D" checked /> <span>3D</span></label>
+                </fieldset>
+                <label>音频
+                  <select id="comicAudio">
+                    <option value="只要环境音、特效音和人声，不要背景音乐，不要旁白；暴雨、雷声、风声、火焰坠落、法术电弧、符箓燃烧和阵法展开的声音要与动作同步">环境音+人声</option>
+                    <option value="有紧张且有节奏的背景音乐，音效与动作同步">紧张背景音乐</option>
+                    <option value="有轻松幽默的背景音乐，角色对白自然">轻松对白</option>
+                    <option value="有电影感环境音、特效音和角色对白，不要旁白">电影环境音</option>
+                    <option value="无明确音频要求">不指定</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>角色功能</h2>
+                <span>参考图 / 手动设定</span>
+              </div>
+              <div class="comic-two-col">
+                <label>角色来源
+                  <select id="comicRoleSource">
+                    <option value="reference">使用左侧已勾选角色图</option>
+                    <option value="manual">手动填写人物设定</option>
+                    <option value="mixed">参考图 + 手动补充</option>
+                  </select>
+                </label>
+                <label>人物身份 <input id="comicCharacterIdentity" type="text" value="东方道术师/主角" placeholder="如 赛博赏金猎人、校园女主、魔法导师" /></label>
+                <label>人物性格 <input id="comicCharacterPersonality" type="text" value="冷峻、镇定、克制，带强烈东方玄门气质" placeholder="如 活泼、傲娇、沉稳、毒舌、温柔" /></label>
+                <label>服装外观 <textarea id="comicCharacterOutfit" class="requirement-text" spellcheck="false">黑色雨衣被狂风卷起，衣摆剧烈翻飞；保持发型、体型、道具、神情和气质一致。</textarea></label>
+                <label>主角补充设定 <textarea id="comicHero" class="requirement-text" spellcheck="false">参考已勾选角色图中的道术师/主角形象，保持发型、服装、体型、道具、神情和气质一致。人物神情冷峻、镇定，带强烈东方道术师气质。</textarea></label>
+                <label>反派/怪物设定 <textarea id="comicVillain" class="requirement-text" spellcheck="false">如果勾选怪物图，则作为天灾、火球、邪物或压迫性对手的形象参考，保持轮廓、颜色、威胁感和体量关系；如果没有怪物图，则以巨大燃烧火球作为主要危机对象。</textarea></label>
+              </div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>剧情设定</h2>
+                <span>钩子 + 环境</span>
+              </div>
+              <div class="comic-two-col">
+                <label>剧情钩子 <textarea id="comicHook" class="requirement-text" spellcheck="false">开场3秒内制造危机：暴雨夜乌云翻滚，雷电交织，一颗巨大燃烧火球从天空急速坠落；火球即将砸落的瞬间，道术师悬停半空，准备掐诀开阵。</textarea></label>
+                <label>场景环境 <textarea id="comicScene" class="requirement-text" spellcheck="false">场景是暴雨夜的东方玄学电影场面，乌云翻滚、雷电交织、火焰照亮雨幕，金色灵光与道家法阵在高空展开。整体按电影标准处理氛围光感、体积云、雨滴粒子、火焰和法术能量碰撞。</textarea></label>
+              </div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>分镜节奏</h2>
+                <button id="addShotBtn" class="mini" type="button">新增分镜</button>
+              </div>
+              <div id="shotList" class="shot-list"></div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>对白与表演</h2>
+                <button id="addDialogueBtn" class="mini" type="button">新增台词</button>
+              </div>
+              <div id="dialogueList" class="dialogue-list"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="result-pane comic-result-pane">
+        <section class="panel comic-result-panel">
+          <div class="panel-head">
+            <h2>结果区</h2>
+            <span id="comicGenerateStatus">未生成</span>
+          </div>
+          <div id="comicVideoResult" class="comic-video-result">
+            <div class="empty-output">暂无视频结果</div>
+          </div>
+          <div class="panel-subhead">
+            <h3>Seedance 提示词</h3>
+            <span id="promptLength">0 字</span>
+          </div>
+          <div class="comic-actions">
+            <button id="buildPromptBtn" class="export-primary" type="button">生成提示词</button>
+            <button id="copyPromptBtn" class="mini ghost" type="button">复制</button>
+            <button id="downloadPromptBtn" class="mini ghost" type="button">下载 txt</button>
+          </div>
+          <textarea id="comicPromptOutput" class="requirement-text comic-output" spellcheck="false"></textarea>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>运行日志</h2>
+            <span>Seedance 2.0</span>
+          </div>
+          <div id="comicRunLog" class="log-list comic-run-log"></div>
+        </section>
+      </section>
+    </main>
+
+    <section class="control-band comic-control-band">
+      <div class="batch-box">
+        <label for="comicBatchTag">批次名</label>
+        <input id="comicBatchTag" type="text" />
+      </div>
+      <div class="batch-box compact-box">
+        <label for="comicGenerateMode">模式</label>
+        <select id="comicGenerateMode">
+          <option value="auto">自动参考</option>
+          <option value="text">纯文本</option>
+        </select>
+      </div>
+      <button id="generateVideoBtn" class="icon-action" type="button" title="生成视频" aria-label="生成视频">▶</button>
+    </section>
+
+    <div id="comicChangelogModal" class="modal-backdrop" hidden>
+      <div class="modal-panel changelog-panel">
+        <div class="modal-title-row">
+          <div>
+            <h2>更新日志</h2>
+            <p>Touka AI素材中台 <strong>v1.0.29</strong></p>
+          </div>
+          <button id="comicChangelogCloseBtn" class="mini ghost" type="button">关闭</button>
+        </div>
+        <div class="changelog-list">
+          <section>
+            <h3>v1.0.29</h3>
+            <ul>
+              <li>顶部固定导航栏：加入网站 Logo、更新日志入口和账号系统。</li>
+              <li>广告素材工作台和漫剧工作台支持项目下拉切换、新增项目、管理员改名和删除。</li>
+              <li>通用提示词改为按项目独立保存，默认提示词改为更通用的广告素材规则。</li>
+              <li>竞品素材特殊提示词升级为 JSON 反推格式，视频会生成 Seedance 2.0 专用提示词。</li>`n              <li>视频素材反推接入 Gemini 多模态和 ASR 台词提取，生成视频会保留原台词语种。</li>`n              <li>非战斗参考视频不再被旧攻击/升级提示词误判为战斗模板。</li>`n              <li>上传竞品素材时仅锁定当前栏位，其他竞品栏位仍可继续操作。</li>`n              <li>竞品素材默认生成尺寸调整为 1024x1024，仍支持用户手动修改。</li>
+              <li>角色图、怪物图、产品 Logo 图库按项目共享，竞品素材和结果图库按用户项目隔离。</li>
+            </ul>
+          </section>
+          <section>
+            <h3>近期更新</h3>
+            <ul>
+              <li>新增漫剧工作台，支持角色、怪物、场景参考素材和 Seedance 2.0 视频生成。</li>
+              <li>支持本地/局域网访问、登录账号隔离、管理员账号管理。</li>
+              <li>结果图库支持批次筛选、实时刷新、选中批次下载。</li>
+              <li>生成流程支持图片模式和图片+视频模式，并支持生成次数参数。</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script src="/comic.js" type="module"></script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+

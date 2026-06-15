@@ -1,0 +1,312 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <button id="changelogBtn" class="topbar-link" type="button">更新日志</button>
+      </nav>
+      <div class="topbar-account">
+        <span id="currentUserBadge">未登录</span>
+        <button id="adminUsersBtn" class="mini ghost" type="button" hidden>账号管理</button>
+        <button id="logoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item active" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>v1.0.29</small>
+      </div>
+    </aside>
+
+    <main class="app">
+      <section class="operation-pane">
+        <section class="topbar">
+          <div>
+            <h1>广告素材工作台 <span class="app-version">v1.0.29</span></h1>
+            <div class="path-editor">
+              <select id="projectSelect" title="切换项目"></select>
+              <button id="renameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
+              <button id="deleteProjectBtn" class="mini ghost danger admin-project-action" type="button" hidden>删除</button>
+            </div>
+          </div>
+          <div class="status">
+            <span id="modelBadge">gpt-image-2</span>
+            <span id="runBadge">空闲</span>
+          </div>
+        </section>
+
+        <section class="control-band">
+          <div class="batch-box">
+            <label for="batchTag">批次名</label>
+            <input id="batchTag" type="text" />
+          </div>
+          <input id="concurrencyInput" type="hidden" value="3" />
+          <div class="batch-box compact-box">
+            <label for="repeatCountInput">生成次数</label>
+            <input id="repeatCountInput" type="number" min="1" max="50" value="1" />
+          </div>
+          <div class="batch-box compact-box">
+            <label for="outputModeSelect">生成模式</label>
+            <select id="outputModeSelect">
+              <option value="image">图片</option>
+              <option value="video">图片+视频</option>
+            </select>
+          </div>
+          <div class="batch-box model-box">
+            <label for="imageModelSelect">生图模型</label>
+            <select id="imageModelSelect" required>
+              <option value="">请选择</option>
+              <option value="gpt-image-2">image 2.0（常规）</option>
+              <option value="ByteDance-Seedream-5-0-lite">ByteDance-Seedream-5-0-lite（擦边）</option>
+            </select>
+          </div>
+          <button id="stopBtn" class="icon-action ghost" type="button" title="停止" aria-label="停止" disabled>×</button>
+          <button id="startBtn" class="icon-action" type="button" title="开始生成" aria-label="开始生成">▶</button>
+        </section>
+
+        <section class="metrics">
+          <div><strong id="totalCount">0</strong><span>任务</span></div>
+          <div><strong id="doneCount">0</strong><span>完成</span></div>
+          <div><strong id="skipCount">0</strong><span>跳过</span></div>
+          <div><strong id="failCount">0</strong><span>失败</span></div>
+        </section>
+
+        <section class="workspace">
+          <div class="asset-column">
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>角色图</h2>
+                <div class="head-actions">
+                  <button id="uploadRoleBtn" class="mini" type="button">上传角色</button>
+                  <label><input id="toggleRoles" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <input id="roleUploader" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <div id="roleGrid" class="thumb-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>怪物图</h2>
+                <div class="head-actions">
+                  <button id="uploadMonsterBtn" class="mini" type="button">上传怪物</button>
+                  <label><input id="toggleMonsters" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="monsterGrid" class="thumb-grid compact-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>产品 Logo</h2>
+                <div class="head-actions">
+                  <button id="uploadLogoBtn" class="mini" type="button">上传 Logo</button>
+                  <label><input id="toggleLogos" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="logoGrid" class="thumb-grid compact-grid"></div>
+            </aside>
+          </div>
+
+          <div class="workspace-main">
+            <section class="panel guangdada-panel">
+              <div class="panel-head">
+                <h2>广大大素材库 <span class="disabled-tag">暂时禁用，请自行上传素材</span></h2>
+                <span id="guangdadaStatus">已禁用</span>
+              </div>
+              <div class="guangdada-box">
+              <div class="guangdada-controls">
+                <label>竞品 <select id="guangdadaKeyword"></select></label>
+                <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" disabled /></label>
+                <label>数量 <input id="guangdadaTopN" type="number" min="1" max="100" value="3" disabled /></label>
+                <label>类型
+                  <select id="guangdadaMaterialType" disabled>
+                    <option value="all">全部</option>
+                    <option value="image" selected>图片</option>
+                    <option value="video">视频</option>
+                  </select>
+                </label>
+                <label>开始日期 <input id="guangdadaStartDate" type="date" disabled /></label>
+                <label>结束日期 <input id="guangdadaEndDate" type="date" disabled /></label>
+                <label>最近时间
+                  <select id="guangdadaRecentRange" disabled>
+                    <option value="">自定义</option>
+                    <option value="1">最近1天</option>
+                    <option value="3" selected>最近3天</option>
+                    <option value="7">最近7天</option>
+                    <option value="30">最近30天</option>
+                    <option value="365">最近1年</option>
+                  </select>
+                </label>
+                <button id="guangdadaSearchBtn" class="ghost compact-action" type="button" disabled>抓取</button>
+                <button id="guangdadaDeleteFolderBtn" class="ghost danger compact-action" type="button">删除</button>
+              </div>
+              <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">广大大抓取暂时禁用，请在下方竞品素材卡片中手动上传图片或视频素材。</div></div>
+              </div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>竞品素材与要求</h2>
+                <span id="taskPreview">0 个预估任务</span>
+              </div>
+              <div class="global-prompt-box">
+                <div class="global-prompt-head">
+                  <label for="globalRequirementText">通用提示词</label>
+                  <button id="saveGlobalRequirementBtn" class="mini ghost" type="button">保存通用提示词</button>
+                </div>
+                <textarea id="globalRequirementText" class="requirement-text global-requirement-text" spellcheck="false"></textarea>
+              </div>
+              <div id="competitorList" class="competitors"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="result-pane">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>结果图库</h2>
+            <span id="outputCount">0 张</span>
+          </div>
+          <div class="export-bar">
+            <button id="exportOutputsBtn" class="export-primary" type="button">下载选中批次</button>
+            <span id="exportStatus"></span>
+          </div>
+          <div id="batchFilters" class="batch-filters"></div>
+          <div id="outputGrid" class="output-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>运行日志</h2>
+            <span id="currentJob">未运行</span>
+          </div>
+          <div id="jobTable" class="job-table"></div>
+          <div id="logList" class="log-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="loginModal" class="modal-backdrop login-backdrop" hidden>
+      <div class="modal-panel login-panel">
+        <h2>登录 Touka AI素材中台</h2>
+        <p>请输入服务器提供的账号和密码。登录后会进入该账号独立的角色图、怪物图、产品 Logo、竞品素材和结果图库。</p>
+        <label>账号 <input id="loginUsername" type="text" autocomplete="username" /></label>
+        <label>密码 <input id="loginPassword" type="password" autocomplete="current-password" /></label>
+        <div id="loginStatus" class="login-status"></div>
+        <div class="modal-actions">
+          <button id="loginBtn" type="button">登录</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="changelogModal" class="modal-backdrop" hidden>
+      <div class="modal-panel changelog-panel">
+        <div class="modal-title-row">
+          <div>
+            <h2>更新日志</h2>
+            <p>Touka AI素材中台 <strong>v1.0.29</strong></p>
+          </div>
+          <button id="changelogCloseBtn" class="mini ghost" type="button">关闭</button>
+        </div>
+        <div class="changelog-list">
+          <section>
+            <h3>v1.0.29</h3>
+            <ul>
+              <li>顶部固定导航栏：加入网站 Logo、更新日志入口和账号系统。</li>
+              <li>广告素材工作台和漫剧工作台支持项目下拉切换、新增项目、管理员改名和删除。</li>
+              <li>通用提示词改为按项目独立保存，默认提示词改为更通用的广告素材规则。</li>
+              <li>竞品素材特殊提示词升级为 JSON 反推格式，视频会生成 Seedance 2.0 专用提示词。</li>`n              <li>视频素材反推接入 Gemini 多模态和 ASR 台词提取，生成视频会保留原台词语种。</li>`n              <li>非战斗参考视频不再被旧攻击/升级提示词误判为战斗模板。</li>`n              <li>上传竞品素材时仅锁定当前栏位，其他竞品栏位仍可继续操作。</li>`n              <li>竞品素材默认生成尺寸调整为 1024x1024，仍支持用户手动修改。</li>
+              <li>角色图、怪物图、产品 Logo 图库按项目共享，竞品素材和结果图库按用户项目隔离。</li>
+            </ul>
+          </section>
+          <section>
+            <h3>近期更新</h3>
+            <ul>
+              <li>新增漫剧工作台，支持角色、怪物、场景参考素材和 Seedance 2.0 视频生成。</li>
+              <li>支持本地/局域网访问、登录账号隔离、管理员账号管理。</li>
+              <li>结果图库支持批次筛选、实时刷新、选中批次下载。</li>
+              <li>生成流程支持图片模式和图片+视频模式，并支持生成次数参数。</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="adminUsersModal" class="modal-backdrop" hidden>
+      <div class="modal-panel admin-users-panel">
+        <h2>账号管理</h2>
+        <div class="admin-create-grid">
+          <label>账号 <input id="adminNewUsername" type="text" autocomplete="off" /></label>
+          <label>昵称 <input id="adminNewDisplayName" type="text" autocomplete="off" /></label>
+          <label>密码 <input id="adminNewPassword" type="text" autocomplete="new-password" /></label>
+          <label>权限
+            <select id="adminNewRole">
+              <option value="user">普通用户</option>
+              <option value="admin">管理员</option>
+            </select>
+          </label>
+          <button id="adminCreateUserBtn" type="button">创建账号</button>
+        </div>
+        <div id="adminUsersStatus" class="login-status"></div>
+        <div id="adminUsersList" class="admin-users-list"></div>
+        <div class="modal-actions">
+          <button id="adminUsersCloseBtn" class="ghost" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="competitorNameModal" class="modal-backdrop" hidden>
+      <div class="modal-panel">
+        <h2>新增竞品名称</h2>
+        <label>竞品名称 <input id="competitorNameInput" type="text" placeholder="例如：Capybara Go!" /></label>
+        <div class="modal-actions">
+          <button id="competitorNameCancelBtn" class="ghost" type="button">取消</button>
+          <button id="competitorNameConfirmBtn" type="button">确认新增</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
