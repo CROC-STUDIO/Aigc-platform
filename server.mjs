@@ -9,6 +9,7 @@ import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";
+import { handleWangzhuanRequest } from "./server/wangzhuan/router.mjs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -18,6 +19,7 @@ const USERS_PATH = join(__dirname, "users.json");
 let projectRoot = resolve(__dirname, "..");
 let savedProjects = [];
 let users = [];
+let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
 const MODEL = "gpt-image-2";
@@ -330,14 +332,17 @@ function dirs() {
 
 async function loadConfig() {
   if (!existsSync(CONFIG_PATH)) {
+    appConfig = {};
     savedProjects = normalizeProjects([{ name: basename(projectRoot), path: projectRoot }]);
     return;
   }
   try {
-    const data = JSON.parse(await readFile(CONFIG_PATH, "utf8"));
+    const data = parseJsonFileContent(await readFile(CONFIG_PATH, "utf8"), "config.json");
+    appConfig = data && typeof data === "object" ? data : {};
     if (data.projectRoot) projectRoot = resolve(data.projectRoot);
     savedProjects = normalizeProjects(data.projects ?? [{ name: basename(projectRoot), path: projectRoot }]);
   } catch {
+    appConfig = {};
     projectRoot = resolve(__dirname, "..");
     savedProjects = normalizeProjects([{ name: basename(projectRoot), path: projectRoot }]);
   }
@@ -393,7 +398,8 @@ async function ensureProjectStructure(root = projectRoot) {
 
 async function saveConfig() {
   savedProjects = normalizeProjects(savedProjects);
-  await writeFile(CONFIG_PATH, JSON.stringify({ projectRoot, projects: savedProjects }, null, 2), "utf8");
+  appConfig = { ...appConfig, projectRoot, projects: savedProjects };
+  await writeFile(CONFIG_PATH, JSON.stringify(appConfig, null, 2), "utf8");
 }
 
 const ROLE_META = {
@@ -2776,10 +2782,13 @@ function safeInsideProject(path) {
   return full;
 }
 
-async function withRequestScope(req, res, handler) {
+async function withRequestScope(req, res, handler, options = {}) {
   const cookies = parseCookies(req);
   const user = userFromRequest(req);
-  if (!user) return sendJson(res, { error: "请先登录" }, 401);
+  if (!user) {
+    if (typeof options.onUnauthenticated === "function") return options.onUnauthenticated();
+    return sendJson(res, { error: "请先登录" }, 401);
+  }
   const userId = user.username;
   const cookieBase = cookies.ad_project_root ? resolve(cookies.ad_project_root) : projectRoot;
   const allowedBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
@@ -2814,6 +2823,17 @@ async function handleRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/login") return login(req, res);
     if (req.method === "POST" && url.pathname === "/api/logout") return logout(req, res);
+    if (url.pathname.startsWith("/api/wangzhuan/")) {
+      return handleWangzhuanRequest(req, res, url, {
+        readJson,
+        currentUser,
+        currentUserId,
+        currentProjectRoot,
+        currentBaseProjectRoot,
+        getLegacyRunState: getRunState,
+        config: appConfig
+      });
+    }
     if (req.method === "GET" && url.pathname === "/api/materials") return sendJson(res, await loadMaterials());
     if (req.method === "GET" && url.pathname === "/api/admin/users") return sendJson(res, await listAdminUsers());
     if (req.method === "POST" && url.pathname === "/api/admin/users/create") return sendJson(res, await createAdminUser(await readJson(req)));
@@ -2897,12 +2917,13 @@ async function handleRequest(req, res) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
+  const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
   const isStatic = !url.pathname.startsWith("/api/") && url.pathname !== "/file";
   if (isPublicAuth || isStatic) {
     handleRequest(req, res).catch((error) => sendError(res, error));
     return;
   }
-  withRequestScope(req, res, () => handleRequest(req, res)).catch((error) => sendError(res, error));
+  withRequestScope(req, res, () => handleRequest(req, res), isWangzhuanApi ? { onUnauthenticated: () => handleRequest(req, res) } : {}).catch((error) => sendError(res, error));
 });
 
 const port = Number(process.env.PORT || 5177);

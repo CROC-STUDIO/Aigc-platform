@@ -1,0 +1,568 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { Readable } from "node:stream";
+import test from "node:test";
+
+import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
+import { getGallery } from "../../server/wangzhuan/gallery.mjs";
+import { buildDownloadPackage } from "../../server/wangzhuan/package.mjs";
+import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
+import {
+  confirmRemixPreview,
+  estimateRemix,
+  getRemixDetail,
+  startRemix,
+  uploadRemixSource
+} from "../../server/wangzhuan/remix.mjs";
+import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
+import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
+import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+
+const baseDraft = {
+  displayName: "Cash Reward US EN",
+  productName: "Lucky Cash",
+  cta: "Download now",
+  ending: "Claim your bonus today",
+  currencySymbol: "$",
+  language: "en-US",
+  regions: ["US"],
+  targetChannels: ["tiktok_ads"],
+  defaultOutputRatio: "9:16",
+  defaultDurationSec: 15,
+  promiseLevel: "strong_conversion"
+};
+
+function context(root, userId = "alice", overrides = {}) {
+  return {
+    userProjectRoot: join(root, userId, "project"),
+    sharedProjectRoot: join(root, "shared"),
+    userId,
+    user: { userId, username: userId, role: "user", isAdmin: false },
+    config: {},
+    ...overrides
+  };
+}
+
+function sourceUpload(fileName = "competitor.mp4", mimeType = "video/mp4") {
+  return {
+    fileName,
+    mimeType,
+    content: `data:${mimeType};base64,${Buffer.from("source material").toString("base64")}`,
+    durationSec: 15,
+    width: 720,
+    height: 1280
+  };
+}
+
+function referenceUpload() {
+  return {
+    fileName: "reference.mp4",
+    mimeType: "video/mp4",
+    content: `data:video/mp4;base64,${Buffer.from("reference video").toString("base64")}`,
+    durationSec: 15,
+    width: 720,
+    height: 1280,
+    canExtractFrame: true
+  };
+}
+
+function decomposition() {
+  return {
+    scene: "Phone app reward screen",
+    subject: "Hand holding phone",
+    action: "User taps a reward task",
+    camera: "Close-up vertical shot",
+    lighting: "Bright indoor lighting",
+    style: "Clean app demo",
+    quality: "HD",
+    hook: "Earn rewards with daily tasks"
+  };
+}
+
+function region(label = "watermark") {
+  return {
+    regionId: `reg_${label}`,
+    type: "bbox",
+    label,
+    bbox: { x: 0.62, y: 0.84, width: 0.24, height: 0.08 }
+  };
+}
+
+async function templateFixture(ctx) {
+  const saved = await saveTemplate(ctx, { mode: "create", draft: baseDraft });
+  return saved.template;
+}
+
+async function activeBatchFixture(ctx, idSuffix = "lock") {
+  const template = await templateFixture(ctx);
+  const checked = await checkReferenceVideo(ctx, referenceUpload());
+  await decomposeReferenceVideo(ctx, {
+    idempotencyKey: `idem_decompose_${idSuffix}`,
+    referenceVideoId: checked.referenceVideo.referenceVideoId,
+    decomposition: decomposition()
+  });
+  const estimated = await estimateBatch(ctx, {
+    templateId: template.templateId,
+    versionId: template.versionId,
+    referenceVideoId: checked.referenceVideo.referenceVideoId,
+    targetChannel: "tiktok_ads",
+    targetRegion: "US",
+    language: "en-US",
+    promiseLevel: "strong_conversion",
+    durationSec: 15,
+    variantCount: 1,
+    requestedConcurrency: 1,
+    outputRatio: "9:16"
+  });
+  return startBatchFromEstimate(ctx, {
+    idempotencyKey: `idem_start_batch_${idSuffix}`,
+    estimateId: estimated.estimate.estimateId
+  });
+}
+
+function jsonReq(method, body = {}) {
+  const stream = Readable.from([JSON.stringify(body)]);
+  stream.method = method;
+  stream.headers = {};
+  return stream;
+}
+
+function captureRes() {
+  return {
+    statusCode: 0,
+    headers: {},
+    body: Buffer.alloc(0),
+    writeHead(status, headers) {
+      this.statusCode = status;
+      this.headers = headers;
+    },
+    end(body = "") {
+      this.body = Buffer.isBuffer(body) ? body : Buffer.from(String(body), "utf8");
+    }
+  };
+}
+
+function routerContext(ctx) {
+  return {
+    readJson: async (req) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    },
+    currentUser: () => ctx.user,
+    currentUserId: () => ctx.userId,
+    currentProjectRoot: () => ctx.userProjectRoot,
+    currentBaseProjectRoot: () => ctx.sharedProjectRoot,
+    capabilities: ctx.capabilities
+  };
+}
+
+function zipEntries(zip) {
+  const entries = new Map();
+  let offset = 0;
+  while (offset + 30 <= zip.length && zip.readUInt32LE(offset) === 0x04034b50) {
+    const compressedSize = zip.readUInt32LE(offset + 18);
+    const nameLength = zip.readUInt16LE(offset + 26);
+    const extraLength = zip.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = zip.subarray(nameStart, nameStart + nameLength).toString("utf8");
+    const data = zip.subarray(dataStart, dataStart + compressedSize);
+    entries.set(name, data);
+    offset = dataStart + compressedSize;
+  }
+  return entries;
+}
+
+test("remix upload stores source material and rejects invalid file types", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-upload-"));
+  try {
+    const ctx = context(root);
+    const uploaded = await uploadRemixSource(ctx, sourceUpload("competitor.mp4"));
+
+    assert.match(uploaded.sourceId, /^rsrc_\d{8}_\d{3}$/);
+    assert.equal(uploaded.probe.sourceId, uploaded.sourceId);
+    assert.equal(uploaded.probe.mimeType, "video/mp4");
+    assert.match(uploaded.previewUrl, /^\/file\?path=/);
+    assert.equal(uploaded.previewUrl.includes(root), false);
+    assert.equal(existsSync(join(ctx.userProjectRoot, uploaded.probe.storedPath)), true);
+    assert.equal(existsSync(join(wangzhuanPaths(ctx).remixSourcesDir, uploaded.sourceId, "source-probe.json")), true);
+
+    await assert.rejects(
+      () => uploadRemixSource(ctx, sourceUpload("notes.txt", "text/plain")),
+      (error) => {
+        assert.equal(error.code, "invalid_material");
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix estimate enforces capability and region preflight", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-estimate-"));
+  try {
+    const unsupportedCtx = context(root, "unsupported");
+    const unsupportedTemplate = await templateFixture(unsupportedCtx);
+    const unsupportedSource = await uploadRemixSource(unsupportedCtx, sourceUpload());
+
+    await assert.rejects(
+      () => estimateRemix(unsupportedCtx, {
+        sourceId: unsupportedSource.sourceId,
+        templateId: unsupportedTemplate.templateId,
+        versionId: unsupportedTemplate.versionId,
+        operationType: "watermark_cover",
+        regions: [region()],
+        targetChannel: "tiktok_ads"
+      }),
+      (error) => {
+        assert.equal(error.code, "unsupported_capability");
+        assert.equal(error.data.capability.status, "unsupported");
+        return true;
+      }
+    );
+
+    const ctx = context(root, "supported", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover", "text_cta_ending_replace"]
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+
+    await assert.rejects(
+      () => estimateRemix(ctx, {
+        sourceId: source.sourceId,
+        templateId: template.templateId,
+        versionId: template.versionId,
+        operationType: "watermark_cover",
+        regions: [],
+        targetChannel: "tiktok_ads"
+      }),
+      (error) => {
+        assert.equal(error.code, "region_required");
+        return true;
+      }
+    );
+
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+
+    assert.match(estimated.estimateId, /^rme_\d{8}_\d{3}$/);
+    assert.equal(estimated.capability.provider, "function_k");
+    assert.equal(estimated.capability.status, "supported");
+    assert.equal(estimated.confirmationRequired, false);
+    assert.deepEqual(estimated.warnings, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix start creates preview-required output and preview confirm makes it downloadable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-confirm-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover", "logo_icon_cover_or_replace", "text_cta_ending_replace"]
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_remix_start",
+      estimateId: estimated.estimateId
+    });
+    const replay = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_remix_start",
+      estimateId: estimated.estimateId
+    });
+    assert.equal(replay.remix.remixId, started.remix.remixId);
+    assert.equal(started.remix.status, "preview_required");
+    assert.equal(started.remix.outputs.length, 1);
+    assert.equal(started.remix.outputs[0].sourceType, "remix");
+    assert.equal(started.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(started.remix.outputs[0].downloadEligible, false);
+    assert.equal(started.downloadSummary.packageReady, false);
+
+    await assert.rejects(
+      () => buildDownloadPackage(ctx, { remixIds: [started.remix.remixId] }),
+      (error) => {
+        assert.equal(error.code, "empty_download_set");
+        return true;
+      }
+    );
+
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(detail.remix.remixId, started.remix.remixId);
+    assert.equal(detail.downloadSummary.downloadEligibleCount, 0);
+
+    const confirmed = await confirmRemixPreview(ctx, started.remix.remixId, {
+      idempotencyKey: "idem_s7_preview_confirm",
+      outputId: started.remix.outputs[0].outputId
+    });
+    const confirmReplay = await confirmRemixPreview(ctx, started.remix.remixId, {
+      idempotencyKey: "idem_s7_preview_confirm",
+      outputId: started.remix.outputs[0].outputId
+    });
+    assert.equal(confirmReplay.remix.status, "succeeded");
+    assert.equal(confirmed.remix.status, "succeeded");
+    assert.equal(confirmed.remix.previewConfirmedBy, "alice");
+    assert.equal(confirmed.remix.outputs[0].qcStatus, "pass");
+    assert.equal(confirmed.remix.outputs[0].previewConfirmed, true);
+    assert.equal(confirmed.remix.outputs[0].downloadEligible, true);
+    assert.equal(confirmed.downloadSummary.packageReady, true);
+
+    const reportPath = join(wangzhuanPaths(ctx).remixDir, started.remix.remixId, "qc", `${started.remix.outputs[0].outputId}.json`);
+    const report = JSON.parse(await readFile(reportPath, "utf8"));
+    assert.equal(report.sourceType, "remix");
+    assert.equal(report.previewConfirmed, true);
+    assert.equal(report.qcStatus, "pass");
+
+    const gallery = await getGallery(ctx, { downloadEligibleOnly: "true" });
+    assert.equal(gallery.items.some((item) => item.remixId === started.remix.remixId), true);
+
+    const packaged = await buildDownloadPackage(ctx, { remixIds: [started.remix.remixId] });
+    const entries = zipEntries(packaged.zip);
+    const remixRoot = `remix/${started.remix.remixId}`;
+    assert.equal(packaged.manifest.items.length, 1);
+    assert.equal(entries.has("package-manifest.json"), true);
+    assert.equal(entries.has(`${remixRoot}/source/original.mp4`), true);
+    assert.equal(entries.has(`${remixRoot}/source/source-probe.json`), true);
+    assert.equal(entries.has(`${remixRoot}/regions/regions.json`), true);
+    assert.equal(entries.has(`${remixRoot}/prompts/${started.remix.tasks[0].generationTaskId}_remix.txt`), true);
+    assert.equal(entries.has(`${remixRoot}/qc/${started.remix.outputs[0].outputId}.json`), true);
+    assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.csv`), true);
+    assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.json`), true);
+    assert.equal(entries.has(`${remixRoot}/outputs/${started.remix.outputs[0].outputId}.mp4`), true);
+    assert.equal(entries.has(`${remixRoot}/remix.json`), true);
+    assert.equal(entries.has(`${remixRoot}/preview-confirmation.json`), true);
+
+    const textPayload = Buffer.concat([...entries.values()]).toString("utf8");
+    assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
+    assert.ok([...entries.keys()].some((name) => name.endsWith(`${basename(started.remix.outputs[0].filePath)}`)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("pipeline and remix start enforce the same user project run lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-lock-"));
+  try {
+    const batchCtx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    await activeBatchFixture(batchCtx, "active_batch");
+    const remixTemplate = await templateFixture(batchCtx);
+    const remixSource = await uploadRemixSource(batchCtx, sourceUpload());
+    const remixEstimate = await estimateRemix(batchCtx, {
+      sourceId: remixSource.sourceId,
+      templateId: remixTemplate.templateId,
+      versionId: remixTemplate.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+
+    await assert.rejects(
+      () => startRemix(batchCtx, {
+        idempotencyKey: "idem_s7_lock_remix_start",
+        estimateId: remixEstimate.estimateId
+      }),
+      (error) => {
+        assert.equal(error.code, "batch_already_running");
+        assert.equal(error.data.runningResource, "pipeline_batch");
+        return true;
+      }
+    );
+
+    const remixCtx = context(root, "bob", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const template = await templateFixture(remixCtx);
+    const source = await uploadRemixSource(remixCtx, sourceUpload());
+    const estimatedRemix = await estimateRemix(remixCtx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const startedRemix = await startRemix(remixCtx, {
+      idempotencyKey: "idem_s7_lock_start_remix_first",
+      estimateId: estimatedRemix.estimateId
+    });
+
+    const checked = await checkReferenceVideo(remixCtx, referenceUpload());
+    await decomposeReferenceVideo(remixCtx, {
+      idempotencyKey: "idem_decompose_after_remix_lock",
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      decomposition: decomposition()
+    });
+    const estimatedBatch = await estimateBatch(remixCtx, {
+      templateId: template.templateId,
+      versionId: template.versionId,
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      targetChannel: "tiktok_ads",
+      targetRegion: "US",
+      language: "en-US",
+      promiseLevel: "strong_conversion",
+      durationSec: 15,
+      variantCount: 1,
+      requestedConcurrency: 1,
+      outputRatio: "9:16"
+    });
+
+    await assert.rejects(
+      () => startBatchFromEstimate(remixCtx, {
+        idempotencyKey: "idem_s7_lock_batch_start",
+        estimateId: estimatedBatch.estimate.estimateId
+      }),
+      (error) => {
+        assert.equal(error.code, "batch_already_running");
+        assert.equal(error.data.runningResource, "remix");
+        assert.equal(error.data.remixId, startedRemix.remix.remixId);
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix router endpoints return envelopes for upload, estimate, start, detail, confirm, and zip", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-router-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const routeCtx = routerContext(ctx);
+
+    const uploadRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", sourceUpload()),
+      uploadRes,
+      new URL("http://localhost/api/wangzhuan/remix/upload"),
+      routeCtx
+    );
+    assert.equal(uploadRes.statusCode, 200);
+    const uploaded = JSON.parse(uploadRes.body.toString("utf8"));
+    assert.equal(uploaded.code, "ok");
+
+    const estimateRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        sourceId: uploaded.data.sourceId,
+        templateId: template.templateId,
+        versionId: template.versionId,
+        operationType: "watermark_cover",
+        regions: [region()],
+        targetChannel: "tiktok_ads"
+      }),
+      estimateRes,
+      new URL("http://localhost/api/wangzhuan/remix/estimate"),
+      routeCtx
+    );
+    assert.equal(estimateRes.statusCode, 200);
+    const estimated = JSON.parse(estimateRes.body.toString("utf8"));
+    assert.equal(estimated.code, "ok");
+
+    const startRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", { idempotencyKey: "idem_s7_router_start", estimateId: estimated.data.estimateId }),
+      startRes,
+      new URL("http://localhost/api/wangzhuan/remix/start"),
+      routeCtx
+    );
+    assert.equal(startRes.statusCode, 200);
+    const started = JSON.parse(startRes.body.toString("utf8"));
+    assert.equal(started.code, "ok");
+    assert.equal(started.data.remix.status, "preview_required");
+
+    const detailRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("GET"),
+      detailRes,
+      new URL(`http://localhost/api/wangzhuan/remix/${started.data.remix.remixId}`),
+      routeCtx
+    );
+    assert.equal(detailRes.statusCode, 200);
+    const detail = JSON.parse(detailRes.body.toString("utf8"));
+    assert.equal(detail.code, "ok");
+    assert.equal(detail.data.downloadSummary.packageReady, false);
+
+    const confirmRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        idempotencyKey: "idem_s7_router_confirm",
+        outputId: started.data.remix.outputs[0].outputId
+      }),
+      confirmRes,
+      new URL(`http://localhost/api/wangzhuan/remix/${started.data.remix.remixId}/preview-confirm`),
+      routeCtx
+    );
+    assert.equal(confirmRes.statusCode, 200);
+    const confirmed = JSON.parse(confirmRes.body.toString("utf8"));
+    assert.equal(confirmed.code, "ok");
+    assert.equal(confirmed.data.remix.status, "succeeded");
+
+    const downloadRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", { remixIds: [started.data.remix.remixId] }),
+      downloadRes,
+      new URL("http://localhost/api/wangzhuan/download"),
+      routeCtx
+    );
+    assert.equal(downloadRes.statusCode, 200);
+    assert.equal(downloadRes.headers["Content-Type"], "application/zip");
+    assert.equal(zipEntries(downloadRes.body).has("package-manifest.json"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

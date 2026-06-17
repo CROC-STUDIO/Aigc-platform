@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 竞品素材快速改造</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="wz-body">
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <a class="topbar-link" href="/wangzhuan.html">网赚素材管线</a>
+      </nav>
+      <div class="topbar-account">
+        <span id="remixCurrentUserBadge">未登录</span>
+        <button id="remixLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/wangzhuan.html">
+          <span>▣</span>
+          <b>网赚素材管线</b>
+        </a>
+        <a class="platform-nav-item active" href="/competitor-remix.html">
+          <span>◇</span>
+          <b>竞品素材改造</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>Remix</small>
+      </div>
+    </aside>
+
+    <main class="app wz-app">
+      <section class="operation-pane">
+        <section class="topbar wz-page-head">
+          <div>
+            <h1>竞品素材快速改造</h1>
+            <div class="path-editor">
+              <span class="page-hint">首期覆盖文案/CTA、Logo/Icon、水印三类局部改造；下载前必须人工预览确认</span>
+            </div>
+          </div>
+          <div class="status">
+            <span id="remixEnvelopeBadge">Envelope: waiting</span>
+            <span id="remixCapabilityBadge">Provider: unverified</span>
+          </div>
+        </section>
+
+        <section class="metrics wz-metrics" aria-label="改造概览">
+          <div><strong id="remixTemplateCount">0</strong><span>模板</span></div>
+          <div><strong id="remixRegionCount">0</strong><span>区域</span></div>
+          <div><strong id="remixOutputCount">0</strong><span>输出</span></div>
+          <div><strong id="remixDownloadCount">0</strong><span>可下载</span></div>
+        </section>
+
+        <div id="remixGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
+
+        <section class="wz-grid remix-grid">
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>源素材</h2>
+              <button id="remixUseSampleBtn" class="mini ghost" type="button">使用样例</button>
+            </div>
+            <input id="remixSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
+            <div class="wz-inline-form">
+              <label>时长 <input id="remixDuration" type="number" min="0" max="90" value="15" /></label>
+              <label>宽度 <input id="remixWidth" type="number" value="720" /></label>
+              <label>高度 <input id="remixHeight" type="number" value="1280" /></label>
+            </div>
+            <button id="remixUploadBtn" type="button">上传并检查</button>
+            <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>改造参数</h2>
+              <button id="remixAddRegionBtn" class="mini" type="button">添加区域</button>
+            </div>
+            <label>产品模板
+              <select id="remixTemplateSelect"></select>
+            </label>
+            <label>改造类型
+              <select id="remixOperationType">
+                <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
+                <option value="logo_icon_cover_or_replace">Logo/Icon 区域遮挡或替换</option>
+                <option value="watermark_cover" selected>水印区域遮挡</option>
+              </select>
+            </label>
+            <label>目标渠道
+              <select id="remixTargetChannel">
+                <option value="tiktok_ads" selected>TikTok Ads</option>
+                <option value="meta_ads">Meta Ads</option>
+                <option value="google_ads">Google Ads</option>
+                <option value="unity_ads">Unity Ads</option>
+                <option value="iron_source">ironSource</option>
+                <option value="generic">通用</option>
+              </select>
+            </label>
+            <div id="remixRegionsBox" class="wz-region-list"></div>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>区域预览</h2>
+              <button id="remixDefaultRegionBtn" class="mini ghost" type="button">默认水印区</button>
+            </div>
+            <div class="wz-region-canvas" aria-label="归一化区域预览">
+              <div id="remixRegionRect" class="wz-region-rect"></div>
+            </div>
+            <div class="wz-warning">区域仅记录 bbox 或描述，不自动识别画面产品名、icon 或水印残留。</div>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>能力估算</h2>
+              <button id="remixEstimateBtn" class="mini" type="button">估算能力</button>
+            </div>
+            <div id="remixEstimateBox" class="wz-estimate empty-line">尚未估算</div>
+            <div class="modal-actions wz-actions">
+              <button id="remixStartBtn" type="button" disabled>开始改造</button>
+            </div>
+          </section>
+
+          <section class="panel wz-panel wz-wide">
+            <div class="panel-head">
+              <h2>处理状态与预览确认</h2>
+              <span id="remixStatusBadge">未开始</span>
+            </div>
+            <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
+            <div class="modal-actions wz-actions">
+              <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
+              <button id="remixDownloadBtn" class="ghost" type="button" disabled>下载交付包</button>
+            </div>
+          </section>
+
+          <section class="panel wz-panel wz-wide">
+            <div class="panel-head">
+              <h2>改造图库</h2>
+              <button id="remixRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+            </div>
+            <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <div id="remixLoginModal" class="modal-backdrop login-backdrop" hidden>
+      <div class="modal-panel login-panel">
+        <h2>登录 Touka AI素材中台</h2>
+        <p>登录后可上传源素材并创建竞品快速改造任务。</p>
+        <label>账号 <input id="wangzhuanLoginUsername" type="text" autocomplete="username" /></label>
+        <label>密码 <input id="wangzhuanLoginPassword" type="password" autocomplete="current-password" /></label>
+        <div class="login-status"></div>
+        <div class="modal-actions">
+          <button id="wangzhuanLoginBtn" type="button">登录</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/competitor-remix.js" type="module"></script>
+  </body>
+</html>

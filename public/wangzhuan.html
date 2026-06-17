@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 网赚素材管线</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="wz-body">
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <a class="topbar-link" href="/competitor-remix.html">竞品快速改造</a>
+      </nav>
+      <div class="topbar-account">
+        <span id="wzCurrentUserBadge">未登录</span>
+        <button id="wzLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+        <a class="platform-nav-item active" href="/wangzhuan.html">
+          <span>▣</span>
+          <b>网赚素材管线</b>
+        </a>
+        <a class="platform-nav-item" href="/competitor-remix.html">
+          <span>◇</span>
+          <b>竞品素材改造</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>网赚管线</small>
+      </div>
+    </aside>
+
+    <main class="app wz-app">
+      <section class="operation-pane">
+        <section class="topbar wz-page-head">
+          <div>
+            <h1>网赚素材管线</h1>
+            <div class="path-editor">
+              <span class="page-hint">共享产品模板、用户维护强承诺真实规则、15s/30s 估算和完整交付包</span>
+            </div>
+          </div>
+          <div class="status">
+            <span id="wzEnvelopeBadge">Envelope: waiting</span>
+            <span id="wzCapabilityBadge">Provider: unverified</span>
+          </div>
+        </section>
+
+        <section class="metrics wz-metrics" aria-label="管线概览">
+          <div><strong id="wzTemplateCount">0</strong><span>模板</span></div>
+          <div><strong id="wzRuleCount">0</strong><span>渠道规则</span></div>
+          <div><strong id="wzTaskCount">0</strong><span>任务</span></div>
+          <div><strong id="wzDownloadCount">0</strong><span>可下载</span></div>
+        </section>
+
+        <div id="wzGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
+
+        <section class="wz-grid">
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>产品模板</h2>
+              <button id="wzCreateTemplateBtn" class="mini" type="button">保存模板</button>
+            </div>
+            <label>选择模板
+              <select id="wzTemplateSelect"></select>
+            </label>
+            <div class="wz-template-form">
+              <label>模板名 <input id="wzDisplayName" type="text" value="Cash Reward US EN" /></label>
+              <label>产品名 <input id="wzProductName" type="text" value="Lucky Cash" /></label>
+              <label>CTA <input id="wzCta" type="text" value="Download now" /></label>
+              <label>Ending <input id="wzEnding" type="text" value="Claim your bonus today" /></label>
+              <label>币种 <input id="wzCurrencySymbol" type="text" value="$" /></label>
+              <label>语言 <input id="wzLanguage" type="text" value="en-US" /></label>
+              <label>地区 <input id="wzRegions" type="text" value="US" /></label>
+              <label>默认渠道
+                <select id="wzTemplateChannel">
+                  <option value="meta_ads">Meta Ads</option>
+                  <option value="tiktok_ads">TikTok Ads</option>
+                  <option value="google_ads">Google Ads</option>
+                  <option value="unity_ads">Unity Ads</option>
+                  <option value="iron_source">ironSource</option>
+                  <option value="generic">通用</option>
+                </select>
+              </label>
+              <label>默认时长
+                <select id="wzDefaultDuration">
+                  <option value="15">15s</option>
+                  <option value="30">30s</option>
+                </select>
+              </label>
+              <label>承诺等级
+                <select id="wzPromiseLevel">
+                  <option value="stable">稳健版</option>
+                  <option value="strong_conversion" selected>强转化版</option>
+                  <option value="strong_commitment">强承诺版</option>
+                </select>
+              </label>
+            </div>
+            <details id="wzTruthDetails" class="wz-details">
+              <summary>强承诺真实规则</summary>
+              <div id="wzTruthFields" class="wz-template-form"></div>
+            </details>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>渠道规则</h2>
+              <button id="wzLoadRulesBtn" class="mini ghost" type="button">刷新规则</button>
+            </div>
+            <div class="wz-inline-form">
+              <label>目标渠道
+                <select id="wzTargetChannel">
+                  <option value="meta_ads">Meta Ads</option>
+                  <option value="tiktok_ads">TikTok Ads</option>
+                  <option value="google_ads">Google Ads</option>
+                  <option value="unity_ads">Unity Ads</option>
+                  <option value="iron_source">ironSource</option>
+                  <option value="generic">通用</option>
+                </select>
+              </label>
+              <label>目标地区 <input id="wzTargetRegion" type="text" value="US" /></label>
+            </div>
+            <div id="wzRulesBox" class="wz-list empty-line">等待加载渠道规则</div>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>参考视频</h2>
+              <button id="wzUseSampleVideoBtn" class="mini ghost" type="button">使用样例</button>
+            </div>
+            <input id="wzReferenceFile" type="file" accept="video/mp4,video/webm,video/quicktime" />
+            <div class="wz-inline-form">
+              <label>时长 <input id="wzReferenceDuration" type="number" min="3" max="90" value="15" /></label>
+              <label>宽度 <input id="wzReferenceWidth" type="number" value="720" /></label>
+              <label>高度 <input id="wzReferenceHeight" type="number" value="1280" /></label>
+            </div>
+            <div class="modal-actions wz-actions">
+              <button id="wzCheckReferenceBtn" type="button">检查参考视频</button>
+              <button id="wzDecomposeBtn" class="ghost" type="button" disabled>保存拆解</button>
+            </div>
+            <textarea id="wzDecompositionText" class="wz-json-box" spellcheck="false"></textarea>
+            <div id="wzReferenceBox" class="wz-list empty-line">未上传参考视频</div>
+          </section>
+
+          <section class="panel wz-panel">
+            <div class="panel-head">
+              <h2>估算与启动</h2>
+              <button id="wzEstimateBtn" class="mini" type="button">重新估算</button>
+            </div>
+            <div class="wz-inline-form">
+              <label>输出时长
+                <select id="wzDuration">
+                  <option value="15">15s</option>
+                  <option value="30">30s</option>
+                </select>
+              </label>
+              <label>变体数 <input id="wzVariantCount" type="number" min="1" max="50" value="3" /></label>
+              <label>并发 <input id="wzConcurrency" type="number" min="1" max="4" value="2" /></label>
+            </div>
+            <div id="wzEstimateBox" class="wz-estimate empty-line">尚未估算</div>
+            <label class="wz-check">
+              <input id="wzConfirmLimits" type="checkbox" />
+              已确认估算中的任务数、分段数、拼接数和重试边界
+            </label>
+            <div class="modal-actions wz-actions">
+              <button id="wzStartBatchBtn" type="button" disabled>开始批次</button>
+              <button id="wzStopBatchBtn" class="ghost" type="button" disabled>停止批次</button>
+            </div>
+          </section>
+
+          <section class="panel wz-panel wz-wide">
+            <div class="panel-head">
+              <h2>批次状态</h2>
+              <span id="wzBatchBadge">未开始</span>
+            </div>
+            <div id="wzBatchBox" class="wz-list empty-line">暂无批次</div>
+          </section>
+
+          <section class="panel wz-panel wz-wide">
+            <div class="panel-head">
+              <h2>结果图库与交付包</h2>
+              <button id="wzRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+            </div>
+            <div class="modal-actions wz-actions">
+              <button id="wzDownloadBtn" type="button" disabled>下载完整交付包</button>
+              <label class="wz-check"><input id="wzIncludeSegments" type="checkbox" /> partial_failed 下载可用分段</label>
+            </div>
+            <div id="wzGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <div id="wzLoginModal" class="modal-backdrop login-backdrop" hidden>
+      <div class="modal-panel login-panel">
+        <h2>登录 Touka AI素材中台</h2>
+        <p>登录后可使用网赚素材管线。页面会保留当前草稿，重新登录后继续操作。</p>
+        <label>账号 <input id="wangzhuanLoginUsername" type="text" autocomplete="username" /></label>
+        <label>密码 <input id="wangzhuanLoginPassword" type="password" autocomplete="current-password" /></label>
+        <div class="login-status"></div>
+        <div class="modal-actions">
+          <button id="wangzhuanLoginBtn" type="button">登录</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/wangzhuan.js" type="module"></script>
+  </body>
+</html>
