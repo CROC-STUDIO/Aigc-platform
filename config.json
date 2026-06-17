@@ -1,17 +1,26 @@
 {
-  "projectRoot": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P",
+  "projectRoot": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P",
   "projects": [
     {
       "name": "包包4",
-      "path": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P"
+      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P"
     },
     {
       "name": "三国",
-      "path": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P 三国"
+      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P 三国"
     },
     {
       "name": "puzzle",
-      "path": "C:\\Users\\Touka\\Desktop\\puzzle"
+      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\puzzle"
     }
-  ]
+  ],
+  "wangzhuan": {
+    "capabilities": {
+      "remix": {
+        "provider": "",
+        "status": "",
+        "supportedOperations": []
+      }
+    }
+  }
 }
