@@ -11,6 +11,16 @@ import {
 } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeBatchId, makeEstimateId } from "./ids.mjs";
+import {
+  findActiveResourceLock,
+  loadEstimateFromMysql,
+  loadTemplateStoreFromMysql,
+  loadVideoDecompositionFromMysql,
+  recordIdempotencyFact,
+  syncBatchFacts,
+  syncEstimateFact,
+  verifyEstimateConfirmationTokenFromMysql
+} from "./mysql-facts.mjs";
 import { prepareBatchForPipeline } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
 import { preflightStitcher } from "./stitch.mjs";
@@ -94,7 +104,8 @@ async function writeIdempotentResult(paths, endpoint, idempotencyKey, result) {
 }
 
 async function loadTemplateVersion(context, templateId, versionId) {
-  const store = await readJsonOrDefault(wangzhuanPaths(context).templatesPath, { templates: [] });
+  const store = await loadTemplateStoreFromMysql(context)
+    ?? await readJsonOrDefault(wangzhuanPaths(context).templatesPath, { templates: [] });
   const template = (Array.isArray(store.templates) ? store.templates : []).find((item) => {
     return item.templateId === templateId && item.versionId === versionId && item.status !== "deleted";
   });
@@ -105,6 +116,8 @@ async function loadTemplateVersion(context, templateId, versionId) {
 }
 
 async function loadReferenceDecomposition(context, referenceVideoId) {
+  const mysqlDecomposition = await loadVideoDecompositionFromMysql(context, referenceVideoId);
+  if (mysqlDecomposition) return mysqlDecomposition;
   const target = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "decomposition.json");
   if (!existsSync(target)) {
     throw new WangzhuanError("schema_invalid", "拆解结果不完整，请重试或手动补充", {
@@ -289,6 +302,7 @@ export async function estimateBatch(context, request = {}) {
     createdAt: now
   };
   await writeAtomicJson(join(paths.estimatesDir, estimateId, "estimate.json"), record);
+  await syncEstimateFact(context, record, confirmationToken);
   index.items.push({ estimateId, createdBy: currentUserId(context), createdAt: now });
   await writeAtomicJson(indexPath, index);
   if (confirmationRequired) {
@@ -311,6 +325,8 @@ export async function loadEstimate(context, estimateId) {
   if (!/^est_\d{8}_\d{3}$/.test(String(estimateId || ""))) {
     throw new WangzhuanError("validation_error", "estimateId 不合法", { field: "estimateId" });
   }
+  const mysqlEstimate = await loadEstimateFromMysql(context, estimateId);
+  if (mysqlEstimate) return mysqlEstimate;
   const target = join(wangzhuanPaths(context).estimatesDir, estimateId, "estimate.json");
   if (!existsSync(target)) {
     throw new WangzhuanError("validation_error", "estimate 不存在，请重新估算", { estimateId });
@@ -362,21 +378,25 @@ async function saveBatch(context, batch) {
     });
   }
   await writeAtomicJson(indexPath, index);
+  await syncBatchFacts(context, batch, "batch_created");
 }
 
-function assertCanStartFromEstimate(context, record, request) {
+async function assertCanStartFromEstimate(context, record, request) {
   const actualHash = hashPayload(record.request);
   if (actualHash !== record.estimateHash) {
     throw new WangzhuanError("validation_error", "estimate 已失效，请重新估算", { estimateId: record.estimate.estimateId });
   }
   if (record.estimate.confirmationRequired) {
-    if (!request.confirmationToken || request.confirmationToken !== record.confirmation?.confirmationToken) {
+    const tokenMatches = record.confirmation?.confirmationToken
+      ? request.confirmationToken === record.confirmation.confirmationToken
+      : await verifyEstimateConfirmationTokenFromMysql(context, record.estimate.estimateId, request.confirmationToken);
+    if (!request.confirmationToken || !tokenMatches) {
       throw new WangzhuanError("limit_confirmation_required", "本次任务较多，请确认后继续", {
         estimateId: record.estimate.estimateId,
         confirmationRequired: true
       });
     }
-    if (Date.parse(record.confirmation.expiresAt) < Date.now()) {
+    if (record.confirmation?.expiresAt && Date.parse(record.confirmation.expiresAt) < Date.now()) {
       throw new WangzhuanError("limit_confirmation_required", "确认已过期，请重新估算", {
         estimateId: record.estimate.estimateId,
         confirmationRequired: true
@@ -386,6 +406,15 @@ function assertCanStartFromEstimate(context, record, request) {
   if (context.getLegacyRunState?.()?.running) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       runningResource: "existing_ad_batch"
+    });
+  }
+  const activeMysqlLock = await findActiveResourceLock(context);
+  if (activeMysqlLock) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      runningResource: activeMysqlLock.runType || "mysql_resource_lock",
+      batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
+      remixId: activeMysqlLock.runType === "remix" ? activeMysqlLock.runId : undefined,
+      status: activeMysqlLock.runStatus || activeMysqlLock.status
     });
   }
 }
@@ -399,7 +428,7 @@ export async function startBatchFromEstimate(context, request = {}) {
   if (replay) return replay;
 
   const record = await loadEstimate(context, request.estimateId);
-  assertCanStartFromEstimate(context, record, request);
+  await assertCanStartFromEstimate(context, record, request);
   if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
     throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
       estimateId: record.estimate.estimateId,
@@ -449,6 +478,10 @@ export async function startBatchFromEstimate(context, request = {}) {
   const preparedBatch = await prepareBatchForPipeline(context, batch);
   const result = { batch: preparedBatch };
   await writeIdempotentResult(paths, "batches_start", request.idempotencyKey, result);
+  await recordIdempotencyFact(context, "batches_start", request.idempotencyKey, hashPayload(request), {
+    type: "batch",
+    response: { batchId: preparedBatch.batchId, status: preparedBatch.status }
+  });
   await recordTelemetryEvent(context, "generation_batch_started", {
     batchId: preparedBatch.batchId,
     estimateId: record.estimate.estimateId,

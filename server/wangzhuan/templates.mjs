@@ -8,6 +8,7 @@ import {
 } from "./constants.mjs";
 import { WangzhuanError, requirePermission } from "./http.mjs";
 import { makeAuditEventId, makeTemplateId, makeTemplateVersionId } from "./ids.mjs";
+import { loadTemplateStoreFromMysql, syncTemplateStoreFacts } from "./mysql-facts.mjs";
 import { appendJsonl, readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
@@ -31,7 +32,8 @@ function clone(value) {
 }
 
 async function loadTemplateStore(context) {
-  const store = await readJsonOrDefault(wangzhuanPaths(context).templatesPath, TEMPLATE_STORE_DEFAULT);
+  const mysqlStore = await loadTemplateStoreFromMysql(context);
+  const store = mysqlStore ?? await readJsonOrDefault(wangzhuanPaths(context).templatesPath, TEMPLATE_STORE_DEFAULT);
   return {
     schemaVersion: "templates.v1",
     defaultTemplateId: "",
@@ -44,6 +46,7 @@ async function loadTemplateStore(context) {
 
 async function saveTemplateStore(context, store) {
   await writeAtomicJson(wangzhuanPaths(context).templatesPath, store);
+  await syncTemplateStoreFacts(context, store);
 }
 
 function isNonEmptyString(value) {
@@ -99,14 +102,15 @@ export async function listTemplates(context, query = {}) {
   const includeArchived = query.includeArchived === true || query.includeArchived === "true";
   const channel = query.channel;
   const region = query.region;
-  const templates = activeTemplates(await loadTemplateStore(context), includeArchived).filter((template) => {
+  const store = await loadTemplateStore(context);
+  const templates = activeTemplates(store, includeArchived).filter((template) => {
     if (channel && !template.draft?.targetChannels?.includes(channel)) return false;
     if (region && !template.draft?.regions?.includes(region)) return false;
     return true;
   });
   return {
     templates,
-    defaultTemplateId: (await loadTemplateStore(context)).defaultTemplateId,
+    defaultTemplateId: store.defaultTemplateId,
     permissions: {
       canCreateVersion: true,
       canAdminTemplates: Boolean(currentUser(context)?.isAdmin || currentUser(context)?.role === "admin")

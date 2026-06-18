@@ -1,15 +1,27 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeReferenceVideoId } from "./ids.mjs";
-import { readJsonOrDefault, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { resolveLlmConfig } from "./llm-config.mjs";
+import {
+  loadReferenceVideoProbeFromMysql,
+  syncReferenceVideoFact,
+  syncVideoDecompositionFact
+} from "./mysql-facts.mjs";
+import { previewUrlForWangzhuanAsset, readJsonOrDefault, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
+const execFileAsync = promisify(execFile);
+const LLM_TIMEOUT_MS = 60000;
+const DEFAULT_REFERENCE_FRAME_COUNT = 5;
+const MAX_REFERENCE_FRAME_COUNT = 8;
 const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
   "scene",
   "subject",
@@ -19,6 +31,49 @@ const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
   "style",
   "quality",
   "hook"
+]);
+
+const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
+  scene: "视频主要场景，说明空间、App 页面或人物所在环境",
+  subject: "画面主体，说明人物、手机、产品 UI 或奖励元素",
+  action: "核心动作，说明用户行为、镜头推进和转折",
+  camera: "镜头语言，说明景别、运镜、节奏",
+  lighting: "光线和画面氛围",
+  style: "素材风格，例如真人口播、手持演示、UGC、App demo",
+  quality: "画质和生成质量要求",
+  hook: "前三秒钩子，保留结构但不要照搬竞品文案",
+  phoneUi: "可选，手机界面/产品界面重点",
+  rewardFeedback: "可选，奖励反馈或转化刺激点",
+  cta: "可选，行动号召结构",
+  disclaimer: "可选，合规提醒或不能夸大的点"
+});
+
+const DECOMPOSITION_FIELD_ALIASES = Object.freeze({
+  scene: ["scene", "场景", "主要场景", "视频场景"],
+  subject: ["subject", "主体", "画面主体", "主要主体"],
+  action: ["action", "动作", "核心动作", "行为", "转化动作"],
+  camera: ["camera", "镜头", "镜头语言", "运镜", "拍摄方式"],
+  lighting: ["lighting", "光线", "灯光", "氛围", "画面氛围"],
+  style: ["style", "风格", "素材风格", "表现风格"],
+  quality: ["quality", "画质", "质量", "生成质量", "清晰度"],
+  hook: ["hook", "钩子", "前三秒钩子", "开头钩子", "吸引点"],
+  phoneUi: ["phoneUi", "phone_ui", "手机界面", "产品界面", "App界面", "APP界面"],
+  rewardFeedback: ["rewardFeedback", "reward_feedback", "奖励反馈", "收益反馈", "金币反馈"],
+  cta: ["cta", "CTA", "行动号召", "下载引导"],
+  disclaimer: ["disclaimer", "合规提醒", "免责声明", "限制说明"]
+});
+
+const DECOMPOSITION_CONTAINER_KEYS = Object.freeze([
+  "decomposition",
+  "video_decomposition",
+  "videoDecomposition",
+  "script",
+  "scriptJson",
+  "result",
+  "draft",
+  "拆解",
+  "脚本拆解",
+  "视频拆解"
 ]);
 
 function sanitizeFileName(name) {
@@ -51,6 +106,117 @@ function ratioFor(width, height) {
 
 function issue(code, field, message, severity = "error") {
   return { code, field, message, severity };
+}
+
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function clampInteger(value, fallback, min, max) {
+  const number = Math.trunc(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function parseFrameRate(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "0/0") return 0;
+  if (!text.includes("/")) return numberOrZero(text);
+  const [rawNum, rawDen] = text.split("/");
+  const numerator = Number(rawNum);
+  const denominator = Number(rawDen);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return 0;
+  return Math.round((numerator / denominator) * 1000) / 1000;
+}
+
+function normalizeAudioStream(stream = {}) {
+  return {
+    codec: String(stream.codec_name || stream.codec || ""),
+    sampleRate: numberOrZero(stream.sample_rate ?? stream.sampleRate),
+    channels: numberOrZero(stream.channels),
+    bitRateBps: numberOrZero(stream.bit_rate ?? stream.bitRateBps)
+  };
+}
+
+function normalizeProbeResult(raw = {}) {
+  const videoStream = Array.isArray(raw.streams)
+    ? raw.streams.find((stream) => stream.codec_type === "video")
+    : null;
+  const audioStreams = Array.isArray(raw.streams)
+    ? raw.streams.filter((stream) => stream.codec_type === "audio").map(normalizeAudioStream)
+    : Array.isArray(raw.audioStreams) ? raw.audioStreams.map(normalizeAudioStream) : [];
+  const durationSec = numberOrZero(raw.durationSec ?? raw.format?.duration ?? videoStream?.duration);
+  const width = numberOrZero(raw.width ?? videoStream?.width);
+  const height = numberOrZero(raw.height ?? videoStream?.height);
+  return {
+    durationSec,
+    width,
+    height,
+    formatName: String(raw.formatName ?? raw.format?.format_name ?? ""),
+    bitRateBps: numberOrZero(raw.bitRateBps ?? raw.format?.bit_rate),
+    videoCodec: String(raw.videoCodec ?? videoStream?.codec_name ?? ""),
+    fps: numberOrZero(raw.fps ?? parseFrameRate(videoStream?.avg_frame_rate || videoStream?.r_frame_rate)),
+    colorSpace: String(raw.colorSpace ?? videoStream?.color_space ?? videoStream?.color_primaries ?? ""),
+    pixelFormat: String(raw.pixelFormat ?? videoStream?.pix_fmt ?? ""),
+    audioStreams,
+    canExtractFrame: raw.canExtractFrame !== false && Boolean(width && height)
+  };
+}
+
+function requestMetadataProbe(request = {}) {
+  return normalizeProbeResult({
+    durationSec: request.durationSec,
+    width: request.width,
+    height: request.height,
+    canExtractFrame: request.canExtractFrame !== false
+  });
+}
+
+export async function ffprobeMediaFile(filePath, { timeoutMs = 15000, mediaLabel = "媒体文件" } = {}) {
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync("ffprobe", [
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-show_format",
+      "-show_streams",
+      filePath
+    ], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: timeoutMs,
+      windowsHide: true
+    }));
+  } catch (error) {
+    const unavailable = error?.code === "ENOENT";
+    throw new WangzhuanError("invalid_video", unavailable ? `ffprobe 未安装，无法检查${mediaLabel}` : `ffprobe 无法读取${mediaLabel}`, {
+      field: "ffprobe",
+      reason: unavailable ? "not_found" : String(error?.code || "probe_failed")
+    });
+  }
+  try {
+    return normalizeProbeResult(JSON.parse(stdout || "{}"));
+  } catch {
+    throw new WangzhuanError("invalid_video", "ffprobe 返回结果无法解析", { field: "ffprobe" });
+  }
+}
+
+export async function ffprobeReferenceVideo(filePath, { timeoutMs = 15000 } = {}) {
+  return ffprobeMediaFile(filePath, { timeoutMs, mediaLabel: "参考视频" });
+}
+
+async function probeReferenceVideo(context, filePath, request) {
+  if (typeof context.probeReferenceVideo === "function") {
+    return normalizeProbeResult(await context.probeReferenceVideo({ filePath, request }));
+  }
+  if (context.mockReferenceProbe) {
+    return requestMetadataProbe(request);
+  }
+  const timeoutMs = numberOrZero(context.config?.wangzhuan?.ffprobe?.timeoutMs) || 15000;
+  return ffprobeReferenceVideo(filePath, { timeoutMs });
 }
 
 async function nextReferenceSeq(paths) {
@@ -89,11 +255,13 @@ export async function checkReferenceVideo(context, request = {}) {
   await mkdir(referenceDir, { recursive: true });
   const originalPath = join(referenceDir, `original${ext}`);
   await writeFile(originalPath, buffer);
+  const storage = await syncWangzhuanAsset(context, originalPath, "reference_video");
 
-  const durationSec = Number(request.durationSec || 0);
-  const width = Number(request.width || 0);
-  const height = Number(request.height || 0);
-  const canExtractFrame = request.canExtractFrame !== false;
+  const mediaProbe = await probeReferenceVideo(context, originalPath, request);
+  const durationSec = mediaProbe.durationSec;
+  const width = mediaProbe.width;
+  const height = mediaProbe.height;
+  const canExtractFrame = mediaProbe.canExtractFrame;
   const ratio = ratioFor(width, height);
   const issues = [];
 
@@ -118,10 +286,19 @@ export async function checkReferenceVideo(context, request = {}) {
     width,
     height,
     ratio,
+    formatName: mediaProbe.formatName,
+    bitRateBps: mediaProbe.bitRateBps,
+    videoCodec: mediaProbe.videoCodec,
+    fps: mediaProbe.fps,
+    colorSpace: mediaProbe.colorSpace,
+    pixelFormat: mediaProbe.pixelFormat,
+    audioStreamCount: mediaProbe.audioStreams.length,
+    audioStreams: mediaProbe.audioStreams,
     canExtractFrame,
     status: issues.some((item) => item.severity === "error") ? "fail" : issues.length ? "warn" : "pass",
     issues,
-    storedPath: toProjectRelative(context.userProjectRoot, originalPath)
+    storedPath: toProjectRelative(context.userProjectRoot, originalPath),
+    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {})
   };
 
   await writeAtomicJson(join(referenceDir, "probe.json"), probe);
@@ -133,6 +310,7 @@ export async function checkReferenceVideo(context, request = {}) {
     createdAt: new Date().toISOString()
   });
   await saveReferenceIndex(indexPath, index);
+  await syncReferenceVideoFact(context, probe);
   await recordTelemetryEvent(context, "reference_video_checked", {
     referenceVideoId,
     status: probe.status,
@@ -141,7 +319,7 @@ export async function checkReferenceVideo(context, request = {}) {
     issueCodes: probe.issues.map((item) => item.code)
   });
 
-  return { referenceVideo: probe };
+  return { referenceVideo: { ...probe, previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, probe.storedPath) } };
 }
 
 function mimeForExt(ext) {
@@ -155,6 +333,8 @@ export async function loadReferenceVideoProbe(context, referenceVideoId) {
   if (!/^ref_\d{8}_\d{3}$/.test(String(referenceVideoId || ""))) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
+  const mysqlProbe = await loadReferenceVideoProbeFromMysql(context, referenceVideoId);
+  if (mysqlProbe) return mysqlProbe;
   const probePath = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "probe.json");
   if (!existsSync(probePath)) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
@@ -163,28 +343,427 @@ export async function loadReferenceVideoProbe(context, referenceVideoId) {
 }
 
 export function validateVideoDecomposition(referenceVideoId, decomposition = {}) {
+  const normalized = normalizeVideoDecompositionPayload(decomposition);
   const missingFields = DECOMPOSITION_REQUIRED_FIELDS.filter((field) => {
-    const value = decomposition[field];
+    const value = normalized[field];
     return typeof value !== "string" || value.trim().length === 0;
   });
   return {
     referenceVideoId,
     schemaVersion: "video_decomposition.v1",
-    scene: String(decomposition.scene || ""),
-    subject: String(decomposition.subject || ""),
-    action: String(decomposition.action || ""),
-    camera: String(decomposition.camera || ""),
-    lighting: String(decomposition.lighting || ""),
-    style: String(decomposition.style || ""),
-    quality: String(decomposition.quality || ""),
-    hook: String(decomposition.hook || ""),
-    ...(decomposition.subtitleArea ? { subtitleArea: decomposition.subtitleArea } : {}),
-    ...(decomposition.appIconArea ? { appIconArea: decomposition.appIconArea } : {}),
-    ...(decomposition.phoneUi ? { phoneUi: String(decomposition.phoneUi) } : {}),
-    ...(decomposition.rewardFeedback ? { rewardFeedback: String(decomposition.rewardFeedback) } : {}),
-    ...(decomposition.cta ? { cta: String(decomposition.cta) } : {}),
-    ...(decomposition.disclaimer ? { disclaimer: String(decomposition.disclaimer) } : {}),
+    scene: String(normalized.scene || ""),
+    subject: String(normalized.subject || ""),
+    action: String(normalized.action || ""),
+    camera: String(normalized.camera || ""),
+    lighting: String(normalized.lighting || ""),
+    style: String(normalized.style || ""),
+    quality: String(normalized.quality || ""),
+    hook: String(normalized.hook || ""),
+    ...(normalized.subtitleArea ? { subtitleArea: normalized.subtitleArea } : {}),
+    ...(normalized.appIconArea ? { appIconArea: normalized.appIconArea } : {}),
+    ...(normalized.phoneUi ? { phoneUi: String(normalized.phoneUi) } : {}),
+    ...(normalized.rewardFeedback ? { rewardFeedback: String(normalized.rewardFeedback) } : {}),
+    ...(normalized.cta ? { cta: String(normalized.cta) } : {}),
+    ...(normalized.disclaimer ? { disclaimer: String(normalized.disclaimer) } : {}),
     missingFields
+  };
+}
+
+function firstStringValue(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (value && typeof value === "object") return JSON.stringify(value);
+  }
+  return "";
+}
+
+function normalizeVideoDecompositionPayload(raw = {}) {
+  const source = DECOMPOSITION_CONTAINER_KEYS.reduce((found, key) => {
+    if (found) return found;
+    const value = raw?.[key];
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }, null) || raw;
+  const normalized = {};
+  for (const [field, aliases] of Object.entries(DECOMPOSITION_FIELD_ALIASES)) {
+    const value = firstStringValue(source, aliases);
+    if (value) normalized[field] = value;
+  }
+  for (const field of ["subtitleArea", "appIconArea"]) {
+    if (source?.[field]) normalized[field] = source[field];
+  }
+  return normalized;
+}
+
+function resolveStoredVideoPath(context, storedPath) {
+  const relative = String(storedPath || "").replace(/^[\\/]+/, "");
+  if (!relative || relative.includes("..")) {
+    throw new WangzhuanError("reference_video_not_found", "参考视频原文件路径无效，请重新上传", { field: "storedPath" });
+  }
+  return join(context.userProjectRoot, relative);
+}
+
+function referenceFrameTimestamps(durationSec, frameCount) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0 || frameCount <= 0) return [];
+  if (frameCount === 1) return [Math.max(0, Math.round(Math.min(duration * 0.5, duration - 0.1) * 100) / 100)];
+  const end = Math.max(0, duration - 0.1);
+  return Array.from({ length: frameCount }, (_, index) => {
+    const raw = end * (index / (frameCount - 1));
+    return Math.round(raw * 100) / 100;
+  });
+}
+
+async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
+  const frames = [];
+  const frameDir = join(parse(filePath).dir, "llm-frames");
+  await rm(frameDir, { recursive: true, force: true }).catch(() => {});
+  await mkdir(frameDir, { recursive: true });
+  try {
+    for (let index = 0; index < timestampsSec.length; index += 1) {
+      const timestampSec = timestampsSec[index];
+      const framePath = join(frameDir, `frame-${String(index + 1).padStart(2, "0")}.jpg`);
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-ss",
+        String(timestampSec),
+        "-i",
+        filePath,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale='min(720,iw)':-2",
+        "-q:v",
+        "3",
+        framePath
+      ], {
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        timeout: timeoutMs,
+        windowsHide: true
+      });
+      const buffer = await readFile(framePath);
+      if (buffer.length) {
+        frames.push({
+          index,
+          timestampSec,
+          mimeType: "image/jpeg",
+          dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`
+        });
+      }
+    }
+  } finally {
+    await rm(frameDir, { recursive: true, force: true }).catch(() => {});
+  }
+  return frames;
+}
+
+async function extractReferenceFrames(context, filePath, timestampsSec) {
+  if (!timestampsSec.length) return [];
+  if (typeof context.extractReferenceFrames === "function") {
+    return context.extractReferenceFrames({ filePath, timestampsSec });
+  }
+  const timeoutMs = numberOrZero(context.config?.wangzhuan?.llm?.frameExtractTimeoutMs) || 20000;
+  return ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs });
+}
+
+async function collectReferenceVideoVisionInputs(context, probe) {
+  const videoPath = resolveStoredVideoPath(context, probe.storedPath);
+  const videoBuffer = await readFile(videoPath);
+  const mimeType = probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
+  const frameCount = clampInteger(
+    context.config?.wangzhuan?.llm?.referenceFrameCount,
+    DEFAULT_REFERENCE_FRAME_COUNT,
+    1,
+    MAX_REFERENCE_FRAME_COUNT
+  );
+  const timestampsSec = referenceFrameTimestamps(probe.durationSec, frameCount);
+  const warnings = [];
+  let frames = [];
+  try {
+    frames = await extractReferenceFrames(context, videoPath, timestampsSec);
+  } catch (error) {
+    warnings.push({
+      code: "reference_frame_extract_failed",
+      message: "参考视频抽帧失败，已改为仅传原视频文件给模型",
+      reason: String(error?.message || error?.code || "unknown").slice(0, 160)
+    });
+  }
+  return {
+    fileName: probe.fileName || basename(videoPath),
+    mimeType,
+    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
+    frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+    timestampsSec,
+    warnings
+  };
+}
+
+function videoProbePrompt(probe) {
+  return [
+    `文件名：${probe.fileName}`,
+    `referenceVideoId：${probe.referenceVideoId}`,
+    `时长：${probe.durationSec || "-"} 秒`,
+    `画幅：${probe.width || "-"}x${probe.height || "-"}，比例：${probe.ratio || "-"}`,
+    `格式：${probe.formatName || "-"}`,
+    `视频编码：${probe.videoCodec || "-"}`,
+    `FPS：${probe.fps || "-"}`,
+    `码率：${probe.bitRateBps || "-"}`,
+    `颜色空间：${probe.colorSpace || "-"}`,
+    `音轨数量：${probe.audioStreamCount || 0}`
+  ].join("\n");
+}
+
+function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionInputs = {}) {
+  const notes = String(request.knowledgeNotes || "").trim();
+  const promptText = [
+    "请根据参考视频文件和抽样画面帧，生成网赚素材脚本拆解 JSON 草稿。",
+    "",
+    "参考视频信息：",
+    videoProbePrompt(probe),
+    "",
+    "字段说明：",
+    JSON.stringify(DECOMPOSITION_JSON_SCHEMA_HINT, null, 2),
+    "",
+    notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
+    "",
+    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
+    "",
+    "要求：",
+    "1. 必须结合上传视频/抽帧画面判断镜头、节奏、产品露出、CTA 和 ending，不要只依据元数据。",
+    "2. hook 写结构化钩子，不要写竞品品牌或照搬字幕。",
+    "3. scene/subject/action/camera/lighting/style/quality 要能直接被后续脚本裂变使用。",
+    "4. 如能判断手机界面、奖励反馈、CTA、合规提醒，可补 phoneUi/rewardFeedback/cta/disclaimer。",
+    "5. 只返回 JSON 对象。"
+  ].join("\n");
+  const userContent = [
+    { type: "text", text: promptText }
+  ];
+  if (visionInputs.fileDataUrl) {
+    userContent.push({
+      type: "file",
+      file: {
+        filename: visionInputs.fileName || probe.fileName || "reference-video.mp4",
+        file_data: visionInputs.fileDataUrl
+      }
+    });
+  }
+  for (const frame of visionInputs.frames || []) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: frame.dataUrl }
+    });
+  }
+  return [
+    {
+      role: "system",
+      content: [
+        "你是网赚广告素材拆解专家，只做结构化拆解，不生成侵权复刻内容。",
+        "你必须输出严格 JSON 对象，不要 markdown，不要解释。",
+        "拆解目标是学习镜头结构、节奏、话术功能和转化逻辑，规避竞品品牌、人物、水印和原文案照搬。",
+        "输出字段必须至少包含：scene, subject, action, camera, lighting, style, quality, hook。"
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: userContent
+    }
+  ];
+}
+
+function parseLlmJsonContent(content) {
+  const text = String(content || "").trim();
+  if (!text) {
+    throw new WangzhuanError("model_failed", "模型没有返回拆解内容", { reason: "empty_content" });
+  }
+  const candidates = [
+    text,
+    text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim(),
+    text.match(/\{[\s\S]*\}/)?.[0]
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // Try the next candidate form.
+    }
+  }
+  throw new WangzhuanError("model_failed", "模型返回不是合法 JSON，请重试或手动修正", { reason: "invalid_json" });
+}
+
+function chatCompletionsUrl(endpoint) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  return clean.endsWith("/chat/completions") ? clean : `${clean}/chat/completions`;
+}
+
+function responsesUrl(endpoint) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  if (clean.endsWith("/responses")) return clean;
+  if (clean.endsWith("/chat/completions")) return clean.replace(/\/chat\/completions$/, "/responses");
+  return `${clean}/responses`;
+}
+
+function llmResponseText(payload = {}) {
+  const message = payload?.choices?.[0]?.message;
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => typeof part === "string" ? part : part?.text || part?.content || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  return typeof payload?.output_text === "string" ? payload.output_text : "";
+}
+
+function responsesInputFromMessages(messages = []) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: Array.isArray(message.content)
+      ? message.content.map((part) => {
+        if (part?.type === "text") return { type: "input_text", text: part.text || "" };
+        if (part?.type === "image_url") return { type: "input_image", image_url: part.image_url?.url || "" };
+        if (part?.type === "file") {
+          return {
+            type: "input_file",
+            filename: part.file?.filename || "reference-video.mp4",
+            file_data: part.file?.file_data || ""
+          };
+        }
+        return part;
+      })
+      : [{ type: "input_text", text: String(message.content || "") }]
+  }));
+}
+
+function canUseResponsesInput(messages = []) {
+  return messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file"));
+}
+
+function dropFileParts(messages = []) {
+  return messages.map((message) => ({
+    ...message,
+    content: Array.isArray(message.content)
+      ? message.content.filter((part) => part?.type !== "file")
+      : message.content
+  }));
+}
+
+async function callOpenAiCompatibleLlm(llmConfig, messages) {
+  if (!llmConfig.apiKey) {
+    throw new WangzhuanError("model_failed", "未配置网赚拆解模型 API Key", {
+      provider: llmConfig.provider,
+      model: llmConfig.model
+    });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  let response;
+  let payload = {};
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${llmConfig.apiKey}`
+  };
+  const responsesPayload = {
+    model: llmConfig.model,
+    input: responsesInputFromMessages(messages),
+    temperature: llmConfig.temperature,
+    text: { format: { type: "json_object" } }
+  };
+  const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
+  const chatPayload = {
+    model: llmConfig.model,
+    messages: chatMessages,
+    temperature: llmConfig.temperature,
+    response_format: { type: "json_object" }
+  };
+  try {
+    response = await fetch(canUseResponsesInput(messages) ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(canUseResponsesInput(messages) ? responsesPayload : chatPayload),
+      signal: controller.signal
+    });
+    payload = await response.json().catch(() => ({}));
+    if (canUseResponsesInput(messages) && [400, 404, 415, 422].includes(response.status)) {
+      response = await fetch(chatCompletionsUrl(llmConfig.endpoint), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(chatPayload),
+        signal: controller.signal
+      });
+      payload = await response.json().catch(() => ({}));
+    }
+  } catch (error) {
+    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      reason
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    throw new WangzhuanError("model_failed", "模型拆解请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      status: response.status,
+      upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
+    });
+  }
+  return llmResponseText(payload);
+}
+
+export async function draftReferenceVideoDecomposition(context, request = {}) {
+  const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
+  if (probe.status === "fail") {
+    throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
+  }
+  const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
+  const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+  const messages = buildDecompositionMessages(probe, request, llmConfig, visionInputs);
+  const content = typeof context.callWangzhuanLlm === "function"
+    ? await context.callWangzhuanLlm({
+      messages,
+      llmConfig: {
+        provider: llmConfig.provider,
+        endpoint: llmConfig.endpoint,
+        model: llmConfig.model,
+        temperature: llmConfig.temperature
+      },
+      referenceVideo: {
+        ...probe,
+        fileDataUrl: visionInputs.fileDataUrl,
+        frameCount: visionInputs.frames.length
+      },
+      visionInputs
+    })
+    : await callOpenAiCompatibleLlm(llmConfig, messages);
+  const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
+  if (decomposition.missingFields.length) {
+    throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {
+      referenceVideoId: probe.referenceVideoId,
+      missingFields: decomposition.missingFields
+    });
+  }
+  await recordTelemetryEvent(context, "script_decomposition_drafted", {
+    referenceVideoId: probe.referenceVideoId,
+    provider: llmConfig.provider,
+    model: llmConfig.model,
+    status: "drafted"
+  });
+  return {
+    decomposition,
+    draft: {
+      source: "llm",
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      referenceVideoId: probe.referenceVideoId
+    },
+    warnings: visionInputs.warnings
   };
 }
 
@@ -205,6 +784,7 @@ export async function decomposeReferenceVideo(context, request = {}) {
   }
   const target = join(wangzhuanPaths(context).referenceVideosDir, probe.referenceVideoId, "decomposition.json");
   await writeAtomicJson(target, decomposition);
+  await syncVideoDecompositionFact(context, decomposition);
   await recordTelemetryEvent(context, "script_decomposition_completed", {
     referenceVideoId: probe.referenceVideoId,
     missingFieldsCount: decomposition.missingFields.length,

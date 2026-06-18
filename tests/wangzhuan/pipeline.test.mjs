@@ -8,16 +8,18 @@ import test from "node:test";
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import {
   getBatchDetail,
+  retryFailedGenerationTask,
   stopBatch,
   submitPendingGenerationTasks
 } from "../../server/wangzhuan/pipeline.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
-import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
+import { wangzhuanPaths, writeAtomicJson } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
   productName: "Lucky Cash",
+  productLink: "https://play.google.com/store/apps/details?id=lucky.cash",
   cta: "Download now",
   ending: "Claim your bonus today",
   currencySymbol: "$",
@@ -26,7 +28,19 @@ const baseDraft = {
   targetChannels: ["meta_ads"],
   defaultOutputRatio: "9:16",
   defaultDurationSec: 15,
-  promiseLevel: "strong_conversion"
+  promiseLevel: "strong_conversion",
+  assetFileNames: {
+    productIcon: "lucky-cash-icon.png",
+    productScreenshot: "lucky-cash-rewards.png",
+    productRecording: "lucky-cash-flow.mp4",
+    endingAsset: "lucky-cash-ending.mp4",
+    personAsset: "host-reference.mp4",
+    rewardElement: "coin-popup.png"
+  },
+  materialDirection: "余额刺激",
+  voiceoverStyle: "US English natural host",
+  customPrompt: "Make the phone UI clear and keep the host natural.",
+  negativePrompt: "No competitor logo, no fake transfer proof, no invented exact cash amount."
 };
 
 function context(root, overrides = {}) {
@@ -35,6 +49,7 @@ function context(root, overrides = {}) {
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
+    mockReferenceProbe: true,
     config: {},
     ...overrides
   };
@@ -137,6 +152,25 @@ test("start prepares 15s scripts, prompt files, and pending generation tasks", a
     const paths = wangzhuanPaths(ctx);
     assert.equal(existsSync(join(paths.batchesDir, batch.batchId, "task-map", "task-id-map.json")), true);
     assert.equal(existsSync(join(paths.batchesDir, batch.batchId, "tasks.jsonl")), true);
+
+    const processFiles = [
+      "00-brief.json",
+      "01-reference-breakdown.json",
+      "02-product-script.json",
+      "03-localized-variants.json",
+      "04-seedance-prompts.json",
+      "05-video-tasks.json"
+    ];
+    for (const fileName of processFiles) {
+      assert.equal(existsSync(join(paths.batchesDir, batch.batchId, fileName)), true);
+    }
+    const brief = JSON.parse(await readFile(join(paths.batchesDir, batch.batchId, "00-brief.json"), "utf8"));
+    assert.equal(brief.product.productLink, baseDraft.productLink);
+    assert.equal(brief.assets.productIcon, "lucky-cash-icon.png");
+    assert.equal(brief.rules.materialDirection, "余额刺激");
+    const prompts = JSON.parse(await readFile(join(paths.batchesDir, batch.batchId, "04-seedance-prompts.json"), "utf8"));
+    assert.match(prompts.items[0].seedancePrompt, /Store page: https:\/\/play\.google\.com/);
+    assert.match(prompts.items[0].seedancePrompt, /No competitor logo/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -164,6 +198,47 @@ test("mock submit assigns local task ids and keeps remote URLs out of manifest a
     const taskMapText = await readFile(taskMapPath, "utf8");
     assert.match(taskMapText, /mock_seedance_gen_/);
     assert.doesNotMatch(taskMapText, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("scheduler retry resubmits only the failed generation task", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-pipeline-retry-"));
+  try {
+    const { ctx, started } = await fixture(root, { variantCount: 2 });
+    const submitted = await submitPendingGenerationTasks(ctx, started.batch.batchId);
+    const now = new Date().toISOString();
+    const failedTaskId = submitted.batch.tasks[0].generationTaskId;
+    const batchPath = join(wangzhuanPaths(ctx).batchesDir, submitted.batch.batchId, "batch.json");
+    const failedBatch = {
+      ...submitted.batch,
+      status: "running",
+      tasks: submitted.batch.tasks.map((task) => task.generationTaskId === failedTaskId ? {
+        ...task,
+        status: "failed",
+        errorCode: "upstream_timeout",
+        errorMessage: "上游超时",
+        finishedAt: now
+      } : task)
+    };
+    await writeAtomicJson(batchPath, failedBatch);
+
+    const result = await retryFailedGenerationTask(ctx, submitted.batch.batchId, failedTaskId);
+
+    assert.equal(result.retriedCount, 1);
+    assert.equal(result.batch.status, "running");
+    const retried = result.batch.tasks.find((task) => task.generationTaskId === failedTaskId);
+    const untouched = result.batch.tasks.find((task) => task.generationTaskId !== failedTaskId);
+    assert.equal(retried.status, "waiting_upstream");
+    assert.equal(retried.errorCode, undefined);
+    assert.equal(retried.attempts, 2);
+    assert.match(retried.seedanceTaskId, /^mock_seedance_gen_[a-f0-9]{4}_\d{3}$/);
+    assert.equal(untouched.attempts, 1);
+    assert.equal(untouched.status, "waiting_upstream");
+
+    const detail = await getBatchDetail(ctx, submitted.batch.batchId);
+    assert.equal(detail.events.some((event) => event.event === "generation_task_retried" && event.generationTaskId === failedTaskId), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

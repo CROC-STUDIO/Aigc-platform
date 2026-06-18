@@ -26,7 +26,74 @@ start-windows.bat
 启动后打开：
 
 ```text
-http://localhost:5177/
+http://localhost:5182/
+```
+
+## 本地 Docker 部署
+
+也可以直接用本地 Docker 启动服务。镜像会安装 `ffmpeg`，容器内自带 `ffprobe`，用于网赚素材管线检查参考视频的格式、时长、压缩率、编码格式、FPS、宽高、颜色空间和音频流。
+
+```powershell
+docker compose up --build
+```
+
+如果本机 `5182` 端口已被占用，可以换一个宿主端口：
+
+```powershell
+$env:AIGC_HOST_PORT=5178
+docker compose up --build
+```
+
+启动后打开：
+
+```text
+http://localhost:5182/
+```
+
+默认 compose 会同时启动 `mysql:8.4.6`，首次创建 `aigc_mysql_data` volume 时会自动执行 `database/migrations/` 下的迁移。应用通过 `AIGC_DB_HOST`、`AIGC_DB_NAME`、`AIGC_DB_USER`、`AIGC_DB_PASSWORD` 连接 MySQL，把账号、登录会话、角色权限、模板、渠道规则、参考视频、拆解、估算、批次、任务、调度重试、产物、QC、下载包、幂等、审计和埋点写入数据库；JSON 文件只作为本地兼容层和大文件旁路索引。
+
+如果已有 Docker volume，需要手动应用后续迁移，例如：
+
+```powershell
+Get-Content -Raw -Encoding UTF8 database/migrations/0002_scope_runtime_unique_keys.sql | docker compose exec -T mysql sh -lc 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'
+Get-Content -Raw -Encoding UTF8 database/migrations/0002_scope_runtime_unique_keys.verify.sql | docker compose exec -T mysql sh -lc 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'
+Get-Content -Raw -Encoding UTF8 database/migrations/0003_scheduler_state_machine_rules.sql | docker compose exec -T mysql sh -lc 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'
+Get-Content -Raw -Encoding UTF8 database/migrations/0003_scheduler_state_machine_rules.verify.sql | docker compose exec -T mysql sh -lc 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'
+```
+
+默认 compose 会把仓库根目录的 `project-data` 挂载到容器 `/data/project-data`，并把运行态 `config.json`、兼容导入用 `users.json` 保存到 Docker volume `aigc_state`，不会写进镜像层。默认项目根目录是：
+
+```text
+/data/project-data/PROJECT_ROOT_P
+```
+
+## S3 兼容对象存储
+
+服务支持把上传素材、参考视频、竞品素材和生成产物同步到 S3 兼容对象存储。未配置对象存储时仍按原来的本地目录工作；同时配置 `S3_BUCKET` 和 `AWS_REGION` 后启用对象存储。
+
+```powershell
+$env:AWS_ACCESS_KEY_ID=""
+$env:AWS_SECRET_ACCESS_KEY=""
+$env:AWS_REGION=""
+$env:S3_BUCKET=""
+$env:S3_ENDPOINT=""
+$env:S3_PREFIX="uploads"
+$env:S3_ACL=""
+$env:S3_PUBLIC_BASE_URL=""
+$env:PUBLIC_BASE_URL=""
+$env:API_PREFIX="/api"
+```
+
+- `S3_PUBLIC_BASE_URL` 存在时，素材 URL 直接使用 CDN/桶公网域名。
+- 未配置 `S3_PUBLIC_BASE_URL` 时，素材 URL 使用后端代理：`{PUBLIC_BASE_URL}{API_PREFIX}/public/assets/{storage_key}`。
+- AK/SK 只从环境变量读取，不会写进接口返回、前端代码或对象存储索引。
+- 对象存储索引保存在项目目录的 `批处理记录/object-storage-assets.json`，记录 `storageKey` 和 `storageUrl`。
+- 对象存储字段会作为 `asset_files.probe_json` 和本地对象存储索引的一部分同步，不需要额外的 `asset_files` 迁移文件；如后续要把 `storageKey/storageUrl` 变成独立列，应新增后续迁移。
+
+如果不使用 Docker，本机需要能执行 `ffprobe`。Windows 可以安装 FFmpeg 后把 `bin` 目录加入 `PATH`，或用包管理器安装：
+
+```powershell
+winget install Gyan.FFmpeg
 ```
 
 ## AI API Key 配置
@@ -56,7 +123,7 @@ cmd /c tai config show
 cmd /c tai config set --api-key 你的API_KEY
 ```
 
-修改后请重启网页工具，再重新打开 `http://localhost:5177/`。
+修改后请重启网页工具，再重新打开 `http://localhost:5182/`。
 
 竞品素材上传后的图片/视频反推提示词走视觉模型。默认会自动读取 Codex/Tai 配置里的 `base_url` 和 `experimental_bearer_token`，并使用 `gemini-3-flash-preview` 做反推。
 
@@ -151,13 +218,13 @@ $env:REVERSE_PROMPT_MODEL="gemini-3-flash-preview"
 
 ## 登录账号
 
-网页不支持自行注册，账号由服务器提供。服务器实际账号文件在：
+网页不支持自行注册，账号由管理员在右上角 `账号管理` 中创建。Docker 模式下账号、密码哈希、登录会话和角色权限保存在 MySQL：
 
 ```text
-ad-picture-web/users.json
+app_users / auth_sessions / rbac_roles / user_roles
 ```
 
-发布包不会携带 `users.json`，只会携带 `users.example.json`，避免解压覆盖服务器上的真实账号。首次部署时如果服务器还没有 `users.json`，可以参考示例文件创建一个管理员账号：
+首次启动时，如果 MySQL 里还没有账号，服务会读取 `AIGC_USERS_PATH` 指向的 `users.json` 并导入数据库，同时把明文密码转换为哈希。没有 `users.json` 时会创建本地默认管理员：
 
 ```json
 {
@@ -167,13 +234,13 @@ ad-picture-web/users.json
 }
 ```
 
-新增账号时在 `users` 数组里继续添加即可，例如：
+非 Docker 或未配置 `AIGC_DB_*` / `AIGC_DATABASE_URL` 时，服务仍会回退到旧的 `users.json` 模式，方便本机调试。新增账号建议通过网页 `账号管理` 完成；旧模式下也可以在 `users` 数组里继续添加，例如：
 
 ```json
 { "username": "user01", "password": "pass123", "displayName": "用户01" }
 ```
 
-修改 `users.json` 后请重启网页服务。`username` 会作为服务器存储目录名，请保持简单稳定；同一个账号在不同电脑登录也会看到自己的同一份项目素材和结果。清理 Cookie 后不会丢失服务器上的素材和结果，只要重新登录同一个账号，就会回到同一个 `项目根目录/用户数据/<登录账号>/<项目名>/` 目录。
+如果已经启用 MySQL，后续修改 `users.json` 不会覆盖数据库账号；请用网页账号管理或后续数据库迁移处理账号。`username` 会作为服务器存储目录名，请保持简单稳定；同一个账号在不同电脑登录也会看到自己的同一份项目素材和结果。清理 Cookie 后不会丢失服务器上的素材和结果，只要重新登录同一个账号，就会回到同一个 `项目根目录/用户数据/<登录账号>/<项目名>/` 目录。
 
 管理员登录后，右上角会出现 `账号管理` 按钮，可以在网页里直接创建账号、修改昵称、修改密码、调整普通用户/管理员权限、删除账号。普通用户不会看到该入口，也不能调用账号管理接口。
 

@@ -228,12 +228,24 @@ export function renderError(target, error, context = "") {
   if (!target) return;
   const missing = Array.isArray(error?.data?.missingFields) ? error.data.missingFields : [];
   const capability = error?.data?.capability;
+  const validationErrors = Array.isArray(error?.data?.validationErrors) ? error.data.validationErrors : [];
+  const validationSummary = validationErrors
+    .map((item) => {
+      const loc = Array.isArray(item?.loc) ? item.loc.join(".") : "";
+      const msg = item?.msg || item?.message || "";
+      return [loc, msg].filter(Boolean).join(": ");
+    })
+    .filter(Boolean)
+    .slice(0, 3);
   target.hidden = false;
   target.innerHTML = `
     <strong>${escapeHtml(context || error?.code || "请求失败")}</strong>
     <span>${escapeHtml(error?.message || "请求失败")}</span>
     ${missing.length ? `<small>缺失字段：${missing.map(escapeHtml).join("、")}</small>` : ""}
     ${capability ? `<small>能力状态：${escapeHtml(capability.status || "unknown")}；provider：${escapeHtml(capability.provider || "unknown")}</small>` : ""}
+    ${error?.data?.status ? `<small>上游状态码：${escapeHtml(error.data.status)}</small>` : ""}
+    ${error?.data?.upstreamMessage ? `<small>上游信息：${escapeHtml(error.data.upstreamMessage)}</small>` : ""}
+    ${validationSummary.length ? `<small>上游校验：${validationSummary.map(escapeHtml).join("；")}</small>` : ""}
     ${error?.requestId ? `<small>requestId：${escapeHtml(error.requestId)}</small>` : ""}
   `;
 }

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   checkReferenceVideo,
+  draftReferenceVideoDecomposition,
   decomposeReferenceVideo,
   loadReferenceVideoProbe,
   validateVideoDecomposition
@@ -23,6 +24,8 @@ function context(root, config = {}) {
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
+    mockReferenceProbe: true,
+    extractReferenceFrames: async () => [],
     config
   };
 }
@@ -86,6 +89,69 @@ test("checks and stores a valid reference video without exposing absolute paths"
   }
 });
 
+test("checks reference video with probed media metadata instead of trusting request metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-ffprobe-"));
+  try {
+    const result = await checkReferenceVideo({
+      ...context(root),
+      mockReferenceProbe: false,
+      probeReferenceVideo: async ({ filePath, request }) => {
+        assert.match(filePath, /original\.mp4$/);
+        assert.equal(request.durationSec, 2);
+        return {
+          durationSec: 28.52,
+          width: 720,
+          height: 1280,
+          formatName: "mov,mp4,m4a,3gp,3g2,mj2",
+          bitRateBps: 1842000,
+          videoCodec: "h264",
+          fps: 29.97,
+          colorSpace: "bt709",
+          pixelFormat: "yuv420p",
+          audioStreams: [
+            {
+              codec: "aac",
+              sampleRate: 44100,
+              channels: 2,
+              bitRateBps: 128000
+            }
+          ],
+          canExtractFrame: true
+        };
+      }
+    }, validUpload({
+      durationSec: 2,
+      width: 100,
+      height: 100,
+      canExtractFrame: false
+    }));
+
+    assert.equal(result.referenceVideo.durationSec, 28.52);
+    assert.equal(result.referenceVideo.width, 720);
+    assert.equal(result.referenceVideo.height, 1280);
+    assert.equal(result.referenceVideo.formatName, "mov,mp4,m4a,3gp,3g2,mj2");
+    assert.equal(result.referenceVideo.bitRateBps, 1842000);
+    assert.equal(result.referenceVideo.videoCodec, "h264");
+    assert.equal(result.referenceVideo.fps, 29.97);
+    assert.equal(result.referenceVideo.colorSpace, "bt709");
+    assert.equal(result.referenceVideo.pixelFormat, "yuv420p");
+    assert.equal(result.referenceVideo.audioStreamCount, 1);
+    assert.deepEqual(result.referenceVideo.audioStreams, [
+      {
+        codec: "aac",
+        sampleRate: 44100,
+        channels: 2,
+        bitRateBps: 128000
+      }
+    ]);
+    assert.equal(result.referenceVideo.canExtractFrame, true);
+    assert.equal(result.referenceVideo.status, "pass");
+    assert.deepEqual(result.referenceVideo.issues, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects oversized reference uploads before writing a probe", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-limit-"));
   try {
@@ -130,6 +196,271 @@ test("validates and stores a manual decomposition for a checked reference video"
     assert.deepEqual(result.decomposition.missingFields, []);
     assert.deepEqual(result.warnings, []);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("drafts reference video decomposition by calling configured llm", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-"));
+  try {
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async ({ filePath, timestampsSec }) => {
+        assert.match(filePath, /original\.mp4$/);
+        assert.deepEqual(timestampsSec, [0, 7.1, 14.2, 21.3, 28.4]);
+        return [
+          { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,Zmlyc3QtZnJhbWU=" },
+          { index: 1, timestampSec: 7.1, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,c2Vjb25kLWZyYW1l" }
+        ];
+      },
+      callWangzhuanLlm: async ({ messages, llmConfig, referenceVideo, visionInputs }) => {
+        assert.equal(llmConfig.model, "gpt-5.4");
+        assert.equal(referenceVideo.fileDataUrl.startsWith("data:video/mp4;base64,"), true);
+        assert.equal(visionInputs.frames.length, 2);
+        const userContent = messages.find((item) => item.role === "user").content;
+        assert.equal(Array.isArray(userContent), true);
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_data?.startsWith("data:video/mp4;base64,")), true);
+        assert.equal(userContent.filter((part) => part.type === "image_url").length, 2);
+        assert.match(userContent.map((part) => part.text || "").join("\n"), /Cash Demo\.mp4/);
+        return JSON.stringify(validDecomposition({
+          scene: "Generated from model",
+          subject: "Model subject"
+        }));
+      }
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      knowledgeNotes: "Avoid competitor similarity",
+      llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1", temperature: 0.2 }
+    });
+
+    assert.equal(result.decomposition.scene, "Generated from model");
+    assert.equal(result.decomposition.subject, "Model subject");
+    assert.deepEqual(result.decomposition.missingFields, []);
+    assert.equal(result.draft.source, "llm");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition sends video file data and sampled frames to the model gateway", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-video-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body });
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify(validDecomposition({
+          scene: "Gateway saw video input",
+          subject: "Gateway subject"
+        }))
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,ZnJhbWUtMQ==" }
+      ]
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "GPT-5.4",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-key"
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1/responses");
+    const content = calls[0].body.input.find((item) => item.role === "user").content;
+    assert.equal(content.some((part) => part.type === "input_file" && part.file_data.startsWith("data:video/mp4;base64,")), true);
+    assert.equal(content.some((part) => part.type === "input_image" && part.image_url === "data:image/jpeg;base64,ZnJhbWUtMQ=="), true);
+    assert.equal(result.decomposition.scene, "Gateway saw video input");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition falls back to chat image frames when video file input is unsupported", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-fallback-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body });
+      if (String(url).endsWith("/responses")) {
+        return new Response(JSON.stringify({ error: { message: "unsupported file type" } }), {
+          status: 422,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify(validDecomposition({
+              scene: "Fallback used frames",
+              subject: "Fallback subject"
+            }))
+          }
+        }]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,ZnJhbWUtMg==" }
+      ]
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "GPT-5.4",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-key"
+      }
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1/responses");
+    assert.equal(calls[1].url, "https://skylink-gateway.com/api/v1/chat/completions");
+    const chatContent = calls[1].body.messages.find((item) => item.role === "user").content;
+    assert.equal(chatContent.some((part) => part.type === "file"), false);
+    assert.equal(chatContent.some((part) => part.type === "image_url" && part.image_url.url === "data:image/jpeg;base64,ZnJhbWUtMg=="), true);
+    assert.equal(result.decomposition.scene, "Fallback used frames");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition accepts nested llm JSON payloads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-nested-"));
+  try {
+    const ctx = {
+      ...context(root),
+      callWangzhuanLlm: async () => JSON.stringify({
+        decomposition: validDecomposition({
+          scene: "Nested model scene",
+          subject: "Nested model subject"
+        })
+      })
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1", temperature: 0.2 }
+    });
+
+    assert.equal(result.decomposition.scene, "Nested model scene");
+    assert.equal(result.decomposition.subject, "Nested model subject");
+    assert.deepEqual(result.decomposition.missingFields, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition maps Chinese llm field names to contract fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-cn-"));
+  try {
+    const ctx = {
+      ...context(root),
+      callWangzhuanLlm: async () => JSON.stringify({
+        场景: "手机奖励 App 页面",
+        主体: "手持手机的人",
+        动作: "点击奖励按钮并展示金币反馈",
+        镜头: "竖屏近景，轻微推进",
+        光线: "明亮室内光",
+        风格: "UGC App 演示",
+        画质: "高清",
+        钩子: "前三秒展示可领取奖励"
+      })
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1", temperature: 0.2 }
+    });
+
+    assert.equal(result.decomposition.scene, "手机奖励 App 页面");
+    assert.equal(result.decomposition.camera, "竖屏近景，轻微推进");
+    assert.equal(result.decomposition.hook, "前三秒展示可领取奖励");
+    assert.deepEqual(result.decomposition.missingFields, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition stringifies object values returned for contract fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-object-values-"));
+  try {
+    const ctx = {
+      ...context(root),
+      callWangzhuanLlm: async () => JSON.stringify({
+        scene: { environment: "short-form vertical ad scene", durationSec: 13 },
+        subject: { role: "product demonstrator", props: ["phone", "reward cue"] },
+        action: { mainAction: "tap reward button" },
+        camera: { framing: "close-up vertical shot" },
+        lighting: { mood: "bright indoor lighting" },
+        style: { format: "UGC app demo" },
+        quality: { resolution: "HD" },
+        hook: { firstSeconds: "show reward immediately" }
+      })
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1", temperature: 0.2 }
+    });
+
+    assert.match(result.decomposition.scene, /short-form vertical ad scene/);
+    assert.match(result.decomposition.subject, /reward cue/);
+    assert.match(result.decomposition.hook, /show reward immediately/);
+    assert.deepEqual(result.decomposition.missingFields, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition requires llm api key when no mock caller is provided", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-key-"));
+  const previousEnv = {
+    WANGZHUAN_LLM_API_KEY: process.env.WANGZHUAN_LLM_API_KEY,
+    VIDEO_AIGC_API_KEY: process.env.VIDEO_AIGC_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_KEY: process.env.OPENAI_KEY,
+    REVERSE_PROMPT_API_KEY: process.env.REVERSE_PROMPT_API_KEY
+  };
+  try {
+    for (const key of Object.keys(previousEnv)) delete process.env[key];
+    const checked = await checkReferenceVideo(context(root), validUpload());
+    await assert.rejects(
+      () => draftReferenceVideoDecomposition(context(root), {
+        referenceVideoId: checked.referenceVideo.referenceVideoId,
+        llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1" }
+      }),
+      { code: "model_failed" }
+    );
+  } finally {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

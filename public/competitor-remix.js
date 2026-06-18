@@ -15,8 +15,7 @@ import {
   renderKeyValues,
   setBusy,
   showLogin,
-  terminalRemixStatus,
-  tinyVideoDataUrl
+  terminalRemixStatus
 } from "./wangzhuan-common.js";
 
 const els = {
@@ -26,27 +25,20 @@ const els = {
   envelopeBadge: $("#remixEnvelopeBadge"),
   capabilityBadge: $("#remixCapabilityBadge"),
   globalError: $("#remixGlobalError"),
-  templateCount: $("#remixTemplateCount"),
+  sourceCount: $("#remixTemplateCount"),
   regionCount: $("#remixRegionCount"),
   outputCount: $("#remixOutputCount"),
   downloadCount: $("#remixDownloadCount"),
   sourceFile: $("#remixSourceFile"),
-  sourceDuration: $("#remixDuration"),
-  sourceWidth: $("#remixWidth"),
-  sourceHeight: $("#remixHeight"),
-  useSampleBtn: $("#remixUseSampleBtn"),
   uploadBtn: $("#remixUploadBtn"),
   sourceBox: $("#remixSourceBox"),
-  templateSelect: $("#remixTemplateSelect"),
-  operationType: $("#remixOperationType"),
-  targetChannel: $("#remixTargetChannel"),
-  addRegionBtn: $("#remixAddRegionBtn"),
-  defaultRegionBtn: $("#remixDefaultRegionBtn"),
-  regionsBox: $("#remixRegionsBox"),
-  regionRect: $("#remixRegionRect"),
-  estimateBtn: $("#remixEstimateBtn"),
-  estimateBox: $("#remixEstimateBox"),
-  startBtn: $("#remixStartBtn"),
+  clearMaskBtn: $("#remixClearMaskBtn"),
+  maskEditor: $("#remixMaskEditor"),
+  maskMediaLayer: $("#remixMaskMediaLayer"),
+  maskLayer: $("#remixMaskLayer"),
+  maskSummary: $("#remixMaskSummary"),
+  maskPreviewCanvas: $("#remixMaskPreviewCanvas"),
+  maskConfirmBtn: $("#remixMaskConfirmBtn"),
   statusBadge: $("#remixStatusBadge"),
   detailBox: $("#remixDetailBox"),
   confirmBtn: $("#remixConfirmBtn"),
@@ -57,131 +49,276 @@ const els = {
 
 const state = {
   user: null,
-  templates: [],
   source: null,
-  regions: [{
-    regionId: "reg_watermark",
-    type: "bbox",
-    label: "watermark",
-    bbox: { x: 0.62, y: 0.84, width: 0.24, height: 0.08 }
-  }],
-  estimate: null,
+  regions: [],
   detail: null,
   gallery: null,
-  usingSample: false,
-  pollTimer: 0
+  pollTimer: 0,
+  selectedRegionId: "",
+  maskDrag: null,
+  submitBlocked: false,
+  actualMediaCache: null
 };
 
-function selectedTemplate() {
-  return state.templates.find((item) => item.versionId === els.templateSelect.value) || null;
-}
+const MIN_MASK_SIZE = 0.03;
+const MASK_KEY_STEP = 0.01;
+const CREATE_MASK_THRESHOLD = 0.012;
+const POLL_INTERVAL_MS = 3000;
 
 function syncMetrics() {
-  els.templateCount.textContent = state.templates.length;
+  els.sourceCount.textContent = state.source ? "1" : "0";
   els.regionCount.textContent = state.regions.length;
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
+  els.maskConfirmBtn.disabled = state.submitBlocked || !state.source || !state.regions.length;
 }
 
-function renderTemplates() {
-  if (!state.templates.length) {
-    els.templateSelect.innerHTML = `<option value="">请先到网赚素材管线保存产品模板</option>`;
-    syncMetrics();
+function clampNumber(value, min = 0, max = 1) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundMaskValue(value) {
+  return Math.round(clampNumber(value) * 1000) / 1000;
+}
+
+function normalizeBbox(bbox = {}) {
+  const width = clampNumber(Number(bbox.width), MIN_MASK_SIZE, 1);
+  const height = clampNumber(Number(bbox.height), MIN_MASK_SIZE, 1);
+  const x = clampNumber(Number(bbox.x), 0, 1 - width);
+  const y = clampNumber(Number(bbox.y), 0, 1 - height);
+  return {
+    x: roundMaskValue(x),
+    y: roundMaskValue(y),
+    width: roundMaskValue(width),
+    height: roundMaskValue(height)
+  };
+}
+
+function normalizedRegions() {
+  return state.regions.map((region, index) => ({
+    regionId: region.regionId || `mask_${index + 1}`,
+    type: "bbox",
+    label: region.label || `mask_${index + 1}`,
+    bbox: normalizeBbox(region.bbox)
+  }));
+}
+
+function nextRegionId() {
+  let next = state.regions.length + 1;
+  const existing = new Set(state.regions.map((item) => item.regionId));
+  while (existing.has(`mask_${next}`)) next += 1;
+  return `mask_${next}`;
+}
+
+function selectedBboxRegion() {
+  return state.regions.find((item) => item.regionId === state.selectedRegionId && item.bbox)
+    || state.regions.find((item) => item.bbox)
+    || null;
+}
+
+function mediaDimensionsFromProbe(probe = {}) {
+  const width = Number(probe.width || 720);
+  const height = Number(probe.height || 1280);
+  return {
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : 720,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : 1280
+  };
+}
+
+function mediaDimensions() {
+  return mediaDimensionsFromProbe(state.source?.probe || {});
+}
+
+function rememberActualMediaDimensions(media = els.maskMediaLayer?.querySelector("video,img")) {
+  const sourceId = state.source?.sourceId || "";
+  const width = Number(media?.videoWidth || media?.naturalWidth || 0);
+  const height = Number(media?.videoHeight || media?.naturalHeight || 0);
+  if (!sourceId || !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return null;
+  state.actualMediaCache = {
+    sourceId,
+    width: Math.round(width),
+    height: Math.round(height)
+  };
+  return state.actualMediaCache;
+}
+
+function actualMediaDimensions() {
+  const fallback = mediaDimensions();
+  const sourceId = state.source?.sourceId || "";
+  const media = els.maskMediaLayer?.querySelector("video,img");
+  const remembered = rememberActualMediaDimensions(media);
+  const cached = remembered?.sourceId === sourceId ? remembered : state.actualMediaCache;
+  if (cached?.sourceId === sourceId) {
+    return { width: cached.width, height: cached.height };
+  }
+  return {
+    width: fallback.width,
+    height: fallback.height
+  };
+}
+
+function mediaAspectRatioValue(dimensions = actualMediaDimensions()) {
+  return `${Math.max(1, dimensions.width)} / ${Math.max(1, dimensions.height)}`;
+}
+
+function applyMediaAspectRatio(dimensions = actualMediaDimensions()) {
+  const value = mediaAspectRatioValue(dimensions);
+  els.maskEditor?.style.setProperty("--remix-media-aspect-ratio", value);
+  els.maskPreviewCanvas?.parentElement?.style.setProperty("--remix-media-aspect-ratio", value);
+  els.maskMediaLayer?.style.setProperty("--remix-media-aspect-ratio", value);
+}
+
+function mediaViewport() {
+  const rect = els.maskEditor?.getBoundingClientRect?.();
+  const dimensions = actualMediaDimensions();
+  if (!rect || !rect.width || !rect.height) {
+    return { left: 0, top: 0, width: 1, height: 1, rect: { left: 0, top: 0, width: 1, height: 1 } };
+  }
+  const mediaRatio = dimensions.width / dimensions.height || 9 / 16;
+  const editorRatio = rect.width / rect.height;
+  if (editorRatio > mediaRatio) {
+    const height = rect.height;
+    const width = height * mediaRatio;
+    return { left: (rect.width - width) / 2, top: 0, width, height, rect };
+  }
+  const width = rect.width;
+  const height = width / mediaRatio;
+  return { left: 0, top: (rect.height - height) / 2, width, height, rect };
+}
+
+function syncMaskLayerViewport() {
+  applyMediaAspectRatio();
+  const viewport = mediaViewport();
+  if (els.maskLayer) {
+    els.maskLayer.style.inset = "auto";
+    els.maskLayer.style.left = `${viewport.left}px`;
+    els.maskLayer.style.top = `${viewport.top}px`;
+    els.maskLayer.style.width = `${viewport.width}px`;
+    els.maskLayer.style.height = `${viewport.height}px`;
+  }
+  return viewport;
+}
+
+function renderMaskMedia(force = false) {
+  if (!els.maskMediaLayer) return;
+  if (!state.source?.previewUrl) {
+    els.maskMediaLayer.innerHTML = "";
+    state.actualMediaCache = null;
+    applyMediaAspectRatio(mediaDimensions());
     return;
   }
-  els.templateSelect.innerHTML = state.templates.map((template) => `
-    <option value="${escapeHtml(template.versionId)}">
-      ${escapeHtml(template.draft?.displayName || template.templateId)} v${escapeHtml(template.versionNumber)}
-    </option>
-  `).join("");
-  const defaultTemplate = state.templates.find((item) => item.isDefault) || state.templates[0];
-  els.templateSelect.value = defaultTemplate.versionId;
+  const existingMedia = els.maskMediaLayer.querySelector("video,img");
+  if (!force && existingMedia?.dataset.sourceId === state.source.sourceId) {
+    rememberActualMediaDimensions(existingMedia);
+    applyMediaAspectRatio(actualMediaDimensions());
+    return;
+  }
+  const probe = state.source.probe || {};
+  const safeUrl = escapeHtml(state.source.previewUrl);
+  const safeSourceId = escapeHtml(state.source.sourceId || "");
+  const mimeType = String(probe.mimeType || "").toLowerCase();
+  const isVideo = probe.kind === "video" || mimeType.startsWith("video/");
+  els.maskMediaLayer.innerHTML = isVideo
+    ? `<video src="${safeUrl}" data-source-id="${safeSourceId}" muted loop playsinline preload="metadata"></video>`
+    : `<img src="${safeUrl}" data-source-id="${safeSourceId}" alt="" />`;
+  applyMediaAspectRatio(mediaDimensions());
+  const media = els.maskMediaLayer.querySelector("video,img");
+  const syncFromMedia = () => {
+    rememberActualMediaDimensions(media);
+    syncMaskLayerViewport();
+    renderMaskPreview();
+  };
+  media?.addEventListener(isVideo ? "loadedmetadata" : "load", syncFromMedia, { once: true });
+  media?.addEventListener("loadeddata", syncFromMedia, { once: true });
+}
+
+function renderMaskPreview() {
+  const canvas = els.maskPreviewCanvas;
+  if (!canvas) return;
+  const { width, height } = actualMediaDimensions();
+  applyMediaAspectRatio({ width, height });
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, width, height);
+  const regions = normalizedRegions();
+  ctx.fillStyle = "#ffffff";
+  for (const region of regions) {
+    const box = region.bbox;
+    ctx.fillRect(
+      Math.round(box.x * width),
+      Math.round(box.y * height),
+      Math.max(1, Math.round(box.width * width)),
+      Math.max(1, Math.round(box.height * height))
+    );
+  }
+  els.maskSummary.textContent = regions.length ? `${regions.length} 个区域已合成` : "未生成";
   syncMetrics();
 }
 
-function normalizeRegionsFromForm() {
-  return [...els.regionsBox.querySelectorAll(".wz-region-item")].map((row, index) => {
-    const type = row.querySelector("[data-region-type]").value;
-    const label = row.querySelector("[data-region-label]").value.trim() || `region_${index + 1}`;
-    const regionId = row.dataset.regionId || `region_${index + 1}`;
-    if (type === "description") {
-      return {
-        regionId,
-        type,
-        label,
-        description: row.querySelector("[data-region-description]").value.trim()
-      };
-    }
-    return {
-      regionId,
-      type: "bbox",
-      label,
-      bbox: {
-        x: Number(row.querySelector("[data-region-x]").value),
-        y: Number(row.querySelector("[data-region-y]").value),
-        width: Number(row.querySelector("[data-region-width]").value),
-        height: Number(row.querySelector("[data-region-height]").value)
-      }
-    };
-  });
+function maskPreviewDataUrl() {
+  renderMaskPreview();
+  return els.maskPreviewCanvas.toDataURL("image/png");
 }
 
-function renderRegionRect() {
-  const first = state.regions.find((item) => item.type === "bbox") || state.regions[0];
-  if (!first?.bbox) {
-    els.regionRect.hidden = true;
-    return;
+function renderMaskEditor(forceMedia = false) {
+  if (!els.maskEditor || !els.maskLayer) return;
+  if (forceMedia) renderMaskMedia(true);
+  else renderMaskMedia();
+  syncMaskLayerViewport();
+  const empty = els.maskEditor.querySelector("[data-mask-empty]");
+  if (empty) empty.hidden = Boolean(state.source?.previewUrl);
+  const bboxRegions = normalizedRegions();
+  state.regions = bboxRegions;
+  if (!bboxRegions.some((region) => region.regionId === state.selectedRegionId)) {
+    state.selectedRegionId = bboxRegions[0]?.regionId || "";
   }
-  els.regionRect.hidden = false;
-  els.regionRect.style.left = `${first.bbox.x * 100}%`;
-  els.regionRect.style.top = `${first.bbox.y * 100}%`;
-  els.regionRect.style.width = `${first.bbox.width * 100}%`;
-  els.regionRect.style.height = `${first.bbox.height * 100}%`;
+  els.maskLayer.innerHTML = bboxRegions.map((region) => {
+    const bbox = normalizeBbox(region.bbox);
+    const selected = region.regionId === state.selectedRegionId ? " selected" : "";
+    return `
+      <button class="wz-region-rect${selected}" type="button" data-region-id="${escapeHtml(region.regionId)}"
+        style="left:${bbox.x * 100}%;top:${bbox.y * 100}%;width:${bbox.width * 100}%;height:${bbox.height * 100}%"
+        aria-label="Mask 区域 ${escapeHtml(region.label || region.regionId)}">
+        <span>${escapeHtml(region.label || "mask")}</span>
+        <i data-resize-handle="nw"></i>
+        <i data-resize-handle="ne"></i>
+        <i data-resize-handle="sw"></i>
+        <i data-resize-handle="se"></i>
+      </button>
+    `;
+  }).join("");
+  renderMaskPreview();
 }
 
-function renderRegions() {
-  els.regionsBox.innerHTML = state.regions.map((region, index) => `
-    <article class="wz-region-item" data-region-id="${escapeHtml(region.regionId || `region_${index + 1}`)}">
-      <div class="wz-inline-form">
-        <label>类型
-          <select data-region-type>
-            <option value="bbox" ${region.type !== "description" ? "selected" : ""}>bbox</option>
-            <option value="description" ${region.type === "description" ? "selected" : ""}>描述</option>
-          </select>
-        </label>
-        <label>标签 <input data-region-label type="text" value="${escapeHtml(region.label || "region")}" /></label>
+function renderSourcePreview(source) {
+  const url = source?.previewUrl;
+  if (!url) return "";
+  const probe = source.probe || {};
+  const mimeType = String(probe.mimeType || "").toLowerCase();
+  const safeUrl = escapeHtml(url);
+  const isVideo = probe.kind === "video" || mimeType.startsWith("video/");
+  if (isVideo) {
+    return `
+      <div class="remix-source-preview" style="--remix-media-aspect-ratio: ${escapeHtml(mediaAspectRatioValue(mediaDimensionsFromProbe(probe)))}" data-source-preview="video">
+        <video src="${safeUrl}" controls preload="metadata" playsinline></video>
       </div>
-      <div class="wz-inline-form">
-        <label>x <input data-region-x type="number" step="0.01" min="0" max="1" value="${escapeHtml(region.bbox?.x ?? 0.62)}" /></label>
-        <label>y <input data-region-y type="number" step="0.01" min="0" max="1" value="${escapeHtml(region.bbox?.y ?? 0.84)}" /></label>
-        <label>w <input data-region-width type="number" step="0.01" min="0" max="1" value="${escapeHtml(region.bbox?.width ?? 0.24)}" /></label>
-        <label>h <input data-region-height type="number" step="0.01" min="0" max="1" value="${escapeHtml(region.bbox?.height ?? 0.08)}" /></label>
-      </div>
-      <label>描述 <input data-region-description type="text" value="${escapeHtml(region.description || "cover competitor watermark area")}" /></label>
-      <button class="mini ghost" data-remove-region type="button">移除</button>
-    </article>
-  `).join("");
-  for (const input of els.regionsBox.querySelectorAll("input, select")) {
-    input.addEventListener("input", () => {
-      state.regions = normalizeRegionsFromForm();
-      renderRegionRect();
-      syncMetrics();
-    });
+    `;
   }
-  for (const button of els.regionsBox.querySelectorAll("[data-remove-region]")) {
-    button.addEventListener("click", () => {
-      state.regions = normalizeRegionsFromForm().filter((item) => item.regionId !== button.closest(".wz-region-item").dataset.regionId);
-      renderRegions();
-    });
-  }
-  renderRegionRect();
-  syncMetrics();
+  return `
+    <div class="remix-source-preview" style="--remix-media-aspect-ratio: ${escapeHtml(mediaAspectRatioValue(mediaDimensionsFromProbe(probe)))}" data-source-preview="image">
+      <img src="${safeUrl}" alt="源素材预览" />
+    </div>
+  `;
 }
 
 function renderSource() {
   if (!state.source) {
     els.sourceBox.className = "wz-list empty-line";
     els.sourceBox.textContent = "未上传源素材";
+    renderMaskEditor(true);
     return;
   }
   const probe = state.source.probe;
@@ -195,37 +332,180 @@ function renderSource() {
       ${badge(probe.status, { pass: "通过", fail: "失败", warn: "警告" })}
     </article>
     ${state.source.previewUrl ? `<a href="${escapeHtml(state.source.previewUrl)}" target="_blank" rel="noreferrer">打开源文件预览</a>` : ""}
-    ${state.usingSample ? `<div class="wz-warning">样例 data URL 只用于验证上传边界，不代表真实媒体可播放。</div>` : ""}
+    ${renderSourcePreview(state.source)}
   `;
+  renderMaskEditor(true);
 }
 
-function renderEstimate() {
-  const estimate = state.estimate;
-  if (!estimate) {
-    els.estimateBox.className = "wz-estimate empty-line";
-    els.estimateBox.textContent = "尚未估算";
-    els.startBtn.disabled = true;
-    syncMetrics();
-    return;
+function pointerToCanvasPoint(event) {
+  const viewport = syncMaskLayerViewport();
+  const rawX = (event.clientX - viewport.rect.left - viewport.left) / viewport.width;
+  const rawY = (event.clientY - viewport.rect.top - viewport.top) / viewport.height;
+  return {
+    x: clampNumber(rawX),
+    y: clampNumber(rawY),
+    inside: rawX >= 0 && rawX <= 1 && rawY >= 0 && rawY <= 1
+  };
+}
+
+function commitMaskEdit(regionId, bbox) {
+  state.regions = state.regions.map((region) => {
+    if (region.regionId !== regionId) return region;
+    return { ...region, type: "bbox", bbox: normalizeBbox(bbox) };
+  });
+  state.selectedRegionId = regionId;
+  renderMaskEditor();
+}
+
+function resizeBboxFromDrag(startBox, dx, dy, handle) {
+  let { x, y, width, height } = startBox;
+  if (handle.includes("w")) {
+    x += dx;
+    width -= dx;
   }
-  const capability = estimate.capability || {};
-  els.capabilityBadge.textContent = `Provider: ${capability.status || "unknown"} / ${capability.provider || "unknown"}`;
-  els.estimateBox.className = "wz-estimate";
-  els.estimateBox.innerHTML = `
-    <div class="wz-kv-grid">
-      ${renderKeyValues([
-        ["estimateId", estimate.estimateId],
-        ["能力状态", capability.status || "unknown"],
-        ["provider", capability.provider || "unknown"],
-        ["操作", operationLabels[els.operationType.value] || els.operationType.value],
-        ["二次确认", estimate.confirmationRequired ? "需要" : "不需要"]
-      ])}
-    </div>
-    ${capability.supportedOperations?.length ? `<div class="wz-chipline">${capability.supportedOperations.map((item) => `<span>${escapeHtml(operationLabels[item] || item)}</span>`).join("")}</div>` : ""}
-    ${capability.unsupportedReason ? `<div class="wz-warning">${escapeHtml(capability.unsupportedReason)}</div>` : ""}
-  `;
-  els.startBtn.disabled = capability.status !== "supported" && capability.status !== "degraded";
-  syncMetrics();
+  if (handle.includes("e")) width += dx;
+  if (handle.includes("n")) {
+    y += dy;
+    height -= dy;
+  }
+  if (handle.includes("s")) height += dy;
+  if (width < MIN_MASK_SIZE) {
+    if (handle.includes("w")) x -= MIN_MASK_SIZE - width;
+    width = MIN_MASK_SIZE;
+  }
+  if (height < MIN_MASK_SIZE) {
+    if (handle.includes("n")) y -= MIN_MASK_SIZE - height;
+    height = MIN_MASK_SIZE;
+  }
+  return normalizeBbox({ x, y, width, height });
+}
+
+function previewDragBbox(bbox) {
+  const regionId = state.maskDrag?.regionId || "";
+  const target = regionId ? els.maskLayer.querySelector(`[data-region-id="${CSS.escape(regionId)}"]`) : null;
+  if (!target) return;
+  target.style.left = `${bbox.x * 100}%`;
+  target.style.top = `${bbox.y * 100}%`;
+  target.style.width = `${bbox.width * 100}%`;
+  target.style.height = `${bbox.height * 100}%`;
+}
+
+function bindMaskEditor() {
+  if (!els.maskEditor) return;
+  els.maskEditor.addEventListener("pointerdown", (event) => {
+    const rectButton = event.target.closest?.(".wz-region-rect");
+    const point = pointerToCanvasPoint(event);
+    if (!point.inside) return;
+    if (rectButton) {
+      const region = state.regions.find((item) => item.regionId === rectButton.dataset.regionId);
+      if (!region?.bbox) return;
+      const handle = event.target.dataset.resizeHandle || "";
+      state.selectedRegionId = region.regionId;
+      state.maskDrag = {
+        mode: handle ? "resize" : "move",
+        handle,
+        regionId: region.regionId,
+        startPoint: point,
+        startBox: normalizeBbox(region.bbox)
+      };
+      rectButton.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+    if (!state.source?.previewUrl) return;
+    state.maskDrag = {
+      mode: "create",
+      regionId: nextRegionId(),
+      startPoint: point,
+      created: false
+    };
+    els.maskEditor.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+
+  els.maskEditor.addEventListener("pointermove", (event) => {
+    const drag = state.maskDrag;
+    if (!drag) return;
+    const point = pointerToCanvasPoint(event);
+    const dx = point.x - drag.startPoint.x;
+    const dy = point.y - drag.startPoint.y;
+    let nextBox = drag.startBox;
+    if (drag.mode === "move") {
+      nextBox = normalizeBbox({
+        ...drag.startBox,
+        x: drag.startBox.x + dx,
+        y: drag.startBox.y + dy
+      });
+    } else if (drag.mode === "resize") {
+      nextBox = resizeBboxFromDrag(drag.startBox, dx, dy, drag.handle);
+    } else if (drag.mode === "create") {
+      if (!drag.created && Math.max(Math.abs(dx), Math.abs(dy)) < CREATE_MASK_THRESHOLD) return;
+      if (!drag.created) {
+        drag.created = true;
+        const newRegion = {
+          regionId: drag.regionId,
+          type: "bbox",
+          label: `mask_${state.regions.length + 1}`,
+          bbox: normalizeBbox({ x: drag.startPoint.x, y: drag.startPoint.y, width: MIN_MASK_SIZE, height: MIN_MASK_SIZE })
+        };
+        state.regions.push(newRegion);
+        state.selectedRegionId = drag.regionId;
+        renderMaskEditor();
+      }
+      nextBox = normalizeBbox({
+        x: Math.min(drag.startPoint.x, point.x),
+        y: Math.min(drag.startPoint.y, point.y),
+        width: Math.abs(point.x - drag.startPoint.x),
+        height: Math.abs(point.y - drag.startPoint.y)
+      });
+    }
+    state.maskDrag.nextBox = nextBox;
+    previewDragBbox(nextBox);
+  });
+
+  const endDrag = () => {
+    if (!state.maskDrag) return;
+    const { regionId, nextBox, startBox } = state.maskDrag;
+    state.maskDrag = null;
+    if (nextBox || startBox) commitMaskEdit(regionId, nextBox || startBox);
+  };
+  els.maskEditor.addEventListener("pointerup", endDrag);
+  els.maskEditor.addEventListener("pointercancel", endDrag);
+
+  els.maskEditor.addEventListener("keydown", (event) => {
+    const region = selectedBboxRegion();
+    if (!region?.bbox) return;
+    const box = normalizeBbox(region.bbox);
+    const step = event.altKey ? MASK_KEY_STEP / 2 : MASK_KEY_STEP;
+    let nextBox = { ...box };
+    if (event.key === "ArrowLeft") {
+      if (event.shiftKey) nextBox.width -= step;
+      else nextBox.x -= step;
+    } else if (event.key === "ArrowRight") {
+      if (event.shiftKey) nextBox.width += step;
+      else nextBox.x += step;
+    } else if (event.key === "ArrowUp") {
+      if (event.shiftKey) nextBox.height -= step;
+      else nextBox.y -= step;
+    } else if (event.key === "ArrowDown") {
+      if (event.shiftKey) nextBox.height += step;
+      else nextBox.y += step;
+    } else if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      state.regions = state.regions.filter((item) => item.regionId !== region.regionId);
+      state.selectedRegionId = selectedBboxRegion()?.regionId || "";
+      renderMaskEditor();
+      return;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    commitMaskEdit(region.regionId, nextBox);
+  });
+  window.addEventListener("resize", () => {
+    syncMaskLayerViewport();
+    renderMaskPreview();
+  });
 }
 
 function renderDetail() {
@@ -258,6 +538,8 @@ function renderDetail() {
         ["可下载", state.detail.downloadSummary?.downloadEligibleCount || 0],
         ["QC 通过", remix.qcSummary?.passed || 0],
         ["QC 失败", remix.qcSummary?.failed || 0],
+        ["远端 Job", remix.providerJob?.jobId || "-"],
+        ["远端状态", remix.providerJob?.status || "-"],
         ["预览确认", output?.previewConfirmed ? "已确认" : "未确认"]
       ])}
     </div>
@@ -297,32 +579,32 @@ function renderGallery() {
   syncMetrics();
 }
 
-async function loadTemplates() {
-  const data = await apiEnvelope("/api/wangzhuan/templates");
-  state.templates = data.templates || [];
-  els.envelopeBadge.textContent = "Envelope: ok";
-  renderTemplates();
-}
-
 async function uploadSource() {
   clearError(els.globalError);
+  const file = els.sourceFile.files?.[0];
+  if (!file) {
+    renderError(els.globalError, {
+      code: "validation_error",
+      message: "请先选择需要改造的视频或图片素材"
+    }, "源素材上传失败");
+    return;
+  }
   setBusy(els.uploadBtn, true, "上传中");
   try {
-    const file = els.sourceFile.files?.[0];
-    const content = file ? await dataUrlFromFile(file) : tinyVideoDataUrl("competitor");
+    const content = await dataUrlFromFile(file);
     const data = await apiEnvelope("/api/wangzhuan/remix/upload", {
       method: "POST",
       body: JSON.stringify({
-        fileName: file?.name || "sample-competitor.mp4",
-        mimeType: file?.type || "video/mp4",
-        content,
-        durationSec: Number(els.sourceDuration.value),
-        width: Number(els.sourceWidth.value),
-        height: Number(els.sourceHeight.value)
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        content
       })
     });
     state.source = data;
-    state.usingSample = !file;
+    state.regions = [];
+    state.selectedRegionId = "";
+    state.actualMediaCache = null;
+    state.submitBlocked = false;
     renderSource();
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
@@ -332,54 +614,42 @@ async function uploadSource() {
   }
 }
 
-function estimateRequest() {
-  const template = selectedTemplate();
-  state.regions = normalizeRegionsFromForm();
-  return {
-    sourceId: state.source?.sourceId,
-    templateId: template?.templateId,
-    versionId: template?.versionId,
-    operationType: els.operationType.value,
-    regions: state.regions,
-    targetChannel: els.targetChannel.value
-  };
-}
-
-async function estimateRemix() {
+async function startMaskEdit() {
   clearError(els.globalError);
-  if (!state.source || !selectedTemplate()) {
-    renderError(els.globalError, {
-      code: "validation_error",
-      message: "请先上传源素材并选择产品模板"
-    }, "估算前置条件");
-    return;
-  }
-  if (!normalizeRegionsFromForm().length) {
+  const regions = normalizedRegions();
+  if (!state.source || !regions.length) {
     renderError(els.globalError, {
       code: "region_required",
-      message: "请至少添加一个 bbox 或描述区域"
-    }, "区域校验");
+      message: "请先上传素材并框选至少一个区域"
+    }, "Mask 校验");
     return;
   }
-  setBusy(els.estimateBtn, true, "估算中");
+  state.submitBlocked = false;
+  setBusy(els.maskConfirmBtn, true, "提交中");
   try {
-    state.estimate = await apiEnvelope("/api/wangzhuan/remix/estimate", {
+    state.detail = await apiEnvelope("/api/wangzhuan/remix/mask-edit", {
       method: "POST",
-      body: JSON.stringify(estimateRequest())
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey("remix_mask_edit"),
+        sourceId: state.source.sourceId,
+        regions,
+        maskDataUrl: maskPreviewDataUrl()
+      })
     });
-    renderEstimate();
+    els.capabilityBadge.textContent = `Provider: ${state.detail.remix?.capability?.status || "submitted"} / ${state.detail.remix?.capability?.provider || "video_aigc"}`;
+    renderDetail();
+    startPolling();
   } catch (error) {
-    state.estimate = null;
-    if (error.code === "unsupported_capability") {
-      els.startBtn.disabled = true;
-    }
     els.capabilityBadge.textContent = error.data?.capability
       ? `Provider: ${error.data.capability.status} / ${error.data.capability.provider}`
       : "Provider: unsupported";
-    renderEstimate();
-    renderError(els.globalError, error, "能力估算失败");
+    if (error.code === "unsupported_capability") {
+      state.submitBlocked = true;
+    }
+    renderError(els.globalError, error, "改造启动失败");
   } finally {
-    setBusy(els.estimateBtn, false);
+    setBusy(els.maskConfirmBtn, false);
+    syncMetrics();
   }
 }
 
@@ -393,40 +663,18 @@ async function loadRemixDetail() {
 
 function startPolling() {
   window.clearTimeout(state.pollTimer);
-  let attempts = 0;
   const tick = async () => {
-    attempts += 1;
     try {
       const detail = await loadRemixDetail();
       await loadGallery();
-      if (!detail?.remix || terminalRemixStatus(detail.remix.status) || attempts >= 8) return;
-      state.pollTimer = window.setTimeout(tick, 2000);
+      if (!detail?.remix || terminalRemixStatus(detail.remix.status)) return;
+      state.pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
     } catch (error) {
       renderError(els.globalError, error, "改造轮询失败");
+      state.pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
     }
   };
   state.pollTimer = window.setTimeout(tick, 1200);
-}
-
-async function startRemix() {
-  if (!state.estimate?.estimateId) return;
-  clearError(els.globalError);
-  setBusy(els.startBtn, true, "启动中");
-  try {
-    state.detail = await apiEnvelope("/api/wangzhuan/remix/start", {
-      method: "POST",
-      body: JSON.stringify({
-        idempotencyKey: idempotencyKey("remix_start"),
-        estimateId: state.estimate.estimateId
-      })
-    });
-    renderDetail();
-    startPolling();
-  } catch (error) {
-    renderError(els.globalError, error, "改造启动失败");
-  } finally {
-    setBusy(els.startBtn, false);
-  }
 }
 
 async function confirmPreview() {
@@ -457,6 +705,7 @@ async function loadGallery() {
   const remixId = state.detail?.remix?.remixId;
   const params = remixId ? `?${new URLSearchParams({ remixId })}` : "";
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
+  els.envelopeBadge.textContent = "Envelope: ok";
   renderGallery();
 }
 
@@ -480,45 +729,21 @@ async function downloadRemixPackage() {
 }
 
 function bindEvents() {
-  els.useSampleBtn.addEventListener("click", () => {
-    els.sourceFile.value = "";
-    state.usingSample = true;
-    els.sourceBox.className = "wz-list empty-line";
-    els.sourceBox.textContent = "将使用小型 data URL 样例验证上传边界，不代表真实媒体可播放";
-  });
   els.uploadBtn.addEventListener("click", uploadSource);
-  els.addRegionBtn.addEventListener("click", () => {
-    const next = state.regions.length + 1;
-    state.regions.push({
-      regionId: `reg_${next}`,
-      type: "bbox",
-      label: `region_${next}`,
-      bbox: { x: 0.1, y: 0.1, width: 0.25, height: 0.12 }
-    });
-    renderRegions();
+  els.clearMaskBtn.addEventListener("click", () => {
+    state.regions = [];
+    state.selectedRegionId = "";
+    renderMaskEditor();
   });
-  els.defaultRegionBtn.addEventListener("click", () => {
-    state.regions = [{
-      regionId: "reg_watermark",
-      type: "bbox",
-      label: "watermark",
-      bbox: { x: 0.62, y: 0.84, width: 0.24, height: 0.08 }
-    }];
-    renderRegions();
-  });
-  els.operationType.addEventListener("change", () => {
-    state.estimate = null;
-    renderEstimate();
-  });
-  els.estimateBtn.addEventListener("click", estimateRemix);
-  els.startBtn.addEventListener("click", startRemix);
+  els.maskConfirmBtn.addEventListener("click", startMaskEdit);
   els.confirmBtn.addEventListener("click", confirmPreview);
   els.downloadBtn.addEventListener("click", downloadRemixPackage);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
 }
 
 async function init() {
-  renderRegions();
+  renderMaskEditor();
+  bindMaskEditor();
   bindEvents();
   await bindLogin({
     modal: els.loginModal,
@@ -535,7 +760,6 @@ async function init() {
 
 async function loadInitialData() {
   clearError(els.globalError);
-  await loadTemplates();
   await loadGallery();
 }
 

@@ -36,6 +36,7 @@ function context(root, overrides = {}) {
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
+    mockReferenceProbe: true,
     config: {},
     capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } },
     ...overrides

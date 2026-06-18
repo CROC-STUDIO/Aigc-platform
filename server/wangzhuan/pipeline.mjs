@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { getChannelRules } from "./channel-rules.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
+import { syncBatchFacts } from "./mysql-facts.mjs";
 import { appendJsonl, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
@@ -68,20 +69,43 @@ async function writeBatch(context, batch) {
     }
     await writeAtomicJson(indexPath, index);
   }
+  await syncBatchFacts(context, next, "batch_write");
+  return next;
+}
+
+async function writeBatchWithTrigger(context, batch, triggerName) {
+  const now = new Date().toISOString();
+  const next = { ...batch, updatedAt: now };
+  const paths = wangzhuanPaths(context);
+  await writeAtomicJson(join(paths.batchesDir, next.batchId, "batch.json"), next);
+  const indexPath = join(paths.batchesDir, "index.json");
+  if (existsSync(indexPath)) {
+    const index = JSON.parse(await readFile(indexPath, "utf8"));
+    index.items = Array.isArray(index.items) ? index.items : [];
+    const item = index.items.find((entry) => entry.batchId === next.batchId);
+    if (item) {
+      item.status = next.status;
+      item.updatedAt = now;
+    }
+    await writeAtomicJson(indexPath, index);
+  }
+  await syncBatchFacts(context, next, triggerName);
   return next;
 }
 
 function scriptBody(batch, variantIndex, segmentIndex, requiredDisclaimers = []) {
   const productName = batch.templateSnapshot?.draft?.productName || "Product";
+  const materialDirection = batch.templateSnapshot?.draft?.materialDirection;
   const decomposition = batch.decomposition || {};
   const baseAction = decomposition.action || "Show the product benefit in a vertical app demo";
   const rewardFeedback = decomposition.rewardFeedback || "Show believable reward feedback inside the app";
   return [
     `${baseAction}.`,
     `Variant ${variantIndex} focuses on ${productName} with ${batch.referenceVideo?.scene || decomposition.scene || "a reference-inspired scene"}.`,
+    materialDirection ? `Creative angle: ${materialDirection}.` : "",
     `Segment ${segmentIndex} keeps pacing within 15 seconds and includes ${rewardFeedback}.`,
     ...requiredDisclaimers.map((item) => `Disclaimer: ${item}.`)
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function scriptHook(batch, variantIndex) {
@@ -98,11 +122,24 @@ function rewardExpression(batch) {
 function buildPrompt(batch, script, kind) {
   const draft = batch.templateSnapshot?.draft || {};
   const decomposition = batch.decomposition || {};
+  const assetFileNames = draft.assetFileNames || {};
   const channel = batch.estimate?.request?.targetChannel || batch.templateSnapshot?.draft?.targetChannels?.[0] || "generic";
   const lines = [
     `Product: ${draft.productName || "Product"}`,
+    draft.productLink ? `Store page: ${draft.productLink}` : "",
     `Language: ${draft.language || batch.estimate?.request?.language || "en-US"}`,
+    `Region: ${Array.isArray(draft.regions) ? draft.regions.join(", ") : draft.regions || ""}`,
+    `Currency: ${draft.currencySymbol || ""}`,
     `Channel: ${channel}`,
+    `Revenue promise level: ${draft.promiseLevel || "stable"}`,
+    draft.materialDirection ? `Material direction: ${draft.materialDirection}` : "",
+    draft.voiceoverStyle ? `Voiceover style: ${draft.voiceoverStyle}` : "",
+    assetFileNames.productIcon ? `Product icon asset: ${assetFileNames.productIcon}` : "",
+    assetFileNames.productScreenshot ? `Product screenshot asset: ${assetFileNames.productScreenshot}` : "",
+    assetFileNames.productRecording ? `Product recording asset: ${assetFileNames.productRecording}` : "",
+    assetFileNames.endingAsset ? `Ending asset: ${assetFileNames.endingAsset}` : "",
+    assetFileNames.personAsset ? `Person asset: ${assetFileNames.personAsset}` : "",
+    assetFileNames.rewardElement ? `Reward element asset: ${assetFileNames.rewardElement}` : "",
     `Scene: ${decomposition.scene || "mobile app reward scene"}`,
     `Subject: ${decomposition.subject || "user with phone"}`,
     `Camera: ${decomposition.camera || "vertical close-up"}`,
@@ -112,9 +149,11 @@ function buildPrompt(batch, script, kind) {
     `Script body: ${script.body}`,
     `CTA: ${script.cta}`,
     `Ending: ${script.ending}`,
+    draft.customPrompt ? `Additional user prompt: ${draft.customPrompt}` : "",
+    draft.negativePrompt ? `User restrictions: ${draft.negativePrompt}` : "",
     "Do not include competitor names, watermarks, logos, signed URLs, or policy-unsafe income guarantees.",
     kind === "image" ? "Task: create the first-frame image prompt for Seedance." : "Task: create a 15 second 9:16 Seedance image-to-video prompt."
-  ];
+  ].filter(Boolean);
   return `${lines.join("\n")}\n`;
 }
 
@@ -170,6 +209,100 @@ async function appendEvent(context, batchId, event) {
 
 async function ensureEventFile(context, batchId) {
   await appendEvent(context, batchId, { event: "batch_prepared" });
+}
+
+async function writeProcessTraceFiles(context, batch) {
+  const root = batchDir(context, batch.batchId);
+  const draft = batch.templateSnapshot?.draft || {};
+  const assets = draft.assetFileNames || {};
+  const promptItems = [];
+  for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
+    const seedancePromptTarget = join(context.userProjectRoot, task.promptPath);
+    const imagePromptTarget = join(dirname(seedancePromptTarget), `${task.generationTaskId}_image.txt`);
+    promptItems.push({
+      generationTaskId: task.generationTaskId,
+      scriptId: task.scriptId,
+      seedancePromptPath: task.promptPath,
+      imagePromptPath: userRelative(context, imagePromptTarget),
+      seedancePrompt: await readFile(seedancePromptTarget, "utf8"),
+      imagePrompt: await readFile(imagePromptTarget, "utf8")
+    });
+  }
+
+  await writeAtomicJson(join(root, "00-brief.json"), {
+    schemaVersion: "wangzhuan-brief.v1",
+    batchId: batch.batchId,
+    product: {
+      productName: draft.productName || "",
+      productLink: draft.productLink || "",
+      cta: draft.cta || "",
+      ending: draft.ending || "",
+      currencySymbol: draft.currencySymbol || "",
+      language: draft.language || "",
+      regions: Array.isArray(draft.regions) ? draft.regions : [],
+      targetChannels: Array.isArray(draft.targetChannels) ? draft.targetChannels : []
+    },
+    assets,
+    rules: {
+      promiseLevel: draft.promiseLevel || "stable",
+      truthRules: draft.truthRules || {},
+      materialDirection: draft.materialDirection || "",
+      voiceoverStyle: draft.voiceoverStyle || "",
+      customPrompt: draft.customPrompt || "",
+      negativePrompt: draft.negativePrompt || "",
+      outputRatio: draft.defaultOutputRatio || batch.estimate?.outputRatio || "9:16",
+      durationSec: batch.estimate?.durationSec || draft.defaultDurationSec || 15,
+      variantCount: batch.estimate?.variantCount || 0
+    },
+    systemAssumptions: [
+      "15s outputs use one Seedance prompt per variant.",
+      "30s outputs use two 15s segments per variant and require stitching.",
+      "The system must not invent exact rewards, withdrawal thresholds, or payout timing without truth rules."
+    ],
+    createdAt: batch.createdAt
+  });
+  await writeAtomicJson(join(root, "01-reference-breakdown.json"), {
+    schemaVersion: "reference-breakdown.v1",
+    referenceVideo: batch.referenceVideo,
+    decomposition: batch.decomposition
+  });
+  await writeAtomicJson(join(root, "02-product-script.json"), {
+    schemaVersion: "product-script.v1",
+    replacementScope: [
+      "productName",
+      "icon",
+      "cta",
+      "ending",
+      "subtitleProductName",
+      "voiceoverProductName",
+      "phoneUiDescription",
+      "rewardVisualDescription"
+    ],
+    product: {
+      productName: draft.productName || "",
+      productLink: draft.productLink || "",
+      iconAsset: assets.productIcon || "",
+      cta: draft.cta || "",
+      ending: draft.ending || ""
+    },
+    scripts: batch.scripts
+  });
+  await writeAtomicJson(join(root, "03-localized-variants.json"), {
+    schemaVersion: "localized-variants.v1",
+    language: draft.language || "",
+    regions: Array.isArray(draft.regions) ? draft.regions : [],
+    currencySymbol: draft.currencySymbol || "",
+    variants: batch.scripts
+  });
+  await writeAtomicJson(join(root, "04-seedance-prompts.json"), {
+    schemaVersion: "seedance-prompts.v1",
+    model: MODEL_VIDEO,
+    items: promptItems
+  });
+  await writeAtomicJson(join(root, "05-video-tasks.json"), {
+    schemaVersion: "video-tasks.v1",
+    tasks: batch.tasks
+  });
 }
 
 export async function prepareBatchForPipeline(context, batch) {
@@ -238,6 +371,7 @@ export async function prepareBatchForPipeline(context, batch) {
   };
   const saved = await writeBatch(context, prepared);
   await writeTaskMaps(context, saved);
+  await writeProcessTraceFiles(context, saved);
   await ensureEventFile(context, saved.batchId);
   return saved;
 }
@@ -338,4 +472,68 @@ export async function submitPendingGenerationTasks(context, batchId) {
     }, { audit: true });
   }
   return { batch: saved, submittedCount };
+}
+
+export async function retryFailedGenerationTask(context, batchId, generationTaskId) {
+  const batch = await readBatch(context, batchId);
+  if (batch.status === "stopped") {
+    return { batch, retriedCount: 0 };
+  }
+  const now = new Date().toISOString();
+  let retriedCount = 0;
+  let found = false;
+  const tasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
+    if (task.generationTaskId !== generationTaskId) return task;
+    found = true;
+    if (task.status !== "failed") {
+      throw new WangzhuanError("invalid_state_transition", "任务当前状态不可重试", {
+        batchId,
+        generationTaskId,
+        status: task.status
+      });
+    }
+    const attempts = Number(task.attempts || 0);
+    const maxAttempts = Number(task.maxAttempts || 2);
+    if (attempts >= maxAttempts) {
+      throw new WangzhuanError("retry_exhausted", "任务重试次数已耗尽", {
+        batchId,
+        generationTaskId,
+        attempts,
+        maxAttempts
+      });
+    }
+    retriedCount += 1;
+    return {
+      ...task,
+      status: "waiting_upstream",
+      imageTaskId: `mock_img_${task.generationTaskId}`,
+      seedanceTaskId: `mock_seedance_${task.generationTaskId}`,
+      providerJobId: undefined,
+      remoteUrlStored: false,
+      attempts: attempts + 1,
+      startedAt: now,
+      finishedAt: undefined,
+      errorCode: undefined,
+      errorMessage: undefined,
+      nextAttemptAt: undefined
+    };
+  });
+  if (!found) {
+    throw new WangzhuanError("task_not_found", "任务不存在", { batchId, generationTaskId });
+  }
+  const saved = await writeBatchWithTrigger(context, { ...batch, status: "running", tasks }, "scheduler_retry");
+  await writeTaskMaps(context, saved);
+  await appendEvent(context, saved.batchId, { event: "generation_task_retried", generationTaskId, retriedCount });
+  if (retriedCount > 0) {
+    const retried = saved.tasks.find((task) => task.generationTaskId === generationTaskId);
+    await recordTelemetryEvent(context, "generation_task_retried", {
+      batchId: saved.batchId,
+      generationTaskId,
+      scriptId: retried?.scriptId || "",
+      attempts: retried?.attempts || 0,
+      imageTaskId: retried?.imageTaskId || "",
+      seedanceTaskId: retried?.seedanceTaskId || ""
+    }, { audit: true });
+  }
+  return { batch: saved, retriedCount };
 }

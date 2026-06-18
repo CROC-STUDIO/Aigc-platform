@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { syncBatchFacts } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
@@ -69,6 +70,7 @@ async function writeBatch(context, batch) {
     }
     await writeAtomicJson(indexPath, index);
   }
+  await syncBatchFacts(context, next, "qc_completed");
   return next;
 }
 

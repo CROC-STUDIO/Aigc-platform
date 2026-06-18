@@ -2,12 +2,12 @@
   "projectRoot": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P",
   "projects": [
     {
-      "name": "包包4",
-      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P"
-    },
-    {
       "name": "三国",
       "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P 三国"
+    },
+    {
+      "name": "包包4",
+      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P"
     },
     {
       "name": "puzzle",
@@ -15,12 +15,28 @@
     }
   ],
   "wangzhuan": {
+    "llm": {
+      "provider": "skylink",
+      "endpoint": "https://skylink-gateway.com/api/v1",
+      "model": "gpt-5.4",
+      "apiKeyEnv": "WANGZHUAN_LLM_API_KEY"
+    },
     "capabilities": {
       "remix": {
-        "provider": "",
-        "status": "",
-        "supportedOperations": []
+        "provider": "video_aigc",
+        "status": "supported",
+        "supportedOperations": [
+          "watermark_cover",
+          "logo_icon_cover_or_replace",
+          "text_cta_ending_replace"
+        ]
       }
+    },
+    "remixProvider": {
+      "provider": "video_aigc",
+      "endpoint": "https://video-aigc.skylink-gateway.com/api/v1",
+      "apiKeyEnv": "VIDEO_AIGC_API_KEY",
+      "timeoutMs": 30000
     }
   }
 }

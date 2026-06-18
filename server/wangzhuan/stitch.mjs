@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
 import { makeOutputId } from "./ids.mjs";
-import { appendJsonl, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { syncBatchFacts } from "./mysql-facts.mjs";
+import { appendJsonl, previewUrlForWangzhuanAsset, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded", "succeeded"]);
@@ -74,6 +75,7 @@ async function writeBatch(context, batch) {
     }
     await writeAtomicJson(indexPath, index);
   }
+  await syncBatchFacts(context, next, "stitch_progress");
   return next;
 }
 
@@ -182,10 +184,6 @@ function stitchReportPath(context, batchId, outputId) {
   return join(batchDir(context, batchId), "stitch", `${outputId}_stitch-report.json`);
 }
 
-function outputPreviewUrl(filePath) {
-  return `/file?path=${encodeURIComponent(filePath)}`;
-}
-
 function outputSequence(outputId) {
   const match = String(outputId || "").match(/^out_[a-f0-9]{4}_(\d{3})$/);
   return match ? Number(match[1]) : 0;
@@ -223,6 +221,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         `segment=${entry.script.segmentIndex}`,
         `task=${entry.task.generationTaskId}`
       ].join("\n"));
+      const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video");
       outputs.push({
         outputId,
         sourceType: "pipeline",
@@ -232,7 +231,8 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         durationSec: 15,
         kind: "segment_video",
         filePath,
-        previewUrl: outputPreviewUrl(filePath),
+        previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
+        ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
         qcStatus: "not_started",
         downloadEligible: false,
         visualPreviewRequired: false,
@@ -310,6 +310,7 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
     `variant=${group.variantIndex}`,
     `segments=${segmentOutputs.map((output) => output.outputId).join(",")}`
   ].join("\n"));
+  const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video");
   const report = buildReport({
     outputId,
     segmentOutputIds: segmentOutputs.map((output) => output.outputId),
@@ -326,7 +327,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       durationSec: 30,
       kind: "stitched_video",
       filePath,
-      previewUrl: outputPreviewUrl(filePath),
+      previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
+      ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
       qcStatus: "not_started",
       downloadEligible: false,
       visualPreviewRequired: false,

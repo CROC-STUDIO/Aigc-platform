@@ -33,6 +33,7 @@ function context(root, overrides = {}) {
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
+    mockReferenceProbe: true,
     config: {},
     ...overrides
   };

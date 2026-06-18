@@ -6,6 +6,8 @@ import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import { effectiveLimits } from "./config.mjs";
 import { TARGET_CHANNELS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { createRemixProviderClient, hasRemoteRemixProvider } from "./remix-provider.mjs";
+import { ffprobeMediaFile } from "./reference-videos.mjs";
 import {
   makeGenerationTaskId,
   makeRemixEstimateId,
@@ -14,11 +16,14 @@ import {
   makeOutputId
 } from "./ids.mjs";
 import {
+  previewUrlForWangzhuanAsset,
   readJsonOrDefault,
+  syncWangzhuanAsset,
   toProjectRelative,
   wangzhuanPaths,
   writeAtomicJson
 } from "./storage.mjs";
+import { findActiveResourceLock, syncRemixFacts } from "./mysql-facts.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const MATERIAL_EXTS = new Set([".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg"]);
@@ -33,7 +38,10 @@ const MATERIAL_MIME_TYPES = new Set([
 ]);
 const REMIX_OPERATIONS = new Set(["text_cta_ending_replace", "logo_icon_cover_or_replace", "watermark_cover"]);
 const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
+const STOPPABLE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
 const REMIX_MODEL_VIDEO = "function_k";
+const DEFAULT_DIRECT_OPERATION = "watermark_cover";
+const DEFAULT_DIRECT_CHANNEL = "generic";
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -41,6 +49,17 @@ function currentUserId(context) {
 
 function isAdmin(context) {
   return context.user?.role === "admin" || context.user?.isAdmin;
+}
+
+async function assertNoMysqlResourceLock(context) {
+  const activeMysqlLock = await findActiveResourceLock(context);
+  if (!activeMysqlLock) return;
+  throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+    runningResource: activeMysqlLock.runType || "mysql_resource_lock",
+    batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
+    remixId: activeMysqlLock.runType === "remix" ? activeMysqlLock.runId : undefined,
+    status: activeMysqlLock.runStatus || activeMysqlLock.status
+  });
 }
 
 function safeFileName(name, fallback = "source.mp4") {
@@ -70,8 +89,49 @@ function ratioFor(width, height) {
   return `${width}:${height}`;
 }
 
-function previewUrl(relativePath) {
-  return `/file?path=${encodeURIComponent(relativePath)}`;
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function normalizeAudioStream(stream = {}) {
+  return {
+    codec: String(stream.codec || stream.codec_name || ""),
+    sampleRate: numberOrZero(stream.sampleRate ?? stream.sample_rate),
+    channels: numberOrZero(stream.channels),
+    bitRateBps: numberOrZero(stream.bitRateBps ?? stream.bit_rate)
+  };
+}
+
+function normalizeRemixProbe(raw = {}) {
+  const durationSec = numberOrZero(raw.durationSec);
+  const width = numberOrZero(raw.width);
+  const height = numberOrZero(raw.height);
+  const audioStreams = Array.isArray(raw.audioStreams) ? raw.audioStreams.map(normalizeAudioStream) : [];
+  return {
+    durationSec,
+    width,
+    height,
+    ratio: ratioFor(width, height),
+    formatName: String(raw.formatName || ""),
+    bitRateBps: numberOrZero(raw.bitRateBps),
+    videoCodec: String(raw.videoCodec || ""),
+    fps: numberOrZero(raw.fps),
+    colorSpace: String(raw.colorSpace || ""),
+    pixelFormat: String(raw.pixelFormat || ""),
+    audioStreams,
+    audioStreamCount: audioStreams.length,
+    canExtractFrame: raw.canExtractFrame !== false && Boolean(width && height)
+  };
+}
+
+function requestMetadataProbe(request = {}) {
+  return normalizeRemixProbe({
+    durationSec: request.durationSec,
+    width: request.width,
+    height: request.height,
+    canExtractFrame: true
+  });
 }
 
 function stableJson(value) {
@@ -84,6 +144,17 @@ function stableJson(value) {
 
 function hashPayload(value) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function parseMaskDataUrl(maskDataUrl) {
+  if (typeof maskDataUrl !== "string" || !maskDataUrl.startsWith("data:image/png;base64,") || !maskDataUrl.includes(",")) {
+    throw new WangzhuanError("validation_error", "请先生成 mask 预览图", { field: "maskDataUrl" });
+  }
+  const buffer = Buffer.from(maskDataUrl.split(",").pop() || "", "base64");
+  if (!buffer.length) {
+    throw new WangzhuanError("validation_error", "mask 预览图为空", { field: "maskDataUrl" });
+  }
+  return buffer;
 }
 
 function idempotencyFile(paths, endpoint, idempotencyKey, resourceId = "") {
@@ -195,6 +266,20 @@ async function loadSourceProbe(context, sourceId) {
   return probe;
 }
 
+async function probeRemixSource(context, filePath, request, mimeType) {
+  if (typeof context.probeRemixSource === "function") {
+    return normalizeRemixProbe(await context.probeRemixSource({ filePath, request }));
+  }
+  if (context.mockReferenceProbe) {
+    return requestMetadataProbe(request);
+  }
+  if (mimeType.startsWith("video/")) {
+    const timeoutMs = numberOrZero(context.config?.wangzhuan?.ffprobe?.timeoutMs) || 15000;
+    return normalizeRemixProbe(await ffprobeMediaFile(filePath, { timeoutMs, mediaLabel: "竞品素材" }));
+  }
+  return requestMetadataProbe(request);
+}
+
 async function readRemix(context, remixId) {
   const target = remixPath(context, remixId);
   if (!existsSync(target)) {
@@ -230,6 +315,7 @@ async function writeRemix(context, remix) {
     });
   }
   await writeAtomicJson(indexPath, index);
+  await syncRemixFacts(context, next, "remix_write");
   return next;
 }
 
@@ -253,13 +339,20 @@ function normalizeCapability(raw, operationType) {
       ? operationSupported ? status : "unsupported"
       : "unsupported",
     supportedOperations,
+    ...(raw.endpoint ? { endpoint: raw.endpoint } : {}),
+    endpointConfigured: Boolean(raw.endpoint),
     ...(operationSupported ? {} : { unsupportedReason: raw.unsupportedReason || "operation is not supported by current remix provider" }),
     preflightCheckedAt: checkedAt
   };
 }
 
 export function preflightRemixProvider(context = {}, operationType) {
-  const raw = context.capabilities?.remix ?? context.config?.wangzhuan?.capabilities?.remix;
+  const configProvider = context.config?.wangzhuan?.remixProvider;
+  const configCapability = context.config?.wangzhuan?.capabilities?.remix;
+  const raw = context.capabilities?.remix ?? {
+    ...(configCapability && typeof configCapability === "object" ? configCapability : {}),
+    ...(configProvider && typeof configProvider === "object" ? configProvider : {})
+  };
   return normalizeCapability(raw, operationType);
 }
 
@@ -294,6 +387,45 @@ function validateRegions(request, limits) {
     }
     return { regionId, type, label, description };
   });
+}
+
+function directTemplateSnapshot() {
+  return {
+    templateId: "direct_mask_edit",
+    versionId: "direct_mask_edit_v1",
+    versionNumber: 1,
+    status: "active",
+    draft: {
+      displayName: "Direct mask edit",
+      productName: "",
+      cta: "",
+      ending: "",
+      language: "",
+      regions: [],
+      targetChannels: [DEFAULT_DIRECT_CHANNEL]
+    }
+  };
+}
+
+function validateDirectMaskEditRequest(request, limits) {
+  if (!request.sourceId) {
+    throw new WangzhuanError("validation_error", "sourceId 必填", { field: "sourceId" });
+  }
+  const operationType = request.operationType || DEFAULT_DIRECT_OPERATION;
+  const targetChannel = request.targetChannel || DEFAULT_DIRECT_CHANNEL;
+  if (!REMIX_OPERATIONS.has(operationType)) {
+    throw new WangzhuanError("validation_error", "operationType 不在合同枚举内", { field: "operationType" });
+  }
+  if (!TARGET_CHANNELS.includes(targetChannel)) {
+    throw new WangzhuanError("validation_error", "targetChannel 不在合同枚举内", { field: "targetChannel" });
+  }
+  return {
+    sourceId: String(request.sourceId),
+    operationType,
+    targetChannel,
+    regions: validateRegions(request, limits),
+    maskDataUrl: String(request.maskDataUrl || "")
+  };
 }
 
 function validateEstimateRequest(request, limits) {
@@ -359,6 +491,141 @@ function promptText(record) {
     "Replace or cover only the requested competitor areas. Preserve pacing and layout, but do not copy competitor branding.",
     regionText
   ].join("\n");
+}
+
+async function sourceDataUrl(context, source) {
+  const buffer = await readFile(resolveUserPath(context, source.storedPath));
+  return `data:${source.mimeType || "application/octet-stream"};base64,${buffer.toString("base64")}`;
+}
+
+function providerJobId(job) {
+  return String(job?.job_id || job?.jobId || job?.id || "");
+}
+
+function providerStatus(job) {
+  return String(job?.status || "queued");
+}
+
+function providerJobSnapshot(job, capability) {
+  return {
+    jobId: providerJobId(job),
+    jobType: job?.job_type || job?.jobType || "mask_edit",
+    status: providerStatus(job),
+    provider: capability.provider || "video_aigc",
+    createdAt: job?.created_at || job?.createdAt || null,
+    updatedAt: job?.updated_at || job?.updatedAt || null,
+    startedAt: job?.started_at || job?.startedAt || null,
+    finishedAt: job?.finished_at || job?.finishedAt || null
+  };
+}
+
+function remixStatusFromProvider(status) {
+  if (status === "failed") return "failed";
+  if (status === "canceled") return "stopped";
+  if (status === "review_required") return "preview_required";
+  if (status === "running") return "running";
+  return "queued";
+}
+
+function providerPayload(record, source) {
+  const draft = record.templateSnapshot?.draft || {};
+  return {
+    job_type: "mask_edit",
+    input: {
+      source_type: "base64_data_url",
+      source
+    },
+    callback_url: null,
+    options: {
+      priority: 0
+    },
+    params: {
+      mode: "manual",
+      operation_type: record.request.operationType,
+      target_channel: record.request.targetChannel,
+      regions: record.request.regions,
+      mask_source: {
+        mode: "manual",
+        regions: record.request.regions
+      },
+      product_context: {
+        product_name: draft.productName || "",
+        cta: draft.cta || "",
+        ending: draft.ending || "",
+        language: draft.language || "",
+        regions: draft.regions || []
+      }
+    }
+  };
+}
+
+function fullSourceTimeRange(source = {}) {
+  const durationMs = Math.round(Number(source.durationSec || 0) * 1000);
+  return [{
+    start_ms: 0,
+    end_ms: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 1
+  }];
+}
+
+function providerPayloadWithMask(record, source, maskDataUrl) {
+  const payload = providerPayload(record, source);
+  return {
+    ...payload,
+    job_type: "ai_remove",
+    params: {
+      mode: "manual",
+      mask_source_type: "base64_data_url",
+      mask_source: maskDataUrl,
+      time_ranges: fullSourceTimeRange(record.source),
+      mask_threshold: 1
+    }
+  };
+}
+
+async function materializeProviderSubmission(context, record, remixId, capability, options = {}) {
+  const client = createRemixProviderClient(context, capability);
+  if (!client) {
+    throw new WangzhuanError("unsupported_capability", "竞品改造接口未配置，无法创建视频处理任务", {
+      capability: {
+        ...capability,
+        status: "unsupported",
+        unsupportedReason: "missing video processing endpoint"
+      }
+    });
+  }
+  const taskId = makeRemixTaskId(remixId);
+  const promptTarget = join(remixDir(context, remixId), "prompts", `${taskId}_remix.txt`);
+  const promptPath = toProjectRelative(context.userProjectRoot, promptTarget);
+  await writeText(promptTarget, `${promptText(record)}\n`);
+  const source = await sourceDataUrl(context, record.source);
+  const payload = options.maskDataUrl
+    ? providerPayloadWithMask(record, source, options.maskDataUrl)
+    : providerPayload(record, source);
+  const job = await client.createJob(payload);
+  const jobSnapshot = providerJobSnapshot(job, capability);
+  if (!jobSnapshot.jobId) {
+    throw new WangzhuanError("upstream_failed", "视频处理平台未返回 job_id", {
+      provider: capability.provider || "video_aigc"
+    });
+  }
+  const now = new Date().toISOString();
+  return {
+    providerJob: jobSnapshot,
+    tasks: [{
+      generationTaskId: taskId,
+      remixId,
+      status: remixStatusFromProvider(jobSnapshot.status),
+      modelImage: "not_required",
+      modelVideo: capability.provider || client.provider || REMIX_MODEL_VIDEO,
+      providerJobId: jobSnapshot.jobId,
+      seedanceTaskId: jobSnapshot.jobId,
+      promptPath,
+      remoteUrlStored: false,
+      attempts: 1,
+      startedAt: now,
+      finishedAt: null
+    }]
+  };
 }
 
 async function writeTaskMap(context, remix) {
@@ -456,6 +723,7 @@ async function materializeMockRemix(context, record, remixId) {
     `operation=${record.request.operationType}`,
     `provider=${record.capability.provider}`
   ].join("\n"));
+  const storage = await syncWangzhuanAsset(context, outputTarget, "remix_output_video");
   return {
     tasks: [{
       generationTaskId: taskId,
@@ -476,16 +744,70 @@ async function materializeMockRemix(context, record, remixId) {
       sourceType: "remix",
       remixId,
       generationTaskIds: [taskId],
-      durationSec: 15,
+      durationSec: Number(record.source?.durationSec || 15),
       kind: "remix_video",
       filePath,
-      previewUrl: previewUrl(filePath),
+      previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
+      ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
       promptPath,
       qcStatus: "manual_required",
       downloadEligible: false,
       visualPreviewRequired: true,
       previewConfirmed: false
     }
+  };
+}
+
+async function materializeProviderOutput(context, remix, jobSnapshot, outputBuffer) {
+  const task = remix.tasks?.[0];
+  const taskId = task?.generationTaskId || makeRemixTaskId(remix.remixId);
+  const outputId = makeRemixOutputId(remix.remixId);
+  const outputTarget = join(remixDir(context, remix.remixId), "outputs", `${outputId}.mp4`);
+  const filePath = toProjectRelative(context.userProjectRoot, outputTarget);
+  await mkdir(dirname(outputTarget), { recursive: true });
+  await writeFile(outputTarget, outputBuffer);
+  const storage = await syncWangzhuanAsset(context, outputTarget, "remix_output_video");
+  const output = {
+    outputId,
+    sourceType: "remix",
+    remixId: remix.remixId,
+    generationTaskIds: [taskId],
+    durationSec: Number(remix.source?.durationSec || 15),
+    kind: "remix_video",
+    filePath,
+    previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
+    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
+    promptPath: task?.promptPath || "",
+    qcStatus: "manual_required",
+    downloadEligible: false,
+    visualPreviewRequired: true,
+    previewConfirmed: false
+  };
+  const nextTask = {
+    ...task,
+    status: "qc",
+    providerJobId: jobSnapshot.jobId,
+    seedanceTaskId: jobSnapshot.jobId,
+    outputPath: filePath,
+    finishedAt: new Date().toISOString()
+  };
+  const nextRemix = {
+    ...remix,
+    status: "preview_required",
+    providerJob: jobSnapshot,
+    tasks: [nextTask],
+    outputs: [output],
+    qcSummary: {
+      total: 1,
+      passed: 0,
+      failed: 1,
+      warnings: [{ outputId, qcStatus: "manual_required" }]
+    }
+  };
+  const qcReportPath = await writeQcReport(context, nextRemix, output, "manual_required");
+  return {
+    ...nextRemix,
+    outputs: [{ ...output, qcReportPath }]
   };
 }
 
@@ -539,21 +861,33 @@ export async function uploadRemixSource(context, request = {}) {
   await mkdir(sourceRoot, { recursive: true });
   const originalPath = join(sourceRoot, `original${ext}`);
   await writeFile(originalPath, buffer);
-  const width = Number(request.width || 0);
-  const height = Number(request.height || 0);
+  const storage = await syncWangzhuanAsset(context, originalPath, "remix_source");
+  const mediaProbe = await probeRemixSource(context, originalPath, request, mimeType);
+  const width = mediaProbe.width;
+  const height = mediaProbe.height;
   const probe = {
     sourceId,
     fileName,
     mimeType: mimeType || "application/octet-stream",
     sizeBytes: buffer.length,
-    durationSec: Number(request.durationSec || 0),
+    durationSec: mediaProbe.durationSec,
     width,
     height,
-    ratio: ratioFor(width, height),
+    ratio: mediaProbe.ratio,
+    formatName: mediaProbe.formatName,
+    bitRateBps: mediaProbe.bitRateBps,
+    videoCodec: mediaProbe.videoCodec,
+    fps: mediaProbe.fps,
+    colorSpace: mediaProbe.colorSpace,
+    pixelFormat: mediaProbe.pixelFormat,
+    audioStreamCount: mediaProbe.audioStreamCount,
+    audioStreams: mediaProbe.audioStreams,
+    canExtractFrame: mediaProbe.canExtractFrame,
     kind: mimeType.startsWith("image/") ? "image" : "video",
     status: "pass",
     issues: [],
     storedPath: toProjectRelative(context.userProjectRoot, originalPath),
+    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
     userId: currentUserId(context),
     createdAt: new Date().toISOString()
   };
@@ -572,8 +906,132 @@ export async function uploadRemixSource(context, request = {}) {
   return {
     sourceId,
     probe,
-    previewUrl: previewUrl(probe.storedPath)
+    previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, probe.storedPath)
   };
+}
+
+export async function startDirectMaskEdit(context, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const paths = wangzhuanPaths(context);
+  const replay = await readIdempotentResult(paths, "remix_mask_edit_start", request.idempotencyKey);
+  if (replay) return replay;
+  if (context.getLegacyRunState?.()?.running) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      runningResource: "existing_ad_batch"
+    });
+  }
+  await assertNoMysqlResourceLock(context);
+  const activeBatch = await findActiveBatch(context);
+  if (activeBatch) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      runningResource: "pipeline_batch",
+      batchId: activeBatch.batchId,
+      status: activeBatch.status
+    });
+  }
+  const active = await findActiveRemix(context);
+  if (active) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      remixId: active.remixId,
+      status: active.status
+    });
+  }
+
+  const normalized = validateDirectMaskEditRequest(request, effectiveLimits(context.config || {}));
+  const source = await loadSourceProbe(context, normalized.sourceId);
+  const capability = preflightRemixProvider(context, normalized.operationType);
+  if (capability.status !== "supported" && capability.status !== "degraded") {
+    throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
+  }
+  const maskBuffer = parseMaskDataUrl(normalized.maskDataUrl);
+  const remixId = makeRemixId();
+  const now = new Date().toISOString();
+  const targetDir = remixDir(context, remixId);
+  const maskTarget = join(targetDir, "regions", "mask.png");
+  await mkdir(dirname(maskTarget), { recursive: true });
+  await writeFile(maskTarget, maskBuffer);
+  const maskSource = {
+    sourceType: "base64_data_url",
+    mimeType: "image/png",
+    storedPath: toProjectRelative(context.userProjectRoot, maskTarget)
+  };
+  const record = {
+    schemaVersion: "remix-direct-mask-edit.v1",
+    request: {
+      sourceId: normalized.sourceId,
+      operationType: normalized.operationType,
+      targetChannel: normalized.targetChannel,
+      regions: normalized.regions
+    },
+    source,
+    templateSnapshot: directTemplateSnapshot(),
+    capability,
+    userId: currentUserId(context),
+    createdAt: now
+  };
+  const materialized = hasRemoteRemixProvider(context, capability)
+    ? await materializeProviderSubmission(context, record, remixId, capability, { maskDataUrl: normalized.maskDataUrl })
+    : await materializeMockRemix(context, record, remixId);
+  let remix = hasRemoteRemixProvider(context, capability) ? {
+    remixId,
+    type: "remix",
+    status: remixStatusFromProvider(materialized.providerJob.status),
+    userId: currentUserId(context),
+    sourceId: source.sourceId,
+    source,
+    operationType: normalized.operationType,
+    regions: normalized.regions,
+    targetChannel: normalized.targetChannel,
+    templateSnapshot: record.templateSnapshot,
+    capability,
+    maskSource,
+    providerJob: materialized.providerJob,
+    tasks: materialized.tasks,
+    outputs: [],
+    qcSummary: {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      warnings: []
+    },
+    createdAt: now,
+    updatedAt: now
+  } : {
+    remixId,
+    type: "remix",
+    status: "preview_required",
+    userId: currentUserId(context),
+    sourceId: source.sourceId,
+    source,
+    operationType: normalized.operationType,
+    regions: normalized.regions,
+    targetChannel: normalized.targetChannel,
+    templateSnapshot: record.templateSnapshot,
+    capability,
+    maskSource,
+    tasks: materialized.tasks,
+    outputs: [materialized.output],
+    qcSummary: {
+      total: 1,
+      passed: 0,
+      failed: 1,
+      warnings: [{ outputId: materialized.output.outputId, qcStatus: "manual_required" }]
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+  if (!hasRemoteRemixProvider(context, capability)) {
+    const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
+    remix.outputs[0] = { ...materialized.output, qcReportPath };
+  }
+  await writeAtomicJson(join(targetDir, "regions", "regions.json"), remix.regions);
+  remix = await writeRemix(context, remix);
+  await writeTaskMap(context, remix);
+  const result = { remix, downloadSummary: downloadSummary(remix) };
+  await writeIdempotentResult(paths, "remix_mask_edit_start", request.idempotencyKey, result);
+  return result;
 }
 
 export async function estimateRemix(context, request = {}) {
@@ -633,6 +1091,7 @@ export async function startRemix(context, request = {}) {
       runningResource: "existing_ad_batch"
     });
   }
+  await assertNoMysqlResourceLock(context);
   const activeBatch = await findActiveBatch(context);
   if (activeBatch) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
@@ -660,8 +1119,34 @@ export async function startRemix(context, request = {}) {
 
   const remixId = makeRemixId();
   const now = new Date().toISOString();
-  const materialized = await materializeMockRemix(context, { ...record, capability }, remixId);
-  let remix = {
+  const remoteEnabled = hasRemoteRemixProvider(context, capability);
+  const materialized = remoteEnabled
+    ? await materializeProviderSubmission(context, { ...record, capability }, remixId, capability)
+    : await materializeMockRemix(context, { ...record, capability }, remixId);
+  let remix = remoteEnabled ? {
+    remixId,
+    type: "remix",
+    status: remixStatusFromProvider(materialized.providerJob.status),
+    userId: currentUserId(context),
+    sourceId: record.source.sourceId,
+    source: record.source,
+    operationType: record.request.operationType,
+    regions: record.request.regions,
+    targetChannel: record.request.targetChannel,
+    templateSnapshot: record.templateSnapshot,
+    capability,
+    providerJob: materialized.providerJob,
+    tasks: materialized.tasks,
+    outputs: [],
+    qcSummary: {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      warnings: []
+    },
+    createdAt: now,
+    updatedAt: now
+  } : {
     remixId,
     type: "remix",
     status: "preview_required",
@@ -684,8 +1169,10 @@ export async function startRemix(context, request = {}) {
     createdAt: now,
     updatedAt: now
   };
-  const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
-  remix.outputs[0] = { ...materialized.output, qcReportPath };
+  if (!remoteEnabled) {
+    const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
+    remix.outputs[0] = { ...materialized.output, qcReportPath };
+  }
   await writeAtomicJson(join(remixDir(context, remixId), "regions", "regions.json"), remix.regions);
   remix = await writeRemix(context, remix);
   await writeTaskMap(context, remix);
@@ -696,9 +1183,96 @@ export async function startRemix(context, request = {}) {
 
 export async function getRemixDetail(context, remixId) {
   const remix = await readRemix(context, remixId);
+  if (remix.providerJob?.jobId && ["queued", "running"].includes(remix.status)) {
+    const client = createRemixProviderClient(context, remix.capability || {});
+    if (client) {
+      const job = await client.getJob(remix.providerJob.jobId);
+      const jobSnapshot = providerJobSnapshot(job, remix.capability || {});
+      let nextRemix = {
+        ...remix,
+        status: remixStatusFromProvider(jobSnapshot.status),
+        providerJob: jobSnapshot,
+        tasks: (remix.tasks || []).map((task) => ({
+          ...task,
+          status: remixStatusFromProvider(jobSnapshot.status),
+          providerJobId: jobSnapshot.jobId,
+          seedanceTaskId: jobSnapshot.jobId
+        }))
+      };
+      if (jobSnapshot.status === "succeeded" || jobSnapshot.status === "review_required") {
+        nextRemix = await materializeProviderOutput(context, nextRemix, jobSnapshot, await client.downloadJob(jobSnapshot.jobId));
+      }
+      if (jobSnapshot.status === "failed") {
+        nextRemix = {
+          ...nextRemix,
+          status: "failed",
+          qcSummary: {
+            total: 0,
+            passed: 0,
+            failed: 1,
+            warnings: [{ providerJobId: jobSnapshot.jobId, qcStatus: "fail" }]
+          }
+        };
+      }
+      const saved = await writeRemix(context, nextRemix);
+      await writeTaskMap(context, saved);
+      return {
+        remix: saved,
+        downloadSummary: downloadSummary(saved)
+      };
+    }
+  }
   return {
     remix,
     downloadSummary: downloadSummary(remix)
+  };
+}
+
+export async function stopRemix(context, remixId, request = {}) {
+  const remix = await readRemix(context, remixId);
+  if (!STOPPABLE_REMIX_STATUSES.has(remix.status)) {
+    throw new WangzhuanError("not_running", "改造任务当前状态不可停止", { remixId, status: remix.status });
+  }
+  const now = new Date().toISOString();
+  const reason = String(request.reason || "user_stopped").trim() || "user_stopped";
+  const nextRemix = {
+    ...remix,
+    status: "stopped",
+    stoppedAt: now,
+    stopReason: reason,
+    providerJob: remix.providerJob
+      ? {
+          ...remix.providerJob,
+          status: remix.providerJob.status === "succeeded" ? remix.providerJob.status : "canceled",
+          finishedAt: remix.providerJob.finishedAt || now
+        }
+      : remix.providerJob,
+    tasks: (Array.isArray(remix.tasks) ? remix.tasks : []).map((task) => ({
+      ...task,
+      status: "stopped",
+      errorCode: reason,
+      finishedAt: task.finishedAt || now
+    })),
+    qcSummary: {
+      total: remix.qcSummary?.total || 0,
+      passed: remix.qcSummary?.passed || 0,
+      failed: remix.qcSummary?.failed || 0,
+      warnings: [
+        ...(Array.isArray(remix.qcSummary?.warnings) ? remix.qcSummary.warnings : []),
+        { remixId, qcStatus: "stopped", reason }
+      ]
+    }
+  };
+  const saved = await writeRemix(context, nextRemix);
+  await writeTaskMap(context, saved);
+  await recordTelemetryEvent(context, "competitor_remix_stopped", {
+    remixId: saved.remixId,
+    providerJobId: saved.providerJob?.jobId || "",
+    reason
+  }, { audit: true });
+  return {
+    remix: saved,
+    downloadSummary: downloadSummary(saved)
   };
 }
 

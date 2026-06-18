@@ -4,6 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 
 import { makePackageId } from "./ids.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { syncDownloadPackageFact } from "./mysql-facts.mjs";
 import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
@@ -439,6 +440,7 @@ export async function buildDownloadPackage(context, request = {}) {
 
   addStringFile(files, "package-manifest.json", manifest);
   await writeAtomicJson(join(wangzhuanPaths(context).batchesDir, "packages", `${manifest.packageId}.manifest.json`), manifest);
+  await syncDownloadPackageFact(context, manifest);
   await recordTelemetryEvent(context, "batch_downloaded", {
     packageId: manifest.packageId,
     batchIds,

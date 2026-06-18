@@ -1,0 +1,17 @@
+{
+  "projectRoot": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\Aigc-platform",
+  "sourceFilePaths": [
+    "config.json",
+    "package-release.ps1",
+    "public/app.js",
+    "public/comic.html",
+    "public/comic.js",
+    "public/index.html",
+    "public/styles.css",
+    "README.md",
+    "server.mjs",
+    "start-windows.bat",
+    "start-windows.ps1"
+  ],
+  "gitCommitHash": "8dc290d0c99d8eaa8b27902515a7975682144bc7"
+}

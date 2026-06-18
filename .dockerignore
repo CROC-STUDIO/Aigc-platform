@@ -1,0 +1,16 @@
+.git
+.understand-anything
+node_modules
+dist
+build
+.env
+.env.*
+*.log
+tmp-*.log
+users.json
+config.json
+project-data
+用户数据
+批处理记录
+效果图
+video_frames

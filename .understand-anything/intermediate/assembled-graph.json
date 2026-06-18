@@ -1,0 +1,1731 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "Touka AI素材中台",
+    "languages": [
+      "javascript",
+      "html",
+      "css",
+      "markdown",
+      "json",
+      "powershell",
+      "batch"
+    ],
+    "frameworks": [
+      "Node.js http",
+      "Vanilla JavaScript",
+      "Tai CLI",
+      "Seedance 2.0"
+    ],
+    "description": "本地 Node Web 工具，用于按项目和用户管理 AIGC 广告素材，上传/导入竞品参考图或视频，反推提示词，并通过 Tai CLI 调用 gpt-image-2 与 Seedance 2.0 批量生成图片和视频。",
+    "analyzedAt": "2026-06-17T03:18:11.050Z",
+    "gitCommitHash": "8dc290d0c99d8eaa8b27902515a7975682144bc7"
+  },
+  "nodes": [
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "项目说明文档，定义 Touka AI素材中台的启动方式、素材目录、账号体系、提示词规则、图片与视频生成流程。",
+      "tags": [
+        "docs",
+        "product-context",
+        "operations"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:config.json",
+      "type": "config",
+      "name": "config.json",
+      "filePath": "config.json",
+      "summary": "本地项目配置，保存默认项目根目录和可切换项目列表。",
+      "tags": [
+        "config",
+        "project-root",
+        "local-state"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.understand-anything/.understandignore",
+      "type": "config",
+      "name": ".understandignore",
+      "filePath": ".understand-anything/.understandignore",
+      "summary": "理解图谱的扫描排除规则，避免把运行产物、素材输出、账号文件和二进制媒体纳入架构分析。",
+      "tags": [
+        "analysis-config",
+        "ignore-rules"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:start-windows.ps1",
+      "type": "file",
+      "name": "start-windows.ps1",
+      "filePath": "start-windows.ps1",
+      "summary": "Windows PowerShell 启动脚本，检查 Node.js 后运行 server.mjs 并提示本机与局域网访问地址。",
+      "tags": [
+        "startup",
+        "windows",
+        "powershell"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:start-windows.bat",
+      "type": "file",
+      "name": "start-windows.bat",
+      "filePath": "start-windows.bat",
+      "summary": "Windows 批处理启动入口，用于双击启动 Node 服务。",
+      "tags": [
+        "startup",
+        "windows",
+        "batch"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:package-release.ps1",
+      "type": "file",
+      "name": "package-release.ps1",
+      "filePath": "package-release.ps1",
+      "summary": "发布打包脚本，用于整理分发包并避开真实 users.json 等本地敏感状态。",
+      "tags": [
+        "release",
+        "packaging",
+        "powershell"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server.mjs",
+      "type": "file",
+      "name": "server.mjs",
+      "filePath": "server.mjs",
+      "summary": "项目后端核心。单文件 Node HTTP 服务，负责账号认证、项目隔离、素材管理、提示词反推、广大大素材导入、Tai CLI 图片生成、Seedance 视频生成、运行状态和静态文件服务。",
+      "tags": [
+        "backend",
+        "node-http",
+        "tai-cli",
+        "generation-pipeline"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:public/index.html",
+      "type": "file",
+      "name": "public/index.html",
+      "filePath": "public/index.html",
+      "summary": "主素材工作台 HTML，承载登录、项目切换、素材选择、竞品素材、广大大素材区、运行状态和结果图库。",
+      "tags": [
+        "frontend",
+        "main-workbench",
+        "html"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:public/app.js",
+      "type": "file",
+      "name": "public/app.js",
+      "filePath": "public/app.js",
+      "summary": "主素材工作台前端控制器。维护选择状态，调用后端 API，渲染素材、竞品卡片、结果批次和任务进度，并触发批量图片/视频生成。",
+      "tags": [
+        "frontend",
+        "state-management",
+        "api-client",
+        "batch-ui"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:public/comic.html",
+      "type": "file",
+      "name": "public/comic.html",
+      "filePath": "public/comic.html",
+      "summary": "游戏漫剧视频生成页面，提供项目、参考素材、分镜、台词、角色设定和 Seedance 提示词输出区域。",
+      "tags": [
+        "frontend",
+        "comic-workbench",
+        "html"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:public/comic.js",
+      "type": "file",
+      "name": "public/comic.js",
+      "filePath": "public/comic.js",
+      "summary": "漫剧视频前端控制器。组织角色、怪物、场景、参考视频、分镜和台词，生成 Seedance 2.0 提示词并提交视频生成。",
+      "tags": [
+        "frontend",
+        "seedance",
+        "prompt-builder"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:public/styles.css",
+      "type": "file",
+      "name": "public/styles.css",
+      "filePath": "public/styles.css",
+      "summary": "全站样式表，定义深色科技风、玻璃面板、素材网格、运行栏、登录弹窗、漫画工作台等视觉结构。",
+      "tags": [
+        "frontend",
+        "css",
+        "dark-ui"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "concept:multi-user-project-storage",
+      "type": "concept",
+      "name": "多用户项目隔离存储",
+      "summary": "同一 base project 下共享角色、怪物、场景、参考视频和产品 Logo；竞品素材、输出图、批处理记录按 用户数据/<用户ID>/<项目名> 隔离。",
+      "tags": [
+        "storage",
+        "multi-user",
+        "project-isolation"
+      ]
+    },
+    {
+      "id": "concept:tai-cli-generation-pipeline",
+      "type": "concept",
+      "name": "Tai CLI 生成管线",
+      "summary": "后端把前端选择的角色、怪物、Logo 和竞品参考图组装成任务，通过 tai aigc image 调用 gpt-image-2，再按模式可接 Seedance image_to_video。",
+      "tags": [
+        "tai-cli",
+        "image-generation",
+        "seedance"
+      ]
+    },
+    {
+      "id": "concept:reverse-prompt-analysis",
+      "type": "concept",
+      "name": "竞品素材反推提示词",
+      "summary": "上传竞品图片或视频时，后端优先调用视觉模型反推构图、主体、节奏和对话线索；无 Key 时退回本地尺寸、色彩和构图统计。",
+      "tags": [
+        "reverse-prompt",
+        "vision-model",
+        "fallback-analysis"
+      ]
+    },
+    {
+      "id": "concept:guangdada-ingestion",
+      "type": "concept",
+      "name": "广大大素材导入",
+      "summary": "服务端可按关键词、日期和人气阈值查询远端广大大接口，按图片哈希或 URL 去重，下载图片或视频并导入竞品素材槽。",
+      "tags": [
+        "external-ingestion",
+        "guangdada",
+        "dedupe"
+      ]
+    },
+    {
+      "id": "concept:run-state-and-job-queue",
+      "type": "concept",
+      "name": "批处理运行状态与并发队列",
+      "summary": "每个用户项目会话维护独立 runState，startBatch 建立任务列表并用有限并发 worker 执行，前端轮询 /api/state 展示进度。",
+      "tags": [
+        "runtime-state",
+        "queue",
+        "concurrency"
+      ]
+    },
+    {
+      "id": "function:server.mjs:handleRequest",
+      "type": "function",
+      "name": "handleRequest",
+      "filePath": "server.mjs",
+      "summary": "中心 HTTP 路由分发器，把 /api、/file 和静态资源请求派发到对应处理函数。",
+      "tags": [
+        "router",
+        "http"
+      ]
+    },
+    {
+      "id": "function:server.mjs:withRequestScope",
+      "type": "function",
+      "name": "withRequestScope",
+      "filePath": "server.mjs",
+      "summary": "用 AsyncLocalStorage 为登录用户和当前项目绑定请求上下文。",
+      "tags": [
+        "request-scope",
+        "auth",
+        "project-isolation"
+      ]
+    },
+    {
+      "id": "function:server.mjs:loadConfig",
+      "type": "function",
+      "name": "loadConfig",
+      "filePath": "server.mjs",
+      "summary": "读取 config.json，恢复 projectRoot 与项目列表；失败时回退到服务目录上级。",
+      "tags": [
+        "config",
+        "startup"
+      ]
+    },
+    {
+      "id": "function:server.mjs:loadUsers",
+      "type": "function",
+      "name": "loadUsers",
+      "filePath": "server.mjs",
+      "summary": "读取 users.json 或初始化默认账号数据，供登录与管理员账号管理使用。",
+      "tags": [
+        "auth",
+        "users"
+      ]
+    },
+    {
+      "id": "function:server.mjs:dirs",
+      "type": "function",
+      "name": "dirs",
+      "filePath": "server.mjs",
+      "summary": "计算当前请求下的共享素材目录、用户隔离输出目录、记录目录和提示词路径。",
+      "tags": [
+        "filesystem",
+        "storage-layout"
+      ]
+    },
+    {
+      "id": "function:server.mjs:loadMaterials",
+      "type": "function",
+      "name": "loadMaterials",
+      "filePath": "server.mjs",
+      "summary": "确保项目目录结构存在，读取角色、怪物、场景、参考视频、Logo、竞品素材、结果输出和运行状态。",
+      "tags": [
+        "materials",
+        "filesystem",
+        "api-data"
+      ]
+    },
+    {
+      "id": "function:server.mjs:buildJobs",
+      "type": "function",
+      "name": "buildJobs",
+      "filePath": "server.mjs",
+      "summary": "根据前端选择、竞品设置、角色/怪物数量、Logo 和重复次数组合生成图片或图片+视频任务。",
+      "tags": [
+        "job-builder",
+        "prompt-composition"
+      ]
+    },
+    {
+      "id": "function:server.mjs:startBatch",
+      "type": "function",
+      "name": "startBatch",
+      "filePath": "server.mjs",
+      "summary": "校验选择和模型，创建任务队列、记录目录和 runState，并启动后台 worker 执行批处理。",
+      "tags": [
+        "batch",
+        "queue",
+        "async-worker"
+      ]
+    },
+    {
+      "id": "function:server.mjs:runTaiJob",
+      "type": "function",
+      "name": "runTaiJob",
+      "filePath": "server.mjs",
+      "summary": "单个任务执行入口，先生成图片，再按 outputMode 决定是否进入 Seedance 视频阶段。",
+      "tags": [
+        "tai-cli",
+        "job-runner"
+      ]
+    },
+    {
+      "id": "function:server.mjs:runImageStage",
+      "type": "function",
+      "name": "runImageStage",
+      "filePath": "server.mjs",
+      "summary": "调用 tai aigc image，带参考图和尺寸生成图片；对 429、超时和网关 HTML 等错误做重试。",
+      "tags": [
+        "gpt-image-2",
+        "retry",
+        "download"
+      ]
+    },
+    {
+      "id": "function:server.mjs:runSeedanceVideoStage",
+      "type": "function",
+      "name": "runSeedanceVideoStage",
+      "filePath": "server.mjs",
+      "summary": "用生成图作为 Seedance image_to_video 参考，生成 15 秒 9:16 720p 视频并下载 MP4。",
+      "tags": [
+        "seedance",
+        "image-to-video",
+        "download"
+      ]
+    },
+    {
+      "id": "function:server.mjs:generateComicVideo",
+      "type": "function",
+      "name": "generateComicVideo",
+      "filePath": "server.mjs",
+      "summary": "漫剧视频专用生成入口，收集临时参考素材，按 text_to_video 或 omni_reference 模式调用 Seedance。",
+      "tags": [
+        "comic",
+        "seedance",
+        "video-generation"
+      ]
+    },
+    {
+      "id": "function:server.mjs:uploadRole",
+      "type": "function",
+      "name": "uploadRole",
+      "filePath": "server.mjs",
+      "summary": "上传或替换角色、怪物、场景、参考视频和 Logo 等共享素材，并在生成中阻止替换。",
+      "tags": [
+        "upload",
+        "shared-materials"
+      ]
+    },
+    {
+      "id": "function:server.mjs:uploadCompetitor",
+      "type": "function",
+      "name": "uploadCompetitor",
+      "filePath": "server.mjs",
+      "summary": "上传或替换竞品素材，交给 replaceCompetitorMaterial 清空旧素材并生成特殊提示词。",
+      "tags": [
+        "upload",
+        "competitor-material"
+      ]
+    },
+    {
+      "id": "function:server.mjs:replaceCompetitorMaterial",
+      "type": "function",
+      "name": "replaceCompetitorMaterial",
+      "filePath": "server.mjs",
+      "summary": "将图片或视频写入竞品素材槽；图片走视觉反推，视频保存封面、做 ASR 和视频提示词反推。",
+      "tags": [
+        "competitor-material",
+        "reverse-prompt",
+        "asr"
+      ]
+    },
+    {
+      "id": "function:server.mjs:searchGuangdada",
+      "type": "function",
+      "name": "searchGuangdada",
+      "filePath": "server.mjs",
+      "summary": "按关键词、人气、日期和素材类型调用远端广大大搜索接口，分段扫描并去重排序。",
+      "tags": [
+        "guangdada",
+        "external-api",
+        "search"
+      ]
+    },
+    {
+      "id": "function:server.mjs:importGuangdadaMaterial",
+      "type": "function",
+      "name": "importGuangdadaMaterial",
+      "filePath": "server.mjs",
+      "summary": "下载广大大图片或视频素材，必要时获取详情页资源和封面，再导入竞品素材槽。",
+      "tags": [
+        "guangdada",
+        "download",
+        "import"
+      ]
+    },
+    {
+      "id": "function:server.mjs:sendOutputsZip",
+      "type": "function",
+      "name": "sendOutputsZip",
+      "filePath": "server.mjs",
+      "summary": "根据选中批次筛选输出文件，构造 zip 并作为下载响应返回。",
+      "tags": [
+        "export",
+        "zip",
+        "outputs"
+      ]
+    },
+    {
+      "id": "function:server.mjs:safeInsideProject",
+      "type": "function",
+      "name": "safeInsideProject",
+      "filePath": "server.mjs",
+      "summary": "约束文件访问必须位于当前项目目录或共享项目目录内，降低路径穿越风险。",
+      "tags": [
+        "security",
+        "filesystem-boundary"
+      ]
+    },
+    {
+      "id": "function:public/app.js:api",
+      "type": "function",
+      "name": "api",
+      "filePath": "public/app.js",
+      "summary": "主工作台的 fetch 包装器，统一 JSON 解析、401 登录处理和友好错误提示。",
+      "tags": [
+        "frontend",
+        "api-client"
+      ]
+    },
+    {
+      "id": "function:public/app.js:loadMaterials",
+      "type": "function",
+      "name": "loadMaterials",
+      "filePath": "public/app.js",
+      "summary": "加载 /api/materials，刷新项目、素材、竞品设置、结果批次和运行状态。",
+      "tags": [
+        "frontend",
+        "materials",
+        "render"
+      ]
+    },
+    {
+      "id": "function:public/app.js:renderCompetitors",
+      "type": "function",
+      "name": "renderCompetitors",
+      "filePath": "public/app.js",
+      "summary": "渲染竞品素材卡片、替换上传、Logo 勾选、角色/怪物数量、输出尺寸和特殊提示词编辑。",
+      "tags": [
+        "frontend",
+        "competitor-ui",
+        "autosave"
+      ]
+    },
+    {
+      "id": "function:public/app.js:estimateTaskCount",
+      "type": "function",
+      "name": "estimateTaskCount",
+      "filePath": "public/app.js",
+      "summary": "按当前选择和竞品设置估算待生成任务数，驱动开始前保护提示。",
+      "tags": [
+        "frontend",
+        "task-preview"
+      ]
+    },
+    {
+      "id": "function:public/app.js:refreshState",
+      "type": "function",
+      "name": "refreshState",
+      "filePath": "public/app.js",
+      "summary": "轮询 /api/state，更新任务进度；生成结束后刷新素材和结果图库。",
+      "tags": [
+        "frontend",
+        "polling",
+        "run-state"
+      ]
+    },
+    {
+      "id": "function:public/app.js:uploadPickedFile",
+      "type": "function",
+      "name": "uploadPickedFile",
+      "filePath": "public/app.js",
+      "summary": "读取用户选择的图片或视频为 data URL，必要时截取视频封面，然后提交上传接口。",
+      "tags": [
+        "frontend",
+        "upload",
+        "video-cover"
+      ]
+    },
+    {
+      "id": "function:public/app.js:startButtonHandler",
+      "type": "function",
+      "name": "start button handler",
+      "filePath": "public/app.js",
+      "summary": "开始生成按钮事件：校验模型和竞品选择，二次确认大批量任务，调用 /api/start 并启动轮询。",
+      "tags": [
+        "frontend",
+        "batch-start",
+        "event-handler"
+      ]
+    },
+    {
+      "id": "function:public/comic.js:buildPrompt",
+      "type": "function",
+      "name": "buildPrompt",
+      "filePath": "public/comic.js",
+      "summary": "根据漫剧页面表单、分镜、台词和参考素材生成完整 Seedance 视频提示词。",
+      "tags": [
+        "frontend",
+        "prompt-builder",
+        "comic"
+      ]
+    },
+    {
+      "id": "function:public/comic.js:generateVideo",
+      "type": "function",
+      "name": "generateVideo",
+      "filePath": "public/comic.js",
+      "summary": "确认额度消耗后提交 /api/comic/generate-video，并在页面显示生成视频与下载入口。",
+      "tags": [
+        "frontend",
+        "seedance",
+        "comic"
+      ]
+    },
+    {
+      "id": "function:public/comic.js:loadMaterials",
+      "type": "function",
+      "name": "loadMaterials",
+      "filePath": "public/comic.js",
+      "summary": "漫剧页加载共享素材和项目列表，渲染角色、怪物、场景和参考视频选择。",
+      "tags": [
+        "frontend",
+        "materials",
+        "comic"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:GET /api/auth",
+      "type": "endpoint",
+      "name": "GET /api/auth",
+      "filePath": "server.mjs",
+      "summary": "查询当前 Cookie 会话是否已登录。",
+      "tags": [
+        "api",
+        "auth"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/login",
+      "type": "endpoint",
+      "name": "POST /api/login",
+      "filePath": "server.mjs",
+      "summary": "账号密码登录，创建本地内存会话并设置 Cookie。",
+      "tags": [
+        "api",
+        "auth"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:GET /api/materials",
+      "type": "endpoint",
+      "name": "GET /api/materials",
+      "filePath": "server.mjs",
+      "summary": "返回当前用户项目下的素材、竞品、输出、项目列表和运行状态。",
+      "tags": [
+        "api",
+        "materials"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/start",
+      "type": "endpoint",
+      "name": "POST /api/start",
+      "filePath": "server.mjs",
+      "summary": "启动批量图片或图片+视频生成。",
+      "tags": [
+        "api",
+        "batch"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/stop",
+      "type": "endpoint",
+      "name": "POST /api/stop",
+      "filePath": "server.mjs",
+      "summary": "请求停止当前批处理并杀掉活动 Tai CLI 子进程。",
+      "tags": [
+        "api",
+        "batch"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/upload-role",
+      "type": "endpoint",
+      "name": "POST /api/upload-role",
+      "filePath": "server.mjs",
+      "summary": "上传共享素材，包括角色、怪物、场景、参考视频和产品 Logo。",
+      "tags": [
+        "api",
+        "upload"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/upload-competitor",
+      "type": "endpoint",
+      "name": "POST /api/upload-competitor",
+      "filePath": "server.mjs",
+      "summary": "上传竞品图片或视频并生成该素材的特殊提示词。",
+      "tags": [
+        "api",
+        "competitor"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/global-requirement",
+      "type": "endpoint",
+      "name": "POST /api/global-requirement",
+      "filePath": "server.mjs",
+      "summary": "保存全局通用提示词到批处理记录目录。",
+      "tags": [
+        "api",
+        "prompt"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/special-requirements",
+      "type": "endpoint",
+      "name": "POST /api/special-requirements",
+      "filePath": "server.mjs",
+      "summary": "保存竞品素材的特殊提示词和数量/Logo/尺寸设置。",
+      "tags": [
+        "api",
+        "prompt",
+        "competitor-settings"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/outputs/export",
+      "type": "endpoint",
+      "name": "POST /api/outputs/export",
+      "filePath": "server.mjs",
+      "summary": "把选中批次的图片和视频打包成 zip 下载。",
+      "tags": [
+        "api",
+        "export"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/comic/generate-video",
+      "type": "endpoint",
+      "name": "POST /api/comic/generate-video",
+      "filePath": "server.mjs",
+      "summary": "漫剧页提交 Seedance 视频生成请求。",
+      "tags": [
+        "api",
+        "comic",
+        "seedance"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/guangdada/search",
+      "type": "endpoint",
+      "name": "POST /api/guangdada/search",
+      "filePath": "server.mjs",
+      "summary": "搜索广大大素材库并返回归一化、去重后的素材卡片数据。",
+      "tags": [
+        "api",
+        "guangdada"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/guangdada/import",
+      "type": "endpoint",
+      "name": "POST /api/guangdada/import",
+      "filePath": "server.mjs",
+      "summary": "将广大大搜索结果下载并导入为竞品素材。",
+      "tags": [
+        "api",
+        "guangdada",
+        "import"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:GET /file",
+      "type": "endpoint",
+      "name": "GET /file",
+      "filePath": "server.mjs",
+      "summary": "受 safeInsideProject 保护的项目文件代理，用于预览输出图、视频和素材。",
+      "tags": [
+        "api",
+        "file-proxy",
+        "security"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:POST /api/projects/*",
+      "type": "endpoint",
+      "name": "POST /api/projects/*",
+      "filePath": "server.mjs",
+      "summary": "项目创建、切换、改名和删除项目列表项的管理端点。",
+      "tags": [
+        "api",
+        "projects",
+        "admin"
+      ]
+    },
+    {
+      "id": "endpoint:server.mjs:GET/POST /api/admin/users",
+      "type": "endpoint",
+      "name": "GET/POST /api/admin/users",
+      "filePath": "server.mjs",
+      "summary": "管理员账号列表、创建、更新和删除端点。",
+      "tags": [
+        "api",
+        "admin",
+        "users"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "documents:document:README.md->file:server.mjs",
+      "source": "document:README.md",
+      "target": "file:server.mjs",
+      "type": "documents",
+      "weight": 0.5,
+      "description": "README 说明服务启动、目录结构、API Key 和生成流程。"
+    },
+    {
+      "id": "documents:document:README.md->file:public/app.js",
+      "source": "document:README.md",
+      "target": "file:public/app.js",
+      "type": "documents",
+      "weight": 0.5,
+      "description": "README 描述主素材工作台行为和运行保护。"
+    },
+    {
+      "id": "documents:document:README.md->file:public/comic.js",
+      "source": "document:README.md",
+      "target": "file:public/comic.js",
+      "type": "documents",
+      "weight": 0.5,
+      "description": "README 描述视频素材、Seedance 和漫剧生成相关规则。"
+    },
+    {
+      "id": "related:config:.understand-anything/.understandignore->document:README.md",
+      "source": "config:.understand-anything/.understandignore",
+      "target": "document:README.md",
+      "type": "related",
+      "weight": 0.5,
+      "description": "分析忽略规则围绕 README 描述的运行产物、账号和素材输出目录设置。"
+    },
+    {
+      "id": "configures:config:config.json->function:server.mjs:loadConfig",
+      "source": "config:config.json",
+      "target": "function:server.mjs:loadConfig",
+      "type": "configures",
+      "weight": 0.6,
+      "description": "loadConfig 读取 config.json 恢复项目列表和默认根目录。"
+    },
+    {
+      "id": "triggers:file:start-windows.ps1->file:server.mjs",
+      "source": "file:start-windows.ps1",
+      "target": "file:server.mjs",
+      "type": "triggers",
+      "weight": 0.6,
+      "description": "PowerShell 脚本启动 Node 服务。"
+    },
+    {
+      "id": "triggers:file:start-windows.bat->file:server.mjs",
+      "source": "file:start-windows.bat",
+      "target": "file:server.mjs",
+      "type": "triggers",
+      "weight": 0.6,
+      "description": "批处理脚本启动 Node 服务。"
+    },
+    {
+      "id": "deploys:file:package-release.ps1->file:server.mjs",
+      "source": "file:package-release.ps1",
+      "target": "file:server.mjs",
+      "type": "deploys",
+      "weight": 0.7,
+      "description": "发布脚本打包 Web 服务文件。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:handleRequest",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:handleRequest",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含中心路由。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:withRequestScope",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:withRequestScope",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含请求上下文包装。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:loadConfig",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:loadConfig",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含配置加载。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:loadUsers",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:loadUsers",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含账号加载。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:dirs",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:dirs",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含目录布局计算。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:loadMaterials",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:loadMaterials",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含素材汇总。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:buildJobs",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:buildJobs",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含任务构造。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:startBatch",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:startBatch",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含批处理启动。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:runTaiJob",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:runTaiJob",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含单任务执行。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:runImageStage",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:runImageStage",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含图片阶段。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:runSeedanceVideoStage",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:runSeedanceVideoStage",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含视频阶段。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:generateComicVideo",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:generateComicVideo",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含漫剧视频生成。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:uploadRole",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:uploadRole",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含共享素材上传。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:uploadCompetitor",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:uploadCompetitor",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含竞品上传。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:replaceCompetitorMaterial",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:replaceCompetitorMaterial",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含竞品替换和反推。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:searchGuangdada",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:searchGuangdada",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含广大大搜索。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:importGuangdadaMaterial",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:importGuangdadaMaterial",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含广大大导入。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:sendOutputsZip",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:sendOutputsZip",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含结果导出。"
+    },
+    {
+      "id": "contains:file:server.mjs->function:server.mjs:safeInsideProject",
+      "source": "file:server.mjs",
+      "target": "function:server.mjs:safeInsideProject",
+      "type": "contains",
+      "weight": 1,
+      "description": "服务端文件包含文件边界校验。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:GET /api/auth",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:GET /api/auth",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发认证状态查询。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/login",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/login",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发登录。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:GET /api/materials",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:GET /api/materials",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发素材汇总。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/start",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/start",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发批处理启动。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/stop",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/stop",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发停止生成。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/upload-role",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/upload-role",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发共享素材上传。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/upload-competitor",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/upload-competitor",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发竞品上传。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/global-requirement",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/global-requirement",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发通用提示词保存。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/special-requirements",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/special-requirements",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发竞品设置保存。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/outputs/export",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/outputs/export",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发结果导出。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/comic/generate-video",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/comic/generate-video",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发漫剧视频生成。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/guangdada/search",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/guangdada/search",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发广大大搜索。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/guangdada/import",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/guangdada/import",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发广大大导入。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:GET /file",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:GET /file",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发文件代理。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:POST /api/projects/*",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:POST /api/projects/*",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发项目管理。"
+    },
+    {
+      "id": "routes:function:server.mjs:handleRequest->endpoint:server.mjs:GET/POST /api/admin/users",
+      "source": "function:server.mjs:handleRequest",
+      "target": "endpoint:server.mjs:GET/POST /api/admin/users",
+      "type": "routes",
+      "weight": 0.5,
+      "description": "路由分发账号管理。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:GET /api/materials->function:server.mjs:loadMaterials",
+      "source": "endpoint:server.mjs:GET /api/materials",
+      "target": "function:server.mjs:loadMaterials",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用 loadMaterials。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/start->function:server.mjs:startBatch",
+      "source": "endpoint:server.mjs:POST /api/start",
+      "target": "function:server.mjs:startBatch",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用 startBatch。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/upload-role->function:server.mjs:uploadRole",
+      "source": "endpoint:server.mjs:POST /api/upload-role",
+      "target": "function:server.mjs:uploadRole",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用 uploadRole。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/upload-competitor->function:server.mjs:uploadCompetitor",
+      "source": "endpoint:server.mjs:POST /api/upload-competitor",
+      "target": "function:server.mjs:uploadCompetitor",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用 uploadCompetitor。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/outputs/export->function:server.mjs:sendOutputsZip",
+      "source": "endpoint:server.mjs:POST /api/outputs/export",
+      "target": "function:server.mjs:sendOutputsZip",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用结果导出。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/comic/generate-video->function:server.mjs:generateComicVideo",
+      "source": "endpoint:server.mjs:POST /api/comic/generate-video",
+      "target": "function:server.mjs:generateComicVideo",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用漫剧视频生成。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/guangdada/search->function:server.mjs:searchGuangdada",
+      "source": "endpoint:server.mjs:POST /api/guangdada/search",
+      "target": "function:server.mjs:searchGuangdada",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用广大大搜索。"
+    },
+    {
+      "id": "calls:endpoint:server.mjs:POST /api/guangdada/import->function:server.mjs:importGuangdadaMaterial",
+      "source": "endpoint:server.mjs:POST /api/guangdada/import",
+      "target": "function:server.mjs:importGuangdadaMaterial",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "端点调用广大大导入。"
+    },
+    {
+      "id": "validates:endpoint:server.mjs:GET /file->function:server.mjs:safeInsideProject",
+      "source": "endpoint:server.mjs:GET /file",
+      "target": "function:server.mjs:safeInsideProject",
+      "type": "validates",
+      "weight": 0.8,
+      "description": "文件代理先校验路径边界。"
+    },
+    {
+      "id": "calls:function:server.mjs:loadMaterials->function:server.mjs:dirs",
+      "source": "function:server.mjs:loadMaterials",
+      "target": "function:server.mjs:dirs",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "素材读取依赖当前用户项目目录布局。"
+    },
+    {
+      "id": "reads_from:function:server.mjs:loadMaterials->concept:multi-user-project-storage",
+      "source": "function:server.mjs:loadMaterials",
+      "target": "concept:multi-user-project-storage",
+      "type": "reads_from",
+      "weight": 0.5,
+      "description": "读取共享素材和用户隔离素材。"
+    },
+    {
+      "id": "calls:function:server.mjs:startBatch->function:server.mjs:loadMaterials",
+      "source": "function:server.mjs:startBatch",
+      "target": "function:server.mjs:loadMaterials",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "批处理启动前读取最新素材。"
+    },
+    {
+      "id": "calls:function:server.mjs:startBatch->function:server.mjs:buildJobs",
+      "source": "function:server.mjs:startBatch",
+      "target": "function:server.mjs:buildJobs",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "批处理用 buildJobs 生成任务列表。"
+    },
+    {
+      "id": "writes_to:function:server.mjs:startBatch->concept:run-state-and-job-queue",
+      "source": "function:server.mjs:startBatch",
+      "target": "concept:run-state-and-job-queue",
+      "type": "writes_to",
+      "weight": 0.5,
+      "description": "启动时写入运行状态并启动 worker。"
+    },
+    {
+      "id": "transforms:function:server.mjs:buildJobs->concept:tai-cli-generation-pipeline",
+      "source": "function:server.mjs:buildJobs",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "transforms",
+      "weight": 0.5,
+      "description": "将素材选择转换为 Tai CLI 任务。"
+    },
+    {
+      "id": "calls:function:server.mjs:runTaiJob->function:server.mjs:runImageStage",
+      "source": "function:server.mjs:runTaiJob",
+      "target": "function:server.mjs:runImageStage",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "每个任务先进入图片阶段。"
+    },
+    {
+      "id": "calls:function:server.mjs:runTaiJob->function:server.mjs:runSeedanceVideoStage",
+      "source": "function:server.mjs:runTaiJob",
+      "target": "function:server.mjs:runSeedanceVideoStage",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "视频模式下接 Seedance 阶段。"
+    },
+    {
+      "id": "depends_on:function:server.mjs:runImageStage->concept:tai-cli-generation-pipeline",
+      "source": "function:server.mjs:runImageStage",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "通过 Tai CLI 调用 gpt-image-2。"
+    },
+    {
+      "id": "depends_on:function:server.mjs:runSeedanceVideoStage->concept:tai-cli-generation-pipeline",
+      "source": "function:server.mjs:runSeedanceVideoStage",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "通过 Tai CLI 调用 Seedance 2.0。"
+    },
+    {
+      "id": "depends_on:function:server.mjs:generateComicVideo->concept:tai-cli-generation-pipeline",
+      "source": "function:server.mjs:generateComicVideo",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "漫剧视频也使用 Tai CLI Seedance。"
+    },
+    {
+      "id": "writes_to:function:server.mjs:replaceCompetitorMaterial->concept:reverse-prompt-analysis",
+      "source": "function:server.mjs:replaceCompetitorMaterial",
+      "target": "concept:reverse-prompt-analysis",
+      "type": "writes_to",
+      "weight": 0.5,
+      "description": "上传竞品后写入特殊提示词和视频提示词。"
+    },
+    {
+      "id": "calls:function:server.mjs:uploadCompetitor->function:server.mjs:replaceCompetitorMaterial",
+      "source": "function:server.mjs:uploadCompetitor",
+      "target": "function:server.mjs:replaceCompetitorMaterial",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "上传竞品素材后统一替换处理。"
+    },
+    {
+      "id": "depends_on:function:server.mjs:searchGuangdada->concept:guangdada-ingestion",
+      "source": "function:server.mjs:searchGuangdada",
+      "target": "concept:guangdada-ingestion",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "广大大搜索属于外部素材导入流程。"
+    },
+    {
+      "id": "calls:function:server.mjs:importGuangdadaMaterial->function:server.mjs:replaceCompetitorMaterial",
+      "source": "function:server.mjs:importGuangdadaMaterial",
+      "target": "function:server.mjs:replaceCompetitorMaterial",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "下载远端素材后复用竞品替换流程。"
+    },
+    {
+      "id": "validates:function:server.mjs:safeInsideProject->concept:multi-user-project-storage",
+      "source": "function:server.mjs:safeInsideProject",
+      "target": "concept:multi-user-project-storage",
+      "type": "validates",
+      "weight": 0.8,
+      "description": "文件访问限制在当前用户/共享项目范围。"
+    },
+    {
+      "id": "configures:function:server.mjs:withRequestScope->concept:multi-user-project-storage",
+      "source": "function:server.mjs:withRequestScope",
+      "target": "concept:multi-user-project-storage",
+      "type": "configures",
+      "weight": 0.6,
+      "description": "请求上下文决定当前用户和项目根目录。"
+    },
+    {
+      "id": "imports:file:public/index.html->file:public/app.js",
+      "source": "file:public/index.html",
+      "target": "file:public/app.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "主页面加载 app.js。"
+    },
+    {
+      "id": "imports:file:public/comic.html->file:public/comic.js",
+      "source": "file:public/comic.html",
+      "target": "file:public/comic.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "漫剧页面加载 comic.js。"
+    },
+    {
+      "id": "depends_on:file:public/index.html->file:public/styles.css",
+      "source": "file:public/index.html",
+      "target": "file:public/styles.css",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "主页面使用共享样式。"
+    },
+    {
+      "id": "depends_on:file:public/comic.html->file:public/styles.css",
+      "source": "file:public/comic.html",
+      "target": "file:public/styles.css",
+      "type": "depends_on",
+      "weight": 0.6,
+      "description": "漫剧页面使用共享样式。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:api",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:api",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含 API 包装器。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:loadMaterials",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:loadMaterials",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含素材加载。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:renderCompetitors",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:renderCompetitors",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含竞品卡片渲染。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:estimateTaskCount",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:estimateTaskCount",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含任务估算。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:refreshState",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:refreshState",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含状态轮询。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:uploadPickedFile",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:uploadPickedFile",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含上传封装。"
+    },
+    {
+      "id": "contains:file:public/app.js->function:public/app.js:startButtonHandler",
+      "source": "file:public/app.js",
+      "target": "function:public/app.js:startButtonHandler",
+      "type": "contains",
+      "weight": 1,
+      "description": "主前端包含开始按钮处理。"
+    },
+    {
+      "id": "calls:function:public/app.js:api->endpoint:server.mjs:GET /api/auth",
+      "source": "function:public/app.js:api",
+      "target": "endpoint:server.mjs:GET /api/auth",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "前端启动时检查登录态。"
+    },
+    {
+      "id": "calls:function:public/app.js:loadMaterials->endpoint:server.mjs:GET /api/materials",
+      "source": "function:public/app.js:loadMaterials",
+      "target": "endpoint:server.mjs:GET /api/materials",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "前端加载素材汇总。"
+    },
+    {
+      "id": "calls:function:public/app.js:startButtonHandler->endpoint:server.mjs:POST /api/start",
+      "source": "function:public/app.js:startButtonHandler",
+      "target": "endpoint:server.mjs:POST /api/start",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "点击开始生成时提交批处理。"
+    },
+    {
+      "id": "related:function:public/app.js:refreshState->endpoint:server.mjs:POST /api/start",
+      "source": "function:public/app.js:refreshState",
+      "target": "endpoint:server.mjs:POST /api/start",
+      "type": "related",
+      "weight": 0.5,
+      "description": "状态轮询展示 startBatch 创建的 runState。"
+    },
+    {
+      "id": "calls:function:public/app.js:uploadPickedFile->endpoint:server.mjs:POST /api/upload-role",
+      "source": "function:public/app.js:uploadPickedFile",
+      "target": "endpoint:server.mjs:POST /api/upload-role",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "共享素材上传调用 upload-role。"
+    },
+    {
+      "id": "calls:function:public/app.js:uploadPickedFile->endpoint:server.mjs:POST /api/upload-competitor",
+      "source": "function:public/app.js:uploadPickedFile",
+      "target": "endpoint:server.mjs:POST /api/upload-competitor",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "竞品素材上传调用 upload-competitor。"
+    },
+    {
+      "id": "calls:function:public/app.js:renderCompetitors->endpoint:server.mjs:POST /api/special-requirements",
+      "source": "function:public/app.js:renderCompetitors",
+      "target": "endpoint:server.mjs:POST /api/special-requirements",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "竞品设置自动保存。"
+    },
+    {
+      "id": "calls:function:public/app.js:startButtonHandler->function:public/app.js:estimateTaskCount",
+      "source": "function:public/app.js:startButtonHandler",
+      "target": "function:public/app.js:estimateTaskCount",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "开始前估算任务数并做空跑保护。"
+    },
+    {
+      "id": "reads_from:function:public/app.js:refreshState->concept:run-state-and-job-queue",
+      "source": "function:public/app.js:refreshState",
+      "target": "concept:run-state-and-job-queue",
+      "type": "reads_from",
+      "weight": 0.5,
+      "description": "前端轮询并渲染运行状态。"
+    },
+    {
+      "id": "reads_from:function:public/app.js:renderCompetitors->concept:reverse-prompt-analysis",
+      "source": "function:public/app.js:renderCompetitors",
+      "target": "concept:reverse-prompt-analysis",
+      "type": "reads_from",
+      "weight": 0.5,
+      "description": "竞品卡片展示并允许编辑特殊提示词。"
+    },
+    {
+      "id": "calls:function:public/app.js:api->endpoint:server.mjs:POST /api/guangdada/search",
+      "source": "function:public/app.js:api",
+      "target": "endpoint:server.mjs:POST /api/guangdada/search",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "广大大搜索按钮通过 api 调用搜索端点。"
+    },
+    {
+      "id": "calls:function:public/app.js:api->endpoint:server.mjs:POST /api/outputs/export",
+      "source": "function:public/app.js:api",
+      "target": "endpoint:server.mjs:POST /api/outputs/export",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "结果导出直接 fetch 输出 zip。"
+    },
+    {
+      "id": "contains:file:public/comic.js->function:public/comic.js:buildPrompt",
+      "source": "file:public/comic.js",
+      "target": "function:public/comic.js:buildPrompt",
+      "type": "contains",
+      "weight": 1,
+      "description": "漫剧前端包含提示词构建。"
+    },
+    {
+      "id": "contains:file:public/comic.js->function:public/comic.js:generateVideo",
+      "source": "file:public/comic.js",
+      "target": "function:public/comic.js:generateVideo",
+      "type": "contains",
+      "weight": 1,
+      "description": "漫剧前端包含视频生成提交。"
+    },
+    {
+      "id": "contains:file:public/comic.js->function:public/comic.js:loadMaterials",
+      "source": "file:public/comic.js",
+      "target": "function:public/comic.js:loadMaterials",
+      "type": "contains",
+      "weight": 1,
+      "description": "漫剧前端包含素材加载。"
+    },
+    {
+      "id": "calls:function:public/comic.js:loadMaterials->endpoint:server.mjs:GET /api/materials",
+      "source": "function:public/comic.js:loadMaterials",
+      "target": "endpoint:server.mjs:GET /api/materials",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "漫剧页复用素材汇总接口。"
+    },
+    {
+      "id": "calls:function:public/comic.js:generateVideo->function:public/comic.js:buildPrompt",
+      "source": "function:public/comic.js:generateVideo",
+      "target": "function:public/comic.js:buildPrompt",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "提交前确保提示词已生成。"
+    },
+    {
+      "id": "calls:function:public/comic.js:generateVideo->endpoint:server.mjs:POST /api/comic/generate-video",
+      "source": "function:public/comic.js:generateVideo",
+      "target": "endpoint:server.mjs:POST /api/comic/generate-video",
+      "type": "calls",
+      "weight": 0.8,
+      "description": "漫剧页提交 Seedance 生成。"
+    },
+    {
+      "id": "related:function:public/comic.js:buildPrompt->concept:tai-cli-generation-pipeline",
+      "source": "function:public/comic.js:buildPrompt",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "related",
+      "weight": 0.5,
+      "description": "输出提示词供服务端 Seedance 调用。"
+    },
+    {
+      "id": "related:concept:multi-user-project-storage->concept:run-state-and-job-queue",
+      "source": "concept:multi-user-project-storage",
+      "target": "concept:run-state-and-job-queue",
+      "type": "related",
+      "weight": 0.5,
+      "description": "运行状态按用户项目隔离。"
+    },
+    {
+      "id": "related:concept:reverse-prompt-analysis->concept:tai-cli-generation-pipeline",
+      "source": "concept:reverse-prompt-analysis",
+      "target": "concept:tai-cli-generation-pipeline",
+      "type": "related",
+      "weight": 0.5,
+      "description": "反推提示词会进入图片和视频生成提示词。"
+    },
+    {
+      "id": "related:concept:guangdada-ingestion->concept:reverse-prompt-analysis",
+      "source": "concept:guangdada-ingestion",
+      "target": "concept:reverse-prompt-analysis",
+      "type": "related",
+      "weight": 0.5,
+      "description": "导入广大大素材后走同一竞品反推流程。"
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:configuration-and-launch",
+      "name": "配置与启动",
+      "description": "项目说明、本地配置、理解扫描配置、Windows 启动和发布打包入口。",
+      "nodeIds": [
+        "document:README.md",
+        "config:config.json",
+        "config:.understand-anything/.understandignore",
+        "file:start-windows.ps1",
+        "file:start-windows.bat",
+        "file:package-release.ps1"
+      ]
+    },
+    {
+      "id": "layer:server-core",
+      "name": "服务端核心",
+      "description": "Node HTTP 服务、认证、项目隔离、文件边界、管理员和项目管理 API。",
+      "nodeIds": [
+        "file:server.mjs",
+        "endpoint:server.mjs:GET /api/auth",
+        "endpoint:server.mjs:POST /api/login",
+        "endpoint:server.mjs:GET /file",
+        "endpoint:server.mjs:POST /api/projects/*",
+        "endpoint:server.mjs:GET/POST /api/admin/users"
+      ]
+    },
+    {
+      "id": "layer:ad-material-workbench",
+      "name": "素材生成工作台",
+      "description": "主页面的素材上传、竞品设置、广大大导入、批量图片/视频生成、结果展示和导出。",
+      "nodeIds": [
+        "file:public/index.html",
+        "file:public/app.js",
+        "endpoint:server.mjs:GET /api/materials",
+        "endpoint:server.mjs:POST /api/start",
+        "endpoint:server.mjs:POST /api/stop",
+        "endpoint:server.mjs:POST /api/upload-role",
+        "endpoint:server.mjs:POST /api/upload-competitor",
+        "endpoint:server.mjs:POST /api/global-requirement",
+        "endpoint:server.mjs:POST /api/special-requirements",
+        "endpoint:server.mjs:POST /api/outputs/export",
+        "endpoint:server.mjs:POST /api/guangdada/search",
+        "endpoint:server.mjs:POST /api/guangdada/import"
+      ]
+    },
+    {
+      "id": "layer:comic-video-workbench",
+      "name": "漫剧视频工作台",
+      "description": "独立的 Seedance 漫剧视频页面，负责分镜、台词、参考素材和视频提交。",
+      "nodeIds": [
+        "file:public/comic.html",
+        "file:public/comic.js",
+        "endpoint:server.mjs:POST /api/comic/generate-video"
+      ]
+    },
+    {
+      "id": "layer:presentation",
+      "name": "界面呈现",
+      "description": "共享视觉系统和页面样式，覆盖主工作台、漫剧页、弹窗、素材网格、运行状态和结果图库。",
+      "nodeIds": [
+        "file:public/styles.css"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "先读产品说明",
+      "description": "从 README 了解项目目标、启动方式、素材目录、账号体系、提示词规则和生成模式。",
+      "nodeIds": [
+        "document:README.md",
+        "config:config.json"
+      ],
+      "languageLesson": "重点记住共享目录和用户隔离目录的区别，这是理解后端文件路径的钥匙。"
+    },
+    {
+      "order": 2,
+      "title": "进入后端路由",
+      "description": "查看 server.mjs 的 handleRequest，所有页面 API、文件代理和静态服务都从这里分发。",
+      "nodeIds": [
+        "file:server.mjs",
+        "function:server.mjs:handleRequest"
+      ],
+      "languageLesson": "这个项目没有 Express，直接用 node:http，所以路由是 if 链而不是框架注册表。"
+    },
+    {
+      "order": 3,
+      "title": "理解项目与用户隔离",
+      "description": "看 withRequestScope、dirs 和 loadMaterials，掌握共享素材与用户私有竞品/输出/记录的目录关系。",
+      "nodeIds": [
+        "function:server.mjs:withRequestScope",
+        "function:server.mjs:dirs",
+        "function:server.mjs:loadMaterials",
+        "concept:multi-user-project-storage"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "跟踪主工作台",
+      "description": "从 index.html 到 app.js，观察前端如何加载素材、维护选择状态、渲染竞品卡片并调用批处理 API。",
+      "nodeIds": [
+        "file:public/index.html",
+        "file:public/app.js",
+        "function:public/app.js:loadMaterials",
+        "function:public/app.js:renderCompetitors"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "走完整生成链路",
+      "description": "从开始按钮进入 /api/start，再看 startBatch、buildJobs、runTaiJob、runImageStage 和 runSeedanceVideoStage。",
+      "nodeIds": [
+        "function:public/app.js:startButtonHandler",
+        "endpoint:server.mjs:POST /api/start",
+        "function:server.mjs:startBatch",
+        "function:server.mjs:buildJobs",
+        "function:server.mjs:runTaiJob",
+        "concept:tai-cli-generation-pipeline"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "理解竞品反推与导入",
+      "description": "查看 uploadCompetitor、replaceCompetitorMaterial、searchGuangdada 和 importGuangdadaMaterial，掌握竞品素材从上传/抓取到特殊提示词生成的路径。",
+      "nodeIds": [
+        "endpoint:server.mjs:POST /api/upload-competitor",
+        "function:server.mjs:replaceCompetitorMaterial",
+        "function:server.mjs:searchGuangdada",
+        "function:server.mjs:importGuangdadaMaterial",
+        "concept:reverse-prompt-analysis"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "查看漫剧视频页",
+      "description": "从 comic.html 和 comic.js 看独立的 Seedance 漫剧工作流：收集素材、构建提示词、提交视频生成。",
+      "nodeIds": [
+        "file:public/comic.html",
+        "file:public/comic.js",
+        "function:public/comic.js:buildPrompt",
+        "function:public/comic.js:generateVideo",
+        "endpoint:server.mjs:POST /api/comic/generate-video"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "最后看呈现和发布",
+      "description": "styles.css 定义完整深色界面，start 脚本和 package-release.ps1 支撑 Windows 本地运行与发布。",
+      "nodeIds": [
+        "file:public/styles.css",
+        "file:start-windows.ps1",
+        "file:package-release.ps1"
+      ]
+    }
+  ]
+}

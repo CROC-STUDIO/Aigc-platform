@@ -95,7 +95,8 @@ export function requirePermission(user, permission) {
     throw new WangzhuanError("unauthenticated", ERROR_MESSAGES.unauthenticated);
   }
   const isAdmin = user.isAdmin || user.role === "admin";
-  const allowed = permission === "template:admin" ? isAdmin : true;
+  const permissions = user.permissions && typeof user.permissions === "object" ? user.permissions : {};
+  const allowed = isAdmin || permissions[permission] === true || (permission === "template:admin" ? false : Object.keys(permissions).length === 0);
   if (!allowed) {
     throw new WangzhuanError("permission_denied", ERROR_MESSAGES.permission_denied, { requestedPermission: permission });
   }

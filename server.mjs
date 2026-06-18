@@ -1,4 +1,5 @@
 ﻿import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, parse, resolve } from "node:path";
@@ -7,18 +8,33 @@ import { promisify } from "node:util";
 import { networkInterfaces } from "node:os";
 import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { handleWangzhuanRequest } from "./server/wangzhuan/router.mjs";
+import { runDueSchedulerJobs } from "./server/wangzhuan/scheduler.mjs";
+import { resolveProjectFilePath } from "./server/project-file-paths.mjs";
+import { createAuthStore, publicUser } from "./server/auth-store.mjs";
+import { loadEnvFile, loadRuntimeConfig } from "./server/runtime-config.mjs";
+import {
+  buildPublicUrl,
+  deleteObject,
+  deleteRecordedAssetMetadata,
+  getRecordedAssetMetadata,
+  objectStorageEnabled,
+  openObjectStream,
+  projectStorageDescriptor,
+  uploadProjectAsset
+} from "./server/object-storage.mjs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+loadEnvFile({ envPath: join(__dirname, ".env") });
 
-const CONFIG_PATH = join(__dirname, "config.json");
-const USERS_PATH = join(__dirname, "users.json");
-let projectRoot = resolve(__dirname, "..");
+const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolve(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
+const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
+const USERS_PATH = process.env.AIGC_USERS_PATH ? resolve(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
+let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolve(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
 let savedProjects = [];
-let users = [];
+let authStore;
 let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
@@ -50,7 +66,6 @@ function defaultRunState() {
 }
 
 const sessionStates = new Map();
-const authSessions = new Map();
 
 function sanitizeSegment(value, fallback = "default") {
   const clean = String(value ?? "")
@@ -82,99 +97,34 @@ function clearCookie(name) {
   return `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
-function safeCompare(a, b) {
-  const left = Buffer.from(String(a ?? ""), "utf8");
-  const right = Buffer.from(String(b ?? ""), "utf8");
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
-
-function normalizeUsers(items = []) {
-  const seen = new Set();
-  const normalized = [];
-  for (const item of items) {
-    const username = sanitizeSegment(item.username, "");
-    const password = String(item.password ?? "");
-    const role = String(item.role ?? (username === "admin" ? "admin" : "user")).trim() === "admin" ? "admin" : "user";
-    if (!username || !password || seen.has(username)) continue;
-    seen.add(username);
-    normalized.push({
-      username,
-      password,
-      displayName: String(item.displayName ?? username).trim() || username,
-      role
-    });
-  }
-  return normalized;
-}
-
-function parseJsonFileContent(content, fileLabel) {
-  const text = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    const position = Number(error.message.match(/position (\d+)/)?.[1]);
-    let location = "";
-    let nearby = "";
-    if (Number.isFinite(position)) {
-      const before = text.slice(0, position);
-      const line = before.split("\n").length;
-      const column = before.length - before.lastIndexOf("\n");
-      location = ` at line ${line}, column ${column}`;
-      nearby = ` Nearby content: ${JSON.stringify(text.slice(Math.max(0, position - 40), position + 80))}`;
-    }
-    throw new Error(`${fileLabel} is not valid JSON${location}: ${error.message}.${nearby}`);
-  }
-}
-
 async function loadUsers() {
-  if (!existsSync(USERS_PATH)) {
-    users = normalizeUsers([{ username: "admin", password: "admin123", displayName: "管理员", role: "admin" }]);
-    await writeFile(USERS_PATH, `${JSON.stringify({ users }, null, 2)}\n`, "utf8");
-    return;
-  }
-  const data = parseJsonFileContent(await readFile(USERS_PATH, "utf8"), "users.json");
-  users = normalizeUsers(Array.isArray(data) ? data : data.users);
-  if (!users.length) throw new Error("users.json 中没有可用账号，请在服务器上添加 username/password");
+  authStore = createAuthStore({ usersPath: USERS_PATH });
+  await authStore.init();
 }
 
-async function saveUsers() {
-  await writeFile(USERS_PATH, `${JSON.stringify({ users }, null, 2)}\n`, "utf8");
-}
-
-function publicUser(user) {
-  return user ? { username: user.username, displayName: user.displayName, userId: user.username, role: user.role, isAdmin: user.role === "admin" } : null;
-}
-
-function userFromRequest(req) {
+async function userFromRequest(req) {
   const token = parseCookies(req).ad_session || "";
-  const session = authSessions.get(token);
-  if (!session) return null;
-  const user = users.find((item) => item.username === session.username);
-  if (!user) {
-    authSessions.delete(token);
-    return null;
-  }
-  return user;
+  return authStore.userFromSessionToken(token);
 }
 
 async function login(req, res) {
   const body = await readJson(req);
-  const username = sanitizeSegment(body.username, "");
+  const username = String(body.username ?? "");
   const password = String(body.password ?? "");
-  const user = users.find((item) => item.username === username);
-  if (!user || !safeCompare(user.password, password)) {
+  const result = await authStore.login(username, password, {
+    ip: req.socket?.remoteAddress ?? "",
+    userAgent: req.headers["user-agent"] ?? ""
+  });
+  if (!result.authenticated) {
     return sendJson(res, { error: "账号或密码错误" }, 401);
   }
-  const token = randomBytes(32).toString("hex");
-  authSessions.set(token, { username: user.username, createdAt: Date.now() });
-  appendCookie(res, `ad_session=${encodeURIComponent(token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
-  return sendJson(res, { authenticated: true, user: publicUser(user) });
+  appendCookie(res, `ad_session=${encodeURIComponent(result.token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
+  return sendJson(res, { authenticated: true, user: result.user });
 }
 
-function logout(req, res) {
+async function logout(req, res) {
   const token = parseCookies(req).ad_session || "";
-  if (token) authSessions.delete(token);
+  await authStore.logout(token);
   appendCookie(res, clearCookie("ad_session"));
   return sendJson(res, { ok: true, authenticated: false });
 }
@@ -193,66 +143,23 @@ function requireAdmin() {
   return user;
 }
 
-function publicUsers() {
-  return users.map((user) => ({
-    username: user.username,
-    displayName: user.displayName,
-    role: user.role,
-    isAdmin: user.role === "admin"
-  }));
-}
-
 async function listAdminUsers() {
   requireAdmin();
-  return { users: publicUsers() };
+  return { users: await authStore.listUsers() };
 }
 
 async function createAdminUser(body = {}) {
-  requireAdmin();
-  const username = sanitizeSegment(body.username, "");
-  const password = String(body.password ?? "");
-  const displayName = String(body.displayName ?? username).trim() || username;
-  const role = body.role === "admin" ? "admin" : "user";
-  if (!username) throw new Error("请输入账号");
-  if (!password) throw new Error("请输入密码");
-  if (users.some((item) => item.username === username)) throw new Error("账号已存在");
-  users.push({ username, password, displayName, role });
-  await saveUsers();
-  return { ok: true, users: publicUsers() };
+  return authStore.createUser(body, requireAdmin());
 }
 
 async function updateAdminUser(body = {}) {
   const admin = requireAdmin();
-  const username = sanitizeSegment(body.username, "");
-  const user = users.find((item) => item.username === username);
-  if (!user) throw new Error("账号不存在");
-  const nextDisplayName = String(body.displayName ?? user.displayName).trim();
-  const nextPassword = body.password == null ? "" : String(body.password);
-  const nextRole = body.role === "admin" ? "admin" : "user";
-  if (nextDisplayName) user.displayName = nextDisplayName;
-  if (nextPassword) user.password = nextPassword;
-  if (user.username !== admin.username) {
-    user.role = nextRole;
-  }
-  if (!users.some((item) => item.role === "admin")) user.role = "admin";
-  await saveUsers();
-  return { ok: true, users: publicUsers() };
+  return authStore.updateUser(body, admin);
 }
 
 async function deleteAdminUser(body = {}) {
   const admin = requireAdmin();
-  const username = sanitizeSegment(body.username, "");
-  if (!username) throw new Error("请选择要删除的账号");
-  if (username === admin.username) throw new Error("不能删除当前登录的管理员账号");
-  const target = users.find((item) => item.username === username);
-  if (!target) throw new Error("账号不存在");
-  if (target.role === "admin" && users.filter((item) => item.role === "admin").length <= 1) throw new Error("至少保留一个管理员账号");
-  users = users.filter((item) => item.username !== username);
-  for (const [token, session] of authSessions) {
-    if (session.username === username) authSessions.delete(token);
-  }
-  await saveUsers();
-  return { ok: true, users: publicUsers() };
+  return authStore.deleteUser(body.username, admin);
 }
 
 function currentUserId() {
@@ -331,19 +238,17 @@ function dirs() {
 }
 
 async function loadConfig() {
-  if (!existsSync(CONFIG_PATH)) {
-    appConfig = {};
-    savedProjects = normalizeProjects([{ name: basename(projectRoot), path: projectRoot }]);
-    return;
-  }
   try {
-    const data = parseJsonFileContent(await readFile(CONFIG_PATH, "utf8"), "config.json");
-    appConfig = data && typeof data === "object" ? data : {};
-    if (data.projectRoot) projectRoot = resolve(data.projectRoot);
-    savedProjects = normalizeProjects(data.projects ?? [{ name: basename(projectRoot), path: projectRoot }]);
+    const { config, runtimeConfigExists } = await loadRuntimeConfig({
+      runtimePath: CONFIG_PATH,
+      defaultPath: DEFAULT_CONFIG_PATH
+    });
+    appConfig = config;
+    if (runtimeConfigExists && config.projectRoot && !process.env.AIGC_PROJECT_ROOT) projectRoot = resolve(config.projectRoot);
+    savedProjects = normalizeProjects(config.projects ?? [{ name: basename(projectRoot), path: projectRoot }]);
   } catch {
     appConfig = {};
-    projectRoot = resolve(__dirname, "..");
+    projectRoot = process.env.AIGC_PROJECT_ROOT ? resolve(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
     savedProjects = normalizeProjects([{ name: basename(projectRoot), path: projectRoot }]);
   }
 }
@@ -900,7 +805,7 @@ async function listImageFiles(dir) {
     if (!entry.isFile() || !IMAGE_EXTS.has(extname(entry.name).toLowerCase())) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: `/file?path=${encodeURIComponent(fullPath)}&v=${Math.round(info.mtimeMs)}` });
+    files.push({ name: entry.name, path: fullPath, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -916,7 +821,7 @@ async function listOutputFiles(dir) {
     if (!type) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: `/file?path=${encodeURIComponent(fullPath)}&v=${Math.round(info.mtimeMs)}` });
+    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -929,7 +834,7 @@ async function listVideoFiles(dir) {
     if (!entry.isFile() || !VIDEO_EXTS.has(extname(entry.name).toLowerCase())) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, type: "video", batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: `/file?path=${encodeURIComponent(fullPath)}&v=${Math.round(info.mtimeMs)}` });
+    files.push({ name: entry.name, path: fullPath, type: "video", batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -1601,7 +1506,12 @@ async function runImageStage(job, promptDir, logPath) {
   if (!imageUrl) throw new Error(`No image URL returned\n${raw}`);
 
   await downloadImage(imageUrl, job.output);
+  const storage = await syncProjectAssetToObjectStorage(job.output, "generated_image");
   const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
+  if (storage) {
+    record.storage_key = storage.storageKey;
+    record.storage_url = storage.storageUrl;
+  }
   await writeFile(logPath, `${JSON.stringify(record)}\n`, { flag: "a" });
   return { model, taskId };
 }
@@ -1626,7 +1536,12 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   const videoUrl = parseSeedanceVideoUrl(raw) || await pollSeedanceVideoUrl(taskId, job.name);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   await downloadBinary(videoUrl, job.videoOutput);
+  const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
   const record = { time: new Date().toISOString(), name: job.name, model: SEEDANCE_MODEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
+  if (storage) {
+    record.storage_key = storage.storageKey;
+    record.storage_url = storage.storageUrl;
+  }
   await writeFile(logPath, `${JSON.stringify(record)}\n`, { flag: "a" });
   return { videoTaskId: taskId };
 }
@@ -1691,11 +1606,12 @@ async function generateComicVideo(body = {}) {
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   const output = join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`);
   await downloadBinary(videoUrl, output);
+  const storage = await syncProjectAssetToObjectStorage(output, "comic_video_output");
   const promptPath = join(workDir, "seedance_prompt.txt");
   await writeFile(promptPath, prompt, "utf8");
   await writeFile(join(workDir, "seedance_result.json"), JSON.stringify({ time: new Date().toISOString(), model: SEEDANCE_MODEL, mode, taskId, promptPath, output, remoteUrl: videoUrl, refs: { images: imageArgs.length, videos: videoArgs.length, audios: audioArgs.length } }, null, 2), "utf8");
   const info = await stat(output);
-  return { ok: true, model: SEEDANCE_MODEL, mode, taskId, output, url: `/file?path=${encodeURIComponent(output)}&v=${Math.round(info.mtimeMs)}`, remoteUrl: videoUrl };
+  return { ok: true, model: SEEDANCE_MODEL, mode, taskId, output, url: storage?.storageUrl || localFileUrl(output, Math.round(info.mtimeMs)), remoteUrl: videoUrl, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}) };
 }
 
 function parseSeedanceVideoUrl(raw) {
@@ -1735,9 +1651,11 @@ async function downloadBinary(url, targetPath) {
   if (!res.ok) throw new Error(`Download failed ${res.status}: ${fullUrl}`);
   const file = createWriteStream(targetPath);
   await new Promise((resolveDownload, reject) => {
+    file.on("error", reject);
+    file.on("finish", resolveDownload);
     res.body.pipeTo(new WritableStream({
       write(chunk) { file.write(Buffer.from(chunk)); },
-      close() { file.end(resolveDownload); },
+      close() { file.end(); },
       abort(err) { file.destroy(err); reject(err); }
     })).catch(reject);
   });
@@ -2133,11 +2051,12 @@ async function uploadRole(req) {
   const fileName = upload.mode === "replace" && upload.targetName ? sanitizeFileName(upload.targetName) : upload.name;
   const target = safeInsideProject(join(targetDir, fileName));
   await writeFile(target, upload.buffer);
+  const storage = await syncProjectAssetToObjectStorage(target, upload.kind === "referenceVideo" ? "reference_video" : upload.kind === "monster" ? "monster_image" : upload.kind === "logo" ? "product_logo" : upload.kind === "scene" ? "scene_image" : "role_image");
   if (!["monster", "referenceVideo"].includes(upload.kind)) {
     const upscaledTarget = join(dirs().upscaledDir, fileName);
     if (existsSync(upscaledTarget)) await rm(upscaledTarget, { force: true });
   }
-  return { ok: true, path: target, name: fileName };
+  return { ok: true, path: target, name: fileName, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
 }
 
 async function deleteSharedMaterial(body = {}) {
@@ -2153,6 +2072,7 @@ async function deleteSharedMaterial(body = {}) {
   const ext = extname(target).toLowerCase();
   if (kind === "referenceVideo" ? !VIDEO_EXTS.has(ext) : !IMAGE_EXTS.has(ext)) throw new Error(kind === "referenceVideo" ? "只能删除视频素材" : "只能删除图片素材");
   if (!existsSync(target)) throw new Error("素材不存在或已被删除");
+  await removeProjectAssetFromObjectStorage(target);
   await rm(target, { force: true });
   const upscaledTarget = join(dirs().upscaledDir, name);
   if (existsSync(upscaledTarget)) await rm(upscaledTarget, { force: true });
@@ -2171,12 +2091,19 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
   const dir = safeInsideProject(join(dirs().projectRoot, folderName));
   await mkdir(dir, { recursive: true });
   const oldImages = await listImageFiles(dir);
-  for (const image of oldImages) await rm(image.path, { force: true });
+  for (const image of oldImages) {
+    await removeProjectAssetFromObjectStorage(image.path);
+    await rm(image.path, { force: true });
+  }
   const oldVideos = await listVideoFiles(dir);
-  for (const video of oldVideos) await rm(video.path, { force: true });
+  for (const video of oldVideos) {
+    await removeProjectAssetFromObjectStorage(video.path);
+    await rm(video.path, { force: true });
+  }
   const fileName = sanitizeFileName(name);
   const target = safeInsideProject(join(dir, fileName));
   await writeFile(target, buffer);
+  const storage = await syncProjectAssetToObjectStorage(target, VIDEO_EXTS.has(extname(fileName).toLowerCase()) ? "competitor_video" : "competitor_image");
   if (VIDEO_EXTS.has(extname(fileName).toLowerCase())) {
     const videoPromptPath = safeInsideProject(join(dir, "视频反推提示词.txt"));
     let coverPath = "";
@@ -2186,6 +2113,7 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
       const coverName = sanitizeFileName(coverImageName || `${parse(fileName).name}_封面.jpg`).replace(/\.[^.]+$/, ".jpg");
       coverPath = safeInsideProject(join(dir, coverName));
       await writeFile(coverPath, coverImageBuffer);
+      await syncProjectAssetToObjectStorage(coverPath, "competitor_video_cover");
       analysis = await analyzeUploadedCompetitorImage(coverPath, { type: "video", fileName });
     }
     let transcript = await transcribeVideoDialogue(target).catch((error) => ({ error: error.message }));
@@ -2198,13 +2126,13 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
     const videoPrompt = specialRequirementForVideoPrompt(specialRequirement) || defaultVideoReversePrompt(fileName);
     await writeFile(videoPromptPath, videoPrompt, "utf8");
     await writeFile(specialRequirementPath, specialRequirement, "utf8");
-    return { ok: true, path: target, name: fileName, coverPath, videoPromptPath, videoPrompt, specialRequirementPath, specialRequirement };
+    return { ok: true, path: target, name: fileName, coverPath, videoPromptPath, videoPrompt, specialRequirementPath, specialRequirement, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
   }
   const analysis = await analyzeUploadedCompetitorImage(target);
   const specialRequirementPath = safeInsideProject(join(dir, "\u7528\u6237\u7279\u6b8a\u8981\u6c42.txt"));
   const specialRequirement = specialRequirementJson({ type: "image", fileName, analysis });
   await writeFile(specialRequirementPath, specialRequirement, "utf8");
-  return { ok: true, path: target, name: fileName, specialRequirementPath, specialRequirement };
+  return { ok: true, path: target, name: fileName, specialRequirementPath, specialRequirement, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
 }
 
 function defaultVideoReversePrompt(fileName) {
@@ -2747,6 +2675,75 @@ function contentTypeForFile(fullPath) {
   return "application/octet-stream";
 }
 
+function localFileUrl(fullPath, version = "") {
+  const suffix = version ? `&v=${encodeURIComponent(version)}` : "";
+  return `/file?path=${encodeURIComponent(fullPath)}${suffix}`;
+}
+
+async function projectAssetMetadata(fullPath) {
+  try {
+    const descriptor = projectStorageDescriptor({
+      fullPath,
+      userRoot: dirs().projectRoot,
+      sharedRoot: dirs().sharedProjectRoot,
+      userId: currentUserId()
+    });
+    return getRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function publicUrlForProjectFile(fullPath, version = "") {
+  const metadata = await projectAssetMetadata(fullPath);
+  return metadata?.storageUrl || localFileUrl(fullPath, version);
+}
+
+async function syncProjectAssetToObjectStorage(fullPath, assetKind = "file") {
+  if (!objectStorageEnabled()) return null;
+  try {
+    return await uploadProjectAsset({
+      fullPath,
+      userRoot: dirs().projectRoot,
+      sharedRoot: dirs().sharedProjectRoot,
+      userId: currentUserId(),
+      assetKind,
+      contentType: contentTypeForFile(fullPath)
+    });
+  } catch (error) {
+    console.warn(`[object-storage] failed to upload ${assetKind}: ${error.message}`);
+    return null;
+  }
+}
+
+async function removeProjectAssetFromObjectStorage(fullPath) {
+  if (!objectStorageEnabled()) return null;
+  try {
+    const descriptor = projectStorageDescriptor({
+      fullPath,
+      userRoot: dirs().projectRoot,
+      sharedRoot: dirs().sharedProjectRoot,
+      userId: currentUserId()
+    });
+    const metadata = await getRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+    if (metadata?.storageKey) await deleteObject(metadata.storageKey);
+    await deleteRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+    return metadata;
+  } catch (error) {
+    console.warn(`[object-storage] failed to delete object: ${error.message}`);
+    return null;
+  }
+}
+
 async function sendProjectFile(req, res, fullPath) {
   const info = await stat(fullPath);
   const ext = extname(fullPath).toLowerCase();
@@ -2774,17 +2771,51 @@ async function sendProjectFile(req, res, fullPath) {
   return createReadStream(fullPath).pipe(res);
 }
 
+async function sendPublicAsset(req, res, storageKey) {
+  const key = String(storageKey || "").replace(/^\/+/, "");
+  if (!key || key.includes("..")) {
+    return sendJson(res, { error: "asset not found" }, 404);
+  }
+  if (process.env.S3_PUBLIC_BASE_URL) {
+    res.writeHead(302, { Location: buildPublicUrl(key) });
+    res.end();
+    return;
+  }
+  if (!objectStorageEnabled()) {
+    return sendJson(res, { error: "object storage is not configured" }, 404);
+  }
+  try {
+    const range = /^bytes=\d*-\d*$/i.test(String(req.headers.range || "")) ? String(req.headers.range) : "";
+    const payload = await openObjectStream(key, { range });
+    const headers = {
+      "Content-Type": payload.contentType,
+      "Cache-Control": payload.cacheControl
+    };
+    if (payload.contentLength != null) headers["Content-Length"] = String(payload.contentLength);
+    if (payload.contentRange) headers["Content-Range"] = payload.contentRange;
+    if (payload.acceptRanges || range) headers["Accept-Ranges"] = payload.acceptRanges || "bytes";
+    res.writeHead(payload.contentRange ? 206 : 200, headers);
+    payload.body.on("error", (error) => {
+      console.warn(`[object-storage] stream failed: ${error.message}`);
+      if (!res.headersSent) sendJson(res, { error: "asset not found" }, 404);
+      else res.destroy(error);
+    });
+    return payload.body.pipe(res);
+  } catch {
+    return sendJson(res, { error: "asset not found" }, 404);
+  }
+}
+
 function safeInsideProject(path) {
-  const full = resolve(path);
-  const userRoot = resolve(dirs().projectRoot);
-  const sharedRoot = resolve(dirs().sharedProjectRoot);
-  if (!full.startsWith(userRoot) && !full.startsWith(sharedRoot)) throw new Error("Path is outside project root");
-  return full;
+  return resolveProjectFilePath(path, {
+    userRoot: dirs().projectRoot,
+    sharedRoot: dirs().sharedProjectRoot
+  });
 }
 
 async function withRequestScope(req, res, handler, options = {}) {
   const cookies = parseCookies(req);
-  const user = userFromRequest(req);
+  const user = await userFromRequest(req);
   if (!user) {
     if (typeof options.onUnauthenticated === "function") return options.onUnauthenticated();
     return sendJson(res, { error: "请先登录" }, 401);
@@ -2818,7 +2849,7 @@ async function handleRequest(req, res) {
   try {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/api/auth") {
-      const user = userFromRequest(req);
+      const user = await userFromRequest(req);
       return sendJson(res, user ? { authenticated: true, user: publicUser(user) } : { authenticated: false });
     }
     if (req.method === "POST" && url.pathname === "/api/login") return login(req, res);
@@ -2833,6 +2864,10 @@ async function handleRequest(req, res) {
         getLegacyRunState: getRunState,
         config: appConfig
       });
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/api/public/assets/")) {
+      const storageKey = decodeURIComponent(url.pathname.slice("/api/public/assets/".length));
+      return await sendPublicAsset(req, res, storageKey);
     }
     if (req.method === "GET" && url.pathname === "/api/materials") return sendJson(res, await loadMaterials());
     if (req.method === "GET" && url.pathname === "/api/admin/users") return sendJson(res, await listAdminUsers());
@@ -2918,15 +2953,16 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
   const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
+  const isPublicAsset = url.pathname.startsWith("/api/public/assets/");
   const isStatic = !url.pathname.startsWith("/api/") && url.pathname !== "/file";
-  if (isPublicAuth || isStatic) {
+  if (isPublicAuth || isPublicAsset || isStatic) {
     handleRequest(req, res).catch((error) => sendError(res, error));
     return;
   }
   withRequestScope(req, res, () => handleRequest(req, res), isWangzhuanApi ? { onUnauthenticated: () => handleRequest(req, res) } : {}).catch((error) => sendError(res, error));
 });
 
-const port = Number(process.env.PORT || 5177);
+const port = Number(process.env.PORT || 5182);
 const host = process.env.HOST || "0.0.0.0";
 await loadConfig();
 await loadUsers();
@@ -2934,6 +2970,90 @@ server.listen(port, host, () => {
   console.log(`Seedance ad picture web UI: http://localhost:${port}`);
   for (const url of localNetworkUrls(port)) console.log(`LAN access: ${url}`);
 });
+
+let schedulerTimer = null;
+let schedulerRunning = false;
+
+function schedulerIntervalMs() {
+  const raw = process.env.AIGC_SCHEDULER_INTERVAL_MS ?? appConfig.wangzhuan?.scheduler?.intervalMs ?? 30_000;
+  return Math.max(5_000, Math.min(Number(raw) || 30_000, 10 * 60_000));
+}
+
+function schedulerEnabled() {
+  const raw = process.env.AIGC_SCHEDULER_ENABLED ?? appConfig.wangzhuan?.scheduler?.enabled ?? "true";
+  return String(raw).toLowerCase() !== "false";
+}
+
+function sha256Hex(value) {
+  return createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
+}
+
+function projectKeyForRoot(root) {
+  return `root:${sha256Hex(root)}`;
+}
+
+function baseRootForProjectKey(projectKey) {
+  if (!projectKey) return currentBaseProjectRoot();
+  const candidates = savedProjects.map((item) => item.path);
+  return candidates.find((item) => projectKeyForRoot(item) === projectKey) || currentBaseProjectRoot();
+}
+
+function schedulerContext(job = {}) {
+  const userId = job.username || "local";
+  const baseRoot = baseRootForProjectKey(job.projectKey);
+  return {
+    userId,
+    user: { userId, username: userId, role: "admin", isAdmin: true },
+    userProjectRoot: userProjectRoot(baseRoot, userId),
+    sharedProjectRoot: baseRoot,
+    config: appConfig,
+    currentUserId: () => userId,
+    currentProjectRoot: () => userProjectRoot(baseRoot, userId),
+    currentBaseProjectRoot: () => baseRoot
+  };
+}
+
+async function tickWangzhuanScheduler() {
+  if (schedulerRunning) return;
+  schedulerRunning = true;
+  try {
+    const result = await runDueSchedulerJobs(schedulerContext(), {
+      workerId: `aigc-platform:${process.pid}`,
+      limit: Number(process.env.AIGC_SCHEDULER_BATCH_SIZE || appConfig.wangzhuan?.scheduler?.batchSize || 5),
+      lockSeconds: Number(process.env.AIGC_SCHEDULER_LOCK_SECONDS || appConfig.wangzhuan?.scheduler?.lockSeconds || 60),
+      contextForJob: (job) => schedulerContext(job)
+    });
+    if (result.claimedCount > 0) {
+      console.log(`[wangzhuan-scheduler] claimed=${result.claimedCount} succeeded=${result.succeededCount} failed=${result.failedCount}`);
+    }
+  } catch (error) {
+    console.warn(`[wangzhuan-scheduler] tick failed: ${error.message}`);
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
+function startWangzhuanScheduler() {
+  if (!schedulerEnabled() || schedulerTimer) return;
+  schedulerTimer = setInterval(() => {
+    tickWangzhuanScheduler().catch((error) => {
+      console.warn(`[wangzhuan-scheduler] unhandled tick failure: ${error.message}`);
+    });
+  }, schedulerIntervalMs());
+  schedulerTimer.unref?.();
+  tickWangzhuanScheduler().catch((error) => {
+    console.warn(`[wangzhuan-scheduler] startup tick failed: ${error.message}`);
+  });
+}
+
+function stopWangzhuanScheduler() {
+  if (!schedulerTimer) return;
+  clearInterval(schedulerTimer);
+  schedulerTimer = null;
+}
+
+server.on("close", stopWangzhuanScheduler);
+startWangzhuanScheduler();
 
 function localNetworkUrls(port) {
   const urls = [];

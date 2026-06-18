@@ -1,0 +1,2150 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "8dc290d0c99d8eaa8b27902515a7975682144bc7",
+  "generatedAt": "2026-06-17T03:18:11.365Z",
+  "files": {
+    "config.json": {
+      "filePath": "config.json",
+      "contentHash": "e57b54a619e460072934a88a0ad16946ba2b3c2795f141d80e5187d4fcb24018",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 17,
+      "hasStructuralAnalysis": true
+    },
+    "package-release.ps1": {
+      "filePath": "package-release.ps1",
+      "contentHash": "3b4019767352a5655125117bc177a76e30818f7d5056b3d0a6ea6a387d8f9ba0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 90,
+      "hasStructuralAnalysis": false
+    },
+    "public/app.js": {
+      "filePath": "public/app.js",
+      "contentHash": "ebeaea5611faab9a91e4e09cb0e0eb6e7115dc6542dace1055a21e8e8cf47ef4",
+      "functions": [
+        {
+          "name": "defaultBatchTag",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "api",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "showLogin",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "hideLogin",
+          "params": [
+            "user"
+          ],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "updateProjectAdminActions",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "openChangelog",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "closeChangelog",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "showToast",
+          "params": [
+            "message"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "checkAuth",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "submitLogin",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "renderAdminUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 23
+        },
+        {
+          "name": "loadAdminUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "openAdminUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "closeAdminUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "createAdminUserFromForm",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "handleAdminUsersListClick",
+          "params": [
+            "event"
+          ],
+          "exported": false,
+          "lineCount": 35
+        },
+        {
+          "name": "friendlyError",
+          "params": [
+            "message"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "loadMaterials",
+          "params": [],
+          "exported": false,
+          "lineCount": 42
+        },
+        {
+          "name": "renderAll",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "renderProjectSelect",
+          "params": [
+            "projects"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "competitorLabel",
+          "params": [
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "findCompetitor",
+          "params": [
+            "folder"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "setCompetitorUploading",
+          "params": [
+            "folder",
+            "uploading"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "competitorNameOptions",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "selectedGuangdadaCompetitor",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "renderGuangdadaCompetitorSelect",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "resetProjectState",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "renderAssetGrid",
+          "params": [],
+          "exported": false,
+          "lineCount": 52
+        },
+        {
+          "name": "renderCompetitors",
+          "params": [],
+          "exported": false,
+          "lineCount": 121
+        },
+        {
+          "name": "renderOutputs",
+          "params": [],
+          "exported": false,
+          "lineCount": 33
+        },
+        {
+          "name": "updateExportControls",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "renderBatchFilters",
+          "params": [
+            "batches"
+          ],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "renderGuangdadaItems",
+          "params": [
+            "items"
+          ],
+          "exported": false,
+          "lineCount": 86
+        },
+        {
+          "name": "renderRunState",
+          "params": [
+            "runState"
+          ],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "updateStartButtonState",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "syncMaterialActionState",
+          "params": [
+            "isRunning"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "renderJobTable",
+          "params": [
+            "jobs"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "statusLabel",
+          "params": [
+            "job"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "workerSuffix",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "formatLogLine",
+          "params": [
+            "line"
+          ],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "compactError",
+          "params": [
+            "error"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "durationText",
+          "params": [
+            "startedAt",
+            "finishedAt"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "debounce",
+          "params": [
+            "fn",
+            "wait"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "estimateTaskCount",
+          "params": [],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "zeroTaskReason",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "updateTaskPreview",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "refreshState",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "formatTime",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "escapeHtml",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "clampNumber",
+          "params": [
+            "value",
+            "min",
+            "max"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "normalizeOutputSizeInput",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "formatDateInput",
+          "params": [
+            "date"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "applyRecentRange",
+          "params": [
+            "days"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "openCompetitorNameModal",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "closeCompetitorNameModal",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "confirmCreateCompetitorName",
+          "params": [],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "readFileAsDataUrl",
+          "params": [
+            "file"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "captureVideoCover",
+          "params": [
+            "file"
+          ],
+          "exported": false,
+          "lineCount": 47
+        },
+        {
+          "name": "uploadPickedFile",
+          "params": [],
+          "exported": false,
+          "lineCount": 32
+        },
+        {
+          "name": "pickImageAndUpload",
+          "params": [],
+          "exported": false,
+          "lineCount": 41
+        },
+        {
+          "name": "bindCompetitorDrop",
+          "params": [
+            "block",
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 39
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1598,
+      "hasStructuralAnalysis": true
+    },
+    "public/comic.html": {
+      "filePath": "public/comic.html",
+      "contentHash": "ab27da420e59562b073a027c58525e218e19bb0daece466ec8e4439d3847a54e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 315,
+      "hasStructuralAnalysis": false
+    },
+    "public/comic.js": {
+      "filePath": "public/comic.js",
+      "contentHash": "01218d5e86471ce382f64bc359b14c9b7defc5a02dedd686435e5a275e04be34",
+      "functions": [
+        {
+          "name": "escapeHtml",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "defaultBatchTag",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "api",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "checkAuth",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "updateProjectAdminActions",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "openChangelog",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "closeChangelog",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "readFileAsDataUrl",
+          "params": [
+            "file"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "pickAndUpload",
+          "params": [
+            "kind"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "renderAssetGrid",
+          "params": [],
+          "exported": false,
+          "lineCount": 43
+        },
+        {
+          "name": "loadMaterials",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "renderProjectSelect",
+          "params": [
+            "projects"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "resetProjectState",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "selectedItems",
+          "params": [
+            "items",
+            "selected"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "referenceLines",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "selectedDimension",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "dimensionStyleLine",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "updateMetrics",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "referenceVideoOptions",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "refreshShotReferenceVideoOptions",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "createShotCard",
+          "params": [],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "createDialogueCard",
+          "params": [],
+          "exported": false,
+          "lineCount": 29
+        },
+        {
+          "name": "collectShots",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "collectDialogues",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "dialogueVoiceGuide",
+          "params": [
+            "line"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "rolePromptBlock",
+          "params": [],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "buildPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 46
+        },
+        {
+          "name": "renderChecklist",
+          "params": [
+            "prompt",
+            "shots",
+            "dialogues"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "appendRunLog",
+          "params": [
+            "message"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "clearRunLog",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "generateVideo",
+          "params": [],
+          "exported": false,
+          "lineCount": 42
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 681,
+      "hasStructuralAnalysis": true
+    },
+    "public/index.html": {
+      "filePath": "public/index.html",
+      "contentHash": "9a915651179e58b678124901e4c618c396b053ee2f5fedd35f10fb91a3ae5f25",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 313,
+      "hasStructuralAnalysis": false
+    },
+    "public/styles.css": {
+      "filePath": "public/styles.css",
+      "contentHash": "3c5f6849d88acac3c2d2d7890bc56337fa20b960dae45973a5bab7e31bf28286",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2165,
+      "hasStructuralAnalysis": false
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "193442fd70edcdaaba7ceb1d5f1a7daa9ef9dfcea4a5559cc2f68c99dfaa2820",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 186,
+      "hasStructuralAnalysis": true
+    },
+    "server.mjs": {
+      "filePath": "server.mjs",
+      "contentHash": "5e560e6b9a0b94804a254ad969dae928c4ceddc51787c035f3548c299853bfcd",
+      "functions": [
+        {
+          "name": "defaultRunState",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "sanitizeSegment",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "parseCookies",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "appendCookie",
+          "params": [
+            "res",
+            "cookie"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "clearCookie",
+          "params": [
+            "name"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "safeCompare",
+          "params": [
+            "a",
+            "b"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "normalizeUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "parseJsonFileContent",
+          "params": [
+            "content",
+            "fileLabel"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "loadUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "saveUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "publicUser",
+          "params": [
+            "user"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "userFromRequest",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "login",
+          "params": [
+            "req",
+            "res"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "logout",
+          "params": [
+            "req",
+            "res"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "currentUser",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "requireAdmin",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "publicUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "listAdminUsers",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "createAdminUser",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "updateAdminUser",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "deleteAdminUser",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "currentUserId",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "currentProjectRoot",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "currentBaseProjectRoot",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "sessionKey",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "sessionState",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "getRunState",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "setRunState",
+          "params": [
+            "next"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "activeChildren",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "taiEntryPath",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "dirs",
+          "params": [],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "loadConfig",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "normalizeProjects",
+          "params": [
+            "items"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "projectList",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "userProjectRoot",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "ensureUserProjectScope",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "ensureProjectStructure",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "saveConfig",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "defaultGlobalRequirement",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "chineseRequirementAfterReplace",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "ensureGlobalRequirementLogoRule",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "isLegacyGlobalRequirement",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "chineseSpecialRequirementAfterReplace",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "chineseVideoSpecialRequirement",
+          "params": [
+            "fileName"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "specialRequirementJson",
+          "params": [],
+          "exported": false,
+          "lineCount": 56
+        },
+        {
+          "name": "normalizeDialogueAnalysis",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "dialogueInstructionBlock",
+          "params": [
+            "dialogue"
+          ],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "detectDialogueLanguage",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "parseSpecialRequirementJson",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "specialRequirementForImagePrompt",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "specialRequirementForVideoPrompt",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "analyzeUploadedCompetitorImage",
+          "params": [
+            "imagePath"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "reversePromptWithVisionModel",
+          "params": [
+            "imagePath"
+          ],
+          "exported": false,
+          "lineCount": 67
+        },
+        {
+          "name": "reversePromptGatewayConfig",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "extractResponseText",
+          "params": [
+            "response"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "analyzeImageWithPython",
+          "params": [
+            "imagePath"
+          ],
+          "exported": false,
+          "lineCount": 49
+        },
+        {
+          "name": "readImageDimensions",
+          "params": [
+            "imagePath"
+          ],
+          "exported": false,
+          "lineCount": 35
+        },
+        {
+          "name": "addLog",
+          "params": [
+            "type",
+            "message"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "updateJobState",
+          "params": [
+            "jobName",
+            "patch"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "summarizeErrorText",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "sleepWithStop",
+          "params": [
+            "ms"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "execTai",
+          "params": [
+            "args"
+          ],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "listImageFiles",
+          "params": [
+            "dir"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "listOutputFiles",
+          "params": [
+            "dir"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "listVideoFiles",
+          "params": [
+            "dir"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "inferBatchFromOutputName",
+          "params": [
+            "name"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "competitorFolders",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "validateCompetitorFolderName",
+          "params": [
+            "name"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "competitorNamePath",
+          "params": [
+            "folder"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "readCompetitorDisplayName",
+          "params": [
+            "folder"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "writeCompetitorDisplayName",
+          "params": [
+            "folder",
+            "displayName"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "loadCompetitorNameLibrary",
+          "params": [],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "saveCompetitorNameLibrary",
+          "params": [
+            "names"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "createCompetitorFolder",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "deleteCompetitorFolder",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "updateCompetitorName",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "readTextIfExists",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "competitorSettingsPath",
+          "params": [
+            "folder"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "readCompetitorSettings",
+          "params": [
+            "folder"
+          ],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "saveCompetitorSettings",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "selectedOutputsForBatches",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "crc32",
+          "params": [
+            "buffer"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "dosDateTime",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "safeZipName",
+          "params": [
+            "name"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "buildOutputsZip",
+          "params": [
+            "outputs"
+          ],
+          "exported": false,
+          "lineCount": 58
+        },
+        {
+          "name": "sendOutputsZip",
+          "params": [
+            "res"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "loadMaterials",
+          "params": [],
+          "exported": false,
+          "lineCount": 68
+        },
+        {
+          "name": "inferRoleMeta",
+          "params": [
+            "fileName"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "requirementBlock",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "layoutFromDimensions",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "normalizeOutputSize",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "normalizeStoredOutputSize",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "layoutWithOutputSize",
+          "params": [
+            "layout"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "layoutLockBlock",
+          "params": [
+            "competitor"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "videoReferenceBlock",
+          "params": [
+            "competitor"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "isCombatReference",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "seedanceReferencePromptText",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "sanitizeNonCombatVideoPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "referenceTypeGuardBlock",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "gameplayLayoutLockBlock",
+          "params": [
+            "competitor"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "unitScaleLockBlock",
+          "params": [
+            "competitor"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "logoInstructionBlock",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "specialRequirementBlock",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "originalityBlock",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "noCrossReferenceBlock",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "sanitizeRequirementText",
+          "params": [
+            "text"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "singleRolePrompt",
+          "params": [
+            "role",
+            "competitor"
+          ],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "trioPrompt",
+          "params": [
+            "roles",
+            "competitor",
+            "groupName"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "repeatSuffix",
+          "params": [
+            "index",
+            "repeatCount"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "buildJobs",
+          "params": [],
+          "exported": false,
+          "lineCount": 81
+        },
+        {
+          "name": "runTaiJob",
+          "params": [
+            "job",
+            "promptDir",
+            "logPath"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "runImageStage",
+          "params": [
+            "job",
+            "promptDir",
+            "logPath"
+          ],
+          "exported": false,
+          "lineCount": 47
+        },
+        {
+          "name": "runSeedanceVideoStage",
+          "params": [
+            "job",
+            "promptDir",
+            "logPath"
+          ],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "generateComicVideo",
+          "params": [],
+          "exported": false,
+          "lineCount": 66
+        },
+        {
+          "name": "parseSeedanceVideoUrl",
+          "params": [
+            "raw"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "pollSeedanceVideoUrl",
+          "params": [
+            "taskId",
+            "jobName"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "downloadImage",
+          "params": [
+            "url",
+            "targetPath"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "downloadBinary",
+          "params": [
+            "url",
+            "targetPath"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "startBatch",
+          "params": [],
+          "exported": false,
+          "lineCount": 129
+        },
+        {
+          "name": "stopBatch",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "comboPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 27
+        },
+        {
+          "name": "seedanceAdVideoPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "seedanceGeneralVideoPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "seedanceBattleVideoPrompt",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "cyclePick",
+          "params": [
+            "items",
+            "start",
+            "count"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "updateConfig",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "switchProject",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "createProject",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "renameProject",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "deleteProject",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 23
+        },
+        {
+          "name": "readJson",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "readUpload",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 33
+        },
+        {
+          "name": "sanitizeFileName",
+          "params": [
+            "name"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "uploadRole",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "deleteSharedMaterial",
+          "params": [],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "uploadCompetitor",
+          "params": [
+            "req"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "replaceCompetitorMaterial",
+          "params": [],
+          "exported": false,
+          "lineCount": 40
+        },
+        {
+          "name": "defaultVideoReversePrompt",
+          "params": [
+            "fileName"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "transcribeVideoDialogue",
+          "params": [
+            "videoPath"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "extractTranscriptText",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "transcriptToDialogue",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "searchGuangdada",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 40
+        },
+        {
+          "name": "keepBestGuangdadaItem",
+          "params": [
+            "map",
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "guangdadaDedupKey",
+          "params": [
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "guangdadaMaxPagesForThreshold",
+          "params": [
+            "minPopularity"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "guangdadaDateChunks",
+          "params": [
+            "startDate",
+            "endDate"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "buildGuangdadaSearchPayload",
+          "params": [],
+          "exported": false,
+          "lineCount": 30
+        },
+        {
+          "name": "normalizeGuangdadaItem",
+          "params": [
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 65
+        },
+        {
+          "name": "matchGuangdadaMaterialType",
+          "params": [
+            "item",
+            "materialType"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "normalizeMaterialUrl",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "isLikelyImageUrl",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "isLikelyVideoUrl",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "parseDateFilter",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "normalizeUnixMs",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "matchGuangdadaDateRange",
+          "params": [
+            "item",
+            "startDate",
+            "endDate"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "importGuangdadaMaterial",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 39
+        },
+        {
+          "name": "guangdadaDetailUrls",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "guangdadaDetailImageUrls",
+          "params": [
+            "body"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "downloadRemoteImage",
+          "params": [
+            "imageUrl"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "downloadRemoteBinary",
+          "params": [
+            "url"
+          ],
+          "exported": false,
+          "lineCount": 28
+        },
+        {
+          "name": "isLikelyVideoBuffer",
+          "params": [
+            "buffer"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "tryDownloadImage",
+          "params": [
+            "imageUrl"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "proxyGuangdadaImage",
+          "params": [
+            "req",
+            "res",
+            "url"
+          ],
+          "exported": false,
+          "lineCount": 28
+        },
+        {
+          "name": "proxyGuangdadaVideo",
+          "params": [
+            "req",
+            "res",
+            "url"
+          ],
+          "exported": false,
+          "lineCount": 41
+        },
+        {
+          "name": "detectImageContentType",
+          "params": [
+            "buffer"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "isImageBuffer",
+          "params": [
+            "buffer"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "sendJson",
+          "params": [
+            "res",
+            "data"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "sendError",
+          "params": [
+            "res",
+            "error"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "contentTypeForFile",
+          "params": [
+            "fullPath"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "sendProjectFile",
+          "params": [
+            "req",
+            "res",
+            "fullPath"
+          ],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "safeInsideProject",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "withRequestScope",
+          "params": [
+            "req",
+            "res",
+            "handler"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "serveStatic",
+          "params": [
+            "req",
+            "res",
+            "pathname"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "handleRequest",
+          "params": [
+            "req",
+            "res"
+          ],
+          "exported": false,
+          "lineCount": 88
+        },
+        {
+          "name": "localNetworkUrls",
+          "params": [
+            "port"
+          ],
+          "exported": false,
+          "lineCount": 10
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:child_process",
+          "specifiers": [
+            "execFile"
+          ]
+        },
+        {
+          "source": "node:fs",
+          "specifiers": [
+            "createReadStream",
+            "createWriteStream",
+            "existsSync"
+          ]
+        },
+        {
+          "source": "node:fs/promises",
+          "specifiers": [
+            "mkdir",
+            "readdir",
+            "readFile",
+            "rm",
+            "stat",
+            "writeFile"
+          ]
+        },
+        {
+          "source": "node:path",
+          "specifiers": [
+            "basename",
+            "dirname",
+            "extname",
+            "join",
+            "parse",
+            "resolve"
+          ]
+        },
+        {
+          "source": "node:url",
+          "specifiers": [
+            "fileURLToPath"
+          ]
+        },
+        {
+          "source": "node:util",
+          "specifiers": [
+            "promisify"
+          ]
+        },
+        {
+          "source": "node:os",
+          "specifiers": [
+            "networkInterfaces"
+          ]
+        },
+        {
+          "source": "node:stream",
+          "specifiers": [
+            "Readable"
+          ]
+        },
+        {
+          "source": "node:async_hooks",
+          "specifiers": [
+            "AsyncLocalStorage"
+          ]
+        },
+        {
+          "source": "node:crypto",
+          "specifiers": [
+            "randomBytes",
+            "timingSafeEqual"
+          ]
+        },
+        {
+          "source": "node:http",
+          "specifiers": [
+            "http"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 2928,
+      "hasStructuralAnalysis": true
+    },
+    "start-windows.bat": {
+      "filePath": "start-windows.bat",
+      "contentHash": "3f1ec5915b71285d1c2e165ab9eaa3380305a4dd596e064ee625bd402c26a666",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 15,
+      "hasStructuralAnalysis": false
+    },
+    "start-windows.ps1": {
+      "filePath": "start-windows.ps1",
+      "contentHash": "e47cd9adde7eb7925d1cd8707db051bc0cde2c1c545ba25a7685b906c5172a8e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 12,
+      "hasStructuralAnalysis": false
+    }
+  }
+}

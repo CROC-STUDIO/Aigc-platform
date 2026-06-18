@@ -14,7 +14,9 @@ import {
   confirmRemixPreview,
   estimateRemix,
   getRemixDetail,
+  startDirectMaskEdit,
   startRemix,
+  stopRemix,
   uploadRemixSource
 } from "../../server/wangzhuan/remix.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
@@ -41,6 +43,7 @@ function context(root, userId = "alice", overrides = {}) {
     sharedProjectRoot: join(root, "shared"),
     userId,
     user: { userId, username: userId, role: "user", isAdmin: false },
+    mockReferenceProbe: true,
     config: {},
     ...overrides
   };
@@ -147,6 +150,7 @@ function captureRes() {
 
 function routerContext(ctx) {
   return {
+    ...ctx,
     readJson: async (req) => {
       const chunks = [];
       for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
@@ -198,6 +202,42 @@ test("remix upload stores source material and rejects invalid file types", async
         return true;
       }
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix upload probes real video metadata instead of trusting request defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-probe-"));
+  try {
+    const ctx = context(root, "alice", {
+      probeRemixSource: async () => ({
+        durationSec: 4.2,
+        width: 720,
+        height: 1280,
+        formatName: "mov,mp4,m4a,3gp,3g2,mj2",
+        bitRateBps: 2250000,
+        videoCodec: "h264",
+        fps: 30,
+        colorSpace: "bt709",
+        pixelFormat: "yuv420p",
+        audioStreams: [{ codec: "aac", sampleRate: 48000, channels: 2, bitRateBps: 128000 }],
+        canExtractFrame: true
+      })
+    });
+
+    const uploaded = await uploadRemixSource(ctx, {
+      ...sourceUpload("four-second.mp4"),
+      durationSec: 15,
+      width: 720,
+      height: 1280
+    });
+
+    assert.equal(uploaded.probe.durationSec, 4.2);
+    assert.equal(uploaded.probe.ratio, "9:16");
+    assert.equal(uploaded.probe.videoCodec, "h264");
+    assert.equal(uploaded.probe.fps, 30);
+    assert.equal(uploaded.probe.audioStreamCount, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -267,6 +307,76 @@ test("remix estimate enforces capability and region preflight", async () => {
     assert.equal(estimated.capability.status, "supported");
     assert.equal(estimated.confirmationRequired, false);
     assert.deepEqual(estimated.warnings, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix direct mask-edit route submits one generated mask image to ai_remove manual mode", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-direct-mask-"));
+  try {
+    const providerCalls = [];
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover", "mask_edit"]
+        }
+      },
+      probeRemixSource: async () => ({
+        durationSec: 4.2,
+        width: 720,
+        height: 1280,
+        canExtractFrame: true
+      }),
+      remixProviderClient: {
+        async createJob(payload) {
+          providerCalls.push(payload);
+          return {
+            job_id: "job_direct_mask_001",
+            job_type: payload.job_type,
+            status: "queued"
+          };
+        }
+      }
+    });
+    const routeCtx = routerContext(ctx);
+    const uploaded = await uploadRemixSource(ctx, sourceUpload());
+    const maskDataUrl = `data:image/png;base64,${Buffer.from("single combined mask").toString("base64")}`;
+
+    const startRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        idempotencyKey: "idem_s7_direct_mask_start",
+        sourceId: uploaded.sourceId,
+        regions: [region("logo"), region("watermark")],
+        maskDataUrl
+      }),
+      startRes,
+      new URL("http://localhost/api/wangzhuan/remix/mask-edit"),
+      routeCtx
+    );
+
+    assert.equal(startRes.statusCode, 200);
+    const started = JSON.parse(startRes.body.toString("utf8"));
+    assert.equal(started.code, "ok");
+    assert.equal(started.data.remix.status, "queued");
+    assert.equal(started.data.remix.operationType, "watermark_cover");
+    assert.equal(started.data.remix.regions.length, 2);
+    assert.equal(started.data.remix.maskSource.sourceType, "base64_data_url");
+    assert.match(started.data.remix.maskSource.storedPath, /mask\.png$/);
+
+    assert.equal(providerCalls.length, 1);
+    assert.equal(providerCalls[0].job_type, "ai_remove");
+    assert.equal(providerCalls[0].params.mode, "manual");
+    assert.equal(providerCalls[0].params.mask_source_type, "base64_data_url");
+    assert.equal(providerCalls[0].params.mask_source, maskDataUrl);
+    assert.equal(providerCalls[0].params.mask_threshold, 1);
+    assert.deepEqual(providerCalls[0].params.time_ranges, [{ start_ms: 0, end_ms: 4200 }]);
+    assert.equal(providerCalls[0].params.operation_type, undefined);
+    assert.equal(providerCalls[0].params.regions, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -367,6 +477,294 @@ test("remix start creates preview-required output and preview confirm makes it d
     const textPayload = Buffer.concat([...entries.values()]).toString("utf8");
     assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
     assert.ok([...entries.keys()].some((name) => name.endsWith(`${basename(started.remix.outputs[0].filePath)}`)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix start submits configured video platform job for mask editing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-provider-"));
+  try {
+    const providerCalls = [];
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover", "logo_icon_cover_or_replace", "text_cta_ending_replace"]
+        }
+      },
+      remixProviderClient: {
+        async createJob(payload) {
+          providerCalls.push(payload);
+          return {
+            job_id: "job_mask_001",
+            job_type: payload.job_type,
+            status: "queued",
+            created_at: "2026-06-01T10:00:00Z",
+            updated_at: "2026-06-01T10:00:00Z"
+          };
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_provider_start",
+      estimateId: estimated.estimateId
+    });
+
+    assert.equal(providerCalls.length, 1);
+    assert.equal(providerCalls[0].job_type, "mask_edit");
+    assert.equal(providerCalls[0].input.source_type, "base64_data_url");
+    assert.match(providerCalls[0].input.source, /^data:video\/mp4;base64,/);
+    assert.equal(providerCalls[0].params.operation_type, "watermark_cover");
+    assert.deepEqual(providerCalls[0].params.regions, [region()]);
+    assert.equal(providerCalls[0].params.mask_source.mode, "manual");
+    assert.equal(providerCalls[0].params.mask_source.regions[0].label, "watermark");
+    assert.equal(providerCalls[0].callback_url, null);
+    assert.equal(providerCalls[0].options.priority, 0);
+
+    const task = started.remix.tasks[0];
+    assert.equal(task.providerJobId, "job_mask_001");
+    assert.equal(task.seedanceTaskId, "job_mask_001");
+    assert.equal(task.modelVideo, "video_aigc");
+    assert.equal(task.status, "queued");
+    assert.equal(task.remoteUrlStored, false);
+    assert.equal(started.remix.providerJob.jobId, "job_mask_001");
+    assert.equal(started.remix.providerJob.status, "queued");
+    assert.equal(started.remix.status, "queued");
+    assert.equal(started.remix.outputs.length, 0);
+    assert.equal(started.downloadSummary.packageReady, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix detail polls video platform job and materializes succeeded output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-provider-detail-"));
+  try {
+    const providerCalls = [];
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      remixProviderClient: {
+        async createJob(payload) {
+          providerCalls.push(["create", payload]);
+          return {
+            job_id: "job_mask_done",
+            job_type: "mask_edit",
+            status: "queued"
+          };
+        },
+        async getJob(jobId) {
+          providerCalls.push(["detail", jobId]);
+          return {
+            job_id: jobId,
+            job_type: "mask_edit",
+            status: "succeeded",
+            finished_at: "2026-06-01T10:03:00Z"
+          };
+        },
+        async downloadJob(jobId) {
+          providerCalls.push(["download", jobId]);
+          return Buffer.from("remote processed video");
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_provider_detail_start",
+      estimateId: estimated.estimateId
+    });
+
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+
+    assert.deepEqual(providerCalls.map((item) => item[0]), ["create", "detail", "download"]);
+    assert.equal(detail.remix.status, "preview_required");
+    assert.equal(detail.remix.providerJob.jobId, "job_mask_done");
+    assert.equal(detail.remix.providerJob.status, "succeeded");
+    assert.equal(detail.remix.outputs.length, 1);
+    assert.equal(detail.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(detail.remix.outputs[0].downloadEligible, false);
+    assert.equal(detail.remix.tasks[0].status, "qc");
+    assert.equal(detail.remix.tasks[0].providerJobId, "job_mask_done");
+    assert.equal(existsSync(join(ctx.userProjectRoot, detail.remix.outputs[0].filePath)), true);
+    assert.equal(await readFile(join(ctx.userProjectRoot, detail.remix.outputs[0].filePath), "utf8"), "remote processed video");
+    assert.equal(existsSync(join(wangzhuanPaths(ctx).remixDir, started.remix.remixId, "qc", `${detail.remix.outputs[0].outputId}.json`)), true);
+    assert.equal(detail.downloadSummary.packageReady, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix detail keeps polling pending jobs and materializes review-required output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-provider-review-"));
+  try {
+    const providerCalls = [];
+    let detailCount = 0;
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      remixProviderClient: {
+        async createJob(payload) {
+          providerCalls.push(["create", payload]);
+          return {
+            job_id: "job_review_required",
+            job_type: "ai_remove",
+            status: "pending"
+          };
+        },
+        async getJob(jobId) {
+          providerCalls.push(["detail", jobId]);
+          detailCount += 1;
+          return {
+            job_id: jobId,
+            job_type: "ai_remove",
+            status: detailCount === 1 ? "pending" : "review_required",
+            updated_at: "2026-06-01T10:02:00Z"
+          };
+        },
+        async downloadJob(jobId) {
+          providerCalls.push(["download", jobId]);
+          return Buffer.from("review required video");
+        }
+      }
+    });
+    const uploaded = await uploadRemixSource(ctx, sourceUpload());
+    const startRes = await startDirectMaskEdit(ctx, {
+      idempotencyKey: "idem_s7_review_required_start",
+      sourceId: uploaded.sourceId,
+      regions: [region("watermark")],
+      maskDataUrl: `data:image/png;base64,${Buffer.from("mask").toString("base64")}`
+    });
+
+    const pending = await getRemixDetail(ctx, startRes.remix.remixId);
+    const review = await getRemixDetail(ctx, startRes.remix.remixId);
+
+    assert.equal(pending.remix.status, "queued");
+    assert.equal(pending.remix.providerJob.status, "pending");
+    assert.equal(review.remix.status, "preview_required");
+    assert.equal(review.remix.providerJob.status, "review_required");
+    assert.equal(review.remix.outputs.length, 1);
+    assert.equal(review.remix.outputs[0].qcStatus, "manual_required");
+    assert.deepEqual(providerCalls.map((item) => item[0]), ["create", "detail", "detail", "download"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stop remix marks active provider job stopped and releases pipeline start lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-stop-remix-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      remixProviderClient: {
+        async createJob() {
+          return {
+            job_id: "job_stop_me",
+            job_type: "mask_edit",
+            status: "running"
+          };
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimatedRemix = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const startedRemix = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_stop_remix_start",
+      estimateId: estimatedRemix.estimateId
+    });
+    assert.equal(startedRemix.remix.status, "running");
+
+    const checked = await checkReferenceVideo(ctx, referenceUpload());
+    await decomposeReferenceVideo(ctx, {
+      idempotencyKey: "idem_s7_stop_remix_decompose",
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      decomposition: decomposition()
+    });
+    const estimatedBatch = await estimateBatch(ctx, {
+      templateId: template.templateId,
+      versionId: template.versionId,
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      targetChannel: "tiktok_ads",
+      targetRegion: "US",
+      language: "en-US",
+      promiseLevel: "strong_conversion",
+      durationSec: 15,
+      variantCount: 1,
+      requestedConcurrency: 1,
+      outputRatio: "9:16"
+    });
+    await assert.rejects(
+      () => startBatchFromEstimate(ctx, {
+        idempotencyKey: "idem_s7_stop_remix_locked_batch",
+        estimateId: estimatedBatch.estimate.estimateId
+      }),
+      { code: "batch_already_running" }
+    );
+
+    const stopped = await stopRemix(ctx, startedRemix.remix.remixId, { reason: "user_cancelled" });
+    assert.equal(stopped.remix.status, "stopped");
+    assert.equal(stopped.remix.stopReason, "user_cancelled");
+    assert.equal(stopped.remix.tasks.every((task) => task.status === "stopped"), true);
+    assert.equal(stopped.remix.tasks[0].errorCode, "user_cancelled");
+    assert.equal(stopped.downloadSummary.packageReady, false);
+
+    const detail = await getRemixDetail(ctx, startedRemix.remix.remixId);
+    assert.equal(detail.remix.status, "stopped");
+
+    const startedBatch = await startBatchFromEstimate(ctx, {
+      idempotencyKey: "idem_s7_stop_remix_unlocked_batch",
+      estimateId: estimatedBatch.estimate.estimateId
+    });
+    assert.equal(startedBatch.batch.status, "queued");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

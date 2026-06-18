@@ -1,0 +1,100 @@
+{
+  "scriptCompleted": true,
+  "files": [
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "config.json",
+      "language": "json",
+      "sizeLines": 16,
+      "fileCategory": "config"
+    },
+    {
+      "path": "package-release.ps1",
+      "language": "powershell",
+      "sizeLines": 89,
+      "fileCategory": "script"
+    },
+    {
+      "path": "public/app.js",
+      "language": "javascript",
+      "sizeLines": 1597,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/comic.html",
+      "language": "html",
+      "sizeLines": 314,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/comic.js",
+      "language": "javascript",
+      "sizeLines": 680,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/index.html",
+      "language": "html",
+      "sizeLines": 312,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/styles.css",
+      "language": "css",
+      "sizeLines": 2164,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 185,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "server.mjs",
+      "language": "javascript",
+      "sizeLines": 2927,
+      "fileCategory": "code"
+    },
+    {
+      "path": "start-windows.bat",
+      "language": "batch",
+      "sizeLines": 14,
+      "fileCategory": "script"
+    },
+    {
+      "path": "start-windows.ps1",
+      "language": "powershell",
+      "sizeLines": 11,
+      "fileCategory": "script"
+    }
+  ],
+  "totalFiles": 12,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "small",
+  "stats": {
+    "filesScanned": 12,
+    "byCategory": {
+      "code": 4,
+      "config": 1,
+      "script": 3,
+      "markup": 3,
+      "docs": 1
+    },
+    "byLanguage": {
+      "unknown": 1,
+      "json": 1,
+      "powershell": 2,
+      "javascript": 3,
+      "html": 2,
+      "css": 1,
+      "markdown": 1,
+      "batch": 1
+    }
+  }
+}

@@ -62,7 +62,7 @@
         </section>
 
         <section class="metrics wz-metrics" aria-label="改造概览">
-          <div><strong id="remixTemplateCount">0</strong><span>模板</span></div>
+          <div><strong id="remixTemplateCount">0</strong><span>源素材</span></div>
           <div><strong id="remixRegionCount">0</strong><span>区域</span></div>
           <div><strong id="remixOutputCount">0</strong><span>输出</span></div>
           <div><strong id="remixDownloadCount">0</strong><span>可下载</span></div>
@@ -70,72 +70,67 @@
 
         <div id="remixGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
 
-        <section class="wz-grid remix-grid">
+        <section class="wz-flow-map" aria-label="流程导览">
+          <span><b>1</b>源素材输入</span>
+          <i aria-hidden="true"></i>
+          <span><b>2</b>区域与能力</span>
+          <i aria-hidden="true"></i>
+          <span><b>3</b>预览与交付</span>
+        </section>
+
+        <section class="wz-workbench remix-workbench" aria-label="竞品素材快速改造工作流">
+          <section id="remix-left-rail" class="wz-flow-column wz-flow-rail" data-flow-step="source-assets" aria-label="源素材输入">
+            <div class="wz-flow-label">
+              <span>源素材输入</span>
+              <strong>上传源文件 / 读取基础规格</strong>
+            </div>
           <section class="panel wz-panel">
             <div class="panel-head">
-              <h2>源素材</h2>
-              <button id="remixUseSampleBtn" class="mini ghost" type="button">使用样例</button>
+              <h2>源素材输入</h2>
             </div>
             <input id="remixSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
-            <div class="wz-inline-form">
-              <label>时长 <input id="remixDuration" type="number" min="0" max="90" value="15" /></label>
-              <label>宽度 <input id="remixWidth" type="number" value="720" /></label>
-              <label>高度 <input id="remixHeight" type="number" value="1280" /></label>
-            </div>
             <button id="remixUploadBtn" type="button">上传并检查</button>
             <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
           </section>
-
-          <section class="panel wz-panel">
-            <div class="panel-head">
-              <h2>改造参数</h2>
-              <button id="remixAddRegionBtn" class="mini" type="button">添加区域</button>
-            </div>
-            <label>产品模板
-              <select id="remixTemplateSelect"></select>
-            </label>
-            <label>改造类型
-              <select id="remixOperationType">
-                <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
-                <option value="logo_icon_cover_or_replace">Logo/Icon 区域遮挡或替换</option>
-                <option value="watermark_cover" selected>水印区域遮挡</option>
-              </select>
-            </label>
-            <label>目标渠道
-              <select id="remixTargetChannel">
-                <option value="tiktok_ads" selected>TikTok Ads</option>
-                <option value="meta_ads">Meta Ads</option>
-                <option value="google_ads">Google Ads</option>
-                <option value="unity_ads">Unity Ads</option>
-                <option value="iron_source">ironSource</option>
-                <option value="generic">通用</option>
-              </select>
-            </label>
-            <div id="remixRegionsBox" class="wz-region-list"></div>
           </section>
 
-          <section class="panel wz-panel">
+          <section id="remix-main-flow" class="wz-flow-column wz-flow-main" data-flow-step="region-rules" aria-label="区域与能力">
+            <div class="wz-flow-label">
+              <span>区域与能力</span>
+              <strong>框选多个区域 / 生成单张 mask / 提交处理</strong>
+            </div>
+          <section class="panel wz-panel remix-preview-panel">
             <div class="panel-head">
-              <h2>区域预览</h2>
-              <button id="remixDefaultRegionBtn" class="mini ghost" type="button">默认水印区</button>
+              <h2>Mask 编辑窗口</h2>
+              <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
             </div>
-            <div class="wz-region-canvas" aria-label="归一化区域预览">
-              <div id="remixRegionRect" class="wz-region-rect"></div>
+            <div id="remixMaskEditor" class="wz-region-canvas remix-mask-editor" aria-label="Mask 编辑窗口，方向键移动选中区域，Shift 加方向键调整大小" tabindex="0">
+              <div id="remixMaskMediaLayer" class="remix-mask-media" aria-hidden="true"></div>
+              <div class="remix-mask-empty" data-mask-empty>上传源素材后框选多个区域</div>
+              <div id="remixMaskLayer" class="remix-mask-layer"></div>
             </div>
-            <div class="wz-warning">区域仅记录 bbox 或描述，不自动识别画面产品名、icon 或水印残留。</div>
+            <div class="wz-warning">框选区域会合成一张 mask 预览图；确认后提交视频处理平台 ai_remove 手动任务。</div>
           </section>
 
-          <section class="panel wz-panel">
+          <section class="panel wz-panel remix-mask-preview-panel">
             <div class="panel-head">
-              <h2>能力估算</h2>
-              <button id="remixEstimateBtn" class="mini" type="button">估算能力</button>
+              <h2>Mask 区域预览</h2>
+              <span id="remixMaskSummary">未生成</span>
             </div>
-            <div id="remixEstimateBox" class="wz-estimate empty-line">尚未估算</div>
+            <div class="remix-mask-preview">
+              <canvas id="remixMaskPreviewCanvas" width="720" height="1280" aria-label="合成 mask 预览图"></canvas>
+            </div>
             <div class="modal-actions wz-actions">
-              <button id="remixStartBtn" type="button" disabled>开始改造</button>
+              <button id="remixMaskConfirmBtn" type="button" disabled>确认并调用接口</button>
             </div>
           </section>
+          </section>
 
+          <aside id="remix-right-rail" class="wz-flow-column wz-flow-rail" data-flow-step="preview-delivery" aria-label="预览与交付">
+            <div class="wz-flow-label">
+              <span>预览与交付</span>
+              <strong>处理状态 / 人工确认 / 下载结果</strong>
+            </div>
           <section class="panel wz-panel wz-wide">
             <div class="panel-head">
               <h2>处理状态与预览确认</h2>
@@ -155,6 +150,7 @@
             </div>
             <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
           </section>
+          </aside>
         </section>
       </section>
     </main>

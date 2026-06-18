@@ -1,5 +1,14 @@
 import { appendFile, mkdir, open, readFile, rename, stat, truncate, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+
+import {
+  deleteObject,
+  deleteRecordedAssetMetadata,
+  getRecordedAssetMetadata,
+  objectStorageEnabled,
+  projectStorageDescriptor,
+  uploadProjectAsset
+} from "../object-storage.mjs";
 
 const PIPELINE_DIR = "网赚管线";
 const RECORD_DIR = "批处理记录";
@@ -34,6 +43,79 @@ export function toProjectRelative(userProjectRoot, fullPath) {
     .slice(userProjectRoot.length)
     .replace(/^[\\/]+/, "")
     .replace(/\\/g, "/");
+}
+
+function currentUserId(context) {
+  return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
+}
+
+function localPreviewUrl(relativePath) {
+  return `/file?path=${encodeURIComponent(relativePath)}`;
+}
+
+export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhuan_file") {
+  if (!objectStorageEnabled()) return null;
+  try {
+    return await uploadProjectAsset({
+      fullPath,
+      userRoot: context.userProjectRoot,
+      sharedRoot: context.sharedProjectRoot,
+      userId: currentUserId(context),
+      assetKind
+    });
+  } catch (error) {
+    console.warn(`[object-storage] failed to upload ${assetKind}: ${error.message}`);
+    return null;
+  }
+}
+
+export async function getWangzhuanAssetMetadata(context, relativePath) {
+  if (!relativePath) return null;
+  try {
+    const fullPath = resolve(context.userProjectRoot, String(relativePath));
+    const descriptor = projectStorageDescriptor({
+      fullPath,
+      userRoot: context.userProjectRoot,
+      sharedRoot: context.sharedProjectRoot,
+      userId: currentUserId(context)
+    });
+    return getRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function previewUrlForWangzhuanAsset(context, relativePath) {
+  const metadata = await getWangzhuanAssetMetadata(context, relativePath);
+  return metadata?.storageUrl || localPreviewUrl(relativePath);
+}
+
+export async function removeWangzhuanAssetFromObjectStorage(context, fullPath) {
+  if (!objectStorageEnabled()) return null;
+  try {
+    const descriptor = projectStorageDescriptor({
+      fullPath,
+      userRoot: context.userProjectRoot,
+      sharedRoot: context.sharedProjectRoot,
+      userId: currentUserId(context)
+    });
+    const metadata = await getRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+    if (metadata?.storageKey) await deleteObject(metadata.storageKey);
+    await deleteRecordedAssetMetadata({
+      root: descriptor.root,
+      relativePath: descriptor.relativePath
+    });
+    return metadata;
+  } catch (error) {
+    console.warn(`[object-storage] failed to delete object: ${error.message}`);
+    return null;
+  }
 }
 
 export async function ensureParent(target) {

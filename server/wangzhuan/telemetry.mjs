@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { compactTimestamp, shortHex } from "./ids.mjs";
+import { recordMysqlTelemetryEvent } from "./mysql-facts.mjs";
 import { appendJsonl, wangzhuanPaths } from "./storage.mjs";
 
 function currentUser(context) {
@@ -103,6 +104,8 @@ export async function recordTelemetryEvent(context, event, payload = {}, options
     audit = { ...telemetry };
     await appendJsonl(paths.auditPath, audit);
   }
+
+  await recordMysqlTelemetryEvent(context, telemetry, audit);
 
   return { telemetry, audit };
 }
