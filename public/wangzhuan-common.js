@@ -244,6 +244,7 @@ export function renderError(target, error, context = "") {
     ${missing.length ? `<small>缺失字段：${missing.map(escapeHtml).join("、")}</small>` : ""}
     ${capability ? `<small>能力状态：${escapeHtml(capability.status || "unknown")}；provider：${escapeHtml(capability.provider || "unknown")}</small>` : ""}
     ${error?.data?.status ? `<small>上游状态码：${escapeHtml(error.data.status)}</small>` : ""}
+    ${error?.data?.inputMode ? `<small>模型输入：${escapeHtml(error.data.inputMode)}</small>` : ""}
     ${error?.data?.upstreamMessage ? `<small>上游信息：${escapeHtml(error.data.upstreamMessage)}</small>` : ""}
     ${validationSummary.length ? `<small>上游校验：${validationSummary.map(escapeHtml).join("；")}</small>` : ""}
     ${error?.requestId ? `<small>requestId：${escapeHtml(error.requestId)}</small>` : ""}

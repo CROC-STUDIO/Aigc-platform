@@ -158,115 +158,145 @@
             <!-- 列3：改写分支（可扇出） -->
             <div class="wz-col wz-col-branches" data-step="3">
               <div class="wz-col-label">
-                <b>3</b> 产品改写
-                <button id="wzAddBranchBtn" class="mini ghost wz-add-branch" type="button" title="添加一个并行的改写分支">+ 添加改写分支</button>
+                <b>3</b> 产品改写（可裂变 3.1 / 3.2 / 3.3…）
+                <button id="wzAddBranchBtn" class="mini ghost wz-add-branch" type="button" title="裂变一个完整的改写子节点">+ 裂变子节点</button>
               </div>
               <div class="wz-branches" id="wzBranches">
-                <section class="wz-node wz-node-branch" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
+                <section class="wz-node wz-node-branch collapsed" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
                   <div class="panel-head">
-                    <h2>改写分支 #1</h2>
+                    <h2 class="wz-branch-title">改写 3.1</h2>
                     <button id="wzCreateTemplateBtn" class="mini" type="button">保存模板</button>
                   </div>
                   <div class="wz-node-body">
-                    <div class="wz-template-form wz-primary-form">
-                      <label>当前项目 <input id="wzProjectName" type="text" value="当前项目" /></label>
-                      <label>批次名 <input id="wzBatchName" type="text" value="wangzhuan_batch" /></label>
-                      <label>选择模板
-                        <select id="wzTemplateSelect"></select>
-                      </label>
-                      <label>产品名 <input id="wzProductName" type="text" value="Perkplay" /></label>
-                      <label>产品链接 <input id="wzProductLink" type="url" value="https://play.google.com/store/apps/details?id=perkplay" /></label>
-                      <label>CTA <input id="wzCta" type="text" value="Download now" /></label>
-                      <label>语言 <input id="wzLanguage" type="text" value="en-US" /></label>
-                      <label>地区 <input id="wzRegions" type="text" value="US" /></label>
-                      <label>默认渠道
-                        <select id="wzTemplateChannel">
-                          <option value="meta_ads">Meta Ads</option>
-                          <option value="tiktok_ads">TikTok Ads</option>
-                          <option value="google_ads">Google Ads</option>
-                          <option value="unity_ads">Unity Ads</option>
-                          <option value="iron_source">ironSource</option>
-                          <option value="generic">通用</option>
-                        </select>
-                      </label>
-                      <label>承诺等级
-                        <select id="wzPromiseLevel">
-                          <option value="stable">稳健版</option>
-                          <option value="strong_conversion" selected>强转化版</option>
-                          <option value="strong_commitment">强承诺版</option>
-                        </select>
-                      </label>
+                    <div class="wz-subflow">
+                      <section class="wz-subnode" data-sub="1" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head"><span class="wz-subno">3.1.1</span> 📦 产品信息</div>
+                        <div class="wz-subnode-body">
+                          <div class="wz-template-form wz-primary-form">
+                            <label>产品名 <input id="wzProductName" type="text" value="Perkplay" /></label>
+                            <label>产品链接 <input id="wzProductLink" type="url" value="https://play.google.com/store/apps/details?id=perkplay" /></label>
+                            <label>CTA <input id="wzCta" type="text" value="Download now" /></label>
+                            <label>语言 <input id="wzLanguage" type="text" value="en-US" /></label>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="wz-subnode" data-sub="2" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head"><span class="wz-subno">3.1.2</span> 🎯 本次投放</div>
+                        <div class="wz-subnode-body">
+                          <div class="wz-inline-form">
+                            <label>目标渠道
+                              <select id="wzTargetChannel">
+                                <option value="meta_ads">Meta Ads</option>
+                                <option value="tiktok_ads">TikTok Ads</option>
+                                <option value="google_ads">Google Ads</option>
+                                <option value="unity_ads">Unity Ads</option>
+                                <option value="iron_source">ironSource</option>
+                                <option value="generic">通用</option>
+                              </select>
+                            </label>
+                            <label>目标地区 <input id="wzTargetRegion" type="text" value="US" /></label>
+                            <label>素材方向
+                              <select id="wzMaterialDirection">
+                                <option value="痛点开场">痛点开场</option>
+                                <option value="真人反差">真人反差</option>
+                                <option value="社交证明">社交证明</option>
+                                <option value="余额刺激" selected>余额刺激</option>
+                                <option value="提现按钮">提现按钮</option>
+                                <option value="新用户奖励">新用户奖励</option>
+                                <option value="通勤场景">通勤场景</option>
+                                <option value="家务间隙">家务间隙</option>
+                                <option value="睡前场景">睡前场景</option>
+                                <option value="强 CTA">强 CTA</option>
+                              </select>
+                            </label>
+                            <label>口播风格 <input id="wzVoiceoverStyle" type="text" value="Natural local host" /></label>
+                            <label>承诺等级
+                              <select id="wzPromiseLevel">
+                                <option value="stable">稳健版</option>
+                                <option value="strong_conversion" selected>强转化版</option>
+                                <option value="strong_commitment">强承诺版</option>
+                              </select>
+                            </label>
+                          </div>
+                          <div id="wzRulesBox" class="wz-list empty-line">等待加载渠道规则</div>
+                          <div class="modal-actions wz-actions">
+                            <button id="wzLoadRulesBtn" class="ghost" type="button">刷新渠道规则</button>
+                          </div>
+                          <details id="wzTruthDetails" class="wz-details">
+                            <summary>强承诺真实规则</summary>
+                            <div id="wzTruthFields" class="wz-template-form"></div>
+                          </details>
+                        </div>
+                      </section>
+
+                      <section class="wz-subnode" data-sub="3" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head"><span class="wz-subno">3.1.3</span> 🗂 模板与批次默认值</div>
+                        <div class="wz-subnode-body">
+                          <div class="wz-template-form">
+                            <label>当前项目 <input id="wzProjectName" type="text" value="当前项目" /></label>
+                            <label>批次名 <input id="wzBatchName" type="text" value="wangzhuan_batch" /></label>
+                            <label>选择模板
+                              <select id="wzTemplateSelect"></select>
+                            </label>
+                            <label>模板名 <input id="wzDisplayName" type="text" value="Perkplay_US_强转化" /></label>
+                            <label>生成模式
+                              <select id="wzGenerationMode">
+                                <option value="reference_batch" selected>参考视频批量裂变</option>
+                              </select>
+                            </label>
+                            <label>默认渠道
+                              <select id="wzTemplateChannel">
+                                <option value="meta_ads">Meta Ads</option>
+                                <option value="tiktok_ads">TikTok Ads</option>
+                                <option value="google_ads">Google Ads</option>
+                                <option value="unity_ads">Unity Ads</option>
+                                <option value="iron_source">ironSource</option>
+                                <option value="generic">通用</option>
+                              </select>
+                            </label>
+                            <label>地区 <input id="wzRegions" type="text" value="US" /></label>
+                            <label>默认时长
+                              <select id="wzDefaultDuration">
+                                <option value="15">15s</option>
+                                <option value="30">30s</option>
+                              </select>
+                            </label>
+                            <label>Ending <input id="wzEnding" type="text" value="Claim your bonus today" /></label>
+                            <label>币种 <input id="wzCurrencySymbol" type="text" value="$" /></label>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="wz-subnode" data-sub="4" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head"><span class="wz-subno">3.1.4</span> 🎬 产品素材资产</div>
+                        <div class="wz-subnode-body">
+                          <div class="wz-template-form">
+                            <label>产品图标 <input id="wzProductIconFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                            <label>产品截图 <input id="wzProductScreenshotFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                            <label>产品录屏 <input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
+                            <label>结尾素材 <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                            <label>人物 <input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                            <label>奖励元素 <input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="wz-subnode" data-sub="5" data-port-in="1">
+                        <div class="wz-subnode-head"><span class="wz-subno">3.1.5</span> ✍️ 提示词配置</div>
+                        <div class="wz-subnode-body">
+                          <label class="wz-field-label">脚本裂变约束
+                            <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="填写需要保留或变化的特征，例如：保留三段式节奏，替换为我方产品 icon、人物、奖励元素，生成 N 个不同开头。"></textarea>
+                          </label>
+                          <label class="wz-field-label">全局提示词 / 单素材特殊要求
+                            <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false">Make the phone UI clear, keep the host natural, show the uploaded product icon, and include the product slogan as subtitle text.</textarea>
+                          </label>
+                          <label class="wz-field-label">限定提示词
+                            <textarea id="wzNegativePrompt" class="wz-json-box compact" spellcheck="false">No competitor logo, no fake transfer proof, no guaranteed payout, no invented exact cash amount, no wrong currency symbol, no watermark residue, no distorted icon.</textarea>
+                          </label>
+                        </div>
+                      </section>
                     </div>
-                    <div class="wz-inline-form">
-                      <label>目标渠道
-                        <select id="wzTargetChannel">
-                          <option value="meta_ads">Meta Ads</option>
-                          <option value="tiktok_ads">TikTok Ads</option>
-                          <option value="google_ads">Google Ads</option>
-                          <option value="unity_ads">Unity Ads</option>
-                          <option value="iron_source">ironSource</option>
-                          <option value="generic">通用</option>
-                        </select>
-                      </label>
-                      <label>目标地区 <input id="wzTargetRegion" type="text" value="US" /></label>
-                      <label>素材方向
-                        <select id="wzMaterialDirection">
-                          <option value="痛点开场">痛点开场</option>
-                          <option value="真人反差">真人反差</option>
-                          <option value="社交证明">社交证明</option>
-                          <option value="余额刺激" selected>余额刺激</option>
-                          <option value="提现按钮">提现按钮</option>
-                          <option value="新用户奖励">新用户奖励</option>
-                          <option value="通勤场景">通勤场景</option>
-                          <option value="家务间隙">家务间隙</option>
-                          <option value="睡前场景">睡前场景</option>
-                          <option value="强 CTA">强 CTA</option>
-                        </select>
-                      </label>
-                      <label>口播风格 <input id="wzVoiceoverStyle" type="text" value="Natural local host" /></label>
-                    </div>
-                    <details class="wz-details wz-advanced-settings">
-                      <summary>高级设置：模板资产、提示词和生成默认值</summary>
-                      <div class="wz-template-form">
-                        <label>生成模式
-                          <select id="wzGenerationMode">
-                            <option value="reference_batch" selected>参考视频批量裂变</option>
-                          </select>
-                        </label>
-                        <label>模板名 <input id="wzDisplayName" type="text" value="Perkplay_US_强转化" /></label>
-                        <label>Ending <input id="wzEnding" type="text" value="Claim your bonus today" /></label>
-                        <label>币种 <input id="wzCurrencySymbol" type="text" value="$" /></label>
-                        <label>默认时长
-                          <select id="wzDefaultDuration">
-                            <option value="15">15s</option>
-                            <option value="30">30s</option>
-                          </select>
-                        </label>
-                        <label>产品图标 <input id="wzProductIconFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                        <label>产品截图 <input id="wzProductScreenshotFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                        <label>产品录屏 <input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
-                        <label>结尾素材 <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                        <label>人物 <input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                        <label>奖励元素 <input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                      </div>
-                      <label>脚本裂变约束
-                        <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="填写需要保留或变化的特征，例如：保留三段式节奏，替换为我方产品 icon、人物、奖励元素，生成 N 个不同开头。"></textarea>
-                      </label>
-                      <label>全局提示词 / 单素材特殊要求
-                        <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false">Make the phone UI clear, keep the host natural, show the uploaded product icon, and include the product slogan as subtitle text.</textarea>
-                      </label>
-                      <label>限定提示词
-                        <textarea id="wzNegativePrompt" class="wz-json-box compact" spellcheck="false">No competitor logo, no fake transfer proof, no guaranteed payout, no invented exact cash amount, no wrong currency symbol, no watermark residue, no distorted icon.</textarea>
-                      </label>
-                    </details>
-                    <div id="wzRulesBox" class="wz-list empty-line">等待加载渠道规则</div>
-                    <div class="modal-actions wz-actions">
-                      <button id="wzLoadRulesBtn" class="ghost" type="button">刷新渠道规则</button>
-                    </div>
-                    <details id="wzTruthDetails" class="wz-details">
-                      <summary>强承诺真实规则</summary>
-                      <div id="wzTruthFields" class="wz-template-form"></div>
-                    </details>
                   </div>
                 </section>
               </div>

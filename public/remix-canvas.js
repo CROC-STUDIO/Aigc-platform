@@ -270,33 +270,37 @@
   }
 
   // --- Soft pipeline state (done / current / pending) ---------------------
-  // Pure visual layer; observes existing DOM signals. No locking.
+  // Drives off BACKEND-populated DOM signals only (`.empty-line` is present
+  // while a box is empty and removed when real server data arrives), plus the
+  // mask summary text. Default form values never affect these. Monotonic.
+  const hasData = (elId) => {
+    const el = document.getElementById(elId);
+    return !!el && !el.classList.contains("empty-line");
+  };
+
   const STAGES = [
     {
       step: "1",
       nodes: ["remixNodeSource"],
-      done: () => sig("remixSourceBox", "未上传源素材")
+      // server returned source spec
+      done: () => hasData("remixSourceBox")
     },
     {
       step: "2",
       nodes: ["remixNodeMask", "remixNodeMaskPreview"],
-      // done once the mask preview is generated (summary leaves "未生成")
-      done: () => sig("remixMaskSummary", "未生成")
+      // mask composed (summary leaves the "未生成" placeholder)
+      done: () => {
+        const t = (document.getElementById("remixMaskSummary")?.textContent || "").trim();
+        return t.length > 0 && t !== "未生成";
+      }
     },
     {
       step: "3",
       nodes: ["remixNodeDelivery", "remixNodeGallery"],
-      done: () =>
-        sig("remixDetailBox", "暂无改造任务") || sig("remixGalleryBox", "暂无可展示结果")
+      // a remix task / result exists
+      done: () => hasData("remixDetailBox") || hasData("remixGalleryBox")
     }
   ];
-
-  function sig(elId, placeholder) {
-    const el = document.getElementById(elId);
-    if (!el) return false;
-    const txt = (el.textContent || "").trim();
-    return txt.length > 0 && txt !== placeholder;
-  }
 
   const STATE_LABEL = { done: "已完成", current: "进行中", pending: "待开始" };
 
@@ -315,9 +319,16 @@
 
   function refreshPipelineState() {
     ensureStatePills();
-    const doneFlags = STAGES.map((s) => {
+    const raw = STAGES.map((s) => {
       try { return !!s.done(); } catch (_) { return false; }
     });
+    const doneFlags = [];
+    let prevDone = true;
+    for (const d of raw) {
+      const done = prevDone && d;
+      doneFlags.push(done);
+      prevDone = done;
+    }
     let currentIdx = doneFlags.findIndex((d) => !d);
     if (currentIdx === -1) currentIdx = STAGES.length - 1;
 
@@ -351,7 +362,7 @@
     const mo = new MutationObserver(refreshPipelineState);
     for (const elId of ["remixSourceBox", "remixMaskSummary", "remixDetailBox", "remixGalleryBox"]) {
       const el = document.getElementById(elId);
-      if (el) mo.observe(el, { childList: true, characterData: true, subtree: true });
+      if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }
   }
   refreshPipelineState();

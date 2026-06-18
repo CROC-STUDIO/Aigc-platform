@@ -96,6 +96,25 @@
       path.setAttribute("class", `wz-canvas-link ${cls}${done}`);
       svg.appendChild(path);
     }
+
+    // Second level: vertical connectors between sub-nodes of EXPANDED branches.
+    for (const branch of document.querySelectorAll(".wz-node-branch")) {
+      if (branch.classList.contains("collapsed")) continue; // sub-flow hidden
+      const subs = [...branch.querySelectorAll(".wz-subnode")];
+      for (let i = 0; i < subs.length - 1; i++) {
+        const a = pos(subs[i]);
+        const b = pos(subs[i + 1]);
+        const x1 = a.x + a.w / 2;
+        const y1 = a.y + a.h;
+        const x2 = b.x + b.w / 2;
+        const y2 = b.y;
+        const dy = Math.max(16, (y2 - y1) * 0.5);
+        const path = document.createElementNS(SVGNS, "path");
+        path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + dy} ${x2} ${y2 - dy} ${x2} ${y2}`);
+        path.setAttribute("class", "wz-canvas-link flow-purple wz-sublink");
+        svg.appendChild(path);
+      }
+    }
   }
 
   const scheduleDraw = (() => {
@@ -119,48 +138,85 @@
     const ro = new ResizeObserver(scheduleDraw);
     ro.observe(canvas);
     for (const n of canvas.querySelectorAll(".wz-node")) ro.observe(n);
+    for (const s of canvas.querySelectorAll(".wz-subnode")) ro.observe(s);
   }
 
   // --- Fan-out: add / remove rewrite branches -----------------------------
+  // Each branch is a FULL rewrite form (a clone of node #3.1). The first
+  // branch keeps all real IDs and drives the backend; clones have their
+  // id/name attributes stripped (so they never collide) and stay fillable —
+  // ready to wire up once the backend accepts multiple drafts.
   const branchesWrap = document.getElementById("wzBranches");
   const addBtn = document.getElementById("wzAddBranchBtn");
-  let branchSeq = 1; // branch #1 is the real node
+  const baseNode = document.getElementById("wzNodeRewrite");
+  let branchSeq = 1; // 3.1 is the real node
 
-  function addBranch() {
-    branchSeq += 1;
-    const index = branchSeq;
-    const node = document.createElement("section");
-    node.className = "wz-node wz-node-branch wz-node-placeholder";
-    node.dataset.node = "rewrite";
-    node.dataset.branch = String(index - 1);
-    node.dataset.portIn = "1";
-    node.dataset.portOut = "1";
-    node.innerHTML = `
-      <div class="panel-head">
-        <h2>改写分支 #${index}</h2>
-        <button class="mini ghost wz-branch-remove" type="button">移除</button>
-      </div>
-      <div class="wz-node-body">
-        <div class="wz-branch-note">
-          扩展位：并行改写分支已在画布中预留。<br />
-          多分支的参数填写与提交将在后端「一次拆解 → 多组改写」接口就绪后启用；
-          当前请使用 #1 分支跑通单条管线。
-        </div>
-      </div>`;
-    branchesWrap.appendChild(node);
+  function wireBranch(node) {
     ensureCollapseButtons();
     node.querySelector(".wz-branch-remove")?.addEventListener("click", () => {
       node.remove();
+      renumberBranches();
       scheduleDraw();
     });
     if ("ResizeObserver" in window) {
-      // observe the new node too
       try {
         const ro = new ResizeObserver(scheduleDraw);
         ro.observe(node);
+        for (const s of node.querySelectorAll(".wz-subnode")) ro.observe(s);
       } catch (_) {}
     }
-    node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }
+
+  function renumberBranches() {
+    const nodes = [...branchesWrap.querySelectorAll(".wz-node-branch")];
+    nodes.forEach((n, i) => {
+      const title = n.querySelector(".wz-branch-title");
+      if (title) title.textContent = `改写 3.${i + 1}`;
+      // Renumber this branch's sub-nodes → 3.{i+1}.{j+1}
+      const subs = [...n.querySelectorAll(".wz-subnode")];
+      subs.forEach((s, j) => {
+        const tag = s.querySelector(".wz-subno");
+        if (tag) tag.textContent = `3.${i + 1}.${j + 1}`;
+      });
+    });
+  }
+
+  function addBranch() {
+    if (!baseNode) return;
+    branchSeq += 1;
+    const clone = baseNode.cloneNode(true);
+
+    // Strip identity from the clone so it can't break ID-based business JS.
+    clone.removeAttribute("id");
+    clone.classList.add("wz-node-clone");
+    clone.dataset.branch = String(branchSeq - 1);
+    for (const el of clone.querySelectorAll("[id]")) el.removeAttribute("id");
+    for (const el of clone.querySelectorAll("[name]")) el.removeAttribute("name");
+    // Drop state classes/pills carried over from the original.
+    clone.classList.remove("focused", "collapsed", "state-done", "state-current", "state-pending");
+    clone.querySelector(".wz-node-state")?.remove();
+
+    // Replace the "保存模板" button (needs a real ID/handler) with a remove button.
+    const head = clone.querySelector(".panel-head");
+    const saveBtn = head?.querySelector("button");
+    if (saveBtn) {
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "mini ghost wz-branch-remove";
+      rm.textContent = "移除";
+      saveBtn.replaceWith(rm);
+    }
+    // The rules box inside the clone is just a static hint now.
+    const clonedRules = clone.querySelector(".wz-list");
+    if (clonedRules) {
+      clonedRules.className = "wz-list empty-line";
+      clonedRules.textContent = "保存后端多分支接口就绪后自动加载渠道规则";
+    }
+
+    branchesWrap.appendChild(clone);
+    renumberBranches();
+    wireBranch(clone);
+    clone.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
     scheduleDraw();
   }
 
@@ -241,6 +297,18 @@
 
   // Header click: chevron → collapse that node; elsewhere → focus it.
   canvas.addEventListener("click", (event) => {
+    // Second level: clicking a sub-node header focuses that sub-node.
+    const subHead = event.target.closest(".wz-subnode-head");
+    if (subHead) {
+      const sub = subHead.closest(".wz-subnode");
+      if (sub) {
+        for (const s of canvas.querySelectorAll(".wz-subnode")) {
+          s.classList.toggle("focused", s === sub);
+        }
+        sub.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      }
+      return;
+    }
     const head = event.target.closest(".panel-head");
     if (!head) return;
     const node = head.closest(".wz-node");
@@ -363,48 +431,58 @@
   }
 
   // --- Soft pipeline state (done / current / pending) ---------------------
-  // Pure visual layer: observes existing DOM signals to color stages.
-  // Does NOT lock steps and does NOT touch business logic.
+  // Pure visual layer. Drives off BACKEND-populated DOM signals only:
+  // every result box carries `.empty-line` while empty and the business JS
+  // removes it once real server data arrives. Default <input> values never
+  // affect these, so the colors track actual task progress — not form text.
+  // Stages are also monotonic: a step can't be "done" unless the one before
+  // it is (prevents a later node lighting up while step 1 is untouched).
+  const hasData = (id) => {
+    const el = document.getElementById(id);
+    return !!el && !el.classList.contains("empty-line");
+  };
+  const badgeDone = (id, ...waitingWords) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    const txt = (el.textContent || "").trim();
+    return txt.length > 0 && !waitingWords.includes(txt);
+  };
+
   const STAGES = [
     {
       step: "1",
       nodes: ["wzNodeUpload"],
-      // done when the reference box no longer shows the empty placeholder
-      done: () => signalChanged("wzReferenceBox", "未上传参考视频")
+      // reference video info loaded from server
+      done: () => hasData("wzReferenceBox")
     },
     {
       step: "2",
       nodes: ["wzNodeDecompose"],
-      // done when the decomposition textarea has JSON content
-      done: () => (document.getElementById("wzDecompositionText")?.value || "").trim().length > 0
+      // decomposition confirmed/saved → reference box shows success note,
+      // or the decompose button has been disabled after a confirmed save.
+      done: () => hasData("wzReferenceBox") && /拆解已确认|已确认保存/.test(
+        document.getElementById("wzReferenceBox")?.textContent || ""
+      )
     },
     {
       step: "3",
       nodes: ["wzNodeRewrite"],
-      // done when a product name is filled (rewrite params started)
-      done: () => (document.getElementById("wzProductName")?.value || "").trim().length > 0
+      // channel rules loaded for the product (server-driven)
+      done: () => !document.getElementById("wzRulesBox")?.classList.contains("empty-line")
     },
     {
       step: "4",
       nodes: ["wzNodeBatch"],
-      // done when the user confirmed batch limits
-      done: () => !!document.getElementById("wzConfirmLimits")?.checked
+      // a batch exists (badge left the "未开始" placeholder)
+      done: () => badgeDone("wzBatchBadge", "未开始")
     },
     {
       step: "5",
       nodes: ["wzNodeLog", "wzNodeOutput"],
-      // done when results/gallery has content
-      done: () =>
-        signalChanged("wzBatchBox", "暂无批次") || signalChanged("wzGalleryBox", "暂无可展示结果")
+      // results gallery populated by server
+      done: () => hasData("wzGalleryBox")
     }
   ];
-
-  function signalChanged(id, placeholder) {
-    const el = document.getElementById(id);
-    if (!el) return false;
-    const txt = (el.textContent || "").trim();
-    return txt.length > 0 && txt !== placeholder;
-  }
 
   const STATE_LABEL = { done: "已完成", current: "进行中", pending: "待开始" };
 
@@ -432,9 +510,17 @@
 
   function refreshPipelineState() {
     ensureStatePills();
-    const doneFlags = STAGES.map((s) => {
+    const raw = STAGES.map((s) => {
       try { return !!s.done(); } catch (_) { return false; }
     });
+    // Monotonic: a stage counts as done only if every earlier stage is done.
+    const doneFlags = [];
+    let prevDone = true;
+    for (const d of raw) {
+      const done = prevDone && d;
+      doneFlags.push(done);
+      prevDone = done;
+    }
     // current = first not-done stage (or last if all done)
     let currentIdx = doneFlags.findIndex((d) => !d);
     if (currentIdx === -1) currentIdx = STAGES.length - 1;
@@ -465,9 +551,9 @@
   document.addEventListener("change", refreshPipelineState, true);
   if ("MutationObserver" in window) {
     const mo = new MutationObserver(refreshPipelineState);
-    for (const id of ["wzReferenceBox", "wzBatchBox", "wzGalleryBox", "wzDecompositionText"]) {
+    for (const id of ["wzReferenceBox", "wzRulesBox", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
       const el = document.getElementById(id);
-      if (el) mo.observe(el, { childList: true, characterData: true, subtree: true });
+      if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }
   }
   refreshPipelineState();

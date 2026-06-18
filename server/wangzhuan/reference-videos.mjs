@@ -15,6 +15,7 @@ import {
 } from "./mysql-facts.mjs";
 import { previewUrlForWangzhuanAsset, readJsonOrDefault, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { buildPublicUrl } from "../object-storage.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
@@ -469,8 +470,8 @@ async function extractReferenceFrames(context, filePath, timestampsSec) {
 
 async function collectReferenceVideoVisionInputs(context, probe) {
   const videoPath = resolveStoredVideoPath(context, probe.storedPath);
-  const videoBuffer = await readFile(videoPath);
   const mimeType = probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
+  const fileUrl = resolveModelFileUrl(probe);
   const frameCount = clampInteger(
     context.config?.wangzhuan?.llm?.referenceFrameCount,
     DEFAULT_REFERENCE_FRAME_COUNT,
@@ -489,14 +490,57 @@ async function collectReferenceVideoVisionInputs(context, probe) {
       reason: String(error?.message || error?.code || "unknown").slice(0, 160)
     });
   }
+  if (probe.storageUrl && !fileUrl) {
+    warnings.push({
+      code: "reference_video_storage_url_not_external",
+      message: "参考视频存储地址不是可外部访问的 HTTP(S) URL，已回退为本地文件输入",
+      reason: "storage_url_not_http"
+    });
+  }
+  const videoBuffer = fileUrl ? null : await readFile(videoPath);
   return {
     fileName: probe.fileName || basename(videoPath),
     mimeType,
-    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
+    ...(fileUrl ? { fileUrl } : { fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}` }),
     frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
     timestampsSec,
     warnings
   };
+}
+
+function resolveModelFileUrl(probe = {}) {
+  return externalHttpUrl(probe.storageUrl) || directObjectStorageUrl(probe.storageKey) || "";
+}
+
+function externalHttpUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function directObjectStorageUrl(storageKey) {
+  const key = String(storageKey || "").replace(/^\/+/, "");
+  if (!key) return "";
+  if (externalHttpUrl(process.env.S3_PUBLIC_BASE_URL)) {
+    return buildPublicUrl(key, process.env);
+  }
+  const bucket = String(process.env.S3_BUCKET || "").trim();
+  const region = String(process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "").trim();
+  if (!bucket || !region) return "";
+  const endpoint = String(process.env.S3_ENDPOINT || "").trim();
+  const forcePathStyle = ["1", "true", "yes", "on"].includes(String(process.env.S3_FORCE_PATH_STYLE || "").trim().toLowerCase());
+  const encodedKey = key.split("/").map((part) => encodeURIComponent(part)).join("/");
+  if (endpoint) {
+    const url = new URL(endpoint);
+    if (forcePathStyle) return `${url.origin.replace(/\/+$/, "")}/${encodeURIComponent(bucket)}/${encodedKey}`;
+    return `${url.protocol}//${bucket}.${url.host}/${encodedKey}`;
+  }
+  return `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`;
 }
 
 function videoProbePrompt(probe) {
@@ -539,7 +583,15 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
   const userContent = [
     { type: "text", text: promptText }
   ];
-  if (visionInputs.fileDataUrl) {
+  if (visionInputs.fileUrl) {
+    userContent.push({
+      type: "file",
+      file: {
+        filename: visionInputs.fileName || probe.fileName || "reference-video.mp4",
+        file_url: visionInputs.fileUrl
+      }
+    });
+  } else if (visionInputs.fileDataUrl) {
     userContent.push({
       type: "file",
       file: {
@@ -628,7 +680,7 @@ function responsesInputFromMessages(messages = []) {
           return {
             type: "input_file",
             filename: part.file?.filename || "reference-video.mp4",
-            file_data: part.file?.file_data || ""
+            ...(part.file?.file_url ? { file_url: part.file.file_url } : { file_data: part.file?.file_data || "" })
           };
         }
         return part;
@@ -676,6 +728,10 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
     temperature: llmConfig.temperature,
     text: { format: { type: "json_object" } }
   };
+  const hasFileUrlInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_url));
+  const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_data));
   const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
   const chatPayload = {
     model: llmConfig.model,
@@ -705,6 +761,7 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
+      inputMode: hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only",
       reason
     });
   } finally {
@@ -715,6 +772,7 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
       provider: llmConfig.provider,
       model: llmConfig.model,
       status: response.status,
+      inputMode: hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only",
       upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
     });
   }
@@ -742,6 +800,7 @@ export async function draftReferenceVideoDecomposition(context, request = {}) {
       },
       referenceVideo: {
         ...probe,
+        fileUrl: visionInputs.fileUrl,
         fileDataUrl: visionInputs.fileDataUrl,
         frameCount: visionInputs.frames.length
       },

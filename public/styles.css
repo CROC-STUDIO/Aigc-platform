@@ -5136,3 +5136,251 @@ button.mini {
     width: 100%;
   }
 }
+
+/* ============================================================
+   In-node sections (group fields, kill the "duplicate" look)
+   ============================================================ */
+.wz-section {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wz-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #cfd6e6;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+/* Foldable section uses <details>/<summary> */
+details.wz-section-fold {
+  padding: 0;
+}
+
+details.wz-section-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+details.wz-section-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.wz-section-fold > summary::after {
+  content: "▾";
+  margin-left: auto;
+  color: #7f8aa3;
+  font-size: 11px;
+  transition: transform 0.16s ease;
+}
+
+details.wz-section-fold[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+details.wz-section-fold > summary {
+  display: flex;
+  align-items: center;
+}
+
+details.wz-section-fold[open] {
+  padding-bottom: 12px;
+}
+
+details.wz-section-fold > .wz-template-form,
+details.wz-section-fold > .wz-field-label {
+  margin: 0 12px;
+}
+
+details.wz-section-fold > .wz-field-label + .wz-field-label {
+  margin-top: 10px;
+}
+
+/* ============================================================
+   Rewrite sub-nodes (3.1 / 3.2 …): roomy, single-column always
+   ============================================================ */
+.wz-canvas .wz-node-branch {
+  width: 440px;
+}
+
+/* Inside a rewrite sub-node, never use 2-up grids — fields get full width */
+.wz-canvas .wz-node-branch .wz-primary-form,
+.wz-canvas .wz-node-branch .wz-inline-form,
+.wz-canvas .wz-node-branch .wz-template-form {
+  grid-template-columns: 1fr;
+}
+
+/* Focused rewrite sub-node a touch wider for comfort */
+.wz-canvas .wz-node-branch.focused {
+  width: 480px;
+}
+
+@media (max-width: 980px) {
+  .wz-canvas .wz-node-branch,
+  .wz-canvas .wz-node-branch.focused {
+    width: 100%;
+  }
+}
+
+/* ============================================================
+   Rewrite sub-nodes 3.x: make each read as an independent node
+   ============================================================ */
+
+/* The fan-out column gets a subtle dashed frame so the group is obvious */
+.wz-col-branches .wz-branches {
+  gap: 22px;
+  padding: 10px;
+  border: 1px dashed rgba(184, 148, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(184, 148, 255, 0.04);
+}
+
+/* Each 3.x card: stronger border + its own number badge in the header */
+.wz-canvas .wz-node-branch {
+  border-width: 1px;
+  border-color: rgba(184, 148, 255, 0.5);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
+}
+
+.wz-canvas .wz-node-branch .panel-head {
+  background: linear-gradient(180deg, rgba(184, 148, 255, 0.16), rgba(31, 34, 42, 0.96));
+}
+
+.wz-canvas .wz-node-branch .wz-branch-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.wz-canvas .wz-node-branch .wz-branch-title::before {
+  content: "⎇";
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: #b894ff;
+  color: #1a1030;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+/* Spacer "rail" hint between stacked sub-nodes so they look parallel */
+.wz-col-branches .wz-branches > .wz-node-branch + .wz-node-branch {
+  position: relative;
+}
+
+/* ============================================================
+   Second-level sub-nodes (3.x.1 / 3.x.2 …): vertical sub-flow
+   ============================================================ */
+
+/* Sub-flow column inside an expanded rewrite branch */
+.wz-subflow {
+  display: grid;
+  gap: 30px;            /* vertical room for the connector links */
+  padding: 6px 2px 2px;
+}
+
+/* Each sub-node = an independent small card */
+.wz-subnode {
+  position: relative;
+  border: 1px solid rgba(184, 148, 255, 0.34);
+  border-radius: 9px;
+  background: rgba(18, 19, 26, 0.94);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.wz-subnode-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px 9px 0 0;
+  background: rgba(184, 148, 255, 0.1);
+  color: #e7deff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wz-subno {
+  display: inline-grid;
+  place-items: center;
+  min-width: 38px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #b894ff;
+  color: #1a1030;
+  font-size: 11px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+}
+
+.wz-subnode-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+/* Sub-node forms are always single column (roomy, no cramming) */
+.wz-subnode-body .wz-primary-form,
+.wz-subnode-body .wz-inline-form,
+.wz-subnode-body .wz-template-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+/* Vertical connection ports (top in / bottom out) */
+.wz-subnode[data-port-in]::before,
+.wz-subnode[data-port-out]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  border: 2px solid #101114;
+  border-radius: 999px;
+  background: #b894ff;
+  z-index: 3;
+}
+
+.wz-subnode[data-port-in]::before { top: -6px; }
+.wz-subnode[data-port-out]::after { bottom: -6px; }
+
+/* Focused sub-node highlight */
+.wz-subnode.focused {
+  border-color: rgba(184, 148, 255, 0.85);
+  box-shadow: 0 0 0 2px rgba(184, 148, 255, 0.3), 0 12px 26px rgba(0, 0, 0, 0.42);
+}
+
+/* When a rewrite branch is collapsed, its sub-flow is hidden by the existing
+   .collapsed rule (.wz-node.collapsed .wz-node-body { display:none }). */
+
+/* Sub-node state coloring (reuses the soft 3-state palette) */
+.wz-subnode.state-done { border-left: 3px solid var(--good); }
+.wz-subnode.state-current { border-left: 3px solid #58a6ff; }
+
+@media (max-width: 980px) {
+  .wz-subflow {
+    gap: 14px;
+  }
+  .wz-subnode[data-port-in]::before,
+  .wz-subnode[data-port-out]::after {
+    display: none;
+  }
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -276,7 +276,7 @@ test("draft decomposition honors configured llm timeout", async () => {
   }
 });
 
-test("draft decomposition sends video file data and sampled frames to the model gateway", async () => {
+test("draft decomposition sends S3 video URL and sampled frames to the model gateway", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-video-"));
   const previousFetch = globalThis.fetch;
   const calls = [];
@@ -301,6 +301,14 @@ test("draft decomposition sends video file data and sampled frames to the model 
       ]
     };
     const checked = await checkReferenceVideo(ctx, validUpload());
+    const s3VideoUrl = "https://cdn.example.com/uploads/reference/ref_20260618_001/original.mp4";
+    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify({
+      ...checked.referenceVideo,
+      storageKey: "uploads/reference/ref_20260618_001/original.mp4",
+      storageUrl: s3VideoUrl
+    }, null, 2)}\n`, "utf8");
+
     const result = await draftReferenceVideoDecomposition(ctx, {
       referenceVideoId: checked.referenceVideo.referenceVideoId,
       llmConfig: {
@@ -314,9 +322,189 @@ test("draft decomposition sends video file data and sampled frames to the model 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1/responses");
     const content = calls[0].body.input.find((item) => item.role === "user").content;
-    assert.equal(content.some((part) => part.type === "input_file" && part.file_data.startsWith("data:video/mp4;base64,")), true);
+    assert.equal(content.some((part) => part.type === "input_file" && part.file_url === s3VideoUrl), true);
+    assert.equal(content.some((part) => part.type === "input_file" && part.file_data?.startsWith("data:video/mp4;base64,")), false);
     assert.equal(content.some((part) => part.type === "input_image" && part.image_url === "data:image/jpeg;base64,ZnJhbWUtMQ=="), true);
     assert.equal(result.decomposition.scene, "Gateway saw video input");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition converts relative proxy storage URL into a direct S3 URL", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-s3-direct-"));
+  const previousFetch = globalThis.fetch;
+  const previousEnv = {
+    S3_BUCKET: process.env.S3_BUCKET,
+    AWS_REGION: process.env.AWS_REGION,
+    AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION,
+    S3_ENDPOINT: process.env.S3_ENDPOINT,
+    S3_PUBLIC_BASE_URL: process.env.S3_PUBLIC_BASE_URL,
+    PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
+    S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE
+  };
+  const calls = [];
+  try {
+    process.env.S3_BUCKET = "aigc-assets";
+    process.env.AWS_REGION = "ap-southeast-1";
+    process.env.S3_ENDPOINT = "https://s3.ap-southeast-1.amazonaws.com";
+    delete process.env.AWS_DEFAULT_REGION;
+    delete process.env.S3_PUBLIC_BASE_URL;
+    delete process.env.PUBLIC_BASE_URL;
+    delete process.env.S3_FORCE_PATH_STYLE;
+
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body });
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify(validDecomposition({
+          scene: "Gateway saw direct S3 URL",
+          subject: "Direct S3 subject"
+        }))
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => []
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const storageKey = "uploads/PROJECT_ROOT_P/users/admin/批处理记录/网赚管线/reference-videos/ref_20260618_017/original.mp4";
+    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify({
+      ...checked.referenceVideo,
+      storageKey,
+      storageUrl: `/api/public/assets/${encodeURIComponent(storageKey)}`
+    }, null, 2)}\n`, "utf8");
+
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "GPT-5.4",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-key"
+      }
+    });
+
+    const content = calls[0].body.input.find((item) => item.role === "user").content;
+    assert.equal(
+      content.some((part) => part.type === "input_file"
+        && part.file_url === "https://aigc-assets.s3.ap-southeast-1.amazonaws.com/uploads/PROJECT_ROOT_P/users/admin/%E6%89%B9%E5%A4%84%E7%90%86%E8%AE%B0%E5%BD%95/%E7%BD%91%E8%B5%9A%E7%AE%A1%E7%BA%BF/reference-videos/ref_20260618_017/original.mp4"),
+      true
+    );
+    assert.equal(content.some((part) => part.type === "input_file" && part.file_data?.startsWith("data:video/mp4;base64,")), false);
+    assert.equal(result.decomposition.scene, "Gateway saw direct S3 URL");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition exposes S3 video URL to custom llm callers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-s3-context-"));
+  try {
+    const s3VideoUrl = "https://cdn.example.com/uploads/reference/custom/original.mp4";
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [],
+      callWangzhuanLlm: async ({ messages, referenceVideo, visionInputs }) => {
+        assert.equal(referenceVideo.fileUrl, s3VideoUrl);
+        assert.equal(referenceVideo.fileDataUrl, undefined);
+        assert.equal(visionInputs.fileUrl, s3VideoUrl);
+        assert.equal(visionInputs.fileDataUrl, undefined);
+        const userContent = messages.find((item) => item.role === "user").content;
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_url === s3VideoUrl), true);
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_data?.startsWith("data:video/mp4;base64,")), false);
+        return JSON.stringify(validDecomposition({
+          scene: "Custom caller saw S3 URL",
+          subject: "Custom caller subject"
+        }));
+      }
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify({
+      ...checked.referenceVideo,
+      storageKey: "uploads/reference/custom/original.mp4",
+      storageUrl: s3VideoUrl
+    }, null, 2)}\n`, "utf8");
+
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1" }
+    });
+
+    assert.equal(result.decomposition.scene, "Custom caller saw S3 URL");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition dumps the redacted model request by request id", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-dump-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    const s3VideoUrl = "https://cdn.example.com/uploads/reference/debug/original.mp4";
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify(validDecomposition({
+          scene: "Dumped request scene",
+          subject: "Dumped request subject"
+        }))
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,ZHVtcC1mcmFtZQ==" }
+      ]
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify({
+      ...checked.referenceVideo,
+      storageKey: "uploads/reference/debug/original.mp4",
+      storageUrl: s3VideoUrl
+    }, null, 2)}\n`, "utf8");
+
+    await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "GPT-5.4",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-secret-key",
+        apiKeyEnv: "WANGZHUAN_LLM_API_KEY"
+      }
+    }, {
+      requestId: "req_20260618120219_6afd"
+    });
+
+    assert.equal(calls.length, 1);
+    const dumpPath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "llm-request-req_20260618120219_6afd.json");
+    const dump = JSON.parse(await readFile(dumpPath, "utf8"));
+    assert.equal(dump.requestId, "req_20260618120219_6afd");
+    assert.equal(dump.inputMode, "file_url");
+    assert.equal(dump.request.method, "POST");
+    assert.equal(dump.request.url, "https://skylink-gateway.com/api/v1/responses");
+    assert.equal(dump.request.headers.Authorization, "Bearer <REDACTED:WANGZHUAN_LLM_API_KEY>");
+    assert.equal(JSON.stringify(dump).includes("test-secret-key"), false);
+    const content = dump.request.body.input.find((item) => item.role === "user").content;
+    assert.equal(content.some((part) => part.type === "input_file" && part.file_url === s3VideoUrl), true);
+    assert.equal(content.some((part) => part.type === "input_image" && part.image_url === "data:image/jpeg;base64,ZHVtcC1mcmFtZQ=="), true);
   } finally {
     globalThis.fetch = previousFetch;
     await rm(root, { recursive: true, force: true });

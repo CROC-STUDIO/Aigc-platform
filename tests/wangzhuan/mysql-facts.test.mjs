@@ -281,7 +281,9 @@ export function fakePool() {
         state.assets.set(assetUid, {
           id: existing?.id ?? state.nextAssetId++,
           assetUid,
-          relativePath: params[8]
+          relativePath: params[8],
+          storageKey: params[14] ?? null,
+          storageUrl: params[15] ?? null
         });
         return [{ insertId: state.assets.get(assetUid).id }];
       }
@@ -303,6 +305,7 @@ export function fakePool() {
       if (sql.includes("FROM reference_videos rv")) {
         const reference = state.referenceVideos.get(params[0]);
         if (!reference) return [[]];
+        const asset = state.assets.get(`asset_${reference.referenceVideoId}`) || {};
         return [[{
           reference_video_uid: reference.referenceVideoId,
           status: reference.status,
@@ -316,7 +319,9 @@ export function fakePool() {
           file_name: "demo.mp4",
           mime_type: "video/mp4",
           size_bytes: 5,
-          storage_relative_path: "批处理记录/网赚管线/reference-videos/ref_20260618_001/original.mp4"
+          storage_relative_path: asset.relativePath || "批处理记录/网赚管线/reference-videos/ref_20260618_001/original.mp4",
+          storage_key: asset.storageKey,
+          storage_url: asset.storageUrl
         }]];
       }
       if (sql.includes("INSERT INTO video_decompositions")) {
@@ -841,6 +846,8 @@ test("mysql facts sync reference videos, decompositions, and estimates without s
       status: "pass",
       issues: [],
       storedPath: "批处理记录/网赚管线/reference-videos/ref_20260618_001/original.mp4",
+      storageKey: "uploads/project/users/alice/reference/original.mp4",
+      storageUrl: "https://cdn.example.com/uploads/project/users/alice/reference/original.mp4",
       videoCodec: "h264"
     };
     const decomposition = {
@@ -914,6 +921,8 @@ test("mysql facts sync reference videos, decompositions, and estimates without s
     const loadedReference = await loadReferenceVideoProbeFromMysql(ctx, referenceVideo.referenceVideoId);
     assert.equal(loadedReference.referenceVideoId, referenceVideo.referenceVideoId);
     assert.equal(loadedReference.storedPath.includes("C:/"), false);
+    assert.equal(loadedReference.storageKey, referenceVideo.storageKey);
+    assert.equal(loadedReference.storageUrl, referenceVideo.storageUrl);
 
     const loadedDecomposition = await loadVideoDecompositionFromMysql(ctx, referenceVideo.referenceVideoId);
     assert.equal(loadedDecomposition.schemaVersion, "video_decomposition.v1");
