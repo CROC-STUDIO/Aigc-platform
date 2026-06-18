@@ -371,7 +371,9 @@ async function draftReferenceVideoDecomposition() {
       ? `模型拆解未完成：${error.data.upstreamMessage}`
       : error.data?.status
         ? `模型拆解未完成：上游状态 ${error.data.status}`
-        : "模型拆解未完成，请检查模型配置或稍后重试。";
+        : error.message
+          ? `模型拆解未完成：${error.message}`
+          : "模型拆解未完成，请检查模型配置或稍后重试。";
     renderError(els.globalError, error, "自动拆解失败");
   } finally {
     setBusy(els.draftDecompositionBtn, false);

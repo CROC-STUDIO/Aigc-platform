@@ -215,6 +215,7 @@ test("drafts reference video decomposition by calling configured llm", async () 
       },
       callWangzhuanLlm: async ({ messages, llmConfig, referenceVideo, visionInputs }) => {
         assert.equal(llmConfig.model, "gpt-5.4");
+        assert.equal(llmConfig.timeoutMs, 180000);
         assert.equal(referenceVideo.fileDataUrl.startsWith("data:video/mp4;base64,"), true);
         assert.equal(visionInputs.frames.length, 2);
         const userContent = messages.find((item) => item.role === "user").content;
@@ -239,6 +240,37 @@ test("drafts reference video decomposition by calling configured llm", async () 
     assert.equal(result.decomposition.subject, "Model subject");
     assert.deepEqual(result.decomposition.missingFields, []);
     assert.equal(result.draft.source, "llm");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition honors configured llm timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-timeout-"));
+  try {
+    const ctx = {
+      ...context(root),
+      config: {
+        wangzhuan: {
+          llm: {
+            provider: "skylink",
+            model: "GPT-5.4",
+            endpoint: "https://skylink-gateway.com/api/v1",
+            timeoutMs: 240000
+          }
+        }
+      },
+      callWangzhuanLlm: async ({ llmConfig }) => {
+        assert.equal(llmConfig.timeoutMs, 240000);
+        return JSON.stringify(validDecomposition({ scene: "Timeout configured" }));
+      }
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId
+    });
+
+    assert.equal(result.decomposition.scene, "Timeout configured");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -452,9 +484,22 @@ test("draft decomposition requires llm api key when no mock caller is provided",
     await assert.rejects(
       () => draftReferenceVideoDecomposition(context(root), {
         referenceVideoId: checked.referenceVideo.referenceVideoId,
-        llmConfig: { provider: "skylink", model: "GPT-5.4", endpoint: "https://skylink-gateway.com/api/v1" }
+        llmConfig: {
+          provider: "skylink",
+          model: "GPT-5.4",
+          endpoint: "https://skylink-gateway.com/api/v1",
+          apiKeyEnv: "WANGZHUAN_LLM_API_KEY"
+        }
       }),
-      { code: "model_failed" }
+      {
+        code: "model_failed",
+        data: {
+          provider: "skylink",
+          model: "gpt-5.4",
+          apiKeyEnv: "WANGZHUAN_LLM_API_KEY",
+          upstreamMessage: "未配置模型 API Key，请在环境变量 WANGZHUAN_LLM_API_KEY 中配置后重启服务"
+        }
+      }
     );
   } finally {
     for (const [key, value] of Object.entries(previousEnv)) {

@@ -19,7 +19,7 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
 const execFileAsync = promisify(execFile);
-const LLM_TIMEOUT_MS = 60000;
+const DEFAULT_LLM_TIMEOUT_MS = 180000;
 const DEFAULT_REFERENCE_FRAME_COUNT = 5;
 const MAX_REFERENCE_FRAME_COUNT = 8;
 const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
@@ -653,13 +653,17 @@ function dropFileParts(messages = []) {
 
 async function callOpenAiCompatibleLlm(llmConfig, messages) {
   if (!llmConfig.apiKey) {
+    const apiKeyEnv = llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY";
     throw new WangzhuanError("model_failed", "未配置网赚拆解模型 API Key", {
       provider: llmConfig.provider,
-      model: llmConfig.model
+      model: llmConfig.model,
+      apiKeyEnv,
+      upstreamMessage: `未配置模型 API Key，请在环境变量 ${apiKeyEnv} 中配置后重启服务`
     });
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || DEFAULT_LLM_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   let payload = {};
   const headers = {
@@ -732,7 +736,9 @@ export async function draftReferenceVideoDecomposition(context, request = {}) {
         provider: llmConfig.provider,
         endpoint: llmConfig.endpoint,
         model: llmConfig.model,
-        temperature: llmConfig.temperature
+        temperature: llmConfig.temperature,
+        timeoutMs: llmConfig.timeoutMs,
+        apiKeyEnv: llmConfig.apiKeyEnv
       },
       referenceVideo: {
         ...probe,

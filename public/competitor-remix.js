@@ -64,13 +64,29 @@ const MIN_MASK_SIZE = 0.03;
 const MASK_KEY_STEP = 0.01;
 const CREATE_MASK_THRESHOLD = 0.012;
 const POLL_INTERVAL_MS = 3000;
+const DEFAULT_DIRECT_OPERATION = "watermark_cover";
+const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
+
+function isActiveRemixStatus(status) {
+  return ACTIVE_REMIX_STATUSES.has(status);
+}
+
+function activeRemixNotice(status) {
+  if (status === "preview_required") return "处理已完成，请先完成预览确认或下载交付";
+  return "处理中，请等待状态刷新后再继续操作";
+}
 
 function syncMetrics() {
+  const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
   els.sourceCount.textContent = state.source ? "1" : "0";
   els.regionCount.textContent = state.regions.length;
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
-  els.maskConfirmBtn.disabled = state.submitBlocked || !state.source || !state.regions.length;
+  els.maskConfirmBtn.disabled = state.submitBlocked || activeRemix || !state.source || !state.regions.length;
+  els.uploadBtn.disabled = activeRemix;
+  els.sourceFile.disabled = activeRemix;
+  els.clearMaskBtn.disabled = activeRemix;
+  els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
 }
 
 function clampNumber(value, min = 0, max = 1) {
@@ -520,6 +536,7 @@ function renderDetail() {
     return;
   }
   els.statusBadge.innerHTML = badge(remix.status, remixStatusLabels);
+  const active = isActiveRemixStatus(remix.status);
   const output = remix.outputs?.[0];
   els.confirmBtn.disabled = remix.status !== "preview_required" || !output;
   els.downloadBtn.disabled = !state.detail.downloadSummary?.packageReady;
@@ -543,6 +560,7 @@ function renderDetail() {
         ["预览确认", output?.previewConfirmed ? "已确认" : "未确认"]
       ])}
     </div>
+    ${active ? `<div class="wz-warning">${escapeHtml(activeRemixNotice(remix.status))}</div>` : ""}
     ${output ? `
       <article class="wz-output">
         <div>
@@ -581,6 +599,13 @@ function renderGallery() {
 
 async function uploadSource() {
   clearError(els.globalError);
+  if (isActiveRemixStatus(state.detail?.remix?.status)) {
+    renderError(els.globalError, {
+      code: "active_remix_running",
+      message: "当前已有改造任务处理中，请等待状态刷新后再继续操作"
+    }, "源素材上传失败");
+    return;
+  }
   const file = els.sourceFile.files?.[0];
   if (!file) {
     renderError(els.globalError, {
@@ -611,6 +636,7 @@ async function uploadSource() {
     renderError(els.globalError, error, "源素材上传失败");
   } finally {
     setBusy(els.uploadBtn, false);
+    syncMetrics();
   }
 }
 
@@ -624,7 +650,18 @@ async function startMaskEdit() {
     }, "Mask 校验");
     return;
   }
+  if (isActiveRemixStatus(state.detail?.remix?.status)) {
+    renderError(els.globalError, {
+      code: "active_remix_running",
+      message: "当前已有改造任务处理中，请等待状态刷新后再继续操作"
+    }, "改造启动失败");
+    syncMetrics();
+    return;
+  }
+  const previousDetail = state.detail;
   state.submitBlocked = false;
+  state.detail = { remix: { status: "queued", remixId: "提交中", operationType: DEFAULT_DIRECT_OPERATION, targetChannel: "generic", regions, tasks: [], outputs: [], providerJob: { status: "submitting" }, qcSummary: { total: 0, passed: 0, failed: 0 } }, downloadSummary: { downloadEligibleCount: 0, packageReady: false, missingFiles: [] } };
+  renderDetail();
   setBusy(els.maskConfirmBtn, true, "提交中");
   try {
     state.detail = await apiEnvelope("/api/wangzhuan/remix/mask-edit", {
@@ -646,6 +683,8 @@ async function startMaskEdit() {
     if (error.code === "unsupported_capability") {
       state.submitBlocked = true;
     }
+    state.detail = previousDetail;
+    renderDetail();
     renderError(els.globalError, error, "改造启动失败");
   } finally {
     setBusy(els.maskConfirmBtn, false);
@@ -731,6 +770,7 @@ async function downloadRemixPackage() {
 function bindEvents() {
   els.uploadBtn.addEventListener("click", uploadSource);
   els.clearMaskBtn.addEventListener("click", () => {
+    if (isActiveRemixStatus(state.detail?.remix?.status)) return;
     state.regions = [];
     state.selectedRegionId = "";
     renderMaskEditor();

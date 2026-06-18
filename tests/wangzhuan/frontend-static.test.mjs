@@ -243,3 +243,15 @@ test("competitor remix page keeps independent video-platform remix flow", async 
   assert.match(script, /POLL_INTERVAL_MS/);
   assert.doesNotMatch(script, /attempts\s*>=\s*8/);
 });
+
+test("competitor remix locks submit controls while a task is active", async () => {
+  const script = await readPublic("competitor-remix.js");
+
+  assert.match(script, /function isActiveRemixStatus/);
+  assert.match(script, /state\.detail = \{ remix: \{ status: "queued"/);
+  assert.match(script, /const active = isActiveRemixStatus\(remix\.status\)/);
+  assert.match(script, /els\.maskConfirmBtn\.disabled = state\.submitBlocked \|\| activeRemix \|\| !state\.source \|\| !state\.regions\.length/);
+  assert.match(script, /els\.uploadBtn\.disabled = activeRemix/);
+  assert.match(script, /els\.clearMaskBtn\.disabled = activeRemix/);
+  assert.match(script, /处理中，请等待状态刷新后再继续操作/);
+});

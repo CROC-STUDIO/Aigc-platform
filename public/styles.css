@@ -4296,3 +4296,843 @@ button.mini {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   Vertical pipeline layout (网赚 / 竞品改造)
+   Replaces the fragile absolute-positioned node canvas.
+   Inherits the .wz-app sidebar layout defined above.
+   ============================================================ */
+
+/* --- Sticky step navigation bar (clears the 64px fixed topbar) --- */
+.wz-stepbar {
+  position: sticky;
+  top: 72px;
+  z-index: 18;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(20, 21, 24, 0.96);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
+}
+
+.wz-stepbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #aeb6c6;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 900;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.wz-stepbar-no {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #2a2d34;
+  color: #cfd6e6;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.wz-stepbar-item:hover {
+  color: #ffffff;
+  background: #23262c;
+}
+
+.wz-stepbar-item.active {
+  color: #ffffff;
+  border-color: rgba(88, 166, 255, 0.36);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.wz-stepbar-item.active .wz-stepbar-no {
+  background: #58a6ff;
+  color: #07111f;
+}
+
+.wz-stepbar-item.done .wz-stepbar-no {
+  background: var(--good);
+  color: #04130a;
+}
+
+.wz-stepbar-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.wz-stepbar-metrics div {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: #202228;
+}
+
+.wz-stepbar-metrics strong {
+  color: #f5f7fb;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wz-stepbar-metrics span {
+  color: #8f98aa;
+  font-size: 11px;
+}
+
+/* --- Pipeline steps --- */
+.wz-pipeline {
+  display: grid;
+  gap: 0;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.wz-step {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 16px;
+  scroll-margin-top: 120px;
+}
+
+.wz-step-aside {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  justify-items: center;
+  gap: 6px;
+}
+
+.wz-step-no {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.14);
+  color: #cfe4ff;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.wz-step.active .wz-step-no {
+  background: #58a6ff;
+  border-color: #58a6ff;
+  color: #07111f;
+  box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.16);
+}
+
+.wz-step.done .wz-step-no {
+  background: var(--good);
+  border-color: var(--good);
+  color: #04130a;
+}
+
+.wz-step-line {
+  width: 2px;
+  flex: 1;
+  min-height: 24px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(88, 166, 255, 0.5), rgba(88, 166, 255, 0.12));
+}
+
+.wz-step-line-last {
+  background: transparent;
+}
+
+.wz-step-main {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding-bottom: 28px;
+}
+
+.wz-step-head {
+  display: grid;
+  gap: 4px;
+}
+
+.wz-step-head h2 {
+  color: #ffffff;
+  font-size: 17px;
+}
+
+.wz-step-head p {
+  color: #9aa0aa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wz-pipeline .wz-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding-bottom: 12px;
+  border-radius: 8px;
+  background: rgba(25, 27, 34, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.wz-pipeline .wz-panel .panel-head {
+  min-height: 48px;
+  padding: 12px 14px;
+  background: rgba(31, 34, 42, 0.95);
+}
+
+.wz-pipeline .wz-panel .panel-head h2 {
+  font-size: 15px;
+}
+
+.wz-pipeline .wz-panel > :not(.panel-head) {
+  margin-left: 14px;
+  margin-right: 14px;
+}
+
+.wz-pipeline .wz-panel .wz-primary-form,
+.wz-pipeline .wz-panel .wz-inline-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wz-field-label {
+  display: grid;
+  gap: 4px;
+  color: #d8d5ec;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+@media (max-width: 980px) {
+  .wz-stepbar {
+    top: 130px;
+  }
+}
+
+@media (max-width: 760px) {
+  .wz-step {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .wz-step-no {
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+  }
+
+  .wz-pipeline .wz-panel .wz-primary-form,
+  .wz-pipeline .wz-panel .wz-inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .wz-stepbar-metrics {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
+   Horizontal node canvas (网赚管线 — ComfyUI 风格扇出)
+   上传 → 拆解 → 改写(可多分支) → 批次 → 结果
+   连线由 wz-canvas.js 根据 DOM 实际位置动态绘制。
+   ============================================================ */
+
+.wz-canvas-toolbar {
+  position: sticky;
+  top: 72px;
+  z-index: 18;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(20, 21, 24, 0.96);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
+}
+
+.wz-canvas-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 8px 4px 20px;
+  scrollbar-width: thin;
+}
+
+.wz-canvas {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(300px, 360px);
+  align-items: start;
+  gap: 64px;
+  min-width: min-content;
+  padding: 8px 12px;
+}
+
+/* SVG link layer sits behind the nodes, spans the whole canvas */
+.wz-canvas-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  overflow: visible;
+}
+
+.wz-canvas-link {
+  fill: none;
+  stroke: #58a6ff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 6px rgba(88, 166, 255, 0.28));
+}
+
+.wz-canvas-link.flow-blue { stroke: #58a6ff; }
+.wz-canvas-link.flow-purple { stroke: #b894ff; }
+.wz-canvas-link.flow-green { stroke: #48f58a; }
+
+/* A column = one pipeline stage */
+.wz-col {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wz-col-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 4px;
+  color: #cfd6e6;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wz-col-label b {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #58a6ff;
+  color: #07111f;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.wz-add-branch {
+  margin-left: auto;
+}
+
+/* Branch column can stack multiple rewrite nodes (fan-out) */
+.wz-col-branches .wz-branches {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+/* A node = one card on the canvas */
+.wz-node {
+  position: relative;
+  display: grid;
+  align-content: start;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(25, 27, 34, 0.96);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
+}
+
+.wz-node .panel-head {
+  min-height: 46px;
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px 10px 0 0;
+  background: rgba(31, 34, 42, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wz-node .panel-head h2 {
+  font-size: 14px;
+}
+
+.wz-node .panel-head span {
+  color: #9fa6ba;
+  font-size: 11px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.wz-node-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.wz-node-body .wz-primary-form,
+.wz-node-body .wz-inline-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Connection ports (decorative dots on node edges) */
+.wz-node[data-port-in]::before,
+.wz-node[data-port-out]::after {
+  content: "";
+  position: absolute;
+  top: 23px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #101114;
+  border-radius: 999px;
+  background: #58a6ff;
+  z-index: 3;
+}
+
+.wz-node[data-port-in]::before { left: -6px; }
+.wz-node[data-port-out]::after { right: -6px; }
+
+.wz-node-branch {
+  border-color: rgba(184, 148, 255, 0.32);
+}
+
+.wz-node-branch[data-port-in]::before,
+.wz-node-branch[data-port-out]::after {
+  background: #b894ff;
+}
+
+.wz-branch-remove {
+  color: #ffb3c0;
+  border-color: rgba(255, 107, 138, 0.4);
+}
+
+/* Placeholder branch (extension slot until backend supports fan-out) */
+.wz-node-placeholder .wz-node-body {
+  gap: 12px;
+}
+
+.wz-branch-note {
+  padding: 10px 12px;
+  border: 1px dashed rgba(184, 148, 255, 0.4);
+  border-radius: 8px;
+  color: #d8c8ff;
+  background: rgba(184, 148, 255, 0.08);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* --- Responsive fallback: stack columns vertically on narrow screens --- */
+@media (max-width: 980px) {
+  .wz-canvas-toolbar { top: 130px; }
+
+  .wz-canvas-scroll {
+    overflow-x: visible;
+  }
+
+  .wz-canvas {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    gap: 16px;
+  }
+
+  .wz-canvas-links {
+    display: none;
+  }
+
+  .wz-node[data-port-in]::before,
+  .wz-node[data-port-out]::after {
+    display: none;
+  }
+
+  .wz-node-body {
+    max-height: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .wz-node-body .wz-primary-form,
+  .wz-node-body .wz-inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .wz-stepbar-metrics {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+/* Wider column for the mask editor stage (竞品改造) */
+.wz-canvas .wz-col-wide {
+  grid-auto-columns: minmax(360px, 460px);
+}
+
+.wz-col-wide {
+  min-width: 360px;
+}
+
+/* ============================================================
+   Canvas focus mode + grab-to-pan
+   ============================================================ */
+
+/* Grab-to-pan: empty canvas area shows a hand; nodes stay interactive */
+.wz-canvas-scroll {
+  cursor: grab;
+}
+
+.wz-canvas-scroll.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.wz-canvas .wz-node {
+  cursor: default;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+/* Clicking a node head toggles focus/collapse */
+.wz-canvas .wz-node .panel-head {
+  cursor: pointer;
+}
+
+.wz-canvas .wz-node .panel-head:hover {
+  background: rgba(40, 44, 54, 0.98);
+}
+
+/* Collapsed node: only the header shows */
+.wz-canvas .wz-node.collapsed .wz-node-body {
+  display: none;
+}
+
+.wz-canvas .wz-node.collapsed .panel-head {
+  border-bottom: 0;
+  border-radius: 10px;
+}
+
+.wz-canvas .wz-node.collapsed {
+  opacity: 0.82;
+}
+
+/* A real collapse button (chevron) injected into each node header */
+.wz-canvas .wz-node .wz-collapse-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #7f8aa3;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: none;
+  cursor: pointer;
+  transition: transform 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.wz-canvas .wz-node .wz-collapse-btn:hover {
+  background: #2a2e36;
+  color: #fff;
+}
+
+.wz-canvas .wz-node.collapsed .wz-collapse-btn {
+  transform: rotate(-90deg);
+}
+
+/* Focused node: highlighted ring */
+.wz-canvas .wz-node.focused {
+  border-color: rgba(88, 166, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.28), 0 16px 36px rgba(0, 0, 0, 0.44);
+}
+
+.wz-canvas .wz-node-branch.focused {
+  border-color: rgba(184, 148, 255, 0.78);
+  box-shadow: 0 0 0 2px rgba(184, 148, 255, 0.3), 0 16px 36px rgba(0, 0, 0, 0.44);
+}
+
+/* On narrow screens we stack vertically: disable focus-collapse and pan */
+@media (max-width: 980px) {
+  .wz-canvas-scroll {
+    cursor: auto;
+  }
+
+  .wz-canvas .wz-node.collapsed .wz-node-body {
+    display: grid;
+  }
+
+  .wz-canvas .wz-node.collapsed .panel-head {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .wz-canvas .wz-node .wz-collapse-btn {
+    display: none;
+  }
+}
+
+/* ============================================================
+   Canvas v2: flex columns (per-column width + collapse compaction)
+   + zoom support. These override the earlier grid-based rules.
+   ============================================================ */
+
+.wz-canvas {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 64px;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.wz-canvas .wz-col {
+  flex: 0 0 auto;
+}
+
+.wz-canvas .wz-node {
+  width: 340px;
+  transition: width 0.18s ease, border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.wz-canvas .wz-col-wide .wz-node {
+  width: 460px;
+}
+
+/* Collapsed node shrinks → its column becomes compact */
+.wz-canvas .wz-node.collapsed {
+  width: 240px;
+}
+
+.wz-canvas .wz-col-label {
+  white-space: nowrap;
+}
+
+/* Zoom controls (floating, bottom-right of the scroll area) */
+.wz-zoom-bar {
+  position: sticky;
+  bottom: 14px;
+  left: 100%;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  margin-left: auto;
+  margin-top: -52px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(20, 21, 24, 0.96);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(14px);
+}
+
+.wz-zoom-bar button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #cfd6e6;
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.wz-zoom-bar button:hover {
+  background: #2a2e36;
+  color: #fff;
+}
+
+.wz-zoom-level {
+  min-width: 46px;
+  padding: 0 6px;
+  color: #aeb6c6;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 980px) {
+  .wz-canvas {
+    flex-direction: column;
+    transform: none !important;
+    gap: 16px;
+  }
+
+  .wz-canvas .wz-node,
+  .wz-canvas .wz-col-wide .wz-node,
+  .wz-canvas .wz-node.collapsed {
+    width: 100%;
+  }
+
+  .wz-zoom-bar {
+    display: none;
+  }
+}
+
+/* ============================================================
+   Focus = expand & spread the active node (fixes overlap)
+   + soft 3-state coloring (done / current / pending)
+   ============================================================ */
+
+/* Focused node: widen and lay fields out in a single roomy column */
+.wz-canvas .wz-node.focused {
+  width: 520px;
+}
+
+.wz-canvas .wz-col-wide .wz-node.focused {
+  width: 560px;
+}
+
+.wz-canvas .wz-node.focused .wz-primary-form,
+.wz-canvas .wz-node.focused .wz-inline-form,
+.wz-canvas .wz-node.focused .wz-template-form {
+  grid-template-columns: 1fr;
+}
+
+.wz-canvas .wz-node.focused .wz-node-body {
+  gap: 12px;
+  max-height: 68vh;
+}
+
+.wz-canvas .wz-node.focused label {
+  font-size: 12px;
+}
+
+.wz-canvas .wz-node.focused input,
+.wz-canvas .wz-node.focused select,
+.wz-canvas .wz-node.focused textarea {
+  height: 40px;
+}
+
+.wz-canvas .wz-node.focused textarea {
+  height: auto;
+}
+
+/* --- Soft 3-state coloring on the step bar --- */
+.wz-stepbar-item.state-done .wz-stepbar-no {
+  background: var(--good);
+  color: #04130a;
+}
+
+.wz-stepbar-item.state-current .wz-stepbar-no {
+  background: #58a6ff;
+  color: #07111f;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.22);
+}
+
+.wz-stepbar-item.state-done .wz-stepbar-label {
+  color: #8df0b4;
+}
+
+.wz-stepbar-item.state-current .wz-stepbar-label {
+  color: #cfe4ff;
+}
+
+/* connector tint between done steps */
+.wz-stepbar-item.state-done + .wz-stepbar-item .wz-stepbar-no {
+  /* next-after-done keeps its own state; no change needed */
+}
+
+/* --- Soft 3-state coloring on nodes --- */
+.wz-canvas .wz-node {
+  border-left: 3px solid transparent;
+}
+
+.wz-canvas .wz-node.state-pending {
+  opacity: 0.86;
+}
+
+.wz-canvas .wz-node.state-done {
+  border-left-color: var(--good);
+}
+
+.wz-canvas .wz-node.state-current {
+  border-left-color: #58a6ff;
+}
+
+/* Status pill in the node header */
+.wz-node-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.wz-node-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.wz-node-state.state-done {
+  color: #8df0b4;
+  background: rgba(72, 245, 138, 0.12);
+}
+
+.wz-node-state.state-current {
+  color: #9cc9ff;
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.wz-node-state.state-pending {
+  color: #8b93a6;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Link tint: completed edges go green */
+.wz-canvas-link.done {
+  stroke: #48f58a;
+  opacity: 0.95;
+}
+
+@media (max-width: 980px) {
+  .wz-canvas .wz-node.focused,
+  .wz-canvas .wz-col-wide .wz-node.focused {
+    width: 100%;
+  }
+}

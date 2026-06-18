@@ -2,7 +2,8 @@ export const DEFAULT_LLM_CONFIG = Object.freeze({
   provider: "skylink",
   endpoint: "https://skylink-gateway.com/api/v1",
   model: "gpt-5.4",
-  temperature: 0.2
+  temperature: 0.2,
+  timeoutMs: 180000
 });
 
 function cleanString(value, fallback = "") {
@@ -16,6 +17,13 @@ function cleanTemperature(value) {
     : DEFAULT_LLM_CONFIG.temperature;
 }
 
+function cleanTimeoutMs(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 30000 && number <= 600000
+    ? Math.trunc(number)
+    : DEFAULT_LLM_CONFIG.timeoutMs;
+}
+
 function normalizeModel(provider, model) {
   const cleanModel = cleanString(model, DEFAULT_LLM_CONFIG.model);
   const cleanProvider = cleanString(provider).toLowerCase();
@@ -26,7 +34,7 @@ function normalizeModel(provider, model) {
 }
 
 export function configuredApiKey(llm = {}) {
-  const envName = cleanString(llm.apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
+  const envName = configuredApiKeyEnv(llm);
   return cleanString(llm.apiKey)
     || cleanString(process.env[envName])
     || cleanString(process.env.WANGZHUAN_LLM_API_KEY)
@@ -34,6 +42,10 @@ export function configuredApiKey(llm = {}) {
     || cleanString(process.env.OPENAI_API_KEY)
     || cleanString(process.env.OPENAI_KEY)
     || cleanString(process.env.REVERSE_PROMPT_API_KEY);
+}
+
+export function configuredApiKeyEnv(llm = {}) {
+  return cleanString(llm.apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
 }
 
 export function resolveLlmConfig(config = {}, overrides = {}) {
@@ -50,6 +62,8 @@ export function resolveLlmConfig(config = {}, overrides = {}) {
     endpoint: cleanString(merged.endpoint, DEFAULT_LLM_CONFIG.endpoint).replace(/\/+$/, ""),
     model: normalizeModel(provider, merged.model),
     temperature: cleanTemperature(merged.temperature),
+    timeoutMs: cleanTimeoutMs(merged.timeoutMs),
+    apiKeyEnv: configuredApiKeyEnv(merged),
     apiKey: configuredApiKey(merged)
   };
 }
@@ -62,6 +76,8 @@ export function publicLlmConfig(config = {}) {
       endpoint: llmConfig.endpoint,
       model: llmConfig.model,
       temperature: llmConfig.temperature,
+      timeoutMs: llmConfig.timeoutMs,
+      apiKeyEnv: llmConfig.apiKeyEnv,
       hasApiKey: Boolean(llmConfig.apiKey)
     }
   };

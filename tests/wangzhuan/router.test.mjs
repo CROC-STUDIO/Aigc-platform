@@ -279,10 +279,12 @@ test("llm config endpoint returns model defaults without exposing api key", asyn
     endpoint: "https://skylink-gateway.com/api/v1",
     model: "gpt-5.4",
     temperature: 0.2,
+    timeoutMs: 180000,
+    apiKeyEnv: "WANGZHUAN_LLM_API_KEY",
     hasApiKey: true
   });
   assert.doesNotMatch(res.body, /secret-token/);
-  assert.doesNotMatch(res.body, /apiKey/);
+  assert.doesNotMatch(res.body, /"apiKey"\s*:/);
 });
 
 test("llm config reuses video generation api key when a dedicated key is not set", async () => {
@@ -318,7 +320,73 @@ test("llm config reuses video generation api key when a dedicated key is not set
   assert.equal(payload.code, "ok");
   assert.equal(payload.data.llmConfig.hasApiKey, true);
   assert.doesNotMatch(res.body, /shared-seedance-token/);
-  assert.doesNotMatch(res.body, /apiKey/);
+  assert.doesNotMatch(res.body, /"apiKey"\s*:/);
+});
+
+test("draft decomposition endpoint reports missing llm api key env to frontend", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const previousEnv = {
+    WANGZHUAN_LLM_API_KEY: process.env.WANGZHUAN_LLM_API_KEY,
+    VIDEO_AIGC_API_KEY: process.env.VIDEO_AIGC_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_KEY: process.env.OPENAI_KEY,
+    REVERSE_PROMPT_API_KEY: process.env.REVERSE_PROMPT_API_KEY
+  };
+  for (const key of Object.keys(previousEnv)) delete process.env[key];
+  const root = await mkdtemp(join(tmpdir(), "wz-router-draft-key-"));
+  try {
+    const ctx = {
+      userProjectRoot: join(root, "user"),
+      sharedProjectRoot: join(root, "shared"),
+      userId: "user",
+      user: { userId: "user", username: "user", role: "user", isAdmin: false },
+      mockReferenceProbe: true,
+      readJson: context("user").readJson,
+      currentUser: () => ({ userId: "user", username: "user", role: "user", isAdmin: false }),
+      currentUserId: () => "user",
+      currentProjectRoot: () => join(root, "user"),
+      currentBaseProjectRoot: () => join(root, "shared")
+    };
+    const checked = await checkReferenceVideo(ctx, {
+      fileName: "demo.mp4",
+      mimeType: "video/mp4",
+      content: `data:video/mp4;base64,${Buffer.from("video").toString("base64")}`,
+      durationSec: 15,
+      width: 720,
+      height: 1280,
+      canExtractFrame: true
+    });
+    const res = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        referenceVideoId: checked.referenceVideo.referenceVideoId,
+        llmConfig: {
+          provider: "skylink",
+          endpoint: "https://skylink-gateway.com/api/v1",
+          model: "GPT-5.4",
+          apiKeyEnv: "WANGZHUAN_LLM_API_KEY"
+        }
+      }),
+      res,
+      new URL("http://localhost/api/wangzhuan/reference-videos/draft-decomposition"),
+      ctx
+    );
+
+    assert.equal(res.statusCode, 502);
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.code, "model_failed");
+    assert.equal(payload.data.apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
+    assert.match(payload.data.upstreamMessage, /WANGZHUAN_LLM_API_KEY/);
+    assert.doesNotMatch(res.body, /secret-token/);
+  } finally {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("reference video check endpoint returns the new success envelope", async () => {

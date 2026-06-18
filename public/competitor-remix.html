@@ -52,7 +52,7 @@
           <div>
             <h1>竞品素材快速改造</h1>
             <div class="path-editor">
-              <span class="page-hint">首期覆盖文案/CTA、Logo/Icon、水印三类局部改造；下载前必须人工预览确认</span>
+              <span class="page-hint">下载前必须人工预览确认</span>
             </div>
           </div>
           <div class="status">
@@ -61,97 +61,112 @@
           </div>
         </section>
 
-        <section class="metrics wz-metrics" aria-label="改造概览">
-          <div><strong id="remixTemplateCount">0</strong><span>源素材</span></div>
-          <div><strong id="remixRegionCount">0</strong><span>区域</span></div>
-          <div><strong id="remixOutputCount">0</strong><span>输出</span></div>
-          <div><strong id="remixDownloadCount">0</strong><span>可下载</span></div>
-        </section>
-
         <div id="remixGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
 
-        <section class="wz-flow-map" aria-label="流程导览">
-          <span><b>1</b>源素材输入</span>
-          <i aria-hidden="true"></i>
-          <span><b>2</b>区域与能力</span>
-          <i aria-hidden="true"></i>
-          <span><b>3</b>预览与交付</span>
-        </section>
+        <nav class="wz-canvas-toolbar" id="remixStepbar" aria-label="流程步骤导航">
+          <a class="wz-stepbar-item" href="#remixNodeSource" data-step="1">
+            <span class="wz-stepbar-no">1</span>
+            <span class="wz-stepbar-label">源素材输入</span>
+          </a>
+          <a class="wz-stepbar-item" href="#remixNodeMask" data-step="2">
+            <span class="wz-stepbar-no">2</span>
+            <span class="wz-stepbar-label">区域与能力</span>
+          </a>
+          <a class="wz-stepbar-item" href="#remixNodeDelivery" data-step="3">
+            <span class="wz-stepbar-no">3</span>
+            <span class="wz-stepbar-label">预览与交付</span>
+          </a>
+          <div class="wz-stepbar-metrics" aria-label="改造概览">
+            <div><strong id="remixTemplateCount">0</strong><span>源素材</span></div>
+            <div><strong id="remixRegionCount">0</strong><span>区域</span></div>
+            <div><strong id="remixOutputCount">0</strong><span>输出</span></div>
+            <div><strong id="remixDownloadCount">0</strong><span>可下载</span></div>
+          </div>
+        </nav>
 
-        <section class="wz-workbench remix-workbench" aria-label="竞品素材快速改造工作流">
-          <section id="remix-left-rail" class="wz-flow-column wz-flow-rail" data-flow-step="source-assets" aria-label="源素材输入">
-            <div class="wz-flow-label">
-              <span>源素材输入</span>
-              <strong>上传源文件 / 读取基础规格</strong>
-            </div>
-          <section class="panel wz-panel">
-            <div class="panel-head">
-              <h2>源素材输入</h2>
-            </div>
-            <input id="remixSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
-            <button id="remixUploadBtn" type="button">上传并检查</button>
-            <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
-          </section>
-          </section>
+        <div class="wz-canvas-scroll">
+          <div class="wz-canvas" id="remixCanvas" aria-label="竞品素材快速改造工作流">
+            <svg class="wz-canvas-links" id="remixCanvasLinks" aria-hidden="true"></svg>
 
-          <section id="remix-main-flow" class="wz-flow-column wz-flow-main" data-flow-step="region-rules" aria-label="区域与能力">
-            <div class="wz-flow-label">
-              <span>区域与能力</span>
-              <strong>框选多个区域 / 生成单张 mask / 提交处理</strong>
+            <!-- 列1：源素材输入 -->
+            <div class="wz-col" data-step="1">
+              <div class="wz-col-label"><b>1</b> 源素材输入</div>
+              <section class="wz-node" id="remixNodeSource" data-node="source" data-port-out="1">
+                <div class="panel-head">
+                  <h2>上传源素材</h2>
+                </div>
+                <div class="wz-node-body">
+                  <input id="remixSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
+                  <button id="remixUploadBtn" type="button">上传并检查</button>
+                  <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
+                </div>
+              </section>
             </div>
-          <section class="panel wz-panel remix-preview-panel">
-            <div class="panel-head">
-              <h2>Mask 编辑窗口</h2>
-              <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
-            </div>
-            <div id="remixMaskEditor" class="wz-region-canvas remix-mask-editor" aria-label="Mask 编辑窗口，方向键移动选中区域，Shift 加方向键调整大小" tabindex="0">
-              <div id="remixMaskMediaLayer" class="remix-mask-media" aria-hidden="true"></div>
-              <div class="remix-mask-empty" data-mask-empty>上传源素材后框选多个区域</div>
-              <div id="remixMaskLayer" class="remix-mask-layer"></div>
-            </div>
-            <div class="wz-warning">框选区域会合成一张 mask 预览图；确认后提交视频处理平台 ai_remove 手动任务。</div>
-          </section>
 
-          <section class="panel wz-panel remix-mask-preview-panel">
-            <div class="panel-head">
-              <h2>Mask 区域预览</h2>
-              <span id="remixMaskSummary">未生成</span>
-            </div>
-            <div class="remix-mask-preview">
-              <canvas id="remixMaskPreviewCanvas" width="720" height="1280" aria-label="合成 mask 预览图"></canvas>
-            </div>
-            <div class="modal-actions wz-actions">
-              <button id="remixMaskConfirmBtn" type="button" disabled>确认并调用接口</button>
-            </div>
-          </section>
-          </section>
+            <!-- 列2：区域与能力（Mask 编辑 + 预览） -->
+            <div class="wz-col wz-col-wide" data-step="2">
+              <div class="wz-col-label"><b>2</b> 区域与能力</div>
+              <section class="wz-node" id="remixNodeMask" data-node="mask" data-port-in="1" data-port-out="1">
+                <div class="panel-head">
+                  <h2>Mask 编辑窗口</h2>
+                  <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
+                </div>
+                <div class="wz-node-body">
+                  <div id="remixMaskEditor" class="wz-region-canvas remix-mask-editor" aria-label="Mask 编辑窗口，方向键移动选中区域，Shift 加方向键调整大小" tabindex="0">
+                    <div id="remixMaskMediaLayer" class="remix-mask-media" aria-hidden="true"></div>
+                    <div class="remix-mask-empty" data-mask-empty>上传源素材后框选多个区域</div>
+                    <div id="remixMaskLayer" class="remix-mask-layer"></div>
+                  </div>
+                  <div class="wz-warning">框选区域会合成一张 mask 预览图；确认后提交视频处理平台 ai_remove 手动任务。</div>
+                </div>
+              </section>
 
-          <aside id="remix-right-rail" class="wz-flow-column wz-flow-rail" data-flow-step="preview-delivery" aria-label="预览与交付">
-            <div class="wz-flow-label">
-              <span>预览与交付</span>
-              <strong>处理状态 / 人工确认 / 下载结果</strong>
+              <section class="wz-node" id="remixNodeMaskPreview" data-node="mask-preview" data-port-in="1" data-port-out="1">
+                <div class="panel-head">
+                  <h2>Mask 区域预览</h2>
+                  <span id="remixMaskSummary">未生成</span>
+                </div>
+                <div class="wz-node-body">
+                  <div class="remix-mask-preview">
+                    <canvas id="remixMaskPreviewCanvas" width="720" height="1280" aria-label="合成 mask 预览图"></canvas>
+                  </div>
+                  <div class="modal-actions wz-actions">
+                    <button id="remixMaskConfirmBtn" type="button" disabled>确认并调用接口</button>
+                  </div>
+                </div>
+              </section>
             </div>
-          <section class="panel wz-panel wz-wide">
-            <div class="panel-head">
-              <h2>处理状态与预览确认</h2>
-              <span id="remixStatusBadge">未开始</span>
-            </div>
-            <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
-            <div class="modal-actions wz-actions">
-              <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
-              <button id="remixDownloadBtn" class="ghost" type="button" disabled>下载交付包</button>
-            </div>
-          </section>
 
-          <section class="panel wz-panel wz-wide">
-            <div class="panel-head">
-              <h2>改造图库</h2>
-              <button id="remixRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+            <!-- 列3：预览与交付 -->
+            <div class="wz-col" data-step="3">
+              <div class="wz-col-label"><b>3</b> 预览与交付</div>
+              <section class="wz-node" id="remixNodeDelivery" data-node="delivery" data-port-in="1">
+                <div class="panel-head">
+                  <h2>处理状态与预览确认</h2>
+                  <span id="remixStatusBadge">未开始</span>
+                </div>
+                <div class="wz-node-body">
+                  <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
+                  <div class="modal-actions wz-actions">
+                    <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
+                    <button id="remixDownloadBtn" class="ghost" type="button" disabled>下载交付包</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="wz-node" id="remixNodeGallery" data-node="gallery">
+                <div class="panel-head">
+                  <h2>改造图库</h2>
+                  <button id="remixRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+                </div>
+                <div class="wz-node-body">
+                  <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
+                </div>
+              </section>
             </div>
-            <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
-          </section>
-          </aside>
-        </section>
+
+          </div>
+        </div>
       </section>
     </main>
 
@@ -168,6 +183,7 @@
       </div>
     </div>
 
+    <script src="/remix-canvas.js" defer></script>
     <script src="/competitor-remix.js" type="module"></script>
   </body>
 </html>

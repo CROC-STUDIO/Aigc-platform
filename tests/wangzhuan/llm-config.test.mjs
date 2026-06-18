@@ -15,8 +15,10 @@ test("normalizes Skylink GPT model ids to the lowercase ids returned by /models"
   };
 
   assert.equal(resolveLlmConfig(config).model, "gpt-5.4");
+  assert.equal(resolveLlmConfig(config).apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
   assert.equal(resolveLlmConfig(config, { model: "GPT-5.4-mini" }).model, "gpt-5.4-mini");
   assert.equal(publicLlmConfig(config).llmConfig.model, "gpt-5.4");
+  assert.equal(publicLlmConfig(config).llmConfig.apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
 });
 
 test("keeps non-Skylink model ids case-sensitive", () => {
