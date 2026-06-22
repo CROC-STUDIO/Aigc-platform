@@ -16,6 +16,7 @@
         <a class="topbar-link" href="/competitor-remix.html">独立入口：竞品素材改造</a>
       </nav>
       <div class="topbar-account">
+        <a class="topbar-account-link" href="/wangzhuan-tasks.html">任务管理</a>
         <span id="wzCurrentUserBadge">未登录</span>
         <button id="wzLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
       </div>
@@ -48,20 +49,9 @@
 
     <main class="app wz-app wz-workbench">
       <section class="operation-pane">
-        <section class="topbar wz-page-head">
-          <div>
-            <h1>网赚素材管线</h1>
-          </div>
-          <div class="status">
-            <span id="wzEnvelopeBadge">Envelope: waiting</span>
-            <span id="wzCapabilityBadge">Provider: unverified</span>
-          </div>
-        </section>
-
         <div id="wzGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
         <div id="wzActiveLockActions" class="wz-lock-actions" hidden>
           <span id="wzActiveLockText"></span>
-          <button id="wzStopActiveLockBtn" class="ghost" type="button">停止占用任务</button>
         </div>
 
         <nav class="wz-canvas-toolbar" id="wzStepbar" aria-label="流程步骤导航">
@@ -116,39 +106,34 @@
             </div>
 
             <!-- 列2：拆解 -->
-            <div class="wz-col" data-step="2">
+            <div class="wz-col wz-col-wide" data-step="2">
               <div class="wz-col-label"><b>2</b> 模型拆解</div>
               <section class="wz-node" id="wzNodeDecompose" data-node="decompose" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
-                  <h2>GPT 拆解脚本</h2>
-                  <span>按 JSON 格式拆分脚本</span>
+                  <h2>AI 拆解脚本</h2>
+                  <span>分析参考视频，提取镜头与脚本结构</span>
                 </div>
                 <div class="wz-node-body">
-                  <div id="wzDecompositionStatus" class="wz-info">先读取参考视频信息，再调用模型生成拆解草稿。</div>
-                  <div class="wz-script-schema">
-                    <span>scene</span>
-                    <span>subject</span>
-                    <span>action</span>
-                    <span>camera</span>
-                    <span>lighting</span>
-                    <span>style</span>
-                    <span>quality</span>
-                  </div>
-                  <textarea id="wzDecompositionText" class="wz-json-box" spellcheck="false"></textarea>
+                  <div id="wzDecompositionStatus" class="wz-info">先上传参考视频，再点击「开始解析」生成脚本草稿。</div>
+                  <div id="wzLlmServiceStatus" class="wz-info wz-service-pill">正在检查 AI 拆解服务…</div>
+                  <label class="wz-field-label">素材经验补充（可选）
+                    <textarea id="wzKnowledgeNotes" class="wz-json-box compact" spellcheck="false" placeholder="例如：前 3 秒突出奖励反馈；禁止「稳赚」「日入 xxx」；目标地区用当地口语化表达。"></textarea>
+                    <span class="wz-field-hint">写给 AI 的渠道/产品经验，会用于视频拆解和后续分镜策划。不填也能正常解析。</span>
+                  </label>
                   <div class="modal-actions wz-actions">
-                    <button id="wzDraftDecompositionBtn" type="button" disabled>自动拆解参考视频</button>
+                    <button id="wzDraftDecompositionBtn" type="button" disabled>开始解析</button>
                     <button id="wzDecomposeBtn" class="ghost" type="button" disabled>确认脚本拆解</button>
                   </div>
-                  <label class="wz-field-label">经验规则（可选）
-                    <textarea id="wzKnowledgeNotes" class="wz-json-box compact" spellcheck="false" placeholder="可粘贴历史出量素材经验，例如：常用开头、不能出现的承诺、目标地区表达习惯。"></textarea>
-                  </label>
+                  <p id="wzDecompositionHint" class="wz-field-hint wz-decomposition-hint">解析结果会以表单展示，确认前可直接修改；确认后将锁定并进入第三步。</p>
+                  <div id="wzDecompositionForm" class="wz-decomposition-form empty-line" hidden aria-live="polite"></div>
                   <details class="wz-details wz-advanced-settings">
-                    <summary>高级设置：模型接口配置</summary>
+                    <summary>开发者选项（一般无需修改）</summary>
+                    <p class="wz-field-hint">仅在切换模型或排查故障时使用，日常制作可忽略。</p>
                     <div class="wz-inline-form">
-                      <label>Provider <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 openai / skylink / local" /></label>
-                      <label>模型 <input id="wzLlmModel" type="text" value="gpt-5.4" placeholder="你配置模型名" /></label>
-                      <label>接口地址 <input id="wzLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型接口地址" /></label>
-                      <label>拆解温度 <input id="wzLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" /></label>
+                      <label>模型服务商 <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
+                      <label>模型名称 <input id="wzLlmModel" type="text" value="gpt-5.4" placeholder="服务端配置的模型名" /></label>
+                      <label>接口地址 <input id="wzLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型 API 地址" /></label>
+                      <label>创意随机度 <input id="wzLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" title="数值越低输出越稳定，越高越有变化" /></label>
                     </div>
                   </details>
                 </div>
@@ -161,8 +146,10 @@
                 <b>3</b> 产品改写（可裂变 3.1 / 3.2 / 3.3…）
                 <button id="wzAddBranchBtn" class="mini ghost wz-add-branch" type="button" title="裂变一个完整的改写子节点">+ 裂变子节点</button>
               </div>
+              <div id="wzTemplateStatus" class="wz-template-status wz-info">填写完成后点击「保存模板」，保存后将进入第四步。</div>
+              <p class="wz-field-hint wz-template-save-hint">「保存模板」会一次性写入全部 3.x 裂变子节点，请确保每个分支都已填完。</p>
               <div class="wz-branches" id="wzBranches">
-                <section class="wz-node wz-node-branch collapsed" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
+                <section class="wz-node wz-node-branch" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
                   <div class="panel-head">
                     <h2 class="wz-branch-title">改写 3.1</h2>
                     <button id="wzCreateTemplateBtn" class="mini" type="button">保存模板</button>
@@ -287,12 +274,15 @@
                         <div class="wz-subnode-body">
                           <label class="wz-field-label">脚本裂变约束
                             <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="填写需要保留或变化的特征，例如：保留三段式节奏，替换为我方产品 icon、人物、奖励元素，生成 N 个不同开头。"></textarea>
+                            <span class="wz-field-hint">第三步：控制同一分支下多个变体的差异点，会随模板送入第 4 步 LLM 策划。</span>
                           </label>
                           <label class="wz-field-label">全局提示词 / 单素材特殊要求
                             <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false">Make the phone UI clear, keep the host natural, show the uploaded product icon, and include the product slogan as subtitle text.</textarea>
+                            <span class="wz-field-hint">第三步：补充画面与字幕要求，作用于该分支的全部生成任务。</span>
                           </label>
                           <label class="wz-field-label">限定提示词
                             <textarea id="wzNegativePrompt" class="wz-json-box compact" spellcheck="false">No competitor logo, no fake transfer proof, no guaranteed payout, no invented exact cash amount, no wrong currency symbol, no watermark residue, no distorted icon.</textarea>
+                            <span class="wz-field-hint">第三步：禁止出现的元素或表述，与渠道规则互补。</span>
                           </label>
                         </div>
                       </section>
@@ -308,44 +298,66 @@
               <section class="wz-node" id="wzNodeBatch" data-node="batch" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
                   <h2>批次参数</h2>
-                  <button id="wzEstimateBtn" class="mini" type="button">重新估算</button>
+                  <button id="wzEstimateBtn" class="mini" type="button">估算本批任务</button>
                 </div>
-                <div class="wz-node-body">
-                  <div class="wz-inline-form">
-                    <label>模型
-                      <select id="wzModelSelect">
-                        <option value="dreamina-seedance-2-0-260128" selected>Seedance 2.0</option>
-                      </select>
-                    </label>
-                    <label>输出时长
-                      <select id="wzDuration">
-                        <option value="15">15s</option>
-                        <option value="30">30s</option>
-                      </select>
-                    </label>
-                    <label>变体数 <input id="wzVariantCount" type="number" min="1" max="50" value="3" /></label>
-                    <label>并发 <input id="wzConcurrency" type="number" min="1" max="4" value="2" /></label>
-                  </div>
-                  <details class="wz-details wz-advanced-settings">
-                    <summary>高级设置：Seedance 模型名</summary>
-                    <label>Seedance 模型
-                      <input id="wzSeedanceModel" type="text" value="doubao-seedance-2-0-260128" placeholder="你配置 Seedance 模型名" />
-                    </label>
-                  </details>
-                  <div id="wzEstimateBox" class="wz-estimate empty-line">尚未估算</div>
-                  <div class="wz-process-card">
-                    <strong>生成会带入</strong>
-                    <span>已确认的脚本拆解</span>
-                    <span>产品图标、截图、人物和奖励元素</span>
-                    <span>目标地区语言、人种、口播风格</span>
-                    <span>渠道规则和限定提示词</span>
-                  </div>
+                <div class="wz-node-body wz-batch-body">
+                  <div id="wzBatchReadiness" class="wz-batch-readiness" hidden aria-live="polite"></div>
+                  <ol class="wz-batch-steps" aria-label="第 4 步子流程">
+                    <li class="wz-batch-step" data-batch-step="estimate">① 估算任务规模</li>
+                    <li class="wz-batch-step" data-batch-step="plan">② 生成 Seedance 预案</li>
+                    <li class="wz-batch-step" data-batch-step="confirm">③ 确认并开始生成</li>
+                  </ol>
+                  <section class="wz-batch-section">
+                    <div class="wz-batch-section-head">
+                      <h3>批次参数</h3>
+                      <span class="wz-field-hint">调整时长、变体数后需重新估算</span>
+                    </div>
+                    <div class="wz-inline-form wz-batch-params">
+                      <label>模型
+                        <select id="wzModelSelect">
+                          <option value="dreamina-seedance-2-0-260128" selected>Seedance 2.0</option>
+                        </select>
+                      </label>
+                      <label>输出时长
+                        <select id="wzDuration">
+                          <option value="15">15s</option>
+                          <option value="30">30s</option>
+                        </select>
+                      </label>
+                      <label>变体数
+                        <input id="wzVariantCount" type="number" min="1" max="50" value="3" />
+                        <span class="wz-field-hint">每个 3.x 子节点的脚本变体数；总任务 ≈ 子节点数 × 变体数 × 时长系数</span>
+                      </label>
+                      <label>并发 <input id="wzConcurrency" type="number" min="1" max="4" value="2" /></label>
+                    </div>
+                    <details class="wz-details wz-advanced-settings">
+                      <summary>高级设置：Seedance 模型名</summary>
+                      <label>Seedance 模型
+                        <input id="wzSeedanceModel" type="text" value="dreamina-seedance-2-0-260128" placeholder="Skylink 已启用的 Seedance 模型名" />
+                      </label>
+                    </details>
+                  </section>
+                  <section class="wz-batch-section">
+                    <div class="wz-batch-section-head">
+                      <h3>估算结果</h3>
+                      <span id="wzEstimateHint" class="wz-field-hint">完成前两步后点击右上角「估算本批任务」</span>
+                    </div>
+                    <div id="wzEstimateBox" class="wz-estimate empty-line">完成前两步后，在此估算本批任务规模。</div>
+                  </section>
+                  <section class="wz-batch-section">
+                    <div class="wz-batch-section-head">
+                      <h3>Seedance 预案</h3>
+                      <span id="wzPlanHint" class="wz-field-hint">估算完成后生成，确认后再批量出片</span>
+                    </div>
+                    <div id="wzPlanBox" class="wz-list empty-line">尚未生成 Seedance 预案</div>
+                  </section>
                   <label class="wz-check">
                     <input id="wzConfirmLimits" type="checkbox" />
                     已确认本批次数量、时长和可能消耗
                   </label>
-                  <div class="modal-actions wz-actions">
-                    <button id="wzStartBatchBtn" type="button" disabled>开始批次</button>
+                  <div class="modal-actions wz-actions wz-batch-actions">
+                    <button id="wzPlanBatchBtn" type="button" disabled>生成 Seedance 预案</button>
+                    <button id="wzConfirmPlanBtn" type="button" disabled>确认预案并生成视频</button>
                     <button id="wzStopBatchBtn" class="ghost" type="button" disabled>停止批次</button>
                   </div>
                 </div>

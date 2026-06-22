@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -6,21 +5,32 @@ import { normalizeBranchDrafts } from "./branches.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
-import { loadActivePipelineRunFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
+import {
+  hasWangzhuanFactsStore,
+  loadActivePipelineRunFromMysql,
+  loadBatchDetailFromMysql,
+  syncBatchFacts
+} from "./mysql-facts.mjs";
 import {
   buildSeedanceGenerationPayload,
   collectSeedanceMedia,
   createSeedanceProviderClient,
   DEFAULT_SEEDANCE_MODEL,
+  resolveSeedanceModel,
   summarizeSeedanceRequest,
   summarizeSeedanceResponse
 } from "./seedance-provider.mjs";
-import { appendJsonl, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import {
+  buildGenerationPlanRecord,
+  generateSeedancePlan,
+  validateBranchTruthRulesForPlan
+} from "./plan-preview.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
-const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc"]);
+const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc", "preview_required"]);
 const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "skipped", "stopped"]);
 
 function currentUserId(context) {
@@ -38,68 +48,50 @@ function batchDir(context, batchId) {
   return join(wangzhuanPaths(context).batchesDir, batchId);
 }
 
-function batchPath(context, batchId) {
-  return join(batchDir(context, batchId), "batch.json");
-}
-
-function eventPath(context, batchId) {
-  return join(batchDir(context, batchId), "tasks.jsonl");
-}
-
 function userRelative(context, fullPath) {
   return toProjectRelative(context.userProjectRoot, fullPath);
 }
 
-async function readBatch(context, batchId) {
-  const target = batchPath(context, batchId);
-  if (!existsSync(target)) {
-    throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+async function requireFactsStore() {
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
   }
-  const batch = JSON.parse(await readFile(target, "utf8"));
+}
+
+async function readBatch(context, batchId) {
+  validateBatchId(batchId);
+  await requireFactsStore();
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  const batch = detail?.batch;
+  if (!batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   if (batch.userId !== currentUserId(context) && context.user?.role !== "admin" && !context.user?.isAdmin) {
     throw new WangzhuanError("permission_denied", "当前账号无权访问该批次", { batchId });
   }
   return batch;
 }
 
-async function writeBatch(context, batch) {
+async function writeBatchWithTrigger(context, batch, triggerName = "batch_write") {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.batchesDir, next.batchId, "batch.json"), next);
-  const indexPath = join(paths.batchesDir, "index.json");
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(await readFile(indexPath, "utf8"));
-    index.items = Array.isArray(index.items) ? index.items : [];
-    const item = index.items.find((entry) => entry.batchId === next.batchId);
-    if (item) {
-      item.status = next.status;
-      item.updatedAt = now;
+  const synced = await syncBatchFacts(context, next, triggerName);
+  if (synced?.skipped) {
+    const detail = synced.error?.message || synced.error?.code || null;
+    if (!await hasWangzhuanFactsStore()) {
+      throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存业务状态");
     }
-    await writeAtomicJson(indexPath, index);
+    throw new WangzhuanError("database_unavailable", detail
+      ? `批次状态保存失败：${String(detail).slice(0, 300)}`
+      : "批次状态保存失败，请确认数据库迁移已执行到最新版本（含 pending_preview 任务状态）", {
+      batchId: batch.batchId,
+      triggerName,
+      cause: detail
+    });
   }
-  await syncBatchFacts(context, next, "batch_write");
   return next;
 }
 
-async function writeBatchWithTrigger(context, batch, triggerName) {
-  const now = new Date().toISOString();
-  const next = { ...batch, updatedAt: now };
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.batchesDir, next.batchId, "batch.json"), next);
-  const indexPath = join(paths.batchesDir, "index.json");
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(await readFile(indexPath, "utf8"));
-    index.items = Array.isArray(index.items) ? index.items : [];
-    const item = index.items.find((entry) => entry.batchId === next.batchId);
-    if (item) {
-      item.status = next.status;
-      item.updatedAt = now;
-    }
-    await writeAtomicJson(indexPath, index);
-  }
-  await syncBatchFacts(context, next, triggerName);
-  return next;
+async function writeBatch(context, batch) {
+  return writeBatchWithTrigger(context, batch, "batch_write");
 }
 
 function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaimers = []) {
@@ -223,38 +215,24 @@ async function writeTaskMaps(context, batch) {
   await writePlainPrompt(csvPath, `${csv}\n`);
 }
 
-async function appendEvent(context, batchId, event) {
-  await appendJsonl(eventPath(context, batchId), {
-    createdAt: new Date().toISOString(),
-    batchId,
-    ...event
-  });
-}
-
-function mockSubmittedTask(task, now) {
-  return {
-    ...task,
-    status: "waiting_upstream",
-    imageTaskId: `mock_img_${task.generationTaskId}`,
-    seedanceTaskId: `mock_seedance_${task.generationTaskId}`,
-    provider: "mock",
-    providerJobId: undefined,
-    remoteUrlStored: false,
-    attempts: Number(task.attempts || 0) + 1,
-    startedAt: now,
-    finishedAt: undefined,
-    errorCode: undefined,
-    errorMessage: undefined,
-    nextAttemptAt: undefined
-  };
-}
-
 async function buildSeedanceTaskPayload(context, batch, task, provider) {
-  const promptTarget = join(context.userProjectRoot, task.promptPath);
+  let promptRelPath = task.promptPath;
+  if (!promptRelPath) {
+    const script = (Array.isArray(batch.scripts) ? batch.scripts : []).find((item) => item.scriptId === task.scriptId);
+    promptRelPath = script?.promptPath || "";
+  }
+  if (!promptRelPath) {
+    throw new WangzhuanError("missing_required_file", "Seedance prompt 文件缺失", {
+      generationTaskId: task.generationTaskId,
+      batchId: batch.batchId,
+      scriptId: task.scriptId || ""
+    });
+  }
+  const promptTarget = join(context.userProjectRoot, promptRelPath);
   const prompt = await readFile(promptTarget, "utf8");
   const media = collectSeedanceMedia(batch, task);
   return buildSeedanceGenerationPayload({
-    model: provider?.model || task.modelVideo || MODEL_VIDEO,
+    model: resolveSeedanceModel(batch, provider, task),
     prompt,
     media,
     mode: media.length ? "omni_reference" : "text_to_video",
@@ -276,7 +254,13 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
 }
 
 async function submitTaskToSeedance(context, batch, task, provider, now) {
-  if (!provider) return mockSubmittedTask(task, now);
+  if (!provider) {
+    throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法提交生成任务", {
+      generationTaskId: task.generationTaskId,
+      requiredConfig: "wangzhuan.seedanceProvider.endpoint",
+      requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
+    });
+  }
   const payload = await buildSeedanceTaskPayload(context, batch, task, provider);
   let result;
   try {
@@ -348,7 +332,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
 }
 
 async function ensureEventFile(context, batchId) {
-  await appendEvent(context, batchId, { event: "batch_prepared" });
+  await writeBatchWithTrigger(context, await readBatch(context, batchId), "batch_prepared");
 }
 
 async function writeProcessTraceFiles(context, batch) {
@@ -451,15 +435,20 @@ async function writeProcessTraceFiles(context, batch) {
   });
 }
 
-export async function prepareBatchForPipeline(context, batch) {
+export async function prepareBatchForPipeline(context, batch, options = {}) {
   if (Array.isArray(batch.scripts) && batch.scripts.length && Array.isArray(batch.tasks) && batch.tasks.length) {
     return batch;
   }
 
+  const useLlmPlans = Boolean(options.useLlmPlans);
   const scripts = [];
   const tasks = [];
+  const plans = [];
   const segmentMultiplier = Number(batch.estimate?.durationSec) === 30 ? 2 : 1;
   const branchDrafts = normalizeBranchDrafts(batch.templateSnapshot?.draft, batch.estimate?.request?.branches);
+  if (useLlmPlans) {
+    validateBranchTruthRulesForPlan(branchDrafts);
+  }
   let sequence = 1;
 
   for (const branch of branchDrafts) {
@@ -475,6 +464,65 @@ export async function prepareBatchForPipeline(context, batch) {
         const scriptTarget = join(batchDir(context, batch.batchId), "scripts", `${scriptId}${segmentSuffix}.json`);
         const promptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_seedance.txt`);
         const imagePromptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_image.txt`);
+        let hook = scriptHook(batch, branch, branchVariantIndex);
+        let body = scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers);
+        let cta = branch.cta || batch.decomposition?.cta || "Install now";
+        let ending = branch.ending || "Try it today";
+        let seedancePrompt = "";
+        let imagePrompt = "";
+        let negativePrompt = branch.negativePrompt || "";
+        let voiceover = "";
+        let subtitles = [];
+        let complianceNotes = [];
+        let mediaRefs = branch.assetUrls || {};
+        let planRecord = null;
+
+        if (useLlmPlans) {
+          const planPayload = await generateSeedancePlan(context, {
+            batch,
+            branch,
+            decomposition: batch.decomposition,
+            channelRules,
+            branchVariantIndex,
+            segmentIndex,
+            knowledgeNotes: options.knowledgeNotes
+          });
+          hook = planPayload.hook;
+          body = planPayload.body;
+          cta = planPayload.cta;
+          ending = planPayload.ending;
+          seedancePrompt = planPayload.seedancePrompt;
+          imagePrompt = planPayload.imagePrompt;
+          negativePrompt = planPayload.negativePrompt;
+          voiceover = planPayload.voiceover;
+          subtitles = planPayload.subtitles;
+          complianceNotes = planPayload.complianceNotes;
+          mediaRefs = planPayload.mediaRefs;
+          planRecord = buildGenerationPlanRecord({
+            batch,
+            branch,
+            scriptId,
+            generationTaskId,
+            branchVariantIndex,
+            segmentIndex,
+            sequence,
+            planPayload: {
+              hook,
+              body,
+              voiceover,
+              subtitles,
+              cta,
+              ending,
+              imagePrompt,
+              seedancePrompt,
+              negativePrompt,
+              mediaRefs,
+              complianceNotes
+            }
+          });
+          plans.push(planRecord);
+        }
+
         const script = {
           scriptId,
           batchId: batch.batchId,
@@ -485,32 +533,49 @@ export async function prepareBatchForPipeline(context, batch) {
           variantIndex: sequence,
           segmentIndex,
           durationSec: 15,
-          hook: scriptHook(batch, branch, branchVariantIndex),
-          body: scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers),
-          cta: branch.cta || batch.decomposition?.cta || "Install now",
-          ending: branch.ending || "Try it today",
+          hook,
+          body,
+          cta,
+          ending,
           branchDraft: branch,
           ...(rewardExpression(batch, branch) ? { rewardExpression: rewardExpression(batch, branch) } : {}),
+          ...(planRecord ? {
+            planId: planRecord.planId,
+            voiceover,
+            subtitles,
+            imagePrompt,
+            seedancePrompt,
+            negativePrompt,
+            mediaRefs,
+            complianceNotes
+          } : {}),
           promptPath: userRelative(context, promptTarget),
           scriptPath: userRelative(context, scriptTarget)
         };
         await writeAtomicJson(scriptTarget, script);
-        await writePlainPrompt(promptTarget, buildPrompt(batch, script, "video"));
-        await writePlainPrompt(imagePromptTarget, buildPrompt(batch, script, "image"));
+        await writePlainPrompt(
+          promptTarget,
+          useLlmPlans ? seedancePrompt : buildPrompt(batch, script, "video")
+        );
+        await writePlainPrompt(
+          imagePromptTarget,
+          useLlmPlans ? imagePrompt : buildPrompt(batch, script, "image")
+        );
 
         scripts.push(script);
         tasks.push({
           generationTaskId,
           batchId: batch.batchId,
           scriptId,
+          ...(planRecord ? { planId: planRecord.planId } : {}),
           branchId: branch.branchId,
           branchIndex: branch.branchIndex,
           branchLabel: branch.branchLabel,
           branchVariantIndex,
           segmentIndex,
-          status: "pending",
+          status: useLlmPlans ? "pending_preview" : "pending",
           modelImage: MODEL_IMAGE,
-          modelVideo: MODEL_VIDEO,
+          modelVideo: resolveSeedanceModel(batch),
           promptPath: script.promptPath,
           remoteUrlStored: false,
           attempts: 0
@@ -522,6 +587,10 @@ export async function prepareBatchForPipeline(context, batch) {
 
   const prepared = {
     ...batch,
+    ...(useLlmPlans ? {
+      previewType: "seedance_plan",
+      plans
+    } : {}),
     branchDrafts,
     scripts,
     tasks,
@@ -541,25 +610,9 @@ export async function getBatchDetail(context, batchId) {
   if (shouldPollUpstreamBatch(initial)) {
     await pollUpstreamBatch(context, batchId);
   }
-  const batch = await readBatch(context, batchId);
-  let events = [];
-  try {
-    const text = await readFile(eventPath(context, batch.batchId), "utf8");
-    events = text.trim() ? text.trim().split("\n").map((line) => JSON.parse(line)) : [];
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
-  return {
-    batch,
-    events,
-    downloadSummary: {
-      outputsTotal: outputs.length,
-      downloadEligibleCount: outputs.filter((item) => item.downloadEligible).length,
-      packageReady: outputs.some((item) => item.downloadEligible),
-      missingFiles: []
-    }
-  };
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+  return detail;
 }
 
 export async function stopBatch(context, batchId, request = {}) {
@@ -588,7 +641,6 @@ export async function stopBatch(context, batchId, request = {}) {
     stopReason: request.reason || "user_stopped"
   }, "user_stop");
   await writeTaskMaps(context, stopped);
-  await appendEvent(context, stopped.batchId, { event: "batch_stopped", stoppedCount, reason: request.reason || "user_stopped" });
   await recordTelemetryEvent(context, "batch_stopped", {
     batchId: stopped.batchId,
     completedCount: tasks.filter((task) => task.status === "succeeded").length,
@@ -602,13 +654,20 @@ export async function stopBatch(context, batchId, request = {}) {
 
 export async function submitPendingGenerationTasks(context, batchId) {
   const batch = await readBatch(context, batchId);
-  if (batch.status === "stopped") {
-    return { batch, submittedCount: 0 };
+  if (batch.status === "stopped" || batch.status === "preview_required") {
+    return { batch, submittedCount: 0, failedSubmitCount: 0 };
   }
   const now = new Date().toISOString();
   let submittedCount = 0;
   let failedSubmitCount = 0;
   const provider = createSeedanceProviderClient(context);
+  if (!provider) {
+    throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法提交生成任务", {
+      batchId,
+      requiredConfig: "wangzhuan.seedanceProvider.endpoint",
+      requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
+    });
+  }
   const tasks = [];
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     if (task.status !== "pending") {
@@ -627,11 +686,6 @@ export async function submitPendingGenerationTasks(context, batchId) {
       : batch.status === "queued" ? "running" : batch.status;
   const saved = await writeBatch(context, { ...batch, status: nextStatus, tasks });
   await writeTaskMaps(context, saved);
-  await appendEvent(context, saved.batchId, {
-    event: provider ? "seedance_generation_submitted" : "mock_generation_submitted",
-    submittedCount,
-    failedSubmitCount
-  });
   for (const task of saved.tasks.filter((item) => item.startedAt === now && item.status === "waiting_upstream")) {
     await recordTelemetryEvent(context, "generation_task_submitted", {
       batchId: saved.batchId,
@@ -639,7 +693,7 @@ export async function submitPendingGenerationTasks(context, batchId) {
       scriptId: task.scriptId,
       imageTaskId: task.imageTaskId,
       seedanceTaskId: task.seedanceTaskId,
-      provider: task.provider || (provider ? provider.provider : "mock"),
+      provider: task.provider || provider.provider,
       modelImage: task.modelImage,
       modelVideo: task.modelVideo
     }, { audit: true });
@@ -656,6 +710,14 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   let retriedCount = 0;
   let found = false;
   const provider = createSeedanceProviderClient(context);
+  if (!provider) {
+    throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法重试生成任务", {
+      batchId,
+      generationTaskId,
+      requiredConfig: "wangzhuan.seedanceProvider.endpoint",
+      requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
+    });
+  }
   const tasks = [];
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     if (task.generationTaskId !== generationTaskId) {
@@ -692,7 +754,6 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   }
   const saved = await writeBatchWithTrigger(context, { ...batch, status: "running", tasks }, "scheduler_retry");
   await writeTaskMaps(context, saved);
-  await appendEvent(context, saved.batchId, { event: "generation_task_retried", generationTaskId, retriedCount });
   if (retriedCount > 0) {
     const retried = saved.tasks.find((task) => task.generationTaskId === generationTaskId);
     await recordTelemetryEvent(context, "generation_task_retried", {
@@ -707,20 +768,84 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   return { batch: saved, retriedCount };
 }
 
+function currentPlanIds(batch, request = {}) {
+  const requested = Array.isArray(request.confirmedPlanIds)
+    ? request.confirmedPlanIds.filter(Boolean)
+    : [];
+  if (requested.length) return new Set(requested);
+  return new Set((Array.isArray(batch.plans) ? batch.plans : []).map((plan) => plan.planId));
+}
+
+export async function confirmBatchPlan(context, batchId, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const batch = await readBatch(context, batchId);
+  if (batch.status !== "preview_required") {
+    throw new WangzhuanError("validation_error", "当前批次不在预案确认阶段", {
+      batchId,
+      status: batch.status
+    });
+  }
+  if (batch.previewType !== "seedance_plan") {
+    throw new WangzhuanError("validation_error", "当前批次不是 Seedance 预案确认", {
+      batchId,
+      previewType: batch.previewType || null
+    });
+  }
+  const confirmedPlanIds = currentPlanIds(batch, request);
+  const plans = Array.isArray(batch.plans) ? batch.plans : [];
+  if (!plans.length) {
+    throw new WangzhuanError("validation_error", "没有可确认的 Seedance 预案", { batchId });
+  }
+  const unknownPlanIds = [...confirmedPlanIds].filter((planId) => !plans.some((plan) => plan.planId === planId));
+  if (unknownPlanIds.length) {
+    throw new WangzhuanError("validation_error", "存在未知预案编号", { batchId, unknownPlanIds });
+  }
+  const now = new Date().toISOString();
+  const nextPlans = plans.map((plan) => confirmedPlanIds.has(plan.planId)
+    ? { ...plan, status: "confirmed", confirmedAt: now }
+    : plan);
+  const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
+    if (task.status !== "pending_preview") return task;
+    if (!task.planId || !confirmedPlanIds.has(task.planId)) return task;
+    return { ...task, status: "pending" };
+  });
+  const unconfirmedPreviewTasks = nextTasks.filter((task) => task.status === "pending_preview");
+  if (unconfirmedPreviewTasks.length) {
+    throw new WangzhuanError("validation_error", "仍有未确认的 Seedance 预案", {
+      batchId,
+      pendingPreviewCount: unconfirmedPreviewTasks.length
+    });
+  }
+  const saved = await writeBatchWithTrigger(context, {
+    ...batch,
+    status: "queued",
+    plans: nextPlans,
+    tasks: nextTasks,
+    previewConfirmedAt: now,
+    previewConfirmedBy: currentUserId(context),
+    previewConfirmationNotes: cleanConfirmationNotes(request.confirmationNotes)
+  }, "plan_confirmed");
+  await writeTaskMaps(context, saved);
+  await recordTelemetryEvent(context, "seedance_plan_confirmed", {
+    batchId: saved.batchId,
+    confirmedPlanCount: nextPlans.filter((plan) => plan.status === "confirmed").length,
+    idempotencyKey: request.idempotencyKey
+  }, { audit: true });
+  return { batch: saved, confirmedPlanIds: [...confirmedPlanIds] };
+}
+
+function cleanConfirmationNotes(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? text.slice(0, 2000) : undefined;
+}
+
 export async function getActiveBatch(context) {
+  await requireFactsStore();
   const active = await loadActivePipelineRunFromMysql(context);
   if (active?.batchId) {
     return getBatchDetail(context, active.batchId);
-  }
-  const paths = wangzhuanPaths(context);
-  const indexPath = join(paths.batchesDir, "index.json");
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(await readFile(indexPath, "utf8"));
-    const items = Array.isArray(index.items) ? index.items : [];
-    const match = items.find((item) => ["queued", "running", "stitching", "qc"].includes(item.status));
-    if (match?.batchId) {
-      return getBatchDetail(context, match.batchId);
-    }
   }
   return {
     batch: null,
@@ -735,7 +860,6 @@ export async function getActiveBatch(context) {
 }
 
 export {
-  appendEvent,
   readBatch,
   writeBatch,
   writeTaskMaps

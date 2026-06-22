@@ -2,33 +2,53 @@ import {
   $,
   apiEnvelope,
   badge,
+  batchGenerationProgress,
+  batchGenerationTaskStatusLabels,
+  batchStatusDisplayLabel,
   batchStatusLabels,
+  formatWorkflowEvent,
+  isBatchGenerationActive,
+  isBatchQcRunnable,
+  renderGenerationTaskCards,
   bindLogin,
   channelLabels,
   clearError,
+  confirmBatchPlanRequest,
   dataUrlFromFile,
   downloadZip,
   escapeHtml,
+  flattenDecompositionFieldValue,
   idempotencyKey,
+  inlineRetryHtml,
   promiseLabels,
   renderError,
   renderKeyValues,
   setBusy,
   showLogin,
+  showToast,
+  syncActionHint,
+  taskProgressHtml,
   strongTruthFields,
   terminalBatchStatus
 } from "./wangzhuan-common.js";
+import {
+  clearActiveLockBanner,
+  showActiveLockFromError
+} from "./wangzhuan-task-nav.js";
+
+const lockHost = () => ({
+  state,
+  actions: els.activeLockActions,
+  text: els.activeLockText
+});
 
 const els = {
   badge: $("#wzCurrentUserBadge"),
   logoutBtn: $("#wzLogoutBtn"),
   loginModal: $("#wzLoginModal"),
-  envelopeBadge: $("#wzEnvelopeBadge"),
-  capabilityBadge: $("#wzCapabilityBadge"),
   globalError: $("#wzGlobalError"),
   activeLockActions: $("#wzActiveLockActions"),
   activeLockText: $("#wzActiveLockText"),
-  stopActiveLockBtn: $("#wzStopActiveLockBtn"),
   templateCount: $("#wzTemplateCount"),
   ruleCount: $("#wzRuleCount"),
   taskCount: $("#wzTaskCount"),
@@ -36,6 +56,8 @@ const els = {
   branches: $("#wzBranches"),
   templateSelect: $("#wzTemplateSelect"),
   createTemplateBtn: $("#wzCreateTemplateBtn"),
+  addBranchBtn: $("#wzAddBranchBtn"),
+  templateStatus: $("#wzTemplateStatus"),
   projectName: $("#wzProjectName"),
   generationMode: $("#wzGenerationMode"),
   batchName: $("#wzBatchName"),
@@ -77,18 +99,25 @@ const els = {
   checkReferenceBtn: $("#wzCheckReferenceBtn"),
   draftDecompositionBtn: $("#wzDraftDecompositionBtn"),
   decomposeBtn: $("#wzDecomposeBtn"),
-  decompositionText: $("#wzDecompositionText"),
+  decompositionForm: $("#wzDecompositionForm"),
+  decompositionHint: $("#wzDecompositionHint"),
   decompositionStatus: $("#wzDecompositionStatus"),
+  llmServiceStatus: $("#wzLlmServiceStatus"),
   referenceBox: $("#wzReferenceBox"),
   duration: $("#wzDuration"),
   variantCount: $("#wzVariantCount"),
   concurrency: $("#wzConcurrency"),
   estimateBtn: $("#wzEstimateBtn"),
+  batchReadiness: $("#wzBatchReadiness"),
+  estimateHint: $("#wzEstimateHint"),
+  planHint: $("#wzPlanHint"),
   estimateBox: $("#wzEstimateBox"),
   confirmLimits: $("#wzConfirmLimits"),
   modelSelect: $("#wzModelSelect"),
   seedanceModel: $("#wzSeedanceModel"),
-  startBatchBtn: $("#wzStartBatchBtn"),
+  planBatchBtn: $("#wzPlanBatchBtn"),
+  confirmPlanBtn: $("#wzConfirmPlanBtn"),
+  planBox: $("#wzPlanBox"),
   stopBatchBtn: $("#wzStopBatchBtn"),
   runQcBtn: $("#wzRunQcBtn"),
   retryStitchBtn: $("#wzRetryStitchBtn"),
@@ -116,6 +145,8 @@ const state = {
   galleryPageSize: 20,
   llmDefaults: null,
   activeLock: null,
+  templateCommitted: false,
+  suppressTemplateUnlock: false,
   pollTimer: 0,
   pollIntervalMs: 2000
 };
@@ -160,25 +191,517 @@ const branchFieldIds = {
   negativePrompt: "wzNegativePrompt"
 };
 
-const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，下一步点击“重新估算”生成批次预估。";
+const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，请继续填写第三步产品改写。";
+const TEMPLATE_SAVED_MESSAGE = "模板已保存，请点击第四步「估算本批任务」继续。";
+const ESTIMATE_BTN_LABEL = Object.freeze({
+  first: "估算本批任务",
+  refresh: "重新估算"
+});
+const WORKFLOW_SESSION_KEY = "wz_workflow_v1";
+
+const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
+  "scene",
+  "subject",
+  "action",
+  "camera",
+  "lighting",
+  "style",
+  "quality",
+  "hook"
+]);
+
+const DECOMPOSITION_FORM_SECTIONS = Object.freeze([
+  {
+    title: "画面与动作",
+    layout: "stack",
+    fields: [
+      { key: "scene", label: "场景", required: true, hint: "空间、App 页面或人物所在环境" },
+      { key: "subject", label: "画面主体", required: true, hint: "人物、手机、产品 UI 或奖励元素" },
+      { key: "action", label: "核心动作", required: true, hint: "用户行为、镜头推进和转折" }
+    ]
+  },
+  {
+    title: "镜头与风格",
+    layout: "grid",
+    fields: [
+      { key: "camera", label: "镜头语言", required: true, hint: "景别、运镜、节奏" },
+      { key: "lighting", label: "光线氛围", required: true, hint: "光线和画面氛围" },
+      { key: "style", label: "素材风格", required: true, hint: "真人口播、手持演示、UGC、App demo 等" },
+      { key: "quality", label: "画质要求", required: true, hint: "清晰度与生成质量" }
+    ]
+  },
+  {
+    title: "脚本节奏",
+    layout: "stack",
+    fields: [
+      { key: "hook", label: "前三秒钩子", required: true, hint: "保留结构，不要照搬竞品文案" },
+      { key: "cta", label: "行动号召", required: false, hint: "下载/安装引导结构（可选）" },
+      { key: "disclaimer", label: "合规提醒", required: false, hint: "不能夸大的点（可选）" }
+    ]
+  },
+  {
+    title: "转化细节（可选）",
+    layout: "grid",
+    fields: [
+      { key: "phoneUi", label: "手机/产品界面", required: false, hint: "界面展示重点" },
+      { key: "rewardFeedback", label: "奖励反馈", required: false, hint: "金币、余额等反馈刺激点" }
+    ]
+  }
+]);
+
+const REQUIRED_DRAFT_FIELDS = Object.freeze([
+  "displayName",
+  "productName",
+  "cta",
+  "ending",
+  "currencySymbol",
+  "language",
+  "regions",
+  "targetChannels",
+  "defaultOutputRatio",
+  "defaultDurationSec",
+  "promiseLevel"
+]);
+
+const DRAFT_FIELD_BRANCH_KEYS = Object.freeze({
+  displayName: "displayName",
+  productName: "productName",
+  cta: "cta",
+  ending: "ending",
+  currencySymbol: "currencySymbol",
+  language: "language",
+  regions: "regions",
+  targetChannels: "templateChannel",
+  defaultDurationSec: "defaultDuration",
+  promiseLevel: "promiseLevel"
+});
 
 function isDecompositionConfirmed() {
-  return Boolean(state.decomposition?.referenceVideoId || (state.decomposition && state.referenceVideo?.referenceVideoId));
+  return Boolean(state.decomposition?.referenceVideoId);
+}
+
+function readWorkflowSession() {
+  try {
+    const raw = sessionStorage.getItem(WORKFLOW_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkflowSession(patch = {}) {
+  const prev = readWorkflowSession() || {};
+  sessionStorage.setItem(WORKFLOW_SESSION_KEY, JSON.stringify({
+    ...prev,
+    ...patch,
+    updatedAt: Date.now()
+  }));
+}
+
+function clearWorkflowSession() {
+  sessionStorage.removeItem(WORKFLOW_SESSION_KEY);
+}
+
+function persistWorkflowSession() {
+  writeWorkflowSession({
+    referenceVideoId: state.referenceVideo?.referenceVideoId || null,
+    templateVersionId: isTemplateCommitted() ? state.selectedTemplate?.versionId : null,
+    templateCommitted: isTemplateCommitted()
+  });
+}
+
+function syncDecompositionDomState() {
+  const node = document.getElementById("wzNodeDecompose");
+  if (!node) return;
+  if (isDecompositionConfirmed()) node.dataset.decompositionConfirmed = "1";
+  else node.removeAttribute("data-decomposition-confirmed");
+  window.dispatchEvent(new CustomEvent("wz:decomposition-confirmed-changed"));
+}
+
+function applyRestoredTemplate(versionId, { lock = false } = {}) {
+  if (!versionId || !state.templates.length) return false;
+  const template = state.templates.find((item) => item.versionId === versionId);
+  if (!template) return false;
+  state.suppressTemplateUnlock = true;
+  els.templateSelect.value = template.versionId;
+  applyTemplate(template);
+  state.suppressTemplateUnlock = false;
+  if (lock) setTemplateFormLocked(true);
+  return true;
+}
+
+function restoreWorkflowFromBatch(detail) {
+  const batch = detail?.batch;
+  if (!batch) return false;
+  let restored = false;
+  if (batch.referenceVideo?.referenceVideoId) {
+    state.referenceVideo = batch.referenceVideo;
+    if (batch.decomposition?.referenceVideoId) {
+      state.decomposition = batch.decomposition;
+    }
+    restored = true;
+  }
+  const request = batch.estimate?.request || {};
+  if (request.versionId) {
+    restored = applyRestoredTemplate(request.versionId, { lock: true }) || restored;
+  }
+  if (batch.estimate?.estimateId) {
+    state.estimate = { estimate: batch.estimate, capabilities: batch.capabilities || null };
+    state.capabilities = batch.capabilities || null;
+  }
+  if (restored) {
+    renderReference();
+    syncDecompositionDomState();
+    renderBatchReadiness();
+    renderEstimate();
+    persistWorkflowSession();
+  }
+  return restored;
+}
+
+async function restoreWorkflowSession() {
+  const session = readWorkflowSession();
+  const referenceVideoId = session?.referenceVideoId;
+  if (!referenceVideoId) return false;
+  try {
+    const data = await apiEnvelope(`/api/wangzhuan/reference-videos/${encodeURIComponent(referenceVideoId)}/workflow-state`);
+    if (data.referenceVideo?.referenceVideoId) {
+      state.referenceVideo = data.referenceVideo;
+    }
+    if (data.decompositionConfirmed && data.decomposition?.referenceVideoId) {
+      state.decomposition = data.decomposition;
+    }
+    renderReference();
+    syncDecompositionDomState();
+  } catch {
+    return false;
+  }
+  if (session?.templateCommitted && session.templateVersionId) {
+    applyRestoredTemplate(session.templateVersionId, { lock: true });
+  }
+  renderBatchReadiness();
+  renderEstimate();
+  return Boolean(state.referenceVideo?.referenceVideoId);
+}
+
+function renderBatchReadiness() {
+  if (!els.batchReadiness) return;
+  const decomp = isDecompositionConfirmed();
+  const tmpl = isTemplateCommitted();
+  if (!decomp && !tmpl) {
+    els.batchReadiness.hidden = true;
+    els.batchReadiness.textContent = "";
+    return;
+  }
+  els.batchReadiness.hidden = false;
+  if (decomp && tmpl) {
+    els.batchReadiness.className = "wz-batch-readiness wz-success";
+    els.batchReadiness.innerHTML = "<span>拆解 ✓ · 模板 ✓</span><span>下一步：点击「估算本批任务」</span>";
+    return;
+  }
+  els.batchReadiness.className = "wz-batch-readiness wz-info";
+  const parts = [
+    decomp ? "拆解 ✓" : "拆解待完成",
+    tmpl ? "模板 ✓" : "模板待保存"
+  ];
+  els.batchReadiness.innerHTML = `<span>${parts.join(" · ")}</span><span>完成前两步后再估算本批任务</span>`;
+}
+
+function ensureDecompositionForm() {
+  if (!els.decompositionForm || els.decompositionForm.dataset.wired === "1") return;
+  els.decompositionForm.innerHTML = DECOMPOSITION_FORM_SECTIONS.map((section) => `
+    <section class="wz-decomposition-section">
+      <h3>${escapeHtml(section.title)}</h3>
+      <div class="wz-decomposition-fields${section.layout === "grid" ? " grid" : ""}">
+        ${section.fields.map((field) => `
+          <label class="wz-decomposition-field${field.required ? " required" : ""}">
+            <span>${escapeHtml(field.label)}${field.required ? "" : "（可选）"}</span>
+            <textarea
+              data-decomposition-field="${escapeHtml(field.key)}"
+              class="wz-decomposition-input"
+              rows="3"
+              spellcheck="false"
+              placeholder="${escapeHtml(field.hint || "")}"
+            ></textarea>
+            ${field.hint ? `<small>${escapeHtml(field.hint)}</small>` : ""}
+          </label>
+        `).join("")}
+      </div>
+    </section>
+  `).join("");
+  els.decompositionForm.dataset.wired = "1";
+  els.decompositionForm.addEventListener("input", onDecompositionFormInput);
+}
+
+function fitDecompositionTextareas() {
+  if (!els.decompositionForm) return;
+  for (const textarea of els.decompositionForm.querySelectorAll("textarea")) {
+    textarea.style.height = "auto";
+    const nextHeight = Math.max(84, textarea.scrollHeight + 2);
+    textarea.style.height = `${nextHeight}px`;
+  }
+}
+
+function wzFocusNodeId(id, step) {
+  if (typeof window.wzFocusNode === "function") {
+    window.wzFocusNode(id);
+  } else {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.classList.remove("collapsed");
+    for (const item of document.querySelectorAll(".wz-canvas .wz-node")) {
+      item.classList.toggle("focused", item === node);
+      if (item !== node) item.classList.add("collapsed");
+    }
+    node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }
+  if (step) {
+    for (const item of document.querySelectorAll("#wzStepbar .wz-stepbar-item")) {
+      item.classList.toggle("active", item.dataset.step === String(step));
+    }
+  }
+}
+
+function focusDecomposeStep() {
+  wzFocusNodeId("wzNodeDecompose", "2");
+}
+
+function decompositionFieldInput(key) {
+  return els.decompositionForm?.querySelector(`[data-decomposition-field="${key}"]`) || null;
+}
+
+function collectDecompositionFromForm() {
+  ensureDecompositionForm();
+  const draft = {};
+  for (const section of DECOMPOSITION_FORM_SECTIONS) {
+    for (const field of section.fields) {
+      const input = decompositionFieldInput(field.key);
+      draft[field.key] = input ? String(input.value || "").trim() : "";
+    }
+  }
+  return draft;
+}
+
+function hasDecompositionDraft() {
+  const draft = collectDecompositionFromForm();
+  return DECOMPOSITION_REQUIRED_FIELDS.some((field) => draft[field]);
+}
+
+function isDecompositionDraftComplete() {
+  const draft = collectDecompositionFromForm();
+  return DECOMPOSITION_REQUIRED_FIELDS.every((field) => draft[field]);
+}
+
+function setDecompositionFormLocked(locked) {
+  if (!els.decompositionForm) return;
+  for (const input of els.decompositionForm.querySelectorAll("input, textarea")) {
+    input.disabled = locked;
+    input.classList.toggle("wz-readonly", locked);
+  }
+}
+
+function renderDecompositionForm(data = {}) {
+  ensureDecompositionForm();
+  if (!els.decompositionForm) return;
+  for (const section of DECOMPOSITION_FORM_SECTIONS) {
+    for (const field of section.fields) {
+      const input = decompositionFieldInput(field.key);
+      if (!input) continue;
+      input.value = flattenDecompositionFieldValue(data[field.key] || "");
+    }
+  }
+  const visible = hasDecompositionDraft() || isDecompositionConfirmed();
+  els.decompositionForm.hidden = !visible;
+  els.decompositionForm.classList.toggle("empty-line", !visible);
+  if (els.decompositionHint) els.decompositionHint.hidden = !visible;
+  document.getElementById("wzNodeDecompose")?.classList.toggle("wz-node-decompose-active", visible);
+  setDecompositionFormLocked(isDecompositionConfirmed());
+  fitDecompositionTextareas();
+  syncDecompositionDomState();
+  if (visible && !isDecompositionConfirmed()) focusDecomposeStep();
+  syncDecompositionControls();
+}
+
+function onDecompositionFormInput(event) {
+  if (isDecompositionConfirmed()) return;
+  if (event?.target instanceof HTMLTextAreaElement) {
+    event.target.style.height = "auto";
+    event.target.style.height = `${Math.max(84, event.target.scrollHeight + 2)}px`;
+  }
+  state.decomposition = null;
+  state.estimate = null;
+  renderEstimate();
+  syncDecompositionControls();
+  els.decompositionStatus.className = "wz-info";
+  els.decompositionStatus.textContent = "已修改解析结果，请确认无误后保存。";
+}
+
+function syncDecompositionControls() {
+  const confirmed = isDecompositionConfirmed();
+  const probeReady = Boolean(state.referenceVideo && state.referenceVideo.status !== "fail");
+  const hasDraft = hasDecompositionDraft();
+  const draftComplete = isDecompositionDraftComplete();
+  const parseBusy = Boolean(els.draftDecompositionBtn?.dataset.originalText);
+  const confirmBusy = Boolean(els.decomposeBtn?.dataset.originalText);
+
+  if (els.draftDecompositionBtn) {
+    els.draftDecompositionBtn.disabled = !probeReady || confirmed || parseBusy;
+    if (!parseBusy) {
+      els.draftDecompositionBtn.textContent = hasDraft ? "重新解析" : "开始解析";
+    }
+  }
+  if (els.decomposeBtn) {
+    els.decomposeBtn.disabled = confirmed || !draftComplete || confirmBusy;
+  }
+  if (els.knowledgeNotes) {
+    els.knowledgeNotes.disabled = confirmed;
+  }
+  syncFlowHints();
+}
+
+function syncReferenceHints() {
+  const fileReady = Boolean(els.referenceFile?.files?.[0]);
+  const uploaded = Boolean(state.referenceVideo?.referenceVideoId);
+  if (uploaded) {
+    syncActionHint(els.checkReferenceBtn, "");
+    return;
+  }
+  syncActionHint(
+    els.checkReferenceBtn,
+    fileReady ? "文件已选择，点击读取视频信息" : "请先选择参考视频文件",
+    { tone: fileReady ? "muted" : "warn" }
+  );
+}
+
+function syncDecompositionHints() {
+  const confirmed = isDecompositionConfirmed();
+  const probeReady = Boolean(state.referenceVideo && state.referenceVideo.status !== "fail");
+  const parseBusy = Boolean(els.draftDecompositionBtn?.dataset.originalText);
+  const confirmBusy = Boolean(els.decomposeBtn?.dataset.originalText);
+  if (els.draftDecompositionBtn && !parseBusy) {
+    syncActionHint(
+      els.draftDecompositionBtn,
+      confirmed ? "脚本已确认，如需修改请重新上传参考视频" : !probeReady ? "需先上传并读取参考视频" : "",
+      { tone: confirmed ? "warn" : "muted" }
+    );
+  }
+  if (els.decomposeBtn && !confirmBusy) {
+    syncActionHint(
+      els.decomposeBtn,
+      confirmed ? "脚本已确认，可进入第三步产品改写" : !isDecompositionDraftComplete() ? "请先完成解析并补全必填字段" : "确认后将锁定脚本并进入产品改写",
+      { tone: confirmed ? "muted" : !isDecompositionDraftComplete() ? "warn" : "muted" }
+    );
+  }
+}
+
+function syncTemplateHints() {
+  syncActionHint(
+    els.createTemplateBtn,
+    !isDecompositionConfirmed() ? "需先确认脚本拆解" : isTemplateCommitted() ? "模板已保存，可进入第四步估算" : "填写完成后保存模板",
+    { tone: !isDecompositionConfirmed() ? "warn" : "muted" }
+  );
+}
+
+function syncBatchActionHints() {
+  const estimate = state.estimate?.estimate;
+  const batch = state.batchDetail?.batch;
+  syncActionHint(
+    els.estimateBtn,
+    !isDecompositionConfirmed() || !isTemplateCommitted() ? "需先完成脚本确认与模板保存" : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
+    { tone: !isDecompositionConfirmed() || !isTemplateCommitted() ? "warn" : "muted" }
+  );
+  syncActionHint(
+    els.planBatchBtn,
+    !estimate ? "需先完成拆解、模板保存和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
+    { tone: estimate?.hardBlocked ? "error" : "warn" }
+  );
+  syncActionHint(
+    els.confirmPlanBtn,
+    batch?.status === "preview_required" ? "确认后将提交 Seedance 批量生成" : !estimate ? "需先生成 Seedance 预案" : "",
+    { tone: "muted" }
+  );
+}
+
+function syncFlowHints() {
+  syncReferenceHints();
+  syncDecompositionHints();
+  syncTemplateHints();
+  syncBatchActionHints();
+}
+
+function batchProgressSection(batch, tasks, outputs = []) {
+  if (!batch || terminalBatchStatus(batch.status)) return "";
+  const progress = batchGenerationProgress(batch, tasks);
+  return taskProgressHtml(progress);
+}
+
+function clearDecompositionDraft() {
+  renderDecompositionForm({});
+  state.decomposition = null;
+  state.estimate = null;
+  syncDecompositionDomState();
+  renderEstimate();
+  renderBatchReadiness();
 }
 
 function focusBatchStep() {
-  const batchNode = document.getElementById("wzNodeBatch");
-  if (!batchNode) return;
-  for (const node of document.querySelectorAll(".wz-canvas .wz-node")) {
-    node.classList.toggle("focused", node === batchNode);
-  }
-  for (const item of document.querySelectorAll("#wzStepbar .wz-stepbar-item")) {
-    item.classList.toggle("active", item.dataset.step === "4");
-  }
+  wzFocusNodeId("wzNodeBatch", "4");
   requestAnimationFrame(() => {
-    batchNode.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
     els.estimateBtn?.focus({ preventScroll: true });
   });
+}
+
+function focusLogStep() {
+  wzFocusNodeId("wzNodeLog", "5");
+}
+
+function primaryBranchNode() {
+  return branchNodes()[0] || document.getElementById("wzNodeRewrite");
+}
+
+function focusRewriteStep(missingFields = []) {
+  const rewriteNode = document.getElementById("wzNodeRewrite");
+  if (!rewriteNode) return;
+  wzFocusNodeId("wzNodeRewrite", "3");
+  for (const input of rewriteNode.querySelectorAll(".wz-field-missing")) {
+    input.classList.remove("wz-field-missing");
+  }
+  const node = primaryBranchNode() || rewriteNode;
+  let focusInput = null;
+  for (const field of missingFields) {
+    const branchKey = DRAFT_FIELD_BRANCH_KEYS[field];
+    if (!branchKey) continue;
+    const input = branchField(node, branchKey)
+      || (field === "regions" ? branchField(node, "targetRegion") : null);
+    if (input) {
+      input.classList.add("wz-field-missing");
+      if (!focusInput) focusInput = input;
+    }
+  }
+  requestAnimationFrame(() => {
+    focusInput?.focus({ preventScroll: true });
+  });
+}
+
+function parseRegions(node) {
+  const raw = fieldValue(node, "regions")
+    || fieldValue(node, "targetRegion")
+    || els.regions?.value
+    || "US";
+  return String(raw).split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function missingRequiredDraftFields(draft) {
+  const missingFields = [];
+  for (const field of REQUIRED_DRAFT_FIELDS) {
+    const value = draft[field];
+    if (Array.isArray(value)) {
+      if (value.length === 0) missingFields.push(field);
+    } else if (value === undefined || value === null || value === "") {
+      missingFields.push(field);
+    }
+  }
+  return missingFields;
 }
 
 function syncMetrics() {
@@ -286,7 +809,7 @@ function collectTruthRules(node) {
   return truthRules;
 }
 
-function collectBranchDrafts() {
+function collectAllBranchDrafts() {
   return branchNodes().map((node, index) => {
     const { assetFileNames, assetUrls, assetStorageKeys } = collectBranchAssets(node);
     const targetChannel = fieldValue(node, "targetChannel") || fieldValue(node, "templateChannel") || "meta_ads";
@@ -319,7 +842,112 @@ function collectBranchDrafts() {
       negativePrompt: fieldValue(node, "negativePrompt"),
       truthRules: collectTruthRules(node)
     };
-  }).filter((branch) => branch.productName || branch.cta || branch.materialDirection || Object.keys(branch.assetUrls).length);
+  });
+}
+
+function collectBranchDrafts() {
+  return collectAllBranchDrafts().filter((branch) => branch.productName || branch.cta || branch.materialDirection || Object.keys(branch.assetUrls).length);
+}
+
+function branchDraftToTemplateShape(branch, index = 0) {
+  return {
+    displayName: branch.displayName || `改写 3.${index + 1}`,
+    productName: branch.productName,
+    cta: branch.cta,
+    ending: branch.ending,
+    currencySymbol: branch.currencySymbol,
+    language: branch.language,
+    regions: branch.regions,
+    targetChannels: branch.targetChannels,
+    defaultOutputRatio: branch.defaultOutputRatio || "9:16",
+    defaultDurationSec: branch.defaultDurationSec,
+    promiseLevel: branch.promiseLevel,
+    truthRules: branch.truthRules || {}
+  };
+}
+
+function findIncompleteBranchDraft() {
+  const nodes = branchNodes();
+  const branches = collectAllBranchDrafts();
+  for (let index = 0; index < branches.length; index += 1) {
+    const branch = branches[index];
+    const missingRequired = missingRequiredDraftFields(branchDraftToTemplateShape(branch, index));
+    if (missingRequired.length) {
+      return { index, node: nodes[index], missingFields: missingRequired, kind: "required" };
+    }
+    const missingStrong = missingStrongFields(branchDraftToTemplateShape(branch, index));
+    if (missingStrong.length) {
+      return { index, node: nodes[index], missingFields: missingStrong, kind: "strong" };
+    }
+  }
+  return null;
+}
+
+function isTemplateCommitted() {
+  return Boolean(state.templateCommitted && state.selectedTemplate?.versionId);
+}
+
+function setTemplateFormLocked(locked) {
+  state.templateCommitted = locked;
+  for (const node of branchNodes()) {
+    for (const input of node.querySelectorAll("input, textarea, select")) {
+      input.disabled = locked;
+    }
+    for (const button of node.querySelectorAll(".wz-save-branch")) {
+      button.disabled = locked;
+    }
+    node.classList.toggle("state-done", locked);
+    if (locked) node.dataset.templateCommitted = "1";
+    else node.removeAttribute("data-template-committed");
+  }
+  if (els.createTemplateBtn) {
+    els.createTemplateBtn.disabled = locked;
+    if (!els.createTemplateBtn.dataset.originalText) {
+      els.createTemplateBtn.textContent = locked ? "模板已保存" : "保存模板";
+    }
+  }
+  if (els.addBranchBtn) els.addBranchBtn.disabled = locked;
+  document.getElementById("wzNodeRewrite")?.toggleAttribute("data-template-committed", locked);
+  renderTemplateStatus();
+  renderBatchReadiness();
+  window.dispatchEvent(new CustomEvent("wz:template-commit-changed"));
+}
+
+function renderTemplateStatus() {
+  if (!els.templateStatus) return;
+  if (isTemplateCommitted()) {
+    const name = state.selectedTemplate?.draft?.displayName || state.selectedTemplate?.templateId || "当前模板";
+    els.templateStatus.hidden = false;
+    els.templateStatus.className = "wz-template-status wz-success";
+    els.templateStatus.textContent = `${TEMPLATE_SAVED_MESSAGE}（${name}）`;
+    els.templateStatus.classList.remove("empty-line");
+    return;
+  }
+  els.templateStatus.hidden = false;
+  els.templateStatus.className = "wz-template-status wz-info";
+  els.templateStatus.textContent = branchNodes().length > 1
+    ? "请完成全部裂变子节点后，点击「保存模板」。"
+    : "填写完成后点击「保存模板」，保存后将进入第四步。";
+  els.templateStatus.classList.remove("empty-line");
+}
+
+function unlockTemplateEditing() {
+  if (!state.templateCommitted) return;
+  const nextVersion = (Number(state.selectedTemplate?.versionNumber) || 0) + 1;
+  state.templateCommitted = false;
+  setTemplateFormLocked(false);
+  if (els.templateStatus && state.selectedTemplate?.templateId) {
+    els.templateStatus.hidden = false;
+    els.templateStatus.className = "wz-template-status wz-warning";
+    els.templateStatus.textContent = `正在编辑已保存模板，再次保存将写入新版本 v${nextVersion}。`;
+  }
+  renderBatchReadiness();
+  syncDecompositionControls();
+}
+
+function markTemplateDirtyFromEdit() {
+  if (state.suppressTemplateUnlock || !state.templateCommitted) return;
+  unlockTemplateEditing();
 }
 
 function fillBranchDraft(node, draft = {}, index = 0) {
@@ -401,25 +1029,32 @@ async function uploadBranchAssets() {
 }
 
 function draftFromForm() {
-  const truthRules = {};
-  for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
-    truthRules[input.dataset.truthField] = input.value.trim();
+  const node = primaryBranchNode();
+  const truthRules = node ? collectTruthRules(node) : {};
+  if (!Object.keys(truthRules).length) {
+    for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
+      truthRules[input.dataset.truthField] = input.value.trim();
+    }
   }
   const branches = collectBranchDrafts();
   const primaryBranch = branches[0] || {};
+  const targetChannel = fieldValue(node, "templateChannel")
+    || fieldValue(node, "targetChannel")
+    || els.templateChannel?.value
+    || "meta_ads";
   return {
-    displayName: els.displayName.value.trim(),
-    productName: els.productName.value.trim(),
-    productLink: els.productLink.value.trim(),
-    cta: els.cta.value.trim(),
-    ending: els.ending.value.trim(),
-    currencySymbol: els.currencySymbol.value.trim(),
-    language: els.language.value.trim(),
-    regions: els.regions.value.split(",").map((item) => item.trim()).filter(Boolean),
-    targetChannels: [els.templateChannel.value],
+    displayName: fieldValue(node, "displayName") || els.displayName?.value.trim() || "",
+    productName: fieldValue(node, "productName") || els.productName?.value.trim() || "",
+    productLink: fieldValue(node, "productLink") || els.productLink?.value.trim() || "",
+    cta: fieldValue(node, "cta") || els.cta?.value.trim() || "",
+    ending: fieldValue(node, "ending") || els.ending?.value.trim() || "",
+    currencySymbol: fieldValue(node, "currencySymbol") || els.currencySymbol?.value.trim() || "",
+    language: fieldValue(node, "language") || els.language?.value.trim() || "",
+    regions: parseRegions(node),
+    targetChannels: [targetChannel],
     defaultOutputRatio: "9:16",
-    defaultDurationSec: Number(els.defaultDuration.value),
-    promiseLevel: els.promiseLevel.value,
+    defaultDurationSec: Number(fieldValue(node, "defaultDuration") || els.defaultDuration?.value || 15),
+    promiseLevel: fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable",
     assetFileNames: primaryBranch.assetFileNames || {},
     assetUrls: primaryBranch.assetUrls || {},
     assetStorageKeys: primaryBranch.assetStorageKeys || {},
@@ -430,12 +1065,12 @@ function draftFromForm() {
       temperature: Number(els.llmTemperature.value)
     },
     knowledgeNotes: els.knowledgeNotes.value.trim(),
-    variantPrompt: els.variantPrompt.value.trim(),
+    variantPrompt: fieldValue(node, "variantPrompt") || els.variantPrompt?.value.trim() || "",
     seedanceModel: els.seedanceModel.value.trim(),
-    materialDirection: els.materialDirection.value,
-    voiceoverStyle: els.voiceoverStyle.value.trim(),
-    customPrompt: els.customPrompt.value.trim(),
-    negativePrompt: els.negativePrompt.value.trim(),
+    materialDirection: fieldValue(node, "materialDirection") || els.materialDirection?.value || "",
+    voiceoverStyle: fieldValue(node, "voiceoverStyle") || els.voiceoverStyle?.value.trim() || "",
+    customPrompt: fieldValue(node, "customPrompt") || els.customPrompt?.value.trim() || "",
+    negativePrompt: fieldValue(node, "negativePrompt") || els.negativePrompt?.value.trim() || "",
     truthRules,
     branches
   };
@@ -449,9 +1084,13 @@ function missingStrongFields(draft) {
 }
 
 function applyTemplate(template) {
+  state.suppressTemplateUnlock = true;
   state.selectedTemplate = template || null;
   const draft = template?.draft;
-  if (!draft) return;
+  if (!draft) {
+    state.suppressTemplateUnlock = false;
+    return;
+  }
   els.displayName.value = draft.displayName || "";
   els.productName.value = draft.productName || "";
   els.productLink.value = draft.productLink || "";
@@ -481,6 +1120,7 @@ function applyTemplate(template) {
   }
   els.truthDetails.open = els.promiseLevel.value === "strong_commitment";
   applyBranches(draft);
+  state.suppressTemplateUnlock = false;
 }
 
 function renderTemplates() {
@@ -505,6 +1145,24 @@ function renderTemplates() {
   syncMetrics();
 }
 
+function renderLlmServiceStatus() {
+  if (!els.llmServiceStatus) return;
+  const config = state.llmDefaults;
+  if (!config) {
+    els.llmServiceStatus.className = "wz-info wz-service-pill";
+    els.llmServiceStatus.textContent = "正在检查 AI 拆解服务…";
+    return;
+  }
+  const modelLabel = config.model || "默认模型";
+  if (config.hasApiKey) {
+    els.llmServiceStatus.className = "wz-success wz-service-pill";
+    els.llmServiceStatus.textContent = `AI 拆解服务已就绪（${modelLabel}）`;
+    return;
+  }
+  els.llmServiceStatus.className = "wz-warning wz-service-pill";
+  els.llmServiceStatus.textContent = "AI 拆解服务未配置，请联系管理员设置 API Key";
+}
+
 function applyLlmConfigDefaults() {
   const config = state.llmDefaults;
   if (!config) return;
@@ -512,9 +1170,7 @@ function applyLlmConfigDefaults() {
   if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gpt-5.4";
   if (!els.llmEndpoint.value.trim()) els.llmEndpoint.value = config.endpoint || "https://skylink-gateway.com/api/v1";
   if (!els.llmTemperature.value.trim()) els.llmTemperature.value = String(config.temperature ?? 0.2);
-  if (!els.knowledgeNotes.value.trim() && config.endpoint) {
-    els.knowledgeNotes.placeholder = `LLM endpoint: ${config.endpoint}${config.hasApiKey ? "；API key 已在服务端配置" : "；API key 未配置"}`;
-  }
+  renderLlmServiceStatus();
 }
 
 async function loadLlmConfig() {
@@ -567,9 +1223,10 @@ function renderReference() {
     els.referenceBox.className = "wz-list empty-line";
     els.referenceBox.textContent = "未上传参考视频";
     els.draftDecompositionBtn.disabled = true;
-    els.decomposeBtn.disabled = true;
+    clearDecompositionDraft();
     els.decompositionStatus.className = "wz-info";
-    els.decompositionStatus.textContent = "先读取参考视频信息，再调用模型生成拆解草稿。";
+    els.decompositionStatus.textContent = "先上传参考视频，再点击「开始解析」生成脚本草稿。";
+    syncDecompositionControls();
     return;
   }
   els.referenceBox.className = "wz-list";
@@ -594,27 +1251,33 @@ function renderReference() {
     ${(probe.issues || []).map((item) => `<div class="wz-warning">${escapeHtml(item.message)}</div>`).join("")}
     ${isDecompositionConfirmed() ? `<div class="wz-success">${escapeHtml(DECOMPOSITION_CONFIRMED_MESSAGE)}</div>` : ""}
   `;
-  els.draftDecompositionBtn.disabled = probe.status === "fail";
-  els.decomposeBtn.disabled = probe.status === "fail" || isDecompositionConfirmed() || !els.decompositionText.value.trim();
+  if (isDecompositionConfirmed() && state.decomposition) {
+    renderDecompositionForm(state.decomposition);
+  }
   els.decompositionStatus.className = probe.status === "fail" ? "wz-warning" : "wz-info";
   if (probe.status === "fail") {
-    els.decompositionStatus.textContent = "参考视频检查未通过，不能自动拆解。";
+    els.decompositionStatus.textContent = "参考视频检查未通过，不能解析脚本。";
   } else if (isDecompositionConfirmed()) {
     els.decompositionStatus.className = "wz-success";
     els.decompositionStatus.textContent = DECOMPOSITION_CONFIRMED_MESSAGE;
+  } else if (hasDecompositionDraft()) {
+    els.decompositionStatus.textContent = "解析结果已生成，请检查表单内容后确认；如需重做可点击「重新解析」。";
   } else {
-    els.decompositionStatus.textContent = "视频信息已读取。点击“自动拆解参考视频”调用模型生成草稿。";
+    els.decompositionStatus.textContent = "参考视频已就绪，可填写素材经验后点击「开始解析」。";
   }
+  syncDecompositionControls();
+  syncFlowHints();
 }
 
 async function draftReferenceVideoDecomposition() {
-  if (!state.referenceVideo) return;
+  if (!state.referenceVideo || isDecompositionConfirmed()) return;
   clearError(els.globalError);
   state.decomposition = null;
-  els.decomposeBtn.disabled = true;
-  setBusy(els.draftDecompositionBtn, true, "模型拆解中");
+  state.estimate = null;
+  renderEstimate();
+  setBusy(els.draftDecompositionBtn, true, hasDecompositionDraft() ? "重新解析中" : "解析中");
   els.decompositionStatus.className = "wz-info";
-  els.decompositionStatus.textContent = "正在调用模型拆解参考视频，请稍等。";
+  els.decompositionStatus.textContent = "正在分析参考视频并生成脚本草稿，请稍等。";
   try {
     const data = await apiEnvelope("/api/wangzhuan/reference-videos/draft-decomposition", {
       method: "POST",
@@ -629,23 +1292,48 @@ async function draftReferenceVideoDecomposition() {
         }
       })
     });
-    els.decompositionText.value = JSON.stringify(data.decomposition, null, 2);
-    els.decomposeBtn.disabled = false;
+    renderDecompositionForm(data.decomposition || {});
     els.decompositionStatus.className = "wz-success";
-    els.decompositionStatus.textContent = "模型已生成拆解草稿，请检查 JSON 后点击“确认脚本拆解”保存。";
+    els.decompositionStatus.textContent = "脚本草稿已生成，请检查表单内容后点击「确认脚本拆解」。";
+    showToast("脚本草稿已生成", { type: "success" });
   } catch (error) {
     els.decompositionStatus.className = "wz-warning";
     els.decompositionStatus.textContent = error.data?.upstreamMessage
-      ? `模型拆解未完成：${error.data.upstreamMessage}`
+      ? `解析未完成：${error.data.upstreamMessage}`
       : error.data?.status
-        ? `模型拆解未完成：上游状态 ${error.data.status}`
+        ? `解析未完成：上游状态 ${error.data.status}`
         : error.message
-          ? `模型拆解未完成：${error.message}`
-          : "模型拆解未完成，请检查模型配置或稍后重试。";
-    renderError(els.globalError, error, "自动拆解失败");
+          ? `解析未完成：${error.message}`
+          : "解析未完成，请联系管理员检查 AI 服务配置，或稍后重试。";
+    renderError(els.globalError, error, "脚本解析失败");
   } finally {
     setBusy(els.draftDecompositionBtn, false);
-    els.draftDecompositionBtn.disabled = !state.referenceVideo || state.referenceVideo.status === "fail";
+    syncDecompositionControls();
+  }
+}
+
+function syncEstimateButtonLabel() {
+  if (!els.estimateBtn || els.estimateBtn.dataset.originalText) return;
+  els.estimateBtn.textContent = state.estimate?.estimate
+    ? ESTIMATE_BTN_LABEL.refresh
+    : ESTIMATE_BTN_LABEL.first;
+}
+
+function renderBatchStepProgress() {
+  const estimate = state.estimate?.estimate;
+  const batch = state.batchDetail?.batch;
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  const steps = document.querySelectorAll(".wz-batch-step");
+  if (!steps.length) return;
+  const active = batch?.status === "preview_required" && plans.length
+    ? "confirm"
+    : estimate
+      ? plans.length ? "confirm" : "plan"
+      : "estimate";
+  for (const step of steps) {
+    const key = step.dataset.batchStep;
+    step.classList.toggle("done", key === "estimate" ? Boolean(estimate) : key === "plan" ? plans.length > 0 : batch?.status === "queued" || batch?.status === "running");
+    step.classList.toggle("active", key === active);
   }
 }
 
@@ -653,25 +1341,42 @@ function renderEstimate() {
   const estimate = state.estimate?.estimate;
   if (!estimate) {
     els.estimateBox.className = "wz-estimate empty-line";
-    els.estimateBox.textContent = isDecompositionConfirmed()
-      ? "脚本已确认，点击“重新估算”查看本批任务数和消耗。"
-      : "尚未估算";
-    els.startBatchBtn.disabled = true;
+    if (isTemplateCommitted() && isDecompositionConfirmed()) {
+      els.estimateBox.textContent = "拆解与模板已就绪，请点击「估算本批任务」查看任务数和消耗。";
+      if (els.estimateHint) els.estimateHint.textContent = "前置步骤已完成，可以估算";
+    } else if (isDecompositionConfirmed()) {
+      els.estimateBox.textContent = "脚本已确认，请先完成第三步产品改写并保存模板，再估算本批任务。";
+      if (els.estimateHint) els.estimateHint.textContent = "请先保存模板";
+    } else {
+      els.estimateBox.textContent = "完成前两步后，在此估算本批任务规模。";
+      if (els.estimateHint) els.estimateHint.textContent = "需先完成拆解与模板";
+    }
+    els.planBatchBtn.disabled = true;
+    els.confirmPlanBtn.disabled = true;
+    if (els.planBox) {
+      els.planBox.className = "wz-list empty-line";
+      els.planBox.textContent = "尚未生成 Seedance 预案";
+    }
+    if (els.planHint) els.planHint.textContent = "需先完成估算";
+    syncEstimateButtonLabel();
     syncMetrics();
+    renderBatchReadiness();
+    renderBatchStepProgress();
+    syncFlowHints();
     return;
   }
-  const capability = state.capabilities?.stitcher;
-  els.capabilityBadge.textContent = capability
-    ? `Stitcher: ${capability.status}${capability.provider ? ` / ${capability.provider}` : ""}`
-    : "Provider: not required";
-  els.estimateBox.className = "wz-estimate";
+  els.estimateBox.className = "wz-estimate wz-estimate-panel";
   els.estimateBox.innerHTML = `
-    <div class="wz-kv-grid">
+    <div class="wz-estimate-total">
+      <span>本批预计生成</span>
+      <strong>${escapeHtml(estimate.scriptCount)}</strong>
+      <span>条脚本 · ${escapeHtml(estimate.seedanceSegmentCount)} 段 Seedance · ${escapeHtml(estimate.branchCount || 1)} 个裂变子节点</span>
+    </div>
+    <div class="wz-kv-grid wz-estimate-grid">
       ${renderKeyValues([
-        ["estimateId", estimate.estimateId],
-        ["裂变子节点", estimate.branchCount || 1],
-        ["脚本", estimate.scriptCount],
-        ["Seedance 分段", estimate.seedanceSegmentCount],
+        ["估算编号", estimate.estimateId],
+        ["变体数", estimate.variantCount],
+        ["输出时长", `${estimate.durationSec}s`],
         ["拼接任务", estimate.stitchTaskCount],
         ["生图任务", estimate.imageTaskCount],
         ["并发", estimate.requestedConcurrency],
@@ -681,65 +1386,163 @@ function renderEstimate() {
     </div>
     ${estimate.models?.length ? `<div class="wz-chipline">${estimate.models.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
   `;
+  if (els.estimateHint) {
+    els.estimateHint.textContent = estimate.confirmationRequired
+      ? "任务较多，请勾选确认后再生成预案"
+      : "估算完成，可生成 Seedance 预案";
+  }
   els.confirmLimits.checked = !estimate.confirmationRequired;
   els.confirmLimits.disabled = !estimate.confirmationRequired;
-  els.startBatchBtn.disabled = estimate.hardBlocked || (estimate.confirmationRequired && !els.confirmLimits.checked);
+  els.planBatchBtn.disabled = estimate.hardBlocked || (estimate.confirmationRequired && !els.confirmLimits.checked);
+  els.confirmPlanBtn.disabled = true;
+  renderPlanPreview(state.batchDetail?.batch);
+  syncEstimateButtonLabel();
   syncMetrics();
+  renderBatchReadiness();
+  renderBatchStepProgress();
+  syncFlowHints();
+}
+
+function renderPlanPreview(batch) {
+  if (!els.planBox) return;
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  if (!plans.length) {
+    els.planBox.className = "wz-list empty-line";
+    els.planBox.textContent = batch?.status === "preview_required"
+      ? "批次已进入预案确认，但未读取到预案列表"
+      : "尚未生成 Seedance 预案";
+    if (els.planHint) {
+      els.planHint.textContent = batch?.status === "preview_required"
+        ? "请刷新页面或重新打开批次"
+        : state.estimate?.estimate ? "点击「生成 Seedance 预案」" : "需先完成估算";
+    }
+    els.confirmPlanBtn.disabled = true;
+    renderBatchStepProgress();
+    return;
+  }
+  if (els.planHint) {
+    els.planHint.textContent = batch?.status === "preview_required"
+      ? `共 ${plans.length} 条预案，确认后将提交 Seedance 生成`
+      : `${plans.length} 条预案已生成`;
+  }
+  els.planBox.className = "wz-list";
+  els.planBox.innerHTML = plans.map((plan) => `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(plan.branchLabel || plan.branchId || "分支")} / 变体 ${escapeHtml(plan.branchVariantIndex || plan.variantIndex || "-")} / 分段 ${escapeHtml(plan.segmentIndex || "-")}</strong>
+        <small>${escapeHtml(plan.planId || "")}</small>
+      </div>
+      ${badge(plan.status || "drafted", { drafted: "待确认", confirmed: "已确认" })}
+    </article>
+    <div class="wz-kv-grid">
+      ${renderKeyValues([
+        ["Hook", plan.hook],
+        ["口播", plan.voiceover || "-"],
+        ["Seedance Prompt", plan.seedancePrompt],
+        ["Negative Prompt", plan.negativePrompt || "-"],
+        ["素材引用", Object.values(plan.mediaRefs || {}).filter(Boolean).join(", ") || "-"],
+        ["合规提示", Array.isArray(plan.complianceNotes) ? plan.complianceNotes.join(" · ") : "-"]
+      ])}
+    </div>
+  `).join("");
+  els.confirmPlanBtn.disabled = batch?.status !== "preview_required";
+  renderBatchStepProgress();
+  syncFlowHints();
+}
+
+function syncBatchNodeStatus(status = "") {
+  const batchNode = document.getElementById("wzNodeBatch");
+  if (!batchNode) return;
+  if (status) batchNode.dataset.batchStatus = status;
+  else delete batchNode.dataset.batchStatus;
 }
 
 function renderBatch() {
   const detail = state.batchDetail;
   const batch = detail?.batch;
   if (!batch) {
+    syncBatchNodeStatus();
     els.batchBadge.textContent = "未开始";
     els.batchBox.className = "wz-list empty-line";
     els.batchBox.textContent = "暂无批次";
     els.stopBatchBtn.disabled = true;
     els.runQcBtn.disabled = true;
+    renderPlanPreview(null);
     syncMetrics();
+    renderBatchStepProgress();
+    syncFlowHints();
     return;
   }
-  els.batchBadge.innerHTML = badge(batch.status, batchStatusLabels);
+  syncBatchNodeStatus(batch.status);
+  els.batchBadge.innerHTML = badge(batch.status, {
+    ...batchStatusLabels,
+    [batch.status]: batchStatusDisplayLabel(batch)
+  });
   els.stopBatchBtn.disabled = terminalBatchStatus(batch.status);
   els.retryStitchBtn.hidden = batch.status !== "partial_failed";
   els.retryStitchBtn.disabled = batch.status !== "partial_failed";
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   const events = Array.isArray(detail.events) ? detail.events : [];
-  const qcRunnable = batch.status === "qc" || outputs.some((output) => output.qcStatus === "not_started");
+  const qcRunnable = isBatchQcRunnable(batch, tasks, outputs);
   els.runQcBtn.disabled = !qcRunnable;
+  const generationActive = isBatchGenerationActive(batch, tasks);
+  const logNode = document.getElementById("wzNodeLog");
+  if (logNode) logNode.classList.toggle("wz-generation-live", generationActive);
   els.batchBox.className = "wz-list";
+  const retryActions = batch.status === "partial_failed"
+    ? [{ id: "retry-stitch", label: "重试拼接" }, { id: "re-estimate", label: "重新估算" }]
+    : batch.status === "failed"
+      ? [{ id: "re-estimate", label: "重新估算" }]
+      : [];
   els.batchBox.innerHTML = `
+    ${batchProgressSection(batch, tasks, outputs)}
+    ${generationActive ? `<div class="wz-generation-panel is-live"><div class="wz-generation-head"><strong>Seedance 视频生成中</strong><span class="wz-badge neutral">实时刷新</span></div><p class="wz-generation-note">页面每 2 秒轮询一次上游任务状态；下方卡片展示每个分段的提交模式、上游任务 ID 与当前阶段。</p><div class="wz-generation-tasks">${renderGenerationTaskCards(tasks)}</div></div>` : ""}
+    <div class="wz-info">产品素材已在第 3 步上传至对象存储；确认预案后会把素材 URL 作为 <code>omni_reference</code> 引用提交 Seedance（与 OMS 先审后用的 asset_id 链路不同）。过程追踪文件见批次目录 <code>00-brief.json</code> ~ <code>05-video-tasks.json</code>。</div>
+    ${inlineRetryHtml({
+      message: batch.status === "failed"
+        ? "批次生成失败，可重新估算后再次提交"
+        : batch.status === "partial_failed"
+          ? "部分任务失败，可重试拼接或重新估算"
+          : "",
+      actions: retryActions
+    })}
     <article class="wz-row">
       <div>
         <strong>${escapeHtml(batch.batchId)}</strong>
         <small>${escapeHtml(batch.createdAt || "")} · ${tasks.length} 个任务 · ${escapeHtml(batch.estimate?.durationSec || "-")}s</small>
       </div>
-      ${badge(batch.status, batchStatusLabels)}
+      ${badge(batch.status, {
+        ...batchStatusLabels,
+        [batch.status]: batchStatusDisplayLabel(batch)
+      })}
     </article>
     <div class="wz-kv-grid">
       ${renderKeyValues([
-        ["输出总数", detail.downloadSummary?.outputsTotal || 0],
+        ["输出总数", detail.downloadSummary?.outputsTotal || outputs.length || 0],
         ["可下载", detail.downloadSummary?.downloadEligibleCount || 0],
         ["包状态", detail.downloadSummary?.packageReady ? "ready" : "not_ready"],
         ["QC 通过", batch.qcSummary?.passed || 0],
         ["QC 失败", batch.qcSummary?.failed || 0],
-        ["模型视频质检", outputs.some((output) => output.modelQcSummary) ? "已执行" : "待执行"]
+        ["模型视频质检", outputs.some((output) => output.modelQcSummary) ? "已执行" : (qcRunnable ? "待执行（需手动点击）" : "未就绪")]
       ])}
     </div>
     <div class="wz-task-list">
       ${tasks.slice(0, 12).map((task) => `
         <div>
           <span>${escapeHtml(task.generationTaskId)}</span>
-          <strong>${escapeHtml(task.status)}</strong>
+          <strong>${escapeHtml(batchGenerationTaskStatusLabels[task.status] || task.status)}</strong>
           <small>${escapeHtml(task.seedanceTaskId || task.errorCode || "pending")}</small>
         </div>
       `).join("")}
     </div>
-    ${events.length ? `<div class="wz-events">${events.slice(-5).map((event) => `<small>${escapeHtml(event.event)} · ${escapeHtml(event.createdAt)}</small>`).join("")}</div>` : ""}
+    ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(event.createdAt || "")}</small>`).join("")}</div>` : ""}
   `;
   els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
+  renderPlanPreview(batch);
   syncMetrics();
+  renderBatchStepProgress();
+  syncFlowHints();
 }
 
 function renderGallery() {
@@ -771,54 +1574,15 @@ function renderGallery() {
   syncMetrics();
 }
 
-function activeLockFromError(error) {
-  if (error?.code !== "batch_already_running") return null;
-  const data = error.data || {};
-  if (data.remixId) {
-    return {
-      type: "remix",
-      id: data.remixId,
-      status: data.status || "",
-      label: `竞品改造任务 ${data.remixId}${data.status ? ` · ${data.status}` : ""}`
-    };
-  }
-  if (data.batchId) {
-    return {
-      type: "batch",
-      id: data.batchId,
-      status: data.status || "",
-      label: `素材管线批次 ${data.batchId}${data.status ? ` · ${data.status}` : ""}`
-    };
-  }
-  return null;
-}
-
-function renderActiveLock(lock = state.activeLock) {
-  if (!els.activeLockActions) return;
-  state.activeLock = lock || null;
-  if (!state.activeLock) {
-    els.activeLockActions.hidden = true;
-    if (els.activeLockText) els.activeLockText.textContent = "";
-    return;
-  }
-  els.activeLockActions.hidden = false;
-  const href = state.activeLock.type === "remix"
-    ? "/competitor-remix.html"
-    : "/wangzhuan.html";
-  els.activeLockText.innerHTML = `当前占用：${escapeHtml(state.activeLock.label)} · <a href="${href}">打开任务页</a>`;
-  els.stopActiveLockBtn.disabled = false;
-}
-
 function renderStartError(error) {
   renderError(els.globalError, error, "批次启动失败");
-  renderActiveLock(activeLockFromError(error));
+  showActiveLockFromError(lockHost(), error);
 }
 
 async function loadTemplates() {
   const data = await apiEnvelope("/api/wangzhuan/templates");
   state.templates = data.templates || [];
   state.permissions = data.permissions || {};
-  els.envelopeBadge.textContent = "Envelope: ok";
   renderTemplates();
 }
 
@@ -832,24 +1596,47 @@ async function loadRules() {
 
 async function saveTemplate() {
   clearError(els.globalError);
+  if (isTemplateCommitted()) return;
+  const incompleteBranch = findIncompleteBranchDraft();
+  if (incompleteBranch) {
+    const branchMissing = incompleteBranch.missingFields;
+    focusRewriteStep(incompleteBranch.kind === "required" ? branchMissing : []);
+    if (incompleteBranch.kind === "strong") {
+      els.truthDetails.open = true;
+      renderError(els.globalError, {
+        code: "strong_rule_missing",
+        message: `改写 3.${incompleteBranch.index + 1} 强承诺需要补齐真实收益规则`,
+        data: { missingFields: branchMissing }
+      }, "模板校验");
+    } else {
+      renderError(els.globalError, {
+        code: "validation_error",
+        message: `改写 3.${incompleteBranch.index + 1} 缺少必填字段`,
+        data: { missingFields: branchMissing }
+      }, "模板校验");
+    }
+    incompleteBranch.node?.classList.remove("collapsed");
+    incompleteBranch.node?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    return;
+  }
+  const draft = draftFromForm();
+  const missingStrong = missingStrongFields(draft);
+  if (missingStrong.length) {
+    focusRewriteStep();
+    els.truthDetails.open = true;
+    renderError(els.globalError, {
+      code: "strong_rule_missing",
+      message: "强承诺需要补齐真实收益规则",
+      data: { missingFields: missingStrong }
+    }, "模板校验");
+    return;
+  }
   setBusy(els.createTemplateBtn, true, "上传素材");
   try {
     await uploadBranchAssets();
   } catch (error) {
     setBusy(els.createTemplateBtn, false);
     renderError(els.globalError, error, "产品素材上传失败");
-    return;
-  }
-  const draft = draftFromForm();
-  const missing = missingStrongFields(draft);
-  if (missing.length) {
-    setBusy(els.createTemplateBtn, false);
-    els.truthDetails.open = true;
-    renderError(els.globalError, {
-      code: "strong_rule_missing",
-      message: "强承诺需要补齐真实收益规则",
-      data: { missingFields: missing }
-    }, "模板校验");
     return;
   }
   setBusy(els.createTemplateBtn, true, "保存中");
@@ -862,11 +1649,23 @@ async function saveTemplate() {
     await loadTemplates();
     els.templateSelect.value = data.template.versionId;
     applyTemplate(data.template);
+    setTemplateFormLocked(true);
+    persistWorkflowSession();
+    focusBatchStep();
+    showToast("产品模板已保存，可开始估算批次", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
+    const serverMissing = Array.isArray(error?.data?.missingFields) ? error.data.missingFields : [];
+    if (serverMissing.length) focusRewriteStep(serverMissing);
     renderError(els.globalError, error, "模板保存失败");
   } finally {
     setBusy(els.createTemplateBtn, false);
+    if (isTemplateCommitted()) {
+      if (els.createTemplateBtn) {
+        els.createTemplateBtn.disabled = true;
+        els.createTemplateBtn.textContent = "模板已保存";
+      }
+    }
   }
 }
 
@@ -893,9 +1692,10 @@ async function checkReferenceVideo() {
       })
     });
     state.referenceVideo = data.referenceVideo;
-    state.decomposition = null;
-    els.decompositionText.value = "";
+    clearDecompositionDraft();
+    persistWorkflowSession();
     renderReference();
+    showToast("参考视频信息已读取", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
     renderError(els.globalError, error, "参考视频检查失败");
@@ -905,31 +1705,44 @@ async function checkReferenceVideo() {
 }
 
 async function decomposeReferenceVideo() {
-  if (!state.referenceVideo) return;
+  if (!state.referenceVideo || isDecompositionConfirmed()) return;
   clearError(els.globalError);
-  setBusy(els.decomposeBtn, true, "保存中");
+  const draft = collectDecompositionFromForm();
+  const missingFields = DECOMPOSITION_REQUIRED_FIELDS.filter((field) => !draft[field]);
+  if (missingFields.length) {
+    renderError(els.globalError, {
+      code: "validation_error",
+      message: "脚本拆解缺少必填字段",
+      data: { missingFields }
+    }, "脚本确认失败");
+    return;
+  }
+  setBusy(els.decomposeBtn, true, "确认中");
   try {
-    const decomposition = JSON.parse(els.decompositionText.value || "{}");
     const data = await apiEnvelope("/api/wangzhuan/reference-videos/decompose", {
       method: "POST",
       body: JSON.stringify({
         idempotencyKey: idempotencyKey("decompose"),
         referenceVideoId: state.referenceVideo.referenceVideoId,
-        decomposition
+        decomposition: draft
       })
     });
     state.decomposition = data.decomposition;
     state.estimate = null;
+    renderDecompositionForm(data.decomposition || draft);
     renderReference();
     renderEstimate();
     els.decompositionStatus.className = "wz-success";
     els.decompositionStatus.textContent = DECOMPOSITION_CONFIRMED_MESSAGE;
-    focusBatchStep();
+    persistWorkflowSession();
+    renderBatchReadiness();
+    focusRewriteStep();
+    showToast("脚本拆解已确认，请继续产品改写", { type: "success" });
   } catch (error) {
-    renderError(els.globalError, error, "拆解失败");
+    renderError(els.globalError, error, "拆解确认失败");
   } finally {
     setBusy(els.decomposeBtn, false);
-    els.decomposeBtn.disabled = isDecompositionConfirmed() || !els.decompositionText.value.trim();
+    syncDecompositionControls();
   }
 }
 
@@ -986,12 +1799,16 @@ async function estimateBatch() {
     state.estimate = data;
     state.capabilities = data.capabilities || null;
     renderEstimate();
+    showToast("批次估算完成", { type: "success" });
   } catch (error) {
-    if (error.code === "stitcher_unavailable") els.capabilityBadge.textContent = "Stitcher: unsupported";
     if (error.code === "strong_rule_missing") els.truthDetails.open = true;
     state.estimate = null;
     renderEstimate();
-    renderError(els.globalError, error, "估算失败");
+    if (error?.code === "batch_already_running") {
+      renderStartError(error);
+    } else {
+      renderError(els.globalError, error, "估算失败");
+    }
   } finally {
     setBusy(els.estimateBtn, false);
   }
@@ -1010,9 +1827,20 @@ function startPolling() {
   window.clearTimeout(state.pollTimer);
   const tick = async () => {
     try {
+      const previousStatus = state.batchDetail?.batch?.status;
       const detail = await loadBatchDetail();
       await loadGallery();
-      if (!detail?.batch || terminalBatchStatus(detail.batch.status)) return;
+      const batch = detail?.batch;
+      if (!batch || terminalBatchStatus(batch.status)) {
+        if (batch && batch.status !== previousStatus) {
+          if (batch.status === "succeeded") {
+            showToast("批次生成完成，可下载交付包", { type: "success" });
+          } else if (batch.status === "partial_failed" || batch.status === "failed") {
+            showToast("批次未完全成功，可在任务详情中重试", { type: "error" });
+          }
+        }
+        return;
+      }
       state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     } catch (error) {
       renderError(els.globalError, error, "批次轮询失败");
@@ -1022,43 +1850,80 @@ function startPolling() {
   state.pollTimer = window.setTimeout(tick, 1200);
 }
 
-async function startBatch() {
+async function planBatch() {
   const estimate = state.estimate?.estimate;
   if (!estimate) return;
   if (estimate.confirmationRequired && !els.confirmLimits.checked) {
     renderError(els.globalError, {
       code: "limit_confirmation_required",
       message: "请先确认估算中的任务数和分段数"
-    }, "启动前确认");
+    }, "生成预案前确认");
     return;
   }
   clearError(els.globalError);
-  renderActiveLock(null);
-  setBusy(els.startBatchBtn, true, "启动中");
+  clearActiveLockBanner(lockHost());
+  setBusy(els.planBatchBtn, true, "生成中");
   try {
-    const data = await apiEnvelope("/api/wangzhuan/batches/start", {
+    const llmDefaults = state.llmDefaults || {};
+    const data = await apiEnvelope("/api/wangzhuan/batches/plan", {
       method: "POST",
       body: JSON.stringify({
-        idempotencyKey: idempotencyKey("batch_start"),
+        idempotencyKey: idempotencyKey("batch_plan"),
         estimateId: estimate.estimateId,
+        llmConfig: {
+          provider: els.llmProvider.value.trim() || llmDefaults.provider || "skylink",
+          model: els.llmModel.value.trim() || llmDefaults.model || "gpt-5.4",
+          endpoint: els.llmEndpoint.value.trim() || llmDefaults.endpoint || "https://skylink-gateway.com/api/v1",
+          temperature: Number(els.llmTemperature.value || llmDefaults.temperature || 0.2)
+        },
+        knowledgeNotes: els.knowledgeNotes.value.trim(),
         ...(estimate.confirmationToken ? { confirmationToken: estimate.confirmationToken } : {})
       })
     });
+    state.batchDetail = {
+      batch: data.batch,
+      events: [],
+      downloadSummary: { outputsTotal: 0, downloadEligibleCount: 0, packageReady: false, missingFiles: [] }
+    };
+    if (data.batch?.batchId) {
+      state.batchDetail = await loadBatchDetail();
+    }
+    renderBatch();
+    focusBatchStep();
+    showToast("Seedance 预案已生成，请确认后提交", { type: "success" });
+  } catch (error) {
+    renderStartError(error);
+  } finally {
+    setBusy(els.planBatchBtn, false);
+    renderEstimate();
+  }
+}
+
+async function confirmPlanBatch() {
+  const batchId = state.batchDetail?.batch?.batchId;
+  const plans = state.batchDetail?.batch?.plans || [];
+  if (!batchId || !plans.length) return;
+  clearError(els.globalError);
+  setBusy(els.confirmPlanBtn, true, "确认中");
+  try {
+    const data = await confirmBatchPlanRequest(batchId, plans);
     if (data.batch?.batchId) {
       state.batchDetail = await loadBatchDetail();
     } else {
       state.batchDetail = {
-        batch: data.startedBatch,
+        batch: data.confirmedBatch || data.batch,
         events: [],
         downloadSummary: { outputsTotal: 0, downloadEligibleCount: 0, packageReady: false, missingFiles: [] }
       };
     }
     renderBatch();
     startPolling();
+    focusLogStep();
+    showToast("批次已提交 Seedance 生成，正在轮询上游进度", { type: "success" });
   } catch (error) {
-    renderStartError(error);
+    renderError(els.globalError, error, "确认预案失败");
   } finally {
-    setBusy(els.startBatchBtn, false);
+    setBusy(els.confirmPlanBtn, false);
     renderEstimate();
   }
 }
@@ -1134,42 +1999,14 @@ async function runVideoQc() {
   }
 }
 
-async function stopActiveLock() {
-  const lock = state.activeLock;
-  if (!lock) return;
-  const url = lock.type === "remix"
-    ? `/api/wangzhuan/remix/${encodeURIComponent(lock.id)}/stop`
-    : `/api/wangzhuan/batches/${encodeURIComponent(lock.id)}/stop`;
-  setBusy(els.stopActiveLockBtn, true, "停止中");
-  try {
-    const data = await apiEnvelope(url, {
-      method: "POST",
-      body: JSON.stringify({ reason: "frontend_stop_active_lock" })
-    });
-    if (lock.type === "batch") {
-      state.batchDetail = data;
-      renderBatch();
-    }
-    renderActiveLock(null);
-    clearError(els.globalError);
-    els.capabilityBadge.textContent = "占用任务已停止";
-  } catch (error) {
-    renderError(els.globalError, error, "停止占用任务失败");
-  } finally {
-    setBusy(els.stopActiveLockBtn, false);
-    if (!state.activeLock) els.stopActiveLockBtn.disabled = true;
-  }
-}
-
 async function loadGallery(options = {}) {
   const requestedPage = Number(options.page || state.galleryPage || 1);
   state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
-  const batchId = state.batchDetail?.batch?.batchId;
   const query = new URLSearchParams({
     page: String(state.galleryPage),
-    pageSize: String(state.galleryPageSize)
+    pageSize: String(state.galleryPageSize),
+    sourceType: "pipeline"
   });
-  if (batchId) query.set("batchId", batchId);
   const params = `?${query}`;
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
   state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
@@ -1198,6 +2035,7 @@ async function downloadPackage() {
 
 function bindEvents() {
   els.templateSelect.addEventListener("change", () => {
+    unlockTemplateEditing();
     applyTemplate(state.templates.find((item) => item.versionId === els.templateSelect.value));
     loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败"));
   });
@@ -1211,18 +2049,23 @@ function bindEvents() {
     if (!event.target.closest(".wz-save-branch")) return;
     saveTemplate();
   });
+  els.branches?.addEventListener("input", markTemplateDirtyFromEdit, true);
+  els.branches?.addEventListener("change", markTemplateDirtyFromEdit, true);
+  window.addEventListener("wz:branch-created", () => {
+    unlockTemplateEditing();
+    renderTemplateStatus();
+  });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
   els.useSampleVideoBtn.addEventListener("click", () => {
     els.referenceFile.click();
   });
   els.referenceFile.addEventListener("change", () => {
     state.referenceVideo = null;
-    state.decomposition = null;
-    els.decompositionText.value = "";
+    clearWorkflowSession();
+    clearDecompositionDraft();
     els.draftDecompositionBtn.disabled = true;
-    els.decomposeBtn.disabled = true;
     els.decompositionStatus.className = "wz-info";
-    els.decompositionStatus.textContent = "先读取参考视频信息，再调用模型生成拆解草稿。";
+    els.decompositionStatus.textContent = "先上传参考视频，再点击「开始解析」生成脚本草稿。";
     clearError(els.globalError);
     const file = els.referenceFile.files?.[0];
     if (!file) {
@@ -1233,24 +2076,21 @@ function bindEvents() {
     els.referenceBox.textContent = `已选择 ${file.name}，请点击“读取视频信息”继续`;
   });
   els.checkReferenceBtn.addEventListener("click", checkReferenceVideo);
-  els.draftDecompositionBtn.addEventListener("click", draftReferenceVideoDecomposition);
-  els.decompositionText.addEventListener("input", () => {
-    if (!state.referenceVideo || state.referenceVideo.status === "fail") return;
-    state.decomposition = null;
-    state.estimate = null;
-    renderEstimate();
-    els.decomposeBtn.disabled = isDecompositionConfirmed() || !els.decompositionText.value.trim();
-    els.decompositionStatus.className = "wz-info";
-    els.decompositionStatus.textContent = "已修改拆解 JSON，请确认无误后保存。";
+  els.batchBox?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-inline-retry]");
+    if (!btn) return;
+    if (btn.dataset.inlineRetry === "retry-stitch") els.retryStitchBtn?.click();
+    if (btn.dataset.inlineRetry === "re-estimate") els.estimateBtn?.click();
   });
+  els.draftDecompositionBtn.addEventListener("click", draftReferenceVideoDecomposition);
   els.decomposeBtn.addEventListener("click", decomposeReferenceVideo);
   els.estimateBtn.addEventListener("click", estimateBatch);
   els.confirmLimits.addEventListener("change", renderEstimate);
-  els.startBatchBtn.addEventListener("click", startBatch);
+  els.planBatchBtn.addEventListener("click", planBatch);
+  els.confirmPlanBtn.addEventListener("click", confirmPlanBatch);
   els.stopBatchBtn.addEventListener("click", stopBatch);
   els.runQcBtn.addEventListener("click", runVideoQc);
   els.retryStitchBtn.addEventListener("click", retryStitch);
-  els.stopActiveLockBtn.addEventListener("click", stopActiveLock);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
   els.galleryBox.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
@@ -1265,19 +2105,27 @@ function bindEvents() {
 
 async function loadInitialData() {
   clearError(els.globalError);
-  renderActiveLock(null);
+  clearActiveLockBanner(lockHost());
   await loadLlmConfig();
   await loadTemplates();
   await loadRules();
   await loadActiveBatch();
+  if (state.batchDetail?.batch) {
+    restoreWorkflowFromBatch(state.batchDetail);
+  } else {
+    await restoreWorkflowSession();
+  }
   if (!state.batchDetail) await loadGallery();
-  els.envelopeBadge.textContent = "Envelope: ok";
+  renderBatchReadiness();
   syncMetrics();
 }
 
 async function init() {
   renderTruthFields();
-  els.decompositionText.value = "";
+  ensureDecompositionForm();
+  renderDecompositionForm({});
+  renderTemplateStatus();
+  renderBatchReadiness();
   renderReference();
   bindEvents();
   await bindLogin({

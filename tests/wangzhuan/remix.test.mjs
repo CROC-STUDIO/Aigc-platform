@@ -24,10 +24,12 @@ import {
   stopRemix,
   uploadRemixSource
 } from "../../server/wangzhuan/remix.mjs";
+import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -43,8 +45,26 @@ const baseDraft = {
   promiseLevel: "strong_conversion"
 };
 
-function context(root, userId = "alice", overrides = {}) {
+function defaultRemixProviderClient() {
   return {
+    provider: "function_k",
+    async createJob() {
+      return { job_id: "job_function_k_mock", status: "queued" };
+    },
+    async getJob(jobId) {
+      return { job_id: jobId, status: "review_required", download_url: "https://cdn.example.com/remix-out.mp4" };
+    },
+    async downloadJob() {
+      return Buffer.from("processed remix video");
+    },
+    async downloadUrl() {
+      return Buffer.from("processed remix video");
+    }
+  };
+}
+
+function context(root, userId = "alice", overrides = {}) {
+  const ctx = {
     userProjectRoot: join(root, userId, "project"),
     sharedProjectRoot: join(root, "shared"),
     userId,
@@ -53,33 +73,16 @@ function context(root, userId = "alice", overrides = {}) {
     config: {},
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  if (!ctx.remixProviderClient) {
+    ctx.remixProviderClient = defaultRemixProviderClient();
+  }
+  return ctx;
 }
 
 function objectStorageContext(root, userId = "alice", overrides = {}) {
-  const objectStore = new Map();
-  const ctx = context(root, userId, {
-    ...overrides,
-    async syncWangzhuanAsset({ fullPath, assetKind }) {
-      const relativePath = fullPath
-        .slice(ctx.userProjectRoot.length)
-        .replace(/^[\\/]+/, "")
-        .replace(/\\/g, "/");
-      const safeRelativePath = Buffer.from(relativePath, "utf8").toString("hex").slice(0, 64);
-      const safeName = basename(fullPath).replace(/[^a-zA-Z0-9._-]+/g, "_") || "asset";
-      const storageKey = `uploads/test/${userId}/${assetKind}/${safeRelativePath}_${safeName}`;
-      objectStore.set(storageKey, await readFile(fullPath));
-      return {
-        storageKey,
-        storageUrl: `https://cdn.test/${encodeURIComponent(storageKey)}`
-      };
-    },
-    async openWangzhuanObjectStream(storageKey) {
-      const buffer = objectStore.get(storageKey);
-      if (!buffer) throw new Error(`missing object ${storageKey}`);
-      return { body: Readable.from([buffer]) };
-    }
-  });
-  return { ctx, objectStore };
+  const ctx = context(root, userId, overrides);
+  return { ctx, objectStore: ctx.__mockObjectStore };
 }
 
 function attachMysqlFacts() {
@@ -245,8 +248,8 @@ test("remix upload stores source material and rejects invalid file types", async
     assert.match(uploaded.sourceId, /^rsrc_\d{8}_\d{3}$/);
     assert.equal(uploaded.probe.sourceId, uploaded.sourceId);
     assert.equal(uploaded.probe.mimeType, "video/mp4");
-    assert.match(uploaded.previewUrl, /^\/file\?path=/);
-    assert.equal(uploaded.previewUrl.includes(root), false);
+    assert.match(uploaded.previewUrl, /^https:\/\//);
+    assert.match(uploaded.probe.storageUrl, /^https:\/\//);
     assert.equal(existsSync(join(ctx.userProjectRoot, uploaded.probe.storedPath)), true);
     const sourceFact = await loadRemixSourceFromMysql(ctx, uploaded.sourceId);
     assert.equal(sourceFact.sourceId, uploaded.sourceId);
@@ -439,6 +442,53 @@ test("remix direct mask-edit route submits one generated mask image to ai_remove
   }
 });
 
+test("remix direct mask-edit rejects duplicate submit for the same source after success", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-source-lock-success-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const uploaded = await uploadRemixSource(ctx, sourceUpload());
+    const maskDataUrl = `data:image/png;base64,${Buffer.from("mask").toString("base64")}`;
+    const started = await startDirectMaskEdit(ctx, {
+      idempotencyKey: "idem_s7_source_lock_success_start",
+      sourceId: uploaded.sourceId,
+      regions: [region()],
+      maskDataUrl
+    });
+    const materialized = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(materialized.remix.status, "preview_required");
+    const confirmed = await confirmRemixPreview(ctx, materialized.remix.remixId, {
+      idempotencyKey: "idem_s7_source_lock_success_confirm",
+      outputId: materialized.remix.outputs[0].outputId
+    });
+    assert.equal(confirmed.remix.status, "succeeded");
+
+    await assert.rejects(
+      () => startDirectMaskEdit(ctx, {
+        idempotencyKey: "idem_s7_source_lock_success_retry",
+        sourceId: uploaded.sourceId,
+        regions: [region("retry")],
+        maskDataUrl
+      }),
+      (error) => {
+        assert.equal(error.code, "batch_already_running");
+        assert.equal(error.data.sourceId, uploaded.sourceId);
+        assert.equal(error.data.status, "succeeded");
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("remix start creates preview-required output and preview confirm makes it downloadable", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s7-confirm-"));
   try {
@@ -471,32 +521,33 @@ test("remix start creates preview-required output and preview confirm makes it d
       estimateId: estimated.estimateId
     });
     assert.equal(replay.remix.remixId, started.remix.remixId);
-    assert.equal(started.remix.status, "preview_required");
-    assert.equal(started.remix.outputs.length, 1);
-    assert.equal(started.remix.outputs[0].sourceType, "remix");
-    assert.equal(started.remix.outputs[0].qcStatus, "manual_required");
-    assert.equal(started.remix.outputs[0].downloadEligible, false);
-    assert.equal(started.downloadSummary.packageReady, false);
+    const materialized = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(materialized.remix.status, "preview_required");
+    assert.equal(materialized.remix.outputs.length, 1);
+    assert.equal(materialized.remix.outputs[0].sourceType, "remix");
+    assert.equal(materialized.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(materialized.remix.outputs[0].downloadEligible, false);
+    assert.equal(materialized.downloadSummary.packageReady, false);
 
     await assert.rejects(
-      () => buildDownloadPackage(ctx, { remixIds: [started.remix.remixId] }),
+      () => buildDownloadPackage(ctx, { remixIds: [materialized.remix.remixId] }),
       (error) => {
         assert.equal(error.code, "empty_download_set");
         return true;
       }
     );
 
-    const detail = await getRemixDetail(ctx, started.remix.remixId);
-    assert.equal(detail.remix.remixId, started.remix.remixId);
+    const detail = await getRemixDetail(ctx, materialized.remix.remixId);
+    assert.equal(detail.remix.remixId, materialized.remix.remixId);
     assert.equal(detail.downloadSummary.downloadEligibleCount, 0);
 
-    const confirmed = await confirmRemixPreview(ctx, started.remix.remixId, {
+    const confirmed = await confirmRemixPreview(ctx, materialized.remix.remixId, {
       idempotencyKey: "idem_s7_preview_confirm",
-      outputId: started.remix.outputs[0].outputId
+      outputId: materialized.remix.outputs[0].outputId
     });
-    const confirmReplay = await confirmRemixPreview(ctx, started.remix.remixId, {
+    const confirmReplay = await confirmRemixPreview(ctx, materialized.remix.remixId, {
       idempotencyKey: "idem_s7_preview_confirm",
-      outputId: started.remix.outputs[0].outputId
+      outputId: materialized.remix.outputs[0].outputId
     });
     assert.equal(confirmReplay.remix.status, "succeeded");
     assert.equal(confirmed.remix.status, "succeeded");
@@ -506,34 +557,36 @@ test("remix start creates preview-required output and preview confirm makes it d
     assert.equal(confirmed.remix.outputs[0].downloadEligible, true);
     assert.equal(confirmed.downloadSummary.packageReady, true);
 
-    const reportPath = join(wangzhuanPaths(ctx).remixDir, started.remix.remixId, "qc", `${started.remix.outputs[0].outputId}.json`);
+    const reportPath = join(wangzhuanPaths(ctx).remixDir, materialized.remix.remixId, "qc", `${materialized.remix.outputs[0].outputId}.json`);
     const report = JSON.parse(await readFile(reportPath, "utf8"));
     assert.equal(report.sourceType, "remix");
     assert.equal(report.previewConfirmed, true);
     assert.equal(report.qcStatus, "pass");
 
-    const gallery = await getGallery(ctx, { downloadEligibleOnly: "true" });
-    assert.equal(gallery.items.some((item) => item.remixId === started.remix.remixId), true);
+    const gallery = await getGallery(ctx, { sourceType: "remix", downloadEligibleOnly: "true" });
+    assert.equal(gallery.filters.sourceType, "remix");
+    assert.equal(gallery.items.every((item) => item.sourceType === "remix"), true);
+    assert.equal(gallery.items.some((item) => item.remixId === materialized.remix.remixId), true);
 
-    const packaged = await buildDownloadPackage(ctx, { remixIds: [started.remix.remixId] });
+    const packaged = await buildDownloadPackage(ctx, { remixIds: [materialized.remix.remixId] });
     const entries = zipEntries(packaged.zip);
-    const remixRoot = `remix/${started.remix.remixId}`;
+    const remixRoot = `remix/${materialized.remix.remixId}`;
     assert.equal(packaged.manifest.items.length, 1);
     assert.equal(entries.has("package-manifest.json"), true);
     assert.equal(entries.has(`${remixRoot}/source/original.mp4`), true);
     assert.equal(entries.has(`${remixRoot}/source/source-probe.json`), false);
     assert.equal(entries.has(`${remixRoot}/regions/regions.json`), true);
-    assert.equal(entries.has(`${remixRoot}/prompts/${started.remix.tasks[0].generationTaskId}_remix.txt`), true);
-    assert.equal(entries.has(`${remixRoot}/qc/${started.remix.outputs[0].outputId}.json`), true);
+    assert.equal(entries.has(`${remixRoot}/prompts/${materialized.remix.tasks[0].generationTaskId}_remix.txt`), true);
+    assert.equal(entries.has(`${remixRoot}/qc/${materialized.remix.outputs[0].outputId}.json`), true);
     assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.csv`), true);
     assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.json`), true);
-    assert.equal(entries.has(`${remixRoot}/outputs/${started.remix.outputs[0].outputId}.mp4`), true);
+    assert.equal(entries.has(`${remixRoot}/outputs/${materialized.remix.outputs[0].outputId}.mp4`), true);
     assert.equal(entries.has(`${remixRoot}/remix.json`), false);
     assert.equal(entries.has(`${remixRoot}/preview-confirmation.json`), true);
 
     const textPayload = Buffer.concat([...entries.values()]).toString("utf8");
-    assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
-    assert.ok([...entries.keys()].some((name) => name.endsWith(`${basename(started.remix.outputs[0].filePath)}`)));
+    assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:/);
+    assert.ok([...entries.keys()].some((name) => name.endsWith(`${basename(materialized.remix.outputs[0].filePath)}`)));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -565,9 +618,10 @@ test("remix package is driven by mysql asset storage keys when local cache files
       idempotencyKey: "idem_s7_s3_remix_start",
       estimateId: estimated.estimateId
     });
-    const confirmed = await confirmRemixPreview(ctx, started.remix.remixId, {
+    const materialized = await getRemixDetail(ctx, started.remix.remixId);
+    const confirmed = await confirmRemixPreview(ctx, materialized.remix.remixId, {
       idempotencyKey: "idem_s7_s3_preview_confirm",
-      outputId: started.remix.outputs[0].outputId,
+      outputId: materialized.remix.outputs[0].outputId,
       notes: "object storage backed"
     });
 
@@ -740,6 +794,72 @@ test("remix detail polls video platform job and materializes succeeded output", 
     assert.equal(existsSync(join(ctx.userProjectRoot, detail.remix.outputs[0].filePath)), true);
     assert.equal(await readFile(join(ctx.userProjectRoot, detail.remix.outputs[0].filePath), "utf8"), "remote processed video");
     assert.equal(existsSync(join(wangzhuanPaths(ctx).remixDir, started.remix.remixId, "qc", `${detail.remix.outputs[0].outputId}.json`)), true);
+    assert.equal(detail.downloadSummary.packageReady, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix detail marks download 403 as failed instead of throwing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-provider-download-403-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "video_aigc",
+          status: "supported",
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      remixProviderClient: {
+        async createJob() {
+          return {
+            job_id: "job_download_forbidden",
+            job_type: "mask_edit",
+            status: "queued"
+          };
+        },
+        async getJob(jobId) {
+          return {
+            job_id: jobId,
+            job_type: "mask_edit",
+            status: "succeeded",
+            finished_at: "2026-06-01T10:03:00Z"
+          };
+        },
+        async downloadJob() {
+          throw new WangzhuanError("upstream_failed", "视频处理平台下载失败", {
+            provider: "video_aigc",
+            operation: "download_job",
+            status: 403
+          }, 502);
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_provider_download_403_start",
+      estimateId: estimated.estimateId
+    });
+
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+
+    assert.equal(detail.remix.status, "failed");
+    assert.equal(detail.remix.providerJob.status, "failed");
+    assert.equal(detail.remix.tasks[0].status, "failed");
+    assert.equal(detail.remix.tasks[0].errorCode, "upstream_failed");
+    assert.equal(detail.remix.tasks[0].errorMessage, "视频处理平台下载失败");
+    assert.equal(detail.remix.qcSummary.warnings[0].status, 403);
     assert.equal(detail.downloadSummary.packageReady, false);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -1044,7 +1164,6 @@ test("remix router endpoints return envelopes for upload, estimate, start, detai
     assert.equal(startRes.statusCode, 200);
     const started = JSON.parse(startRes.body.toString("utf8"));
     assert.equal(started.code, "ok");
-    assert.equal(started.data.remix.status, "preview_required");
 
     const detailRes = captureRes();
     await handleWangzhuanRequest(
@@ -1054,15 +1173,15 @@ test("remix router endpoints return envelopes for upload, estimate, start, detai
       routeCtx
     );
     assert.equal(detailRes.statusCode, 200);
-    const detail = JSON.parse(detailRes.body.toString("utf8"));
-    assert.equal(detail.code, "ok");
-    assert.equal(detail.data.downloadSummary.packageReady, false);
+    const materialized = JSON.parse(detailRes.body.toString("utf8"));
+    assert.equal(materialized.code, "ok");
+    assert.equal(materialized.data.remix.status, "preview_required");
 
     const confirmRes = captureRes();
     await handleWangzhuanRequest(
       jsonReq("POST", {
         idempotencyKey: "idem_s7_router_confirm",
-        outputId: started.data.remix.outputs[0].outputId
+        outputId: materialized.data.remix.outputs[0].outputId
       }),
       confirmRes,
       new URL(`http://localhost/api/wangzhuan/remix/${started.data.remix.remixId}/preview-confirm`),

@@ -4,15 +4,38 @@ import test from "node:test";
 import { dirname, join } from "node:path";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
-import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest } from "../../server/wangzhuan/mysql-facts.mjs";
+import {
+  closeWangzhuanFactsPool,
+  loadBatchDetailFromMysql,
+  setWangzhuanFactsPoolForTest,
+  syncBatchFacts,
+  syncReferenceVideoFact
+} from "../../server/wangzhuan/mysql-facts.mjs";
 import { submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import { startDirectMaskEdit, uploadRemixSource } from "../../server/wangzhuan/remix.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
 import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
-import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testSeedanceProviderClient } from "./test-providers.mjs";
+
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
 
 function jsonReq(method, body = {}) {
   const stream = Readable.from([JSON.stringify(body)]);
@@ -50,13 +73,29 @@ function context(role = "user") {
   };
 }
 
+function wangzhuanModuleContext(root, overrides = {}) {
+  const ctx = {
+    userProjectRoot: join(root, "user"),
+    sharedProjectRoot: join(root, "shared"),
+    userId: "user",
+    user: { userId: "user", username: "user", role: "user", isAdmin: false },
+    mockReferenceProbe: true,
+    ...overrides
+  };
+  attachMockObjectStorage(ctx);
+  return ctx;
+}
+
 function tempContext(root, role = "user") {
-  return {
+  const ctx = {
     ...context(role),
-    currentProjectRoot: () => `${root}/user`,
-    currentBaseProjectRoot: () => `${root}/shared`,
+    userProjectRoot: join(root, "user"),
+    sharedProjectRoot: join(root, "shared"),
+    userId: role,
     mockReferenceProbe: true
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function anonymousContext() {
@@ -67,14 +106,9 @@ function anonymousContext() {
 }
 
 async function startedBatchFixture(root) {
+  ensureFactsPool();
   const { join } = await import("node:path");
-  const moduleContext = {
-    userProjectRoot: join(root, "user"),
-    sharedProjectRoot: join(root, "shared"),
-    userId: "user",
-    user: { userId: "user", username: "user", role: "user", isAdmin: false },
-    mockReferenceProbe: true
-  };
+  const moduleContext = wangzhuanModuleContext(root);
   const saved = await saveTemplate(moduleContext, {
     mode: "create",
     draft: {
@@ -137,15 +171,12 @@ async function startedBatchFixture(root) {
 }
 
 async function failedThirtySecondStitchFixture(root) {
+  ensureFactsPool();
   const { join } = await import("node:path");
-  const moduleContext = {
-    userProjectRoot: join(root, "user"),
-    sharedProjectRoot: join(root, "shared"),
-    userId: "user",
-    user: { userId: "user", username: "user", role: "user", isAdmin: false },
-    mockReferenceProbe: true,
+  const moduleContext = wangzhuanModuleContext(root, {
+    seedanceProviderClient: testSeedanceProviderClient(),
     capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } }
-  };
+  });
   const saved = await saveTemplate(moduleContext, {
     mode: "create",
     draft: {
@@ -203,6 +234,7 @@ async function failedThirtySecondStitchFixture(root) {
     estimateId: estimated.estimate.estimateId
   });
   await submitPendingGenerationTasks(moduleContext, started.batch.batchId);
+  await prepareDownloadedSegmentsWithoutStitch(moduleContext, started.batch.batchId);
   await stitchBatchSegments(moduleContext, started.batch.batchId, { forceFail: true });
   return { moduleContext, started };
 }
@@ -340,19 +372,15 @@ test("draft decomposition endpoint reports missing llm api key env to frontend",
   };
   for (const key of Object.keys(previousEnv)) delete process.env[key];
   const root = await mkdtemp(join(tmpdir(), "wz-router-draft-key-"));
+  ensureFactsPool();
   try {
-    const ctx = {
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true,
+    const ctx = wangzhuanModuleContext(root, {
       readJson: context("user").readJson,
       currentUser: () => ({ userId: "user", username: "user", role: "user", isAdmin: false }),
       currentUserId: () => "user",
       currentProjectRoot: () => join(root, "user"),
       currentBaseProjectRoot: () => join(root, "shared")
-    };
+    });
     const checked = await checkReferenceVideo(ctx, {
       fileName: "demo.mp4",
       mimeType: "video/mp4",
@@ -385,6 +413,7 @@ test("draft decomposition endpoint reports missing llm api key env to frontend",
     assert.match(payload.data.upstreamMessage, /WANGZHUAN_LLM_API_KEY/);
     assert.doesNotMatch(res.body, /secret-token/);
   } finally {
+    await resetFactsPool();
     for (const [key, value] of Object.entries(previousEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -398,6 +427,7 @@ test("reference video check endpoint returns the new success envelope", async ()
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-ref-"));
+  ensureFactsPool();
   try {
     const res = captureRes();
     await handleWangzhuanRequest(
@@ -421,6 +451,7 @@ test("reference video check endpoint returns the new success envelope", async ()
     assert.match(payload.data.referenceVideo.referenceVideoId, /^ref_\d{8}_\d{3}$/);
     assert.equal(payload.data.referenceVideo.status, "pass");
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -432,6 +463,16 @@ test("product asset upload endpoint returns a reusable stored asset link for tem
   const root = await mkdtemp(join(tmpdir(), "wz-router-product-asset-"));
   try {
     const res = captureRes();
+    const ctx = {
+      ...tempContext(root),
+      async syncWangzhuanAsset({ fullPath, assetKind }) {
+        return {
+          storageKey: `uploads/test/${assetKind}.png`,
+          storageUrl: `https://harpoons3.s3.ap-southeast-1.amazonaws.com/uploads/test/${assetKind}.png`,
+          storedPath: fullPath
+        };
+      }
+    };
     await handleWangzhuanRequest(
       jsonReq("POST", {
         branchId: "branch_news",
@@ -442,7 +483,7 @@ test("product asset upload endpoint returns a reusable stored asset link for tem
       }),
       res,
       new URL("http://localhost/api/wangzhuan/product-assets/upload"),
-      tempContext(root)
+      ctx
     );
 
     assert.equal(res.statusCode, 200);
@@ -451,7 +492,9 @@ test("product asset upload endpoint returns a reusable stored asset link for tem
     assert.equal(payload.data.asset.branchId, "branch_news");
     assert.equal(payload.data.asset.assetKey, "productIcon");
     assert.match(payload.data.asset.storedPath, /product-assets\/branch_news\/productIcon\/news-icon\.png$/);
-    assert.match(payload.data.asset.previewUrl, /^\/file\?path=|^https?:\/\//);
+    assert.match(payload.data.asset.previewUrl, /^https:\/\//);
+    assert.match(payload.data.asset.storageUrl, /^https:\/\/harpoons3\.s3\.ap-southeast-1\.amazonaws\.com\//);
+    assert.equal(payload.data.asset.previewUrl, payload.data.asset.storageUrl);
     assert.equal(Object.hasOwn(payload.data.asset, "content"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -463,13 +506,9 @@ test("reference video draft endpoint calls llm and returns a decomposition draft
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-draft-"));
+  ensureFactsPool();
   try {
-    const moduleContext = {
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true,
+    const moduleContext = wangzhuanModuleContext(root, {
       readJson: context("user").readJson,
       currentUser: () => ({ userId: "user", username: "user", role: "user", isAdmin: false }),
       currentUserId: () => "user",
@@ -485,7 +524,7 @@ test("reference video draft endpoint calls llm and returns a decomposition draft
         quality: "Model quality",
         hook: "Model hook"
       })
-    };
+    });
     const checked = await checkReferenceVideo(moduleContext, {
       fileName: "demo.mp4",
       mimeType: "video/mp4",
@@ -514,6 +553,7 @@ test("reference video draft endpoint calls llm and returns a decomposition draft
     assert.equal(payload.data.decomposition.scene, "Model scene");
     assert.equal(payload.data.draft.source, "llm");
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -523,13 +563,9 @@ test("reference video draft endpoint writes a redacted model request dump for th
   const { tmpdir } = await import("node:os");
   const root = await mkdtemp(join(tmpdir(), "wz-router-draft-dump-"));
   const previousFetch = globalThis.fetch;
+  ensureFactsPool();
   try {
-    const moduleContext = {
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true,
+    const moduleContext = wangzhuanModuleContext(root, {
       extractReferenceFrames: async () => [
         { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,cm91dGVyLWZyYW1l" }
       ],
@@ -538,7 +574,7 @@ test("reference video draft endpoint writes a redacted model request dump for th
       currentUserId: () => "user",
       currentProjectRoot: () => join(root, "user"),
       currentBaseProjectRoot: () => join(root, "shared")
-    };
+    });
     globalThis.fetch = async () => new Response(JSON.stringify({
       output_text: JSON.stringify({
         scene: "Router dump scene",
@@ -564,12 +600,15 @@ test("reference video draft endpoint writes a redacted model request dump for th
       canExtractFrame: true
     });
     const videoUrl = "https://cdn.example.com/router-dump/original.mp4";
-    const probePath = join(moduleContext.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
-    await writeFile(probePath, `${JSON.stringify({
+    const patchedProbe = {
       ...checked.referenceVideo,
       storageKey: "uploads/router-dump/original.mp4",
       storageUrl: videoUrl
-    }, null, 2)}\n`, "utf8");
+    };
+    const probePath = join(moduleContext.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify(patchedProbe, null, 2)}\n`, "utf8");
+    const synced = await syncReferenceVideoFact(moduleContext, patchedProbe);
+    assert.equal(synced.skipped, false);
 
     const res = captureRes();
     await handleWangzhuanRequest(
@@ -599,6 +638,7 @@ test("reference video draft endpoint writes a redacted model request dump for th
     assert.equal(dump.request.body.input.find((item) => item.role === "user").content.some((part) => part.type === "input_file" && part.file_url === videoUrl), true);
   } finally {
     globalThis.fetch = previousFetch;
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -608,14 +648,9 @@ test("batch estimate endpoint returns a contract success envelope", async () => 
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-est-"));
+  ensureFactsPool();
   try {
-    const ctx = {
-      userProjectRoot: `${root}/user`,
-      sharedProjectRoot: `${root}/shared`,
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true
-    };
+    const ctx = wangzhuanModuleContext(root);
     const saved = await saveTemplate(ctx, {
       mode: "create",
       draft: {
@@ -683,6 +718,7 @@ test("batch estimate endpoint returns a contract success envelope", async () => 
     assert.equal(payload.data.estimate.seedanceSegmentCount, 2);
     assert.equal(payload.data.capabilities.stitcher.status, "not_required");
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -722,6 +758,7 @@ test("batch detail and stop endpoints return contract envelopes", async () => {
     assert.equal(stopPayload.data.batch.status, "stopped");
     assert.equal(stopPayload.data.batch.tasks.every((task) => task.status === "stopped"), true);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -731,14 +768,9 @@ test("remix stop endpoint returns a contract envelope", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-remix-stop-"));
-  setWangzhuanFactsPoolForTest(fakePool());
+  ensureFactsPool();
   try {
-    const moduleContext = {
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true,
+    const moduleContext = wangzhuanModuleContext(root, {
       config: {},
       capabilities: {
         remix: {
@@ -757,7 +789,7 @@ test("remix stop endpoint returns a contract envelope", async () => {
           };
         }
       }
-    };
+    });
     const source = await uploadRemixSource(moduleContext, {
       fileName: "source.mp4",
       mimeType: "video/mp4",
@@ -797,8 +829,7 @@ test("remix stop endpoint returns a contract envelope", async () => {
     assert.equal(stopPayload.data.remix.tasks.every((task) => task.status === "stopped"), true);
     assert.equal(stopPayload.data.downloadSummary.packageReady, false);
   } finally {
-    setWangzhuanFactsPoolForTest(null);
-    await closeWangzhuanFactsPool();
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -829,12 +860,13 @@ test("retry-stitch endpoint returns a contract envelope and qc-ready batch", asy
     assert.equal(payload.data.batch.status, "qc");
     assert.equal(payload.data.batch.outputs.some((output) => output.kind === "stitched_video"), true);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("batch qc endpoint runs generated video model review and returns updated download summary", async () => {
-  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-model-qc-"));
@@ -844,28 +876,19 @@ test("batch qc endpoint runs generated video model review and returns updated do
       ...tempContext(root),
       capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } }
     };
-    const retried = await stitchBatchSegments({
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true,
+    const retried = await stitchBatchSegments(wangzhuanModuleContext(root, {
       capabilities: retryContext.capabilities
-    }, fx.started.batch.batchId);
-    const moduleContext = {
-      userProjectRoot: join(root, "user"),
-      sharedProjectRoot: join(root, "shared"),
-      userId: "user",
-      user: { userId: "user", username: "user", role: "user", isAdmin: false },
-      mockReferenceProbe: true
-    };
-    const batchPath = join(wangzhuanPaths(moduleContext).batchesDir, retried.batch.batchId, "batch.json");
-    const batch = JSON.parse(await readFile(batchPath, "utf8"));
+    }), fx.started.batch.batchId);
+    const moduleContext = wangzhuanModuleContext(root);
+    const batch = (await loadBatchDetailFromMysql(moduleContext, retried.batch.batchId)).batch;
     const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
-    batch.outputs = batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+    const patchedBatch = {
+      ...batch,
+      outputs: batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
       ? { ...output, storageUrl: "https://cdn.example.com/generated/qc-pass.mp4", previewUrl: "https://cdn.example.com/generated/qc-pass.mp4" }
-      : output);
-    await writeFile(batchPath, `${JSON.stringify(batch, null, 2)}\n`, "utf8");
+      : output)
+    };
+    assert.equal((await syncBatchFacts(moduleContext, patchedBatch, "batch_write")).skipped, false);
 
     const qcRes = captureRes();
     await handleWangzhuanRequest(
@@ -895,6 +918,7 @@ test("batch qc endpoint runs generated video model review and returns updated do
     assert.equal(reviewedOutput.downloadEligible, true);
     assert.equal(reviewedOutput.modelQcSummary.score, 0.91);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

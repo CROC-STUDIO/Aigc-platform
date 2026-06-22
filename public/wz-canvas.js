@@ -11,6 +11,8 @@
   const svg = document.getElementById("wzCanvasLinks");
   if (!canvas || !svg) return;
 
+  canvas.setAttribute("tabindex", "0");
+
   const SVGNS = "http://www.w3.org/2000/svg";
 
   // Inject a collapse chevron button into every node header.
@@ -72,6 +74,11 @@
     return { x, y, w: el.offsetWidth, h: el.offsetHeight };
   }
 
+  function linkAnchorY(el) {
+    const p = pos(el);
+    return el?.classList?.contains("collapsed") ? p.y + p.h / 2 : p.y + 23;
+  }
+
   function drawLinks() {
     const W = canvas.offsetWidth;
     const H = canvas.offsetHeight;
@@ -81,19 +88,25 @@
 
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
+    const focused = canvas.querySelector(".wz-node.focused");
     for (const [from, to, cls] of edges()) {
       const a = pos(from);
       const b = pos(to);
       const x1 = a.x + a.w;
-      const y1 = a.y + 23;
+      const y1 = linkAnchorY(from);
       const x2 = b.x;
-      const y2 = b.y + 23;
-      const dx = Math.max(40, (x2 - x1) * 0.5);
+      const y2 = linkAnchorY(to);
+      const span = Math.max(0, x2 - x1);
+      const decomposeFanout = from?.id === "wzNodeDecompose" && to?.classList?.contains("wz-node-branch");
+      const dx = decomposeFanout
+        ? Math.max(88, span * 0.46)
+        : Math.max(40, span * 0.5);
 
       const path = document.createElementNS(SVGNS, "path");
       path.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`);
       const done = from.classList.contains("state-done") ? " done" : "";
-      path.setAttribute("class", `wz-canvas-link ${cls}${done}`);
+      const active = focused && (from === focused || to === focused) ? " flow-active" : "";
+      path.setAttribute("class", `wz-canvas-link ${cls}${done}${active}`);
       svg.appendChild(path);
     }
 
@@ -283,17 +296,6 @@
   const items = stepbar ? [...stepbar.querySelectorAll(".wz-stepbar-item")] : [];
   const scroller = document.querySelector(".wz-canvas-scroll");
 
-  for (const item of items) {
-    item.addEventListener("click", (event) => {
-      const href = item.getAttribute("href") || "";
-      const target = href.startsWith("#") ? document.getElementById(href.slice(1)) : null;
-      if (!target) return;
-      event.preventDefault();
-      target.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-      for (const it of items) it.classList.toggle("active", it === item);
-    });
-  }
-
   if ("IntersectionObserver" in window) {
     const stageNodes = [
       ["1", nodeById("wzNodeUpload")],
@@ -330,34 +332,166 @@
   }
 
   // --- Focus & collapse ---------------------------------------------------
-  // Focus = highlight + center the node (does NOT collapse the others).
-  // Collapse = manual, per-node, via the chevron button on the header.
+  // Focus expands the active node, collapses others in focus mode, and scrolls
+  // it into view. Completing a stage auto-advances focus to the next one.
   const focusEnabled = () => window.matchMedia("(min-width: 981px)").matches;
 
-  function focusNode(node, { center = true } = {}) {
-    if (!node || !focusEnabled()) return;
-    for (const n of canvas.querySelectorAll(".wz-node")) {
-      n.classList.toggle("focused", n === node);
-    }
-    if (center) {
-      requestAnimationFrame(() =>
-        node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" })
-      );
+  function columnForNode(node) {
+    return node?.closest(".wz-col") || null;
+  }
+
+  function setStepbarActive(step) {
+    if (!step) return;
+    for (const it of items) it.classList.toggle("active", it.dataset.step === String(step));
+  }
+
+  function chipSummaryForNode(node) {
+    if (!node) return "";
+    switch (node.id) {
+      case "wzNodeUpload": {
+        const box = document.getElementById("wzReferenceBox");
+        if (!box || box.classList.contains("empty-line")) return "未上传参考视频";
+        return box.textContent.trim().replace(/\s+/g, " ").slice(0, 56) || "已上传参考视频";
+      }
+      case "wzNodeDecompose":
+        if (node.dataset.decompositionConfirmed === "1") return "脚本拆解已确认";
+        if (document.getElementById("wzDecompositionForm")?.hidden === false) return "脚本草稿待确认";
+        return "待开始 AI 拆解";
+      case "wzNodeRewrite":
+        return document.getElementById("wzTemplateStatus")?.classList.contains("wz-success")
+          ? "产品改写模板已保存"
+          : "待填写产品改写";
+      case "wzNodeBatch": {
+        const batchStatus = document.getElementById("wzNodeBatch")?.dataset?.batchStatus;
+        if (batchStatus === "preview_required") return "Seedance 预案待确认";
+        const badge = document.getElementById("wzBatchBadge")?.textContent?.trim();
+        if (stateEstimateReady()) return "批次已估算，可生成预案";
+        return badge && badge !== "未开始" ? badge : "待估算本批任务";
+      }
+      case "wzNodeLog": {
+        const badge = document.getElementById("wzBatchBadge")?.textContent?.trim();
+        return badge && badge !== "未开始" ? `批次状态：${badge}` : "暂无批次日志";
+      }
+      case "wzNodeOutput": {
+        const gallery = document.getElementById("wzGalleryBox");
+        if (gallery && !gallery.classList.contains("empty-line")) return "已有可下载结果";
+        return "结果待生成";
+      }
+      default:
+        if (node.classList.contains("wz-node-branch")) {
+          return node.querySelector(".panel-head h2")?.textContent?.trim() || "改写分支";
+        }
+        return node.querySelector(".panel-head h2")?.textContent?.trim() || "";
     }
   }
 
+  function stateEstimateReady() {
+    const estimate = document.getElementById("wzEstimateBox");
+    return estimate && !estimate.classList.contains("empty-line");
+  }
+
+  function updateChipSummaries() {
+    for (const node of canvas.querySelectorAll(".wz-node")) {
+      const summary = chipSummaryForNode(node);
+      if (summary) node.setAttribute("data-chip-summary", summary);
+      else node.removeAttribute("data-chip-summary");
+    }
+  }
+
+  function focusNode(node, { center = true, collapseOthers = true } = {}) {
+    if (!node) return;
+    if (!focusEnabled()) {
+      if (center) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      return;
+    }
+
+    const focusCol = columnForNode(node);
+    const focusStep = focusCol?.dataset?.step || null;
+    canvas.classList.add("wz-focus-mode");
+    canvas.dataset.focusStep = focusStep || "";
+    for (const col of canvas.querySelectorAll(".wz-col")) {
+      col.classList.toggle("wz-col-focus", col === focusCol);
+    }
+    setStepbarActive(focusStep);
+
+    for (const n of canvas.querySelectorAll(".wz-node")) {
+      const sameCol = columnForNode(n) === focusCol;
+      const isTarget = n === node;
+      n.classList.toggle("focused", isTarget);
+      n.setAttribute("aria-expanded", isTarget ? "true" : "false");
+      if (!collapseOthers) {
+        if (isTarget) n.classList.remove("collapsed");
+        continue;
+      }
+      if (isTarget) {
+        n.classList.remove("collapsed");
+      } else if (sameCol && focusStep === "5") {
+        // Step 5 column keeps both log + output visible; only dim non-target.
+        n.classList.remove("collapsed");
+      } else {
+        n.classList.add("collapsed");
+      }
+    }
+
+    for (const sub of canvas.querySelectorAll(".wz-subnode")) {
+      sub.classList.remove("focused");
+    }
+
+    if (center) {
+      requestAnimationFrame(() => {
+        node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        scheduleDraw();
+      });
+    } else {
+      scheduleDraw();
+    }
+    updateChipSummaries();
+  }
+
+  function focusStage(step, options = {}) {
+    const stage = STAGES.find((item) => item.step === String(step));
+    const target = stage?.nodes?.map((id) => nodeById(id)).find(Boolean);
+    if (target) focusNode(target, options);
+  }
+
+  window.wzFocusNode = (idOrNode, options) => {
+    const node = typeof idOrNode === "string" ? nodeById(idOrNode) : idOrNode;
+    focusNode(node, options);
+  };
+  window.wzFocusStage = (step, options) => focusStage(step, options);
+
   function toggleCollapse(node) {
     node.classList.toggle("collapsed");
+    if (!node.classList.contains("collapsed")) {
+      focusNode(node, { collapseOthers: true });
+      return;
+    }
     scheduleDraw();
   }
 
   // Header click: chevron → collapse that node; elsewhere → focus it.
   canvas.addEventListener("click", (event) => {
+    if (event.target.closest(".wz-collapse-btn")) {
+      const headBtn = event.target.closest(".panel-head");
+      const collapseNode = headBtn?.closest(".wz-node");
+      if (collapseNode) toggleCollapse(collapseNode);
+      return;
+    }
+    if (event.target.closest("button, a, input, select, textarea, label")) return;
+
+    const collapsedNode = event.target.closest(".wz-node.collapsed");
+    if (collapsedNode) {
+      focusNode(collapsedNode);
+      return;
+    }
+
     // Second level: clicking a sub-node header focuses that sub-node.
     const subHead = event.target.closest(".wz-subnode-head");
     if (subHead) {
       const sub = subHead.closest(".wz-subnode");
       if (sub) {
+        const branchNode = sub.closest(".wz-node-branch");
+        if (branchNode) focusNode(branchNode, { center: false });
         for (const s of canvas.querySelectorAll(".wz-subnode")) {
           s.classList.toggle("focused", s === sub);
         }
@@ -377,17 +511,27 @@
     focusNode(node);
   });
 
-  // Step bar focuses the matching node (no collapsing).
+  canvas.addEventListener("keydown", (event) => {
+    if (!focusEnabled() || event.target.closest("input, textarea, select")) return;
+    const step = event.key;
+    if (!/^[1-5]$/.test(step)) return;
+    const item = items.find((it) => it.dataset.step === step);
+    const href = item?.getAttribute("href") || "";
+    const target = href.startsWith("#") ? nodeById(href.slice(1)) : null;
+    if (!target) return;
+    event.preventDefault();
+    focusNode(target);
+  });
+
+  // Step bar focuses the matching node and collapses the rest.
   for (const item of items) {
     item.addEventListener("click", (event) => {
       const href = item.getAttribute("href") || "";
       const target = href.startsWith("#") ? nodeById(href.slice(1)) : null;
-      if (target && focusEnabled()) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        focusNode(target);
-      }
-    }, true);
+      if (!target) return;
+      event.preventDefault();
+      focusNode(target);
+    });
   }
 
   // Newly added branch becomes the focused node.
@@ -514,23 +658,23 @@
     {
       step: "2",
       nodes: ["wzNodeDecompose"],
-      // decomposition confirmed/saved → reference box shows success note,
-      // or the decompose button has been disabled after a confirmed save.
-      done: () => hasData("wzReferenceBox") && /拆解已确认|已确认保存/.test(
-        document.getElementById("wzReferenceBox")?.textContent || ""
-      )
+      done: () => document.getElementById("wzNodeDecompose")?.dataset.decompositionConfirmed === "1"
     },
     {
       step: "3",
       nodes: ["wzNodeRewrite"],
-      // channel rules loaded for the product (server-driven)
-      done: () => !document.getElementById("wzRulesBox")?.classList.contains("empty-line")
+      done: () => document.getElementById("wzNodeRewrite")?.dataset.templateCommitted === "1"
     },
     {
       step: "4",
       nodes: ["wzNodeBatch"],
-      // a batch exists (badge left the "未开始" placeholder)
-      done: () => badgeDone("wzBatchBadge", "未开始")
+      // Step 4 completes only after plan is confirmed (not while preview_required).
+      done: () => {
+        const batchNode = document.getElementById("wzNodeBatch");
+        const status = batchNode?.dataset?.batchStatus;
+        if (status === "preview_required") return false;
+        return badgeDone("wzBatchBadge", "未开始");
+      }
     },
     {
       step: "5",
@@ -593,29 +737,66 @@
           pill.textContent = STATE_LABEL[state];
         }
       }
+      if (stage.step === "3" && doneFlags[i]) {
+        for (const branch of document.querySelectorAll(".wz-node-branch")) {
+          setStateClass(branch, "done");
+          const pill = branch.querySelector(".wz-node-state");
+          if (pill) {
+            pill.classList.remove("state-current", "state-pending");
+            pill.classList.add("state-done");
+            pill.textContent = STATE_LABEL.done;
+          }
+        }
+      }
       const item = document.querySelector(`#wzStepbar .wz-stepbar-item[data-step="${stage.step}"]`);
       if (item) {
         item.classList.remove("state-done", "state-current", "state-pending");
         item.classList.add(`state-${state}`);
       }
     });
+
+    if (focusEnabled()) {
+      if (refreshPipelineState.lastDoneFlags) {
+        for (let i = 0; i < doneFlags.length - 1; i += 1) {
+          if (doneFlags[i] && !refreshPipelineState.lastDoneFlags[i]) {
+            const nextStage = STAGES[i + 1];
+            const nextNode = nextStage?.nodes?.map((id) => nodeById(id)).find(Boolean);
+            if (nextNode) focusNode(nextNode);
+            break;
+          }
+        }
+      } else {
+        const currentStage = STAGES[currentIdx];
+        const currentNode = currentStage?.nodes?.map((id) => nodeById(id)).find(Boolean);
+        if (currentNode) focusNode(currentNode, { center: false });
+      }
+    }
+    refreshPipelineState.lastDoneFlags = [...doneFlags];
+    updateChipSummaries();
     scheduleDraw(); // re-tint completed links
   }
 
   // Re-evaluate on any user input and whenever result boxes mutate.
   document.addEventListener("input", refreshPipelineState, true);
   document.addEventListener("change", refreshPipelineState, true);
+  window.addEventListener("wz:template-commit-changed", refreshPipelineState);
+  window.addEventListener("wz:decomposition-confirmed-changed", refreshPipelineState);
   if ("MutationObserver" in window) {
     const mo = new MutationObserver(refreshPipelineState);
-    for (const id of ["wzReferenceBox", "wzRulesBox", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
+    for (const id of ["wzReferenceBox", "wzTemplateStatus", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
       const el = document.getElementById(id);
       if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }
+    const decomposeNode = document.getElementById("wzNodeDecompose");
+    if (decomposeNode) {
+      mo.observe(decomposeNode, { attributes: true, attributeFilter: ["data-decomposition-confirmed"] });
+    }
+    const batchNode = document.getElementById("wzNodeBatch");
+    if (batchNode) {
+      mo.observe(batchNode, { attributes: true, attributeFilter: ["data-batch-status"] });
+    }
   }
   refreshPipelineState();
-
-  // Default focus: the first node.
-  if (focusEnabled()) focusNode(nodeById("wzNodeUpload"), { center: false });
 
   // Initial paint (give layout a tick to settle, fonts/images may shift it).
   scheduleDraw();

@@ -5,13 +5,19 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
-import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import {
   estimateBatch,
   loadEstimate,
   startBatchFromEstimate
 } from "../../server/wangzhuan/estimates.mjs";
+import {
+  closeWangzhuanFactsPool,
+  loadBatchDetailFromMysql,
+  setWangzhuanFactsPoolForTest
+} from "../../server/wangzhuan/mysql-facts.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -27,8 +33,18 @@ const baseDraft = {
   promiseLevel: "strong_conversion"
 };
 
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
 function context(root, overrides = {}) {
-  return {
+  const ctx = {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
@@ -37,6 +53,8 @@ function context(root, overrides = {}) {
     config: {},
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function validUpload() {
@@ -66,6 +84,7 @@ function decomposition() {
 }
 
 async function fixture(root, draft = baseDraft) {
+  ensureFactsPool();
   const ctx = context(root);
   const saved = await saveTemplate(ctx, { mode: "create", draft });
   const checked = await checkReferenceVideo(ctx, validUpload());
@@ -79,6 +98,12 @@ async function fixture(root, draft = baseDraft) {
     template: saved.template,
     referenceVideoId: checked.referenceVideo.referenceVideoId
   };
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
 }
 
 function request(fx, overrides = {}) {
@@ -124,6 +149,7 @@ test("estimates a 15s batch and persists limits, capabilities, and snapshot", as
     assert.equal(loaded.referenceVideo.referenceVideoId, fx.referenceVideoId);
     assert.equal(loaded.decomposition.schemaVersion, "video_decomposition.v1");
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -137,6 +163,7 @@ test("requires user-maintained truth rules for strong commitment estimate", asyn
       { code: "strong_rule_missing" }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -151,10 +178,14 @@ test("blocks hard limits and missing 30s stitcher capability before upstream wor
     );
 
     await assert.rejects(
-      () => estimateBatch(fx.ctx, request(fx, { durationSec: 30, variantCount: 3 })),
+      () => estimateBatch({
+        ...fx.ctx,
+        capabilities: { stitcher: { status: "unavailable" } }
+      }, request(fx, { durationSec: 30, variantCount: 3 })),
       { code: "stitcher_unavailable" }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -186,9 +217,10 @@ test("returns confirmation token for soft limits and validates it on start", asy
     assert.equal(started.batch.projectRoot.includes(root), false);
     assert.equal(started.batch.estimate.estimateId, estimated.estimate.estimateId);
 
-    const manifest = JSON.parse(await readFile(join(wangzhuanPaths(fx.ctx).batchesDir, started.batch.batchId, "batch.json"), "utf8"));
-    assert.equal(manifest.batchId, started.batch.batchId);
+    const detail = await loadBatchDetailFromMysql(fx.ctx, started.batch.batchId);
+    assert.equal(detail.batch.batchId, started.batch.batchId);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -295,6 +327,7 @@ test("estimates and starts every configured branch with its own prompt inputs", 
     assert.match(walletPrompt, /Product icon URL: https:\/\/cdn\.example\.com\/wangzhuan\/wallet-icon\.png/);
     assert.match(walletPrompt, /Additional user prompt: Focus on a wallet dashboard and withdrawal button\./);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -323,6 +356,7 @@ test("start is idempotent and refuses a second running batch in the same user pr
       { code: "batch_already_running" }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

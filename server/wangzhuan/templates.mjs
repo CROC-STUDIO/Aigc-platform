@@ -8,8 +8,7 @@ import {
 } from "./constants.mjs";
 import { WangzhuanError, requirePermission } from "./http.mjs";
 import { makeAuditEventId, makeTemplateId, makeTemplateVersionId } from "./ids.mjs";
-import { loadTemplateStoreFromMysql, syncTemplateStoreFacts } from "./mysql-facts.mjs";
-import { appendJsonl, readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { hasWangzhuanFactsStore, loadTemplateStoreFromMysql, syncTemplateStoreFacts } from "./mysql-facts.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const TEMPLATE_STORE_DEFAULT = Object.freeze({
@@ -32,8 +31,11 @@ function clone(value) {
 }
 
 async function loadTemplateStore(context) {
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取模板状态");
+  }
   const mysqlStore = await loadTemplateStoreFromMysql(context);
-  const store = mysqlStore ?? await readJsonOrDefault(wangzhuanPaths(context).templatesPath, TEMPLATE_STORE_DEFAULT);
+  const store = mysqlStore ?? TEMPLATE_STORE_DEFAULT;
   return {
     schemaVersion: "templates.v1",
     defaultTemplateId: "",
@@ -45,8 +47,10 @@ async function loadTemplateStore(context) {
 }
 
 async function saveTemplateStore(context, store) {
-  await writeAtomicJson(wangzhuanPaths(context).templatesPath, store);
-  await syncTemplateStoreFacts(context, store);
+  const synced = await syncTemplateStoreFacts(context, store);
+  if (synced?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存模板状态");
+  }
 }
 
 function isNonEmptyString(value) {
@@ -181,15 +185,6 @@ export async function saveTemplate(context, request = {}) {
   await saveTemplateStore(context, store);
 
   const auditEventId = makeAuditEventId();
-  await appendJsonl(wangzhuanPaths(context).auditPath, {
-    auditEventId,
-    type: "template.save",
-    action: request.mode,
-    templateId,
-    versionId: template.versionId,
-    userId: currentUserId(context),
-    createdAt: now
-  });
   await recordTelemetryEvent(context, "product_template_saved", {
     templateId,
     versionId: template.versionId,
@@ -246,16 +241,6 @@ export async function adminTemplateAction(context, request = {}) {
 
   await saveTemplateStore(context, store);
   const auditEventId = makeAuditEventId();
-  await appendJsonl(wangzhuanPaths(context).auditPath, {
-    auditEventId,
-    type: "template.admin",
-    action: request.action,
-    templateId: request.templateId,
-    versionId,
-    status,
-    userId: currentUserId(context),
-    createdAt: now
-  });
   await recordTelemetryEvent(context, "product_template_admin_changed", {
     templateId: request.templateId,
     versionId,

@@ -1,6 +1,6 @@
 import { DEFAULT_CHANNEL_RULES, DEFAULT_RULE_PROMISE_LEVELS, PROMISE_LEVELS, TARGET_CHANNELS } from "./constants.mjs";
-import { loadChannelRuleStoreFromMysql, syncChannelRuleStoreFacts } from "./mysql-facts.mjs";
-import { readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { WangzhuanError } from "./http.mjs";
+import { hasWangzhuanFactsStore, loadChannelRuleStoreFromMysql, syncChannelRuleStoreFacts } from "./mysql-facts.mjs";
 
 const DEFAULT_RULE_STORE = Object.freeze({
   schemaVersion: "channel-rules.v1",
@@ -8,16 +8,30 @@ const DEFAULT_RULE_STORE = Object.freeze({
 });
 
 export async function loadChannelRuleStore(context) {
-  const paths = wangzhuanPaths(context);
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取渠道规则");
+  }
   const mysqlStore = await loadChannelRuleStoreFromMysql(context);
-  const store = mysqlStore ?? await readJsonOrDefault(paths.channelRulesPath, DEFAULT_RULE_STORE);
+  let store = mysqlStore;
+  if (!store) {
+    const synced = await syncChannelRuleStoreFacts(context, DEFAULT_RULE_STORE);
+    if (synced?.skipped) {
+      throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存渠道规则");
+    }
+    store = await loadChannelRuleStoreFromMysql(context);
+  }
   if (!store?.schemaVersion || !Array.isArray(store.rules)) {
-    return structuredClone(DEFAULT_RULE_STORE);
+    throw new WangzhuanError("database_unavailable", "数据库渠道规则结构异常");
   }
   if (store.rules.length === 0) {
-    await writeAtomicJson(paths.channelRulesPath, DEFAULT_RULE_STORE);
-    await syncChannelRuleStoreFacts(context, DEFAULT_RULE_STORE);
-    return structuredClone(DEFAULT_RULE_STORE);
+    const synced = await syncChannelRuleStoreFacts(context, DEFAULT_RULE_STORE);
+    if (synced?.skipped) {
+      throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存渠道规则");
+    }
+    store = await loadChannelRuleStoreFromMysql(context);
+  }
+  if (!store?.rules?.length) {
+    throw new WangzhuanError("database_unavailable", "数据库渠道规则为空，请先初始化规则");
   }
   return store;
 }
@@ -26,14 +40,7 @@ export async function getChannelRules(context, query = {}) {
   const channel = TARGET_CHANNELS.includes(query.channel) ? query.channel : "generic";
   const promiseLevel = PROMISE_LEVELS.includes(query.promiseLevel) ? query.promiseLevel : "stable";
   const normalizedPromiseLevel = DEFAULT_RULE_PROMISE_LEVELS.includes(promiseLevel) ? promiseLevel : "strong_conversion";
-  const paths = wangzhuanPaths(context);
-  const mysqlStore = await loadChannelRuleStoreFromMysql(context);
-  const existedStore = mysqlStore ?? await readJsonOrDefault(paths.channelRulesPath, null);
-  const store = existedStore ?? DEFAULT_RULE_STORE;
-  if (!existedStore) {
-    await writeAtomicJson(paths.channelRulesPath, store);
-    await syncChannelRuleStoreFacts(context, store);
-  }
+  const store = await loadChannelRuleStore(context);
 
   let rules = store.rules.filter((rule) => rule.channel === channel && rule.promiseLevel === normalizedPromiseLevel);
   let fallbackUsed = false;

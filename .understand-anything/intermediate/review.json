@@ -2,33 +2,29 @@
   "issues": [],
   "warnings": [],
   "stats": {
-    "totalNodes": 62,
-    "totalEdges": 102,
-    "totalLayers": 5,
+    "totalNodes": 1230,
+    "totalEdges": 2750,
+    "totalLayers": 9,
     "tourSteps": 8,
     "nodeTypes": {
-      "document": 1,
-      "config": 2,
-      "file": 9,
-      "concept": 5,
-      "function": 29,
-      "endpoint": 16
+      "config": 13,
+      "service": 3,
+      "schema": 22,
+      "document": 3,
+      "file": 70,
+      "pipeline": 11,
+      "table": 36,
+      "function": 1068,
+      "class": 4
     },
     "edgeTypes": {
-      "documents": 3,
-      "related": 6,
-      "configures": 2,
+      "contains": 1084,
+      "migrates": 36,
+      "calls": 1608,
       "triggers": 2,
-      "deploys": 1,
-      "contains": 29,
-      "routes": 16,
-      "calls": 27,
-      "validates": 2,
-      "reads_from": 3,
-      "writes_to": 2,
-      "transforms": 1,
-      "depends_on": 6,
-      "imports": 2
+      "deploys": 2,
+      "configures": 3,
+      "documents": 15
     }
   }
 }

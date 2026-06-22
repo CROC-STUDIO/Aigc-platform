@@ -1,14 +1,40 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { WangzhuanError } from "./http.mjs";
 import { makeOutputId } from "./ids.mjs";
-import { syncBatchFacts } from "./mysql-facts.mjs";
-import { appendJsonl, previewUrlForWangzhuanAsset, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import {
+  hasWangzhuanFactsStore,
+  loadBatchDetailFromMysql,
+  loadIdempotencyFactFromMysql,
+  recordIdempotencyFact,
+  syncBatchFacts
+} from "./mysql-facts.mjs";
+import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded", "succeeded"]);
+const execFileAsync = promisify(execFile);
+const DEFAULT_STITCH_TIMEOUT_MS = 120000;
+
+function ffmpegAvailableSync() {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore", timeout: 5000, windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toConcatListPath(filePath) {
+  return filePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+}
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -25,19 +51,6 @@ function batchDir(context, batchId) {
   return join(wangzhuanPaths(context).batchesDir, batchId);
 }
 
-function batchPath(context, batchId) {
-  return join(batchDir(context, batchId), "batch.json");
-}
-
-function eventPath(context, batchId) {
-  return join(batchDir(context, batchId), "tasks.jsonl");
-}
-
-function retryIdempotencyPath(context, batchId, idempotencyKey) {
-  const safe = String(idempotencyKey || "").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 80);
-  return join(wangzhuanPaths(context).idempotencyDir, `retry_stitch_${batchId}_${safe}.json`);
-}
-
 function userRelative(context, fullPath) {
   return toProjectRelative(context.userProjectRoot, fullPath);
 }
@@ -48,11 +61,13 @@ function safeErrorMessage(error) {
 }
 
 async function readBatch(context, batchId) {
-  const target = batchPath(context, batchId);
-  if (!existsSync(target)) {
-    throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+  validateBatchId(batchId);
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
   }
-  const batch = JSON.parse(await readFile(target, "utf8"));
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  const batch = detail?.batch;
+  if (!batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   if (batch.userId !== currentUserId(context) && context.user?.role !== "admin" && !context.user?.isAdmin) {
     throw new WangzhuanError("permission_denied", "当前账号无权访问该批次", { batchId });
   }
@@ -62,29 +77,11 @@ async function readBatch(context, batchId) {
 async function writeBatch(context, batch, triggerName = "stitch_progress") {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.batchesDir, next.batchId, "batch.json"), next);
-  const indexPath = join(paths.batchesDir, "index.json");
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(await readFile(indexPath, "utf8"));
-    index.items = Array.isArray(index.items) ? index.items : [];
-    const item = index.items.find((entry) => entry.batchId === next.batchId);
-    if (item) {
-      item.status = next.status;
-      item.updatedAt = now;
-    }
-    await writeAtomicJson(indexPath, index);
+  const synced = await syncBatchFacts(context, next, triggerName);
+  if (synced?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存业务状态");
   }
-  await syncBatchFacts(context, next, triggerName);
   return next;
-}
-
-async function appendEvent(context, batchId, event) {
-  await appendJsonl(eventPath(context, batchId), {
-    createdAt: new Date().toISOString(),
-    batchId,
-    ...event
-  });
 }
 
 async function writeText(target, text) {
@@ -141,11 +138,27 @@ async function writeTaskMaps(context, batch) {
 export function preflightStitcher(context = {}) {
   const stitcher = context.capabilities?.stitcher ?? context.config?.wangzhuan?.capabilities?.stitcher;
   const checkedAt = new Date().toISOString();
+  if (stitcher?.status === "unavailable" || stitcher?.available === false) {
+    return {
+      provider: stitcher?.provider || "unknown",
+      version: stitcher?.version || "",
+      status: "unsupported",
+      checkedAt
+    };
+  }
   if (stitcher?.status === "available" || stitcher?.available === true) {
     return {
-      provider: stitcher.provider || "configured",
+      provider: stitcher.provider || "ffmpeg",
       version: stitcher.version || "",
       status: stitcher.degraded ? "degraded" : "supported",
+      checkedAt
+    };
+  }
+  if (ffmpegAvailableSync()) {
+    return {
+      provider: "ffmpeg",
+      version: "",
+      status: "supported",
       checkedAt
     };
   }
@@ -236,17 +249,13 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         await mkdir(dirname(target), { recursive: true });
         await copyFile(taskSource, target);
       } else {
-        await writeText(target, [
-          "mock segment video",
-          `batch=${batch.batchId}`,
-          `branch=${entry.script.branchId || "default"}`,
-          `variant=${entry.script.variantIndex}`,
-          `branchVariant=${entry.script.branchVariantIndex || entry.script.variantIndex}`,
-          `segment=${entry.script.segmentIndex}`,
-          `task=${entry.task.generationTaskId}`
-        ].join("\n"));
+        throw new WangzhuanError("missing_required_file", "分段视频文件缺失，无法生成分段产出", {
+          batchId: batch.batchId,
+          generationTaskId: entry.task.generationTaskId,
+          outputPath: filePath
+        });
       }
-      const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video");
+      const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video", { required: true });
       outputs.push({
         outputId,
         sourceType: "pipeline",
@@ -259,8 +268,9 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         durationSec: 15,
         kind: "segment_video",
         filePath,
-        previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
-        ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
+        previewUrl: storage.storageUrl,
+        storageKey: storage.storageKey,
+        storageUrl: storage.storageUrl,
         qcStatus: "not_started",
         downloadEligible: false,
         visualPreviewRequired: false,
@@ -294,16 +304,6 @@ function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode 
   };
 }
 
-async function readEvents(context, batchId) {
-  try {
-    const text = await readFile(eventPath(context, batchId), "utf8");
-    return text.trim() ? text.trim().split("\n").map((line) => JSON.parse(line)) : [];
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
-}
-
 async function writeReport(context, batchId, report) {
   const target = stitchReportPath(context, batchId, report.outputId);
   await writeAtomicJson(target, report);
@@ -331,18 +331,52 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
   };
 }
 
+async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+  if (!ffmpegAvailableSync()) {
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法拼接 30s 视频");
+  }
+  for (const segmentPath of segmentPaths) {
+    if (!existsSync(segmentPath)) {
+      throw new WangzhuanError("missing_required_file", "拼接所需的分段视频不存在", { segmentPath });
+    }
+  }
+  const listDir = await mkdtemp(join(tmpdir(), "wz-stitch-list-"));
+  try {
+    const listPath = join(listDir, "concat.txt");
+    const listBody = segmentPaths.map((segmentPath) => `file '${toConcatListPath(segmentPath)}'`).join("\n");
+    await writeFile(listPath, listBody, "utf8");
+    await mkdir(dirname(outputPath), { recursive: true });
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", listPath,
+      "-c", "copy",
+      outputPath
+    ], {
+      timeout: timeoutMs,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024
+    });
+  } finally {
+    await rm(listDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function createSucceededStitchOutput(context, batch, group, segmentOutputs, preflight, sequenceState) {
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
   const filePath = userRelative(context, target);
-  await writeText(target, [
-    "mock stitched video",
-    `batch=${batch.batchId}`,
-    `branch=${group.branchId || "default"}`,
-    `variant=${group.branchVariantIndex}`,
-    `segments=${segmentOutputs.map((output) => output.outputId).join(",")}`
-  ].join("\n"));
-  const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video");
+  const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
+  try {
+    await concatSegmentVideos(target, segmentPaths);
+  } catch (error) {
+    throw error instanceof WangzhuanError ? error : new WangzhuanError("stitch_failed", safeErrorMessage(error), {
+      batchId: batch.batchId,
+      segmentOutputIds: segmentOutputs.map((output) => output.outputId)
+    });
+  }
+  const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video", { required: true });
   const report = buildReport({
     outputId,
     segmentOutputIds: segmentOutputs.map((output) => output.outputId),
@@ -362,8 +396,9 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       durationSec: 30,
       kind: "stitched_video",
       filePath,
-      previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
-      ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
+      previewUrl: storage.storageUrl,
+      storageKey: storage.storageKey,
+      storageUrl: storage.storageUrl,
       qcStatus: "not_started",
       downloadEligible: false,
       visualPreviewRequired: false,
@@ -405,10 +440,6 @@ export async function materializeBatchSegmentOutputs(context, batchId) {
     outputs: [...segmentOutputs, ...existingNonSegmentOutputs]
   }, "segments_completed");
   await writeTaskMaps(context, saved);
-  await appendEvent(context, batchId, {
-    event: "segments_materialized",
-    segmentCount: segmentOutputs.length
-  });
   return saved;
 }
 
@@ -426,7 +457,6 @@ export async function finalizeFifteenSecondBatch(context, batchId) {
   }
   if (working.status === "running" || working.status === "queued") {
     working = await writeBatch(context, { ...working, status: "qc" }, "generation_completed");
-    await appendEvent(context, batchId, { event: "generation_completed", durationSec: 15 });
   }
   return working;
 }
@@ -447,7 +477,6 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
   }
 
   const withStitchingStatus = await writeBatch(context, { ...batch, status: "stitching" });
-  await appendEvent(context, batchId, { event: "stitch_started", provider: preflight.provider });
   const sequenceState = { next: nextOutputSequence(withStitchingStatus) };
   const segmentOutputs = await materializeSegmentOutputs(context, withStitchingStatus, groups, sequenceState);
   const segmentByTask = new Map();
@@ -470,7 +499,7 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
         group,
         groupSegments,
         preflight,
-        new Error("mock stitch failure"),
+        new Error("stitch forced failure"),
         sequenceState
       );
       stitchReports.push(report);
@@ -509,11 +538,6 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
     stitchReports
   }, nextStatus === "qc" ? "stitch_completed" : "stitch_progress");
   await writeTaskMaps(context, saved);
-  await appendEvent(context, batchId, {
-    event: nextStatus === "qc" ? "stitch_succeeded" : "stitch_failed",
-    stitchedCount: nextOutputs.filter((output) => output.kind === "stitched_video").length,
-    failedCount: currentFailedCount
-  });
   for (const report of stitchReports.slice(-groups.length)) {
     await recordTelemetryEvent(context, "stitch_completed", {
       batchId,
@@ -524,7 +548,7 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
   }
   return {
     batch: saved,
-    events: await readEvents(context, batchId),
+    events: (await loadBatchDetailFromMysql(context, batchId))?.events || [],
     downloadSummary: {
       outputsTotal: saved.outputs.length,
       downloadEligibleCount: saved.outputs.filter((item) => item.downloadEligible).length,
@@ -534,25 +558,27 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
   };
 }
 
+function hashPayload(value) {
+  return createHash("sha256").update(JSON.stringify(value ?? {}), "utf8").digest("hex");
+}
+
 export async function retryStitch(context, batchId, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
   validateBatchId(batchId);
-  const replayPath = retryIdempotencyPath(context, batchId, request.idempotencyKey);
-  if (existsSync(replayPath)) {
-    return JSON.parse(await readFile(replayPath, "utf8")).result;
-  }
+  const requestHash = hashPayload({ batchId, forceFail: request.forceFail === true });
+  const replay = await loadIdempotencyFactFromMysql(context, "retry_stitch", request.idempotencyKey, requestHash);
+  if (replay) return replay;
   const batch = await readBatch(context, batchId);
   if (batch.status !== "partial_failed") {
     throw new WangzhuanError("invalid_state_transition", "当前状态不支持拼接重试", { batchId, status: batch.status });
   }
   const result = await stitchBatchSegments(context, batchId);
-  await writeAtomicJson(replayPath, {
-    endpoint: "retry-stitch",
-    batchId,
-    result,
-    createdAt: new Date().toISOString()
+  await recordIdempotencyFact(context, "retry_stitch", request.idempotencyKey, requestHash, {
+    type: "batch",
+    id: batchId,
+    response: result
   });
   return result;
 }

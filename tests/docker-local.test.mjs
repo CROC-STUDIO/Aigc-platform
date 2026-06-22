@@ -36,6 +36,8 @@ test("local compose starts MySQL and keeps runtime config out of the image", asy
   assert.match(compose, /AIGC_CONFIG_PATH:\s*\/data\/state\/config\.json/);
   assert.match(compose, /AIGC_USERS_PATH:\s*\/data\/state\/users\.json/);
   assert.match(compose, /VIDEO_AIGC_API_KEY:\s*\$\{VIDEO_AIGC_API_KEY:-\}/);
+  assert.match(compose, /WANGZHUAN_SEEDANCE_ENDPOINT:\s*\$\{WANGZHUAN_SEEDANCE_ENDPOINT:-https:\/\/skylink-gateway\.com\/api\/v1\}/);
+  assert.match(compose, /WANGZHUAN_SEEDANCE_MODEL:\s*\$\{WANGZHUAN_SEEDANCE_MODEL:-dreamina-seedance-2-0-260128\}/);
   assert.match(compose, /WANGZHUAN_LLM_API_KEY:\s*\$\{WANGZHUAN_LLM_API_KEY:-\}/);
   assert.match(compose, /\.\.\/project-data:\/data\/project-data/);
   assert.match(compose, /aigc_state:\/data\/state/);

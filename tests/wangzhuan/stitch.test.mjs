@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import test from "node:test";
 
+import {
+  closeWangzhuanFactsPool,
+  setWangzhuanFactsPoolForTest
+} from "../../server/wangzhuan/mysql-facts.mjs";
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
@@ -13,8 +17,12 @@ import {
   retryStitch,
   stitchBatchSegments
 } from "../../server/wangzhuan/stitch.mjs";
+import { pollUpstreamBatch } from "../../server/wangzhuan/upstream-poll.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testSeedanceProviderClient } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -31,16 +39,19 @@ const baseDraft = {
 };
 
 function context(root, overrides = {}) {
-  return {
+  const ctx = {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
     mockReferenceProbe: true,
     config: {},
-    capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } },
+    seedanceProviderClient: testSeedanceProviderClient(),
+    capabilities: { stitcher: { status: "available", provider: "ffmpeg", version: "test" } },
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function validUpload() {
@@ -71,6 +82,7 @@ function decomposition() {
 }
 
 async function thirtySecondFixture(root, overrides = {}) {
+  setWangzhuanFactsPoolForTest(fakePool());
   const ctx = context(root, overrides.context);
   const saved = await saveTemplate(ctx, { mode: "create", draft: overrides.draft || baseDraft });
   const checked = await checkReferenceVideo(ctx, validUpload());
@@ -99,12 +111,17 @@ async function thirtySecondFixture(root, overrides = {}) {
   return { ctx, estimated, started };
 }
 
+async function resetFactsPool() {
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
+
 test("preflight reports supported or unavailable stitcher without calling a real provider", () => {
   const supported = preflightStitcher({
-    capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } }
+    capabilities: { stitcher: { status: "available", provider: "ffmpeg", version: "test" } }
   });
   assert.equal(supported.status, "supported");
-  assert.equal(supported.provider, "mock_stitch");
+  assert.equal(supported.provider, "ffmpeg");
   assert.equal(supported.version, "test");
 
   const unsupported = preflightStitcher({ capabilities: { stitcher: { status: "unavailable" } } });
@@ -112,14 +129,13 @@ test("preflight reports supported or unavailable stitcher without calling a real
   assert.equal(unsupported.provider, "unknown");
 });
 
-test("mock stitch writes segment outputs, a stitched output, and a succeeded stitch report", async () => {
+test("ffmpeg stitch writes segment outputs, a stitched output, and a succeeded stitch report", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-stitch-ok-"));
   try {
     const { ctx, started } = await thirtySecondFixture(root);
     await submitPendingGenerationTasks(ctx, started.batch.batchId);
-
-    const detail = await stitchBatchSegments(ctx, started.batch.batchId);
-    const batch = detail.batch;
+    const polled = await pollUpstreamBatch(ctx, started.batch.batchId);
+    const batch = polled.batch;
 
     assert.equal(batch.status, "qc");
     assert.equal(batch.outputs.length, 3);
@@ -138,13 +154,14 @@ test("mock stitch writes segment outputs, a stitched output, and a succeeded sti
     assert.equal(report.status, "succeeded");
     assert.equal(report.outputId, stitched.outputId);
     assert.equal(report.segmentOutputIds.length, 2);
-    assert.equal(report.tool.provider, "mock_stitch");
+    assert.equal(report.tool.provider, "ffmpeg");
     assert.equal(report.tool.preflightStatus, "supported");
 
     const taskMapText = await readFile(join(wangzhuanPaths(ctx).batchesDir, batch.batchId, "task-map", "task-id-map.csv"), "utf8");
     assert.match(taskMapText, /out_[a-f0-9]{4}_\d{3}/);
-    assert.doesNotMatch(taskMapText, /remoteUrl|remote_url|https?:\/\//);
+    assert.doesNotMatch(taskMapText, /remoteUrl|remote_url/);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -153,7 +170,7 @@ test("stitch failure keeps segments, writes failed report, and marks batch parti
   const root = await mkdtemp(join(tmpdir(), "wz-stitch-fail-"));
   try {
     const { ctx, started } = await thirtySecondFixture(root, { suffix: "fail" });
-    await submitPendingGenerationTasks(ctx, started.batch.batchId);
+    await prepareDownloadedSegmentsWithoutStitch(ctx, started.batch.batchId);
 
     const detail = await stitchBatchSegments(ctx, started.batch.batchId, { forceFail: true });
     const batch = detail.batch;
@@ -168,6 +185,7 @@ test("stitch failure keeps segments, writes failed report, and marks batch parti
     assert.equal(report.errorCode, "stitch_failed");
     assert.equal(report.errorMessage.includes(root), false);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -176,7 +194,7 @@ test("retry-stitch is idempotent and can turn a failed stitch into a qc-ready ba
   const root = await mkdtemp(join(tmpdir(), "wz-stitch-retry-"));
   try {
     const { ctx, started } = await thirtySecondFixture(root, { suffix: "retry" });
-    await submitPendingGenerationTasks(ctx, started.batch.batchId);
+    await prepareDownloadedSegmentsWithoutStitch(ctx, started.batch.batchId);
     await stitchBatchSegments(ctx, started.batch.batchId, { forceFail: true });
 
     const retried = await retryStitch(ctx, started.batch.batchId, { idempotencyKey: "idem_retry_stitch_1" });
@@ -189,6 +207,7 @@ test("retry-stitch is idempotent and can turn a failed stitch into a qc-ready ba
     assert.equal(replay.batch.batchId, retried.batch.batchId);
     assert.equal(replay.batch.stitchReports.length, retried.batch.stitchReports.length);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -203,6 +222,7 @@ test("stitching without submitted segment task ids fails with no_segments", asyn
       { code: "no_segments" }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

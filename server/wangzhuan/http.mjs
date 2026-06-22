@@ -84,9 +84,19 @@ export function sendOk(res, data, requestId) {
 }
 
 export function sendErrorEnvelope(res, error, requestId) {
-  const safeError = error instanceof WangzhuanError
-    ? error
-    : new WangzhuanError("internal_error", ERROR_MESSAGES.internal_error);
+  let safeError = error;
+  if (!(safeError instanceof WangzhuanError)) {
+    if (safeError?.code === "invalid_state_transition") {
+      safeError = new WangzhuanError(
+        "invalid_state_transition",
+        "任务状态流转不被允许",
+        safeError.details || {},
+        409
+      );
+    } else {
+      safeError = new WangzhuanError("internal_error", ERROR_MESSAGES.internal_error);
+    }
+  }
   return sendEnvelope(res, errorEnvelope(safeError, requestId), safeError.status);
 }
 

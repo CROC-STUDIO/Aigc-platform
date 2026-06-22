@@ -2,22 +2,244 @@
   "scriptCompleted": true,
   "files": [
     {
+      "path": ".dockerignore",
+      "language": "unknown",
+      "sizeLines": 16,
+      "fileCategory": "infra"
+    },
+    {
       "path": ".understand-anything/.understandignore",
       "language": "unknown",
       "sizeLines": 36,
       "fileCategory": "code"
     },
     {
-      "path": "config.json",
+      "path": ".understand-anything/config.json",
+      "language": "json",
+      "sizeLines": 2,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/fingerprints.json",
+      "language": "json",
+      "sizeLines": 2149,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/assembled-graph.json",
+      "language": "json",
+      "sizeLines": 1730,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/fingerprint-input.json",
       "language": "json",
       "sizeLines": 16,
       "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/review.json",
+      "language": "json",
+      "sizeLines": 33,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/scan-result.json",
+      "language": "json",
+      "sizeLines": 99,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/knowledge-graph.json",
+      "language": "json",
+      "sizeLines": 1730,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/meta.json",
+      "language": "json",
+      "sizeLines": 5,
+      "fileCategory": "config"
+    },
+    {
+      "path": "config.default.json",
+      "language": "json",
+      "sizeLines": 40,
+      "fileCategory": "config"
+    },
+    {
+      "path": "config.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.down.sql",
+      "language": "sql",
+      "sizeLines": 38,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.sql",
+      "language": "sql",
+      "sizeLines": 906,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.verify.sql",
+      "language": "sql",
+      "sizeLines": 79,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_asset_object_storage.sql",
+      "language": "sql",
+      "sizeLines": 16,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.down.sql",
+      "language": "sql",
+      "sizeLines": 43,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.sql",
+      "language": "sql",
+      "sizeLines": 47,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.verify.sql",
+      "language": "sql",
+      "sizeLines": 26,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.down.sql",
+      "language": "sql",
+      "sizeLines": 4,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.sql",
+      "language": "sql",
+      "sizeLines": 88,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.verify.sql",
+      "language": "sql",
+      "sizeLines": 22,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.down.sql",
+      "language": "sql",
+      "sizeLines": 10,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.sql",
+      "language": "sql",
+      "sizeLines": 17,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.verify.sql",
+      "language": "sql",
+      "sizeLines": 13,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.down.sql",
+      "language": "sql",
+      "sizeLines": 8,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.sql",
+      "language": "sql",
+      "sizeLines": 8,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.verify.sql",
+      "language": "sql",
+      "sizeLines": 10,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.down.sql",
+      "language": "sql",
+      "sizeLines": 4,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.sql",
+      "language": "sql",
+      "sizeLines": 5,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql",
+      "language": "sql",
+      "sizeLines": 7,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.down.sql",
+      "language": "sql",
+      "sizeLines": 9,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.sql",
+      "language": "sql",
+      "sizeLines": 10,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.verify.sql",
+      "language": "sql",
+      "sizeLines": 5,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/README.md",
+      "language": "markdown",
+      "sizeLines": 221,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docker-compose.yml",
+      "language": "yaml",
+      "sizeLines": 68,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "Dockerfile",
+      "language": "dockerfile",
+      "sizeLines": 23,
+      "fileCategory": "infra"
     },
     {
       "path": "package-release.ps1",
       "language": "powershell",
       "sizeLines": 89,
       "fileCategory": "script"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "sizeLines": 17,
+      "fileCategory": "config"
+    },
+    {
+      "path": "PRODUCT.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
     },
     {
       "path": "public/app.js",
@@ -28,7 +250,7 @@
     {
       "path": "public/comic.html",
       "language": "html",
-      "sizeLines": 314,
+      "sizeLines": 322,
       "fileCategory": "markup"
     },
     {
@@ -38,27 +260,255 @@
       "fileCategory": "code"
     },
     {
+      "path": "public/competitor-remix.html",
+      "language": "html",
+      "sizeLines": 201,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/competitor-remix.js",
+      "language": "javascript",
+      "sizeLines": 971,
+      "fileCategory": "code"
+    },
+    {
       "path": "public/index.html",
       "language": "html",
-      "sizeLines": 312,
+      "sizeLines": 320,
       "fileCategory": "markup"
+    },
+    {
+      "path": "public/remix-canvas.js",
+      "language": "javascript",
+      "sizeLines": 375,
+      "fileCategory": "code"
     },
     {
       "path": "public/styles.css",
       "language": "css",
-      "sizeLines": 2164,
+      "sizeLines": 5412,
       "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan-common.js",
+      "language": "javascript",
+      "sizeLines": 310,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan.html",
+      "language": "html",
+      "sizeLines": 407,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan.js",
+      "language": "javascript",
+      "sizeLines": 1296,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wz-canvas.js",
+      "language": "javascript",
+      "sizeLines": 624,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wz-stepper.js",
+      "language": "javascript",
+      "sizeLines": 59,
+      "fileCategory": "code"
     },
     {
       "path": "README.md",
       "language": "markdown",
-      "sizeLines": 185,
+      "sizeLines": 252,
       "fileCategory": "docs"
     },
     {
       "path": "server.mjs",
       "language": "javascript",
-      "sizeLines": 2927,
+      "sizeLines": 3068,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/auth-store.mjs",
+      "language": "javascript",
+      "sizeLines": 665,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/object-storage.mjs",
+      "language": "javascript",
+      "sizeLines": 335,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/project-file-paths.mjs",
+      "language": "javascript",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/runtime-config.mjs",
+      "language": "javascript",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/branches.mjs",
+      "language": "javascript",
+      "sizeLines": 94,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/channel-rules.mjs",
+      "language": "javascript",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/config.mjs",
+      "language": "javascript",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/constants.mjs",
+      "language": "javascript",
+      "sizeLines": 79,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/estimates.mjs",
+      "language": "javascript",
+      "sizeLines": 455,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/gallery.mjs",
+      "language": "javascript",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/http.mjs",
+      "language": "javascript",
+      "sizeLines": 104,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/ids.mjs",
+      "language": "javascript",
+      "sizeLines": 106,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/llm-config.mjs",
+      "language": "javascript",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/mysql-facts.mjs",
+      "language": "javascript",
+      "sizeLines": 3559,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/package.mjs",
+      "language": "javascript",
+      "sizeLines": 504,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/pagination.mjs",
+      "language": "javascript",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/pipeline.mjs",
+      "language": "javascript",
+      "sizeLines": 677,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/product-assets.mjs",
+      "language": "javascript",
+      "sizeLines": 97,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/qc.mjs",
+      "language": "javascript",
+      "sizeLines": 1005,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/reference-videos.mjs",
+      "language": "javascript",
+      "sizeLines": 897,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/remix-provider.mjs",
+      "language": "javascript",
+      "sizeLines": 135,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/remix.mjs",
+      "language": "javascript",
+      "sizeLines": 1275,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/router.mjs",
+      "language": "javascript",
+      "sizeLines": 159,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/scheduler.mjs",
+      "language": "javascript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/seedance-provider.mjs",
+      "language": "javascript",
+      "sizeLines": 365,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/stitch.mjs",
+      "language": "javascript",
+      "sizeLines": 517,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/storage.mjs",
+      "language": "javascript",
+      "sizeLines": 209,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/telemetry.mjs",
+      "language": "javascript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/templates.mjs",
+      "language": "javascript",
+      "sizeLines": 258,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/upstream-poll.mjs",
+      "language": "javascript",
+      "sizeLines": 204,
       "fileCategory": "code"
     },
     {
@@ -72,28 +522,171 @@
       "language": "powershell",
       "sizeLines": 11,
       "fileCategory": "script"
+    },
+    {
+      "path": "tests/auth-store.test.mjs",
+      "language": "javascript",
+      "sizeLines": 103,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/docker-local.test.mjs",
+      "language": "javascript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/object-storage.test.mjs",
+      "language": "javascript",
+      "sizeLines": 145,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/project-file-paths.test.mjs",
+      "language": "javascript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/runtime-config.test.mjs",
+      "language": "javascript",
+      "sizeLines": 124,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/estimates.test.mjs",
+      "language": "javascript",
+      "sizeLines": 356,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/frontend-static.test.mjs",
+      "language": "javascript",
+      "sizeLines": 300,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/ids.test.mjs",
+      "language": "javascript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/llm-config.test.mjs",
+      "language": "javascript",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "language": "javascript",
+      "sizeLines": 1088,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/mysql-facts.test.mjs",
+      "language": "javascript",
+      "sizeLines": 764,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/orchestration.test.mjs",
+      "language": "javascript",
+      "sizeLines": 199,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/pipeline.test.mjs",
+      "language": "javascript",
+      "sizeLines": 485,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+      "language": "javascript",
+      "sizeLines": 484,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/reference-videos.test.mjs",
+      "language": "javascript",
+      "sizeLines": 818,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/remix.test.mjs",
+      "language": "javascript",
+      "sizeLines": 1089,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/router.test.mjs",
+      "language": "javascript",
+      "sizeLines": 940,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/scheduler.test.mjs",
+      "language": "javascript",
+      "sizeLines": 80,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/seedance-provider.test.mjs",
+      "language": "javascript",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/stitch.test.mjs",
+      "language": "javascript",
+      "sizeLines": 223,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/storage.test.mjs",
+      "language": "javascript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/telemetry.test.mjs",
+      "language": "javascript",
+      "sizeLines": 365,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/templates-channel-rules.test.mjs",
+      "language": "javascript",
+      "sizeLines": 151,
+      "fileCategory": "code"
     }
   ],
-  "totalFiles": 12,
+  "totalFiles": 110,
   "filteredByIgnore": 0,
-  "estimatedComplexity": "small",
+  "estimatedComplexity": "moderate",
   "stats": {
-    "filesScanned": 12,
+    "filesScanned": 110,
     "byCategory": {
-      "code": 4,
-      "config": 1,
+      "infra": 3,
+      "code": 63,
+      "config": 11,
+      "data": 22,
+      "docs": 3,
       "script": 3,
-      "markup": 3,
-      "docs": 1
+      "markup": 5
     },
     "byLanguage": {
-      "unknown": 1,
-      "json": 1,
+      "unknown": 2,
+      "json": 11,
+      "sql": 22,
+      "markdown": 3,
+      "yaml": 1,
+      "dockerfile": 1,
       "powershell": 2,
-      "javascript": 3,
-      "html": 2,
+      "javascript": 62,
+      "html": 4,
       "css": 1,
-      "markdown": 1,
       "batch": 1
     }
   }

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
-import { previewUrlForWangzhuanAsset, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
+import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 
 const PRODUCT_ASSET_KEYS = new Set([
   "productIcon",
@@ -80,7 +80,7 @@ export async function uploadProductAsset(context, request = {}) {
   await mkdir(targetDir, { recursive: true });
   const target = join(targetDir, fileName);
   await writeFile(target, buffer);
-  const storage = await syncWangzhuanAsset(context, target, `product_${assetKey}`);
+  const storage = await syncWangzhuanAsset(context, target, `product_${assetKey}`, { required: true });
   const storedPath = toProjectRelative(context.userProjectRoot, target);
   return {
     asset: {
@@ -90,8 +90,9 @@ export async function uploadProductAsset(context, request = {}) {
       mimeType: mimeType || [...allowedMimes][0] || "application/octet-stream",
       sizeBytes: buffer.length,
       storedPath,
-      previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, storedPath),
-      ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {})
+      previewUrl: storage.storageUrl,
+      storageKey: storage.storageKey,
+      storageUrl: storage.storageUrl
     }
   };
 }

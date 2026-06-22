@@ -8,7 +8,7 @@ import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { resolveLlmConfig } from "./llm-config.mjs";
-import { syncBatchFacts } from "./mysql-facts.mjs";
+import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { buildPublicUrl } from "../object-storage.mjs";
@@ -49,16 +49,14 @@ function batchDir(context, batchId) {
   return join(wangzhuanPaths(context).batchesDir, batchId);
 }
 
-function batchPath(context, batchId) {
-  return join(batchDir(context, batchId), "batch.json");
-}
-
 async function readBatch(context, batchId) {
-  const target = batchPath(context, batchId);
-  if (!existsSync(target)) {
-    throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+  validateBatchId(batchId);
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
   }
-  const batch = JSON.parse(await readFile(target, "utf8"));
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  const batch = detail?.batch;
+  if (!batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   if (batch.userId !== currentUserId(context) && context.user?.role !== "admin" && !context.user?.isAdmin) {
     throw new WangzhuanError("permission_denied", "当前账号无权访问该批次", { batchId });
   }
@@ -68,20 +66,10 @@ async function readBatch(context, batchId) {
 async function writeBatch(context, batch) {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.batchesDir, next.batchId, "batch.json"), next);
-  const indexPath = join(paths.batchesDir, "index.json");
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(await readFile(indexPath, "utf8"));
-    index.items = Array.isArray(index.items) ? index.items : [];
-    const item = index.items.find((entry) => entry.batchId === next.batchId);
-    if (item) {
-      item.status = next.status;
-      item.updatedAt = now;
-    }
-    await writeAtomicJson(indexPath, index);
+  const synced = await syncBatchFacts(context, next, "qc_completed");
+  if (synced?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存业务状态");
   }
-  await syncBatchFacts(context, next, "qc_completed");
   return next;
 }
 
@@ -440,7 +428,7 @@ function taskReviewSummary(tasks = []) {
     branchId: task.branchId || "",
     branchLabel: task.branchLabel || "",
     segmentIndex: task.segmentIndex || 1,
-    provider: task.provider || "mock",
+    provider: task.provider || "seedance",
     modelVideo: task.modelVideo || "",
     seedanceTaskId: task.seedanceTaskId || "",
     requestSummary: task.requestSummary || null,

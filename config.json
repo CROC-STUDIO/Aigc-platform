@@ -38,6 +38,19 @@
       "endpoint": "https://video-aigc.skylink-gateway.com/api/v1",
       "apiKeyEnv": "VIDEO_AIGC_API_KEY",
       "timeoutMs": 30000
+    },
+    "seedanceProvider": {
+      "provider": "seedance",
+      "endpoint": "https://skylink-gateway.com/api/v1",
+      "submitPath": "/seedance/videos/generations",
+      "taskPollPath": "/seedance/tasks",
+      "model": "dreamina-seedance-2-0-260128",
+      "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
+      "timeoutMs": 600000,
+      "ratio": "9:16",
+      "resolution": "720p",
+      "generateAudio": false,
+      "watermark": false
     }
   }
 }

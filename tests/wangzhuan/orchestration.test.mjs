@@ -8,8 +8,32 @@ import test from "node:test";
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { getBatchDetail, submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
+import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest } from "../../server/wangzhuan/mysql-facts.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { pollUpstreamBatch } from "../../server/wangzhuan/upstream-poll.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { testSeedanceProviderClient } from "./test-providers.mjs";
+
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
+
+test.afterEach(async () => {
+  await resetFactsPool();
+});
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -27,16 +51,20 @@ const baseDraft = {
 };
 
 function context(root, overrides = {}) {
-  return {
+  ensureFactsPool();
+  const ctx = {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
     mockReferenceProbe: true,
     config: {},
-    capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } },
+    seedanceProviderClient: testSeedanceProviderClient(),
+    capabilities: { stitcher: { status: "available", provider: "ffmpeg", version: "test" } },
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function validUpload() {
@@ -96,7 +124,7 @@ async function startedBatch(root, durationSec, overrides = {}) {
   return { ctx, started };
 }
 
-test("mock upstream poll completes 15s batches into qc with segment outputs", async () => {
+test("upstream poll completes 15s batches into qc with segment outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-orchestration-15-"));
   try {
     const { ctx, started } = await startedBatch(root, 15);
@@ -117,7 +145,7 @@ test("mock upstream poll completes 15s batches into qc with segment outputs", as
   }
 });
 
-test("mock upstream poll completes 30s batches into qc with stitched outputs", async () => {
+test("upstream poll completes 30s batches into qc with stitched outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-orchestration-30-"));
   try {
     const { ctx, started } = await startedBatch(root, 30);

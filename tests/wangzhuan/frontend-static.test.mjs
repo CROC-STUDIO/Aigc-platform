@@ -60,14 +60,18 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(html, /模板与批次默认值/);
   assert.match(html, /产品素材资产/);
   assert.match(html, /提示词配置/);
-  assert.match(html, /GPT 拆解脚本/);
-  assert.match(html, /按 JSON 格式拆分脚本/);
-  assert.match(html, /自动拆解参考视频/);
+  assert.match(html, /AI 拆解脚本/);
+  assert.match(html, /分析参考视频，提取镜头与脚本结构/);
+  assert.match(html, /id="wzLlmServiceStatus"/);
+  assert.match(html, /素材经验补充（可选）/);
+  assert.match(html, /开始解析/);
+  assert.match(html, /id="wzDecompositionForm"/);
   assert.match(html, /产品改写（可裂变/);
   assert.match(html, /批次参数/);
   assert.match(html, /生成批次/);
   assert.match(html, /结果与下载/);
-  assert.match(html, /生成会带入/);
+  assert.match(html, /第 4 步子流程/);
+  assert.match(html, /生成 Seedance 预案/);
   assert.match(html, /Seedance 2\.0/);
   assert.match(html, /id="wzLlmProvider"/);
   assert.match(html, /id="wzLlmModel"/);
@@ -77,7 +81,8 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(html, /id="wzVariantPrompt"/);
   assert.match(html, /id="wzSeedanceModel"/);
   assert.match(html, /id="wzTemplateSelect"/);
-  assert.match(html, /模型接口配置/);
+  assert.match(html, /开发者选项（一般无需修改）/);
+  assert.doesNotMatch(html, /LLM endpoint/);
   assert.match(html, /参考视频/);
   assert.match(html, /运行日志/);
   assert.doesNotMatch(html, /ffprobe/);
@@ -102,7 +107,11 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(html, /id="wzEstimateBtn"/);
   assert.match(html, /id="wzDownloadBtn"/);
   assert.match(html, /id="wzActiveLockActions"/);
-  assert.match(html, /id="wzStopActiveLockBtn"/);
+  assert.match(html, /id="wzGlobalError"/);
+  assert.doesNotMatch(html, /id="wzStopActiveLockBtn"/);
+  assert.doesNotMatch(html, /id="wzTaskSpaceBtn"/);
+  assert.match(html, /topbar-account-link.*任务管理/);
+  assert.doesNotMatch(html, /platform-nav-item[^>]*href="\/wangzhuan-tasks\.html"/);
   const uploadNode = html.match(/<section class="[^"]*\bwz-node\b[^"]*" id="wzNodeUpload"[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(uploadNode, /参考视频输入/);
   assert.doesNotMatch(uploadNode, /id="wzProductName"/);
@@ -113,9 +122,11 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(script, /llmConfig/);
   assert.match(script, /llmEndpoint/);
   assert.match(script, /loadLlmConfig/);
+  assert.match(script, /renderLlmServiceStatus/);
+  assert.match(script, /AI 拆解服务已就绪/);
   assert.match(script, /\/api\/wangzhuan\/llm-config/);
   assert.match(script, /gpt-5\.4/);
-  assert.match(script, /模型拆解未完成：/);
+  assert.match(script, /解析未完成：/);
   assert.match(script, /knowledgeNotes/);
   assert.match(script, /variantPrompt/);
   assert.match(script, /seedanceModel/);
@@ -142,7 +153,11 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(script, /file_required/);
   assert.match(script, /请选择一个真实参考视频文件，系统会读取时长、画幅和音轨信息/);
   assert.match(script, /读取视频信息/);
-  assert.match(script, /脚本拆解已确认，下一步点击“重新估算”生成批次预估/);
+  assert.match(script, /估算本批任务/);
+  assert.match(script, /ESTIMATE_BTN_LABEL/);
+  assert.match(script, /syncEstimateButtonLabel/);
+  assert.match(html, /id="wzEstimateBtn"/);
+  assert.doesNotMatch(html, /id="wzEstimateBtn"[^>]*>重新估算</);
   assert.doesNotMatch(script, /tinyVideoDataUrl\("reference"\)/);
   assert.doesNotMatch(script, /sample-reference\.mp4/);
   assert.match(script, /画幅/);
@@ -153,13 +168,41 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.doesNotMatch(script, /height: Number\(els\.referenceHeight\.value\)/);
   assert.doesNotMatch(script, /canExtractFrame: true/);
   assert.match(script, /\/api\/wangzhuan\/reference-videos\/decompose/);
+  assert.match(script, /\/api\/wangzhuan\/reference-videos\/\$\{encodeURIComponent\(referenceVideoId\)\}\/workflow-state/);
+  assert.match(script, /restoreWorkflowSession/);
+  assert.match(script, /renderBatchReadiness/);
+  assert.match(script, /WORKFLOW_SESSION_KEY/);
+  assert.match(script, /再次保存将写入新版本/);
+  assert.match(html, /id="wzBatchReadiness"/);
+  assert.match(html, /保存模板.*全部 3\.x/);
+  assert.match(styles, /\.wz-batch-readiness/);
+  assert.match(script, /wzFocusNodeId/);
+  assert.match(script, /window\.wzFocusNode/);
+  assert.match(styles, /\.wz-focus-mode/);
   assert.match(script, /\/api\/wangzhuan\/batches\/estimate/);
-  assert.match(script, /\/api\/wangzhuan\/batches\/start/);
-  assert.match(script, /activeLockFromError/);
-  assert.match(script, /\/api\/wangzhuan\/remix\/\$\{encodeURIComponent\(lock\.id\)\}\/stop/);
-  assert.match(script, /frontend_stop_active_lock/);
+  assert.match(script, /\/api\/wangzhuan\/batches\/plan/);
+  assert.match(script, /confirmBatchPlanRequest/);
+  assert.doesNotMatch(script, /\/api\/wangzhuan\/batches\/start/);
+  assert.match(html, /id="wzPlanBatchBtn"/);
+  assert.match(html, /id="wzConfirmPlanBtn"/);
+  assert.match(html, /id="wzPlanBox"/);
+  assert.match(html, /生成 Seedance 预案/);
+  assert.match(html, /wz-batch-steps/);
+  assert.match(html, /估算结果/);
+  assert.doesNotMatch(html, /生成第4步预案/);
+  assert.match(html, /确认预案并生成视频/);
+  assert.doesNotMatch(html, /id="wzStartBatchBtn"/);
+  assert.match(script, /wangzhuan-task-nav\.js/);
+  assert.match(script, /showActiveLockFromError/);
+  assert.match(common, /taskSpaceHref/);
+  assert.match(common, /wangzhuan-tasks\.html/);
+  assert.match(common, /打开任务管理/);
+  assert.match(common, /confirmBatchPlanRequest/);
+  assert.match(script, /confirmBatchPlanRequest/);
   assert.match(script, /galleryPageSize:\s*20/);
   assert.match(script, /pageSize:\s*String\(state\.galleryPageSize\)/);
+  assert.match(script, /sourceType:\s*"pipeline"/);
+  assert.doesNotMatch(script, /query\.set\("batchId"/);
   assert.match(script, /data-gallery-page/);
   assert.match(styles, /\.wz-gallery-pager/);
   assert.match(styles, /\.wz-lock-actions/);
@@ -251,20 +294,59 @@ test("competitor remix page keeps independent video-platform remix flow", async 
   assert.match(script, /downloadZip/);
   assert.match(script, /galleryPageSize:\s*20/);
   assert.match(script, /pageSize:\s*String\(state\.galleryPageSize\)/);
+  assert.match(script, /sourceType:\s*"remix"/);
+  assert.doesNotMatch(script, /query\.set\("remixId"/);
   assert.match(script, /data-gallery-page/);
   assert.match(styles, /\.wz-gallery-pager/);
   assert.match(script, /POLL_INTERVAL_MS/);
   assert.doesNotMatch(script, /attempts\s*>=\s*8/);
+  assert.match(script, /wangzhuan-task-nav\.js/);
+  assert.doesNotMatch(html, /id="remixTaskSpaceBtn"/);
+});
+
+test("task management page exposes dedicated task space", async () => {
+  const html = await readPublic("wangzhuan-tasks.html");
+  const script = await readPublic("wangzhuan-tasks.js");
+  const styles = await readPublic("styles.css");
+
+  assert.match(html, /任务管理/);
+  assert.match(html, /topbar-account-link active.*wangzhuan-tasks\.html/);
+  assert.doesNotMatch(html, /platform-nav-item[^>]*href="\/wangzhuan-tasks\.html"/);
+  assert.match(html, /id="wzTasksList"/);
+  assert.match(html, /id="wzTasksDetail"/);
+  assert.match(html, /wzTasksTypePipeline/);
+  assert.match(html, /网赚素材管线/);
+  assert.match(html, /竞品素材改造/);
+  assert.match(script, /\/api\/wangzhuan\/tasks/);
+  assert.match(script, /renderTaskMediaCompare/);
+  assert.match(script, /pickPrimaryOutput/);
+  assert.match(script, /runType/);
+  assert.match(script, /confirmBatchPlan/);
+  assert.match(script, /workbenchHref/);
+  assert.match(styles, /\.wz-tasks-layout/);
+  assert.match(styles, /\.wz-tasks-media-stage/);
+  assert.match(styles, /\.wz-tasks-type-badge/);
 });
 
 test("wangzhuan confirmation keeps saved decomposition state clear", async () => {
   const script = await readPublic("wangzhuan.js");
+  const html = await readPublic("wangzhuan.html");
 
   assert.match(script, /function isDecompositionConfirmed/);
-  assert.match(script, /脚本拆解已确认，下一步点击“重新估算”生成批次预估/);
-  assert.match(script, /function focusBatchStep/);
+  assert.match(script, /脚本拆解已确认，请继续填写第三步产品改写/);
+  assert.match(script, /TEMPLATE_SAVED_MESSAGE/);
+  assert.match(script, /isTemplateCommitted/);
+  assert.match(script, /setTemplateFormLocked/);
   assert.match(script, /focusBatchStep\(\)/);
-  assert.match(script, /els\.decomposeBtn\.disabled = isDecompositionConfirmed\(\) \|\| !els\.decompositionText\.value\.trim\(\)/);
+  assert.match(html, /id="wzTemplateStatus"/);
+  assert.match(script, /function syncDecompositionControls/);
+  assert.match(script, /flattenDecompositionFieldValue/);
+  assert.match(script, /fitDecompositionTextareas/);
+  assert.match(script, /wz-decomposition-input/);
+  assert.match(script, /开始解析/);
+  assert.match(script, /重新解析/);
+  assert.doesNotMatch(script, /wzDecompositionText/);
+  assert.doesNotMatch(script, /els\.decomposeBtn\.disabled = isDecompositionConfirmed\(\) \|\| !els\.decompositionText\.value\.trim\(\)/);
 });
 
 test("wangzhuan branch nodes are collected and persisted as editable drafts", async () => {
@@ -287,14 +369,59 @@ test("wangzhuan branch nodes are collected and persisted as editable drafts", as
   assert.doesNotMatch(canvas, /Strip identity from the clone so it can't break ID-based business JS/);
 });
 
+test("wangzhuan generation progress exposes upstream task visibility", async () => {
+  const common = await readPublic("wangzhuan-common.js");
+  const script = await readPublic("wangzhuan.js");
+  const styles = await readPublic("styles.css");
+
+  assert.match(common, /export function isBatchGenerationActive/);
+  assert.match(common, /export function renderGenerationTaskCards/);
+  assert.match(common, /export function formatWorkflowEvent/);
+  assert.match(script, /renderGenerationTaskCards\(tasks\)/);
+  assert.match(script, /formatWorkflowEvent\(event\)/);
+  assert.match(script, /isBatchGenerationActive\(batch, tasks\)/);
+  assert.match(styles, /\.wz-generation-panel/);
+});
+
+test("wangzhuan batch qc state distinguishes generation done from qc running", async () => {
+  const common = await readPublic("wangzhuan-common.js");
+  const script = await readPublic("wangzhuan.js");
+
+  assert.match(common, /export function batchStatusDisplayLabel/);
+  assert.match(common, /export function batchGenerationProgress/);
+  assert.match(common, /export function isBatchQcRunnable/);
+  assert.match(common, /downloaded: "已下载"/);
+  assert.match(common, /qc: "待质检"/);
+  assert.match(script, /isBatchQcRunnable\(batch, tasks, outputs\)/);
+  assert.match(script, /omni_reference/);
+});
+
+test("wangzhuan keeps step 4 focused until seedance plan is confirmed", async () => {
+  const script = await readPublic("wangzhuan.js");
+  const canvas = await readPublic("wz-canvas.js");
+
+  assert.match(script, /syncBatchNodeStatus/);
+  assert.match(script, /dataset\.batchStatus/);
+  assert.match(script, /focusBatchStep\(\);\s*\n\s*showToast\("Seedance 预案已生成/);
+  assert.match(script, /focusLogStep\(\);\s*\n\s*showToast\("批次已提交 Seedance 生成/);
+  assert.match(canvas, /status === "preview_required"\) return false/);
+  assert.match(canvas, /data-batch-status/);
+});
+
 test("competitor remix locks submit controls while a task is active", async () => {
   const script = await readPublic("competitor-remix.js");
 
   assert.match(script, /function isActiveRemixStatus/);
+  assert.match(script, /function isSourceSubmitLocked/);
+  assert.match(script, /function resetWorkshopState/);
+  assert.match(script, /resetWorkshopState\(\)/);
+  assert.match(script, /bindPageLifecycle/);
+  assert.match(script, /addEventListener\("pageshow"/);
   assert.match(script, /state\.detail = \{ remix: \{ status: "queued"/);
   assert.match(script, /const active = isActiveRemixStatus\(remix\.status\)/);
-  assert.match(script, /els\.maskConfirmBtn\.disabled = state\.submitBlocked \|\| activeRemix \|\| !state\.source \|\| !state\.regions\.length/);
+  assert.match(script, /els\.maskConfirmBtn\.disabled = state\.submitBlocked \|\| submitLocked \|\| !state\.source \|\| !state\.regions\.length/);
   assert.match(script, /els\.uploadBtn\.disabled = activeRemix/);
   assert.match(script, /els\.clearMaskBtn\.disabled = activeRemix/);
+  assert.match(script, /该素材已完成改造，不可重复提交/);
   assert.match(script, /处理中，请等待状态刷新后再继续操作/);
 });

@@ -1,24 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
   closeWangzhuanFactsPool,
+  loadBatchDetailFromMysql,
   setWangzhuanFactsPoolForTest,
   syncBatchFacts
 } from "../../server/wangzhuan/mysql-facts.mjs";
 import { runDueSchedulerJob } from "../../server/wangzhuan/scheduler.mjs";
-import { wangzhuanPaths, writeAtomicJson } from "../../server/wangzhuan/storage.mjs";
 import { context as mysqlContext, fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { testSeedanceProviderClient } from "./test-providers.mjs";
 
 function schedulerContext(root) {
-  return {
+  const ctx = {
     ...mysqlContext(),
     userProjectRoot: join(root, "user"),
-    sharedProjectRoot: join(root, "shared")
+    sharedProjectRoot: join(root, "shared"),
+    seedanceProviderClient: testSeedanceProviderClient()
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 test("scheduler worker claims task_retry jobs and resubmits failed generation tasks", async () => {
@@ -27,7 +32,6 @@ test("scheduler worker claims task_retry jobs and resubmits failed generation ta
   setWangzhuanFactsPoolForTest(pool);
   try {
     const ctx = schedulerContext(root);
-    const paths = wangzhuanPaths(ctx);
     const batch = {
       batchId: "wzb_20260618000300_abcd",
       type: "pipeline",
@@ -50,12 +54,10 @@ test("scheduler worker claims task_retry jobs and resubmits failed generation ta
       createdAt: "2026-06-18T00:03:00.000Z",
       updatedAt: "2026-06-18T00:03:00.000Z"
     };
-    await writeAtomicJson(join(paths.batchesDir, batch.batchId, "batch.json"), batch);
-    await writeAtomicJson(join(paths.batchesDir, "index.json"), {
-      schemaVersion: "batches.v1",
-      items: [{ batchId: batch.batchId, status: "queued", createdAt: batch.createdAt }]
-    });
     assert.equal((await syncBatchFacts(ctx, batch, "batch_created")).skipped, false);
+    const promptPath = join(ctx.userProjectRoot, batch.tasks[0].promptPath);
+    await mkdir(join(ctx.userProjectRoot, "批处理记录", "网赚管线", "batches", batch.batchId, "prompts"), { recursive: true });
+    await writeFile(promptPath, "prompt for retry test\n", "utf8");
     const failedBatch = {
       ...batch,
       status: "running",
@@ -67,7 +69,6 @@ test("scheduler worker claims task_retry jobs and resubmits failed generation ta
         nextAttemptAt: "2026-06-18T00:03:00.000Z"
       }]
     };
-    await writeAtomicJson(join(paths.batchesDir, batch.batchId, "batch.json"), failedBatch);
     assert.equal((await syncBatchFacts(ctx, failedBatch, "batch_write")).skipped, false);
 
     const result = await runDueSchedulerJob(ctx, { workerId: "scheduler_test_worker", lockSeconds: 30 });
@@ -76,8 +77,7 @@ test("scheduler worker claims task_retry jobs and resubmits failed generation ta
     assert.equal(result.error, undefined);
     assert.equal(result.job.jobType, "task_retry");
     assert.equal(pool.state.schedulerJobs.get(result.job.jobUid).status, "succeeded");
-    const saved = await readFile(join(paths.batchesDir, batch.batchId, "batch.json"), "utf8");
-    const parsed = JSON.parse(saved);
+    const parsed = (await loadBatchDetailFromMysql(ctx, batch.batchId)).batch;
     assert.equal(parsed.tasks[0].status, "waiting_upstream");
     assert.equal(parsed.tasks[0].attempts, 2);
   } finally {

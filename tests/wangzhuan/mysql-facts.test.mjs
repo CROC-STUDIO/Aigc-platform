@@ -303,6 +303,43 @@ test("mysql state machine rejects unknown transitions instead of auto-seeding th
   }
 });
 
+test("mysql remix poll allows queued to running via remix_write", async () => {
+  const pool = fakePool();
+  setWangzhuanFactsPoolForTest(pool);
+  try {
+    const remix = {
+      remixId: "rmx_20260622000000_abcd",
+      type: "remix",
+      status: "queued",
+      createdAt: "2026-06-22T00:00:00.000Z",
+      updatedAt: "2026-06-22T00:00:00.000Z",
+      providerJob: { jobId: "job_001", status: "queued", provider: "video_aigc" },
+      tasks: [{
+        generationTaskId: "gen_abcd_001",
+        status: "queued",
+        providerJobId: "job_001",
+        attempts: 1,
+        maxAttempts: 2,
+        provider: "video_aigc"
+      }],
+      outputs: []
+    };
+    assert.equal((await syncRemixFacts(context(), remix, "remix_write")).skipped, false);
+
+    const running = {
+      ...remix,
+      status: "running",
+      providerJob: { ...remix.providerJob, status: "running" },
+      tasks: [{ ...remix.tasks[0], status: "running" }],
+      updatedAt: "2026-06-22T00:00:05.000Z"
+    };
+    assert.equal((await syncRemixFacts(context(), running, "remix_write")).skipped, false);
+  } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
+  }
+});
+
 test("mysql facts sync and load product template stores", async () => {
   const pool = fakePool();
   setWangzhuanFactsPoolForTest(pool);

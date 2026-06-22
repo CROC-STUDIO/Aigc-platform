@@ -9,25 +9,36 @@ import {
   downloadZip,
   escapeHtml,
   idempotencyKey,
+  inlineRetryHtml,
   operationLabels,
   remixStatusLabels,
   renderError,
   renderKeyValues,
   setBusy,
   showLogin,
+  showToast,
+  syncActionHint,
+  taskProgressHtml,
   terminalRemixStatus
 } from "./wangzhuan-common.js";
+import {
+  clearActiveLockBanner,
+  showActiveLockFromError
+} from "./wangzhuan-task-nav.js";
+
+const lockHost = () => ({
+  state,
+  actions: els.activeLockActions,
+  text: els.activeLockText
+});
 
 const els = {
   badge: $("#remixCurrentUserBadge"),
   logoutBtn: $("#remixLogoutBtn"),
   loginModal: $("#remixLoginModal"),
-  envelopeBadge: $("#remixEnvelopeBadge"),
-  capabilityBadge: $("#remixCapabilityBadge"),
   globalError: $("#remixGlobalError"),
   activeLockActions: $("#remixActiveLockActions"),
   activeLockText: $("#remixActiveLockText"),
-  stopActiveLockBtn: $("#remixStopActiveLockBtn"),
   operationType: $("#remixOperationType"),
   sourceCount: $("#remixTemplateCount"),
   regionCount: $("#remixRegionCount"),
@@ -68,91 +79,72 @@ const state = {
   activeLock: null
 };
 
+let hasHandledInitialPageShow = false;
+
+function resetWorkshopState() {
+  window.clearTimeout(state.pollTimer);
+  state.pollTimer = 0;
+  state.source = null;
+  state.regions = [];
+  state.selectedRegionId = "";
+  state.actualMediaCache = null;
+  state.detail = null;
+  state.submitBlocked = false;
+  state.maskDrag = null;
+  if (els.sourceFile) els.sourceFile.value = "";
+  renderSource();
+  renderDetail();
+  syncMetrics();
+}
+
 const MIN_MASK_SIZE = 0.03;
 const MASK_KEY_STEP = 0.01;
 const CREATE_MASK_THRESHOLD = 0.012;
 const POLL_INTERVAL_MS = 3000;
 const DEFAULT_DIRECT_OPERATION = "watermark_cover";
 const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
+const SOURCE_SUBMIT_LOCKED_STATUSES = new Set([...ACTIVE_REMIX_STATUSES, "succeeded"]);
+const PROVIDER_RUNNING_STATUSES = new Set(["submitting", "pending", "running"]);
 
 function isActiveRemixStatus(status) {
   return ACTIVE_REMIX_STATUSES.has(status);
+}
+
+function remixSourceId(remix) {
+  return remix?.sourceId || remix?.source?.sourceId || "";
+}
+
+function isProviderJobRunning(remix) {
+  const status = remix?.providerJob?.status;
+  return Boolean(status && PROVIDER_RUNNING_STATUSES.has(status));
+}
+
+function isSourceSubmitLocked() {
+  const remix = state.detail?.remix;
+  const sourceId = state.source?.sourceId;
+  if (!remix || !sourceId) return false;
+  if (remixSourceId(remix) !== sourceId) return false;
+  return SOURCE_SUBMIT_LOCKED_STATUSES.has(remix.status) || isProviderJobRunning(remix);
 }
 
 function selectedOperationType() {
   return els.operationType?.value || DEFAULT_DIRECT_OPERATION;
 }
 
-function activeLockFromError(error) {
-  if (error?.code !== "batch_already_running") return null;
-  const data = error.data || {};
-  if (data.remixId) {
-    return {
-      type: "remix",
-      id: data.remixId,
-      status: data.status || "",
-      label: `竞品改造任务 ${data.remixId}${data.status ? ` · ${data.status}` : ""}`
-    };
-  }
-  if (data.batchId) {
-    return {
-      type: "batch",
-      id: data.batchId,
-      status: data.status || "",
-      label: `素材管线批次 ${data.batchId}${data.status ? ` · ${data.status}` : ""}`
-    };
-  }
-  return null;
-}
-
-function renderActiveLock(lock = state.activeLock) {
-  if (!els.activeLockActions) return;
-  state.activeLock = lock || null;
-  if (!state.activeLock) {
-    els.activeLockActions.hidden = true;
-    if (els.activeLockText) els.activeLockText.textContent = "";
-    return;
-  }
-  els.activeLockActions.hidden = false;
-  const href = state.activeLock.type === "batch" ? "/wangzhuan.html" : "/competitor-remix.html";
-  els.activeLockText.innerHTML = `当前占用：${escapeHtml(state.activeLock.label)} · <a href="${href}">打开任务页</a>`;
-  els.stopActiveLockBtn.disabled = false;
-}
-
-async function stopActiveLock() {
-  const lock = state.activeLock;
-  if (!lock) return;
-  const url = lock.type === "batch"
-    ? `/api/wangzhuan/batches/${encodeURIComponent(lock.id)}/stop`
-    : `/api/wangzhuan/remix/${encodeURIComponent(lock.id)}/stop`;
-  setBusy(els.stopActiveLockBtn, true, "停止中");
-  try {
-    await apiEnvelope(url, {
-      method: "POST",
-      body: JSON.stringify({ reason: "frontend_stop_active_lock" })
-    });
-    renderActiveLock(null);
-    clearError(els.globalError);
-    els.capabilityBadge.textContent = "占用任务已停止";
-  } catch (error) {
-    renderError(els.globalError, error, "停止占用任务失败");
-  } finally {
-    setBusy(els.stopActiveLockBtn, false);
-  }
-}
-
 function activeRemixNotice(status) {
+  if (status === "succeeded") return "该素材已完成改造，不可重复提交";
   if (status === "preview_required") return "处理已完成，请先完成预览确认或下载交付";
   return "处理中，请等待状态刷新后再继续操作";
 }
 
 function syncMetrics() {
   const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
+  const submitLocked = isSourceSubmitLocked();
   els.sourceCount.textContent = state.source ? "1" : "0";
   els.regionCount.textContent = state.regions.length;
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
-  els.maskConfirmBtn.disabled = state.submitBlocked || activeRemix || !state.source || !state.regions.length;
+  els.maskConfirmBtn.disabled = state.submitBlocked || submitLocked || !state.source || !state.regions.length;
   els.uploadBtn.disabled = activeRemix;
   els.sourceFile.disabled = activeRemix;
   els.clearMaskBtn.disabled = activeRemix;
@@ -160,6 +152,64 @@ function syncMetrics() {
   els.stopBtn.hidden = !activeRemix;
   els.stopBtn.disabled = !activeRemix;
   els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
+  syncFlowHints();
+}
+
+function syncFlowHints() {
+  const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
+  const submitLocked = isSourceSubmitLocked();
+  const fileReady = Boolean(els.sourceFile?.files?.[0]);
+  syncActionHint(
+    els.uploadBtn,
+    activeRemix
+      ? "当前有改造任务处理中，请等待完成"
+      : !fileReady && !state.source
+        ? "请先选择需要改造的视频或图片"
+        : fileReady && !state.source
+          ? "文件已选择，点击上传并检查"
+          : "",
+    { tone: activeRemix ? "warn" : "muted" }
+  );
+  syncActionHint(
+    els.maskConfirmBtn,
+    submitLocked
+      ? "当前素材已有任务或已完成改造，暂不可重复提交"
+      : !state.source
+        ? "需先上传源素材"
+        : !state.regions.length
+          ? "请在 Mask 编辑窗口框选至少一个区域"
+          : state.submitBlocked
+            ? "当前能力不可用，请检查改造类型"
+            : "确认后将提交视频处理平台任务",
+    { tone: submitLocked || state.submitBlocked ? "warn" : "muted" }
+  );
+  const remix = state.detail?.remix;
+  const output = remix?.outputs?.[0];
+  syncActionHint(
+    els.confirmBtn,
+    !remix
+      ? "需先提交 Mask 改造任务"
+      : remix.status !== "preview_required"
+        ? "等待处理完成并进入预览确认"
+        : !output
+          ? "暂无可预览输出"
+          : "确认预览通过后可下载交付包",
+    { tone: "muted" }
+  );
+}
+
+function remixProgressSection(remix) {
+  if (!remix || terminalRemixStatus(remix.status)) return "";
+  const tasks = Array.isArray(remix.tasks) ? remix.tasks : [];
+  const terminalTaskStatuses = new Set(["succeeded", "failed", "skipped", "stopped"]);
+  const done = tasks.filter((task) => terminalTaskStatuses.has(task.status)).length;
+  const total = tasks.length;
+  return taskProgressHtml({
+    label: remixStatusLabels[remix.status] || remix.status,
+    detail: total ? `${done}/${total} 个子任务` : `远端状态：${remix.providerJob?.status || "等待中"}`,
+    percent: total ? Math.round((done / total) * 100) : null,
+    indeterminate: !total && isActiveRemixStatus(remix.status)
+  });
 }
 
 function galleryPaginationHtml(gallery) {
@@ -628,15 +678,31 @@ function renderDetail() {
     els.confirmBtn.disabled = true;
     els.downloadBtn.disabled = true;
     syncMetrics();
+    syncFlowHints();
     return;
   }
   els.statusBadge.innerHTML = badge(remix.status, remixStatusLabels);
   const active = isActiveRemixStatus(remix.status);
+  const submitLocked = isSourceSubmitLocked();
   const output = remix.outputs?.[0];
   els.confirmBtn.disabled = remix.status !== "preview_required" || !output;
   els.downloadBtn.disabled = !state.detail.downloadSummary?.packageReady;
+  const retryActions = remix.status === "failed"
+    ? [{ id: "retry-mask", label: "重新提交改造" }]
+    : remix.status === "partial_failed"
+      ? [{ id: "retry-mask", label: "重新提交改造" }]
+      : [];
   els.detailBox.className = "wz-list";
   els.detailBox.innerHTML = `
+    ${remixProgressSection(remix)}
+    ${inlineRetryHtml({
+      message: remix.status === "failed"
+        ? "改造失败，可调整区域后重新提交"
+        : remix.status === "partial_failed"
+          ? "部分输出失败，可重新提交改造"
+          : "",
+      actions: retryActions
+    })}
     <article class="wz-row">
       <div>
         <strong>${escapeHtml(remix.remixId)}</strong>
@@ -655,7 +721,7 @@ function renderDetail() {
         ["预览确认", output?.previewConfirmed ? "已确认" : "未确认"]
       ])}
     </div>
-    ${active ? `<div class="wz-warning">${escapeHtml(activeRemixNotice(remix.status))}</div>` : ""}
+    ${active || submitLocked ? `<div class="wz-warning">${escapeHtml(activeRemixNotice(remix.status))}</div>` : ""}
     ${output ? `
       <article class="wz-output">
         <div>
@@ -668,6 +734,7 @@ function renderDetail() {
     ` : ""}
   `;
   syncMetrics();
+  syncFlowHints();
 }
 
 function renderGallery() {
@@ -732,6 +799,7 @@ async function uploadSource() {
     state.actualMediaCache = null;
     state.submitBlocked = false;
     renderSource();
+    showToast("源素材上传成功，请框选改造区域", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
     renderError(els.globalError, error, "源素材上传失败");
@@ -751,10 +819,12 @@ async function startMaskEdit() {
     }, "Mask 校验");
     return;
   }
-  if (isActiveRemixStatus(state.detail?.remix?.status)) {
+  if (isSourceSubmitLocked()) {
     renderError(els.globalError, {
-      code: "active_remix_running",
-      message: "当前已有改造任务处理中，请等待状态刷新后再继续操作"
+      code: "remix_source_locked",
+      message: state.detail?.remix?.status === "succeeded"
+        ? "该素材已完成改造，不可重复提交"
+        : "当前素材已有改造任务处理中，请等待状态刷新后再继续操作"
     }, "改造启动失败");
     syncMetrics();
     return;
@@ -776,17 +846,14 @@ async function startMaskEdit() {
         maskDataUrl: maskPreviewDataUrl()
       })
     });
-    els.capabilityBadge.textContent = `Provider: ${state.detail.remix?.capability?.status || "submitted"} / ${state.detail.remix?.capability?.provider || "video_aigc"}`;
     renderDetail();
     startPolling();
+    showToast("改造任务已提交，正在后台处理", { type: "success" });
   } catch (error) {
-    els.capabilityBadge.textContent = error.data?.capability
-      ? `Provider: ${error.data.capability.status} / ${error.data.capability.provider}`
-      : "Provider: unsupported";
     if (error.code === "unsupported_capability") {
       state.submitBlocked = true;
     }
-    renderActiveLock(activeLockFromError(error));
+    showActiveLockFromError(lockHost(), error);
     state.detail = previousDetail;
     renderDetail();
     renderError(els.globalError, error, "改造启动失败");
@@ -808,9 +875,20 @@ function startPolling() {
   window.clearTimeout(state.pollTimer);
   const tick = async () => {
     try {
+      const previousStatus = state.detail?.remix?.status;
       const detail = await loadRemixDetail();
       await loadGallery();
-      if (!detail?.remix || terminalRemixStatus(detail.remix.status)) return;
+      const remix = detail?.remix;
+      if (!remix || terminalRemixStatus(remix.status)) {
+        if (remix && remix.status !== previousStatus) {
+          if (remix.status === "preview_required") {
+            showToast("改造完成，请预览并确认", { type: "success" });
+          } else if (remix.status === "failed" || remix.status === "partial_failed") {
+            showToast("改造未完全成功，可查看详情并重试", { type: "error" });
+          }
+        }
+        return;
+      }
       state.pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS);
     } catch (error) {
       renderError(els.globalError, error, "改造轮询失败");
@@ -856,6 +934,7 @@ async function confirmPreview() {
     });
     renderDetail();
     await loadGallery();
+    showToast("预览已确认，可下载交付包", { type: "success" });
   } catch (error) {
     renderError(els.globalError, error, "预览确认失败");
   } finally {
@@ -866,30 +945,24 @@ async function confirmPreview() {
 async function loadGallery(options = {}) {
   const requestedPage = Number(options.page || state.galleryPage || 1);
   state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
-  const remixId = state.detail?.remix?.remixId;
   const query = new URLSearchParams({
     page: String(state.galleryPage),
-    pageSize: String(state.galleryPageSize)
+    pageSize: String(state.galleryPageSize),
+    sourceType: "remix"
   });
-  if (remixId) query.set("remixId", remixId);
   const params = `?${query}`;
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
   state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
-  els.envelopeBadge.textContent = "Envelope: ok";
   renderGallery();
 }
 
 async function loadActiveRemix() {
   const detail = await apiEnvelope("/api/wangzhuan/remix/active");
-  if (!detail?.remix) {
-    state.detail = null;
-    renderDetail();
-    return null;
-  }
+  if (!detail?.remix) return null;
   state.detail = detail;
   state.source = detail.remix.source
     ? { sourceId: detail.remix.source.sourceId, probe: detail.remix.source, previewUrl: detail.remix.source.storageUrl || "" }
-    : state.source;
+    : null;
   state.regions = Array.isArray(detail.remix.regions) ? detail.remix.regions : [];
   state.selectedRegionId = state.regions[0]?.regionId || "";
   if (els.operationType && detail.remix.operationType) {
@@ -929,9 +1002,13 @@ function bindEvents() {
     renderMaskEditor();
   });
   els.maskConfirmBtn.addEventListener("click", startMaskEdit);
+  els.detailBox?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-inline-retry]");
+    if (!btn) return;
+    if (btn.dataset.inlineRetry === "retry-mask") window.wzFocusNode?.("remixNodeMask");
+  });
   els.confirmBtn.addEventListener("click", confirmPreview);
   els.stopBtn.addEventListener("click", stopRemix);
-  els.stopActiveLockBtn?.addEventListener("click", stopActiveLock);
   els.downloadBtn.addEventListener("click", downloadRemixPackage);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
   els.galleryBox.addEventListener("click", (event) => {
@@ -943,10 +1020,32 @@ function bindEvents() {
   });
 }
 
+async function loadInitialData() {
+  clearError(els.globalError);
+  clearActiveLockBanner(lockHost());
+  resetWorkshopState();
+  await loadActiveRemix();
+  await loadGallery();
+}
+
+function bindPageLifecycle() {
+  window.addEventListener("pageshow", () => {
+    if (!state.user) return;
+    if (!hasHandledInitialPageShow) {
+      hasHandledInitialPageShow = true;
+      return;
+    }
+    loadInitialData().catch((error) => {
+      renderError(els.globalError, error, "页面刷新失败");
+    });
+  });
+}
+
 async function init() {
   renderMaskEditor();
   bindMaskEditor();
   bindEvents();
+  bindPageLifecycle();
   await bindLogin({
     modal: els.loginModal,
     badge: els.badge,
@@ -958,14 +1057,6 @@ async function init() {
       });
     }
   });
-}
-
-async function loadInitialData() {
-  clearError(els.globalError);
-  renderActiveLock(null);
-  await loadActiveRemix();
-  await loadGallery();
-  els.envelopeBadge.textContent = "Envelope: ok";
 }
 
 init();

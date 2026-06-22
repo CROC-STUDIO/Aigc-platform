@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { makeRemixEstimateId, makeRemixSourceId } from "./ids.mjs";
+import { makeEstimateId, makeRemixEstimateId, makeRemixSourceId } from "./ids.mjs";
 import { normalizePagination, paginationMeta } from "./pagination.mjs";
 
 let poolPromise = null;
@@ -56,6 +56,10 @@ export async function closeWangzhuanFactsPool() {
 
 export function setWangzhuanFactsPoolForTest(pool) {
   poolPromise = pool ? Promise.resolve(pool) : null;
+}
+
+export async function hasWangzhuanFactsStore() {
+  return Boolean(await getPool());
 }
 
 function sha256Hex(value) {
@@ -153,6 +157,7 @@ const RUN_STATUSES = Object.freeze([
 
 const TASK_STATUSES = Object.freeze([
   "pending",
+  "pending_preview",
   "queued",
   "running",
   "waiting_upstream",
@@ -167,6 +172,7 @@ const TASK_STATUSES = Object.freeze([
 
 const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "__new__", "queued", "batch_created", null, 0],
+  ["workflow_run", "__new__", "preview_required", "batch_created", null, 0],
   ["workflow_run", "__new__", "queued", "remix_write", null, 0],
   ["workflow_run", "__new__", "running", "remix_write", null, 0],
   ["workflow_run", "__new__", "preview_required", "remix_write", null, 0],
@@ -183,19 +189,24 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "stitching", "partial_failed", "stitch_progress", null, 1],
   ["workflow_run", "partial_failed", "stitching", "stitch_progress", null, 0],
   ["workflow_run", "partial_failed", "qc", "stitch_progress", null, 0],
+  ["workflow_run", "partial_failed", "qc", "stitch_completed", null, 0],
   ["workflow_run", "stitching", "qc", "stitch_completed", null, 0],
   ["workflow_run", "running", "succeeded", "qc_completed", null, 1],
   ["workflow_run", "running", "partial_failed", "qc_completed", null, 1],
   ["workflow_run", "running", "failed", "qc_completed", null, 1],
+  ["workflow_run", "queued", "failed", "batch_write", null, 1],
   ["workflow_run", "qc", "succeeded", "qc_completed", null, 1],
   ["workflow_run", "qc", "partial_failed", "qc_completed", null, 1],
   ["workflow_run", "qc", "failed", "qc_completed", null, 1],
+  ["workflow_run", "queued", "running", "remix_write", null, 0],
   ["workflow_run", "queued", "preview_required", "remix_write", null, 0],
   ["workflow_run", "running", "preview_required", "remix_write", null, 0],
   ["workflow_run", "qc", "preview_required", "remix_write", null, 0],
   ["workflow_run", "queued", "failed", "remix_write", null, 1],
   ["workflow_run", "running", "failed", "remix_write", null, 1],
   ["workflow_run", "preview_required", "failed", "remix_write", null, 1],
+  ["workflow_run", "preview_required", "queued", "plan_confirmed", null, 0],
+  ["workflow_run", "preview_required", "stopped", "user_stop", "batch:own", 1],
   ["workflow_run", "queued", "stopped", "remix_write", "remix:own", 1],
   ["workflow_run", "running", "stopped", "remix_write", "remix:own", 1],
   ["workflow_run", "qc", "stopped", "remix_write", "remix:own", 1],
@@ -213,13 +224,17 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "preview_required", "succeeded", "remix_write", "remix:own", 1],
   ["workflow_task", "__new__", "pending", "batch_created", null, 0],
   ["workflow_task", "__new__", "pending", "batch_write", null, 0],
+  ["workflow_task", "__new__", "pending_preview", "batch_write", null, 0],
   ["workflow_task", "__new__", "queued", "remix_write", null, 0],
   ["workflow_task", "__new__", "running", "remix_write", null, 0],
   ["workflow_task", "__new__", "qc", "remix_write", null, 0],
   ["workflow_task", "__new__", "succeeded", "remix_write", null, 1],
   ["workflow_task", "__new__", "failed", "remix_write", null, 1],
+  ["workflow_task", "queued", "running", "remix_write", null, 0],
   ["workflow_task", "queued", "qc", "remix_write", null, 0],
   ["workflow_task", "running", "qc", "remix_write", null, 0],
+  ["workflow_task", "queued", "failed", "remix_write", null, 1],
+  ["workflow_task", "running", "failed", "remix_write", null, 1],
   ["workflow_task", "queued", "stopped", "remix_write", "remix:own", 1],
   ["workflow_task", "running", "stopped", "remix_write", "remix:own", 1],
   ["workflow_task", "qc", "stopped", "remix_write", "remix:own", 1],
@@ -231,6 +246,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "failed", "pending", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "waiting_upstream", "scheduler_retry", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "downloaded_output", null, 0],
+  ["workflow_task", "waiting_upstream", "downloaded", "batch_write", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "stitch_progress", null, 0],
   ["workflow_task", "waiting_upstream", "qc", "stitch_progress", null, 0],
   ["workflow_task", "waiting_upstream", "qc", "stitch_completed", null, 0],
@@ -241,6 +257,8 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "running", "failed", "attempt_exhausted", null, 1],
   ["workflow_task", "waiting_upstream", "failed", "upstream_failed", null, 1],
   ["workflow_task", "pending", "failed", "batch_write", null, 1],
+  ["workflow_task", "pending_preview", "pending", "plan_confirmed", null, 0],
+  ["workflow_task", "pending_preview", "stopped", "user_stop", "batch:own", 1],
   ["workflow_task", "waiting_upstream", "failed", "batch_write", null, 1],
   ["workflow_task", "qc", "failed", "batch_write", null, 1],
   ["workflow_task", "queued", "stopped", "user_stop", "batch:own", 1],
@@ -837,6 +855,30 @@ export async function nextRemixEstimateIdFromMysql(context, date = new Date()) {
   }
 }
 
+export async function nextPipelineEstimateIdFromMysql(context, date = new Date()) {
+  const pool = await getPool();
+  if (!pool) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const prefix = `est_${dateStamp(date)}_`;
+    const [rows] = await conn.execute(
+      `SELECT estimate_uid
+      FROM work_estimates
+      WHERE project_id = ?
+        AND estimate_type = 'pipeline'
+        AND estimate_uid LIKE ?
+      ORDER BY estimate_uid DESC
+      LIMIT 1`,
+      [facts.projectId, `${prefix}%`]
+    );
+    const match = String(rows[0]?.estimate_uid || "").match(/_(\d{3})$/);
+    return makeEstimateId((match ? Number(match[1]) : 0) + 1, date);
+  } finally {
+    conn.release();
+  }
+}
+
 export async function syncRemixSourceFact(context, source) {
   const pool = await getPool();
   if (!pool || !source?.sourceId) return { skipped: true };
@@ -880,6 +922,34 @@ export async function loadRemixSourceFromMysql(context, sourceId) {
     return assetRowToRemixSource(await findAssetByUid(conn, facts.projectId, sourceId));
   } catch (error) {
     console.warn(`[mysql-facts] failed to load remix source ${sourceId}: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function nextReferenceVideoIdFromMysql(context, date = new Date()) {
+  const pool = await getPool();
+  if (!pool) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const prefix = `ref_${dateStamp(date)}_`;
+    const [rows] = await conn.execute(
+      `SELECT reference_video_uid
+      FROM reference_videos
+      WHERE project_id = ?
+        AND reference_video_uid LIKE ?
+      ORDER BY reference_video_uid DESC
+      LIMIT 1`,
+      [facts.projectId, `${prefix}%`]
+    );
+    let next = 1;
+    const match = String(rows[0]?.reference_video_uid || "").match(/_(\d{3})$/);
+    if (match) next = Number(match[1]) + 1;
+    return `${prefix}${String(next).padStart(3, "0")}`;
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to allocate reference video id: ${error.message}`);
     return null;
   } finally {
     conn.release();
@@ -974,6 +1044,13 @@ function referenceVideoRowToProbe(row) {
     storageKey: row.storage_key || probe.storageKey || "",
     storageUrl: row.storage_url || probe.storageUrl || ""
   };
+}
+
+function withAssetPreviewUrl(asset) {
+  if (!asset) return null;
+  const previewUrl = String(asset.previewUrl || asset.storageUrl || "").trim()
+    || (asset.storedPath ? `/file?path=${encodeURIComponent(asset.storedPath)}` : "");
+  return previewUrl ? { ...asset, previewUrl } : asset;
 }
 
 export async function loadReferenceVideoProbeFromMysql(context, referenceVideoId) {
@@ -1542,34 +1619,46 @@ function taskRowToTask(row) {
     branchLabel: request.branchLabel || undefined,
     branchVariantIndex: request.branchVariantIndex,
     segmentIndex: request.segmentIndex,
+    planId: request.planId,
     durationSec: request.durationSec,
     status: row.status,
     kind: row.task_kind,
-    modelImage: row.model_image || undefined,
-    modelVideo: row.model_video || undefined,
-    provider: row.provider || undefined,
-    imageTaskId: row.image_task_id || undefined,
-    seedanceTaskId: row.seedance_task_id || undefined,
-    providerJobId: row.provider_job_id || undefined,
     promptPath: request.promptPath || "",
-    outputPath: response.outputPath || "",
+    outputPath: response.outputPath || relativePath(row.output_storage_relative_path) || "",
     remoteUrlStored: response.remoteUrlStored,
     attempts: Number(row.attempts || 0),
     maxAttempts: Number(row.max_attempts || 0),
-    errorCode: row.error_code || undefined,
-    errorMessage: row.error_message || undefined,
     startedAt: isoDate(row.started_at),
     finishedAt: isoDate(row.finished_at)
   };
+  if (row.model_image) task.modelImage = row.model_image;
+  if (row.model_video) task.modelVideo = row.model_video;
+  if (row.provider) task.provider = row.provider;
+  if (row.image_task_id) task.imageTaskId = row.image_task_id;
+  if (row.seedance_task_id) task.seedanceTaskId = row.seedance_task_id;
+  if (row.provider_job_id) task.providerJobId = row.provider_job_id;
+  if (row.error_code) task.errorCode = row.error_code;
+  if (row.error_message) task.errorMessage = row.error_message;
   if (request.promptStorageKey || row.prompt_storage_key) task.promptStorageKey = request.promptStorageKey || row.prompt_storage_key;
   if (request.promptStorageUrl || row.prompt_storage_url) task.promptStorageUrl = request.promptStorageUrl || row.prompt_storage_url;
   if (response.outputStorageKey || row.output_storage_key) task.outputStorageKey = response.outputStorageKey || row.output_storage_key;
   if (response.outputStorageUrl || row.output_storage_url) task.outputStorageUrl = response.outputStorageUrl || row.output_storage_url;
+  if (Object.keys(request).length) task.requestSummary = request;
+  if (Object.keys(response).length) task.responseSummary = response;
   return task;
 }
 
 function outputRowToOutput(row, taskIds = []) {
-  const filePath = relativePath(row.storage_relative_path);
+  const storageRelativePath = row.storage_relative_path ?? row.storageRelativePath;
+  const storageKey = row.storage_key ?? row.storageKey;
+  const storageUrl = row.storage_url ?? row.storageUrl;
+  const promptPathValue = row.prompt_path ?? row.promptPath;
+  const promptStorageKey = row.prompt_storage_key ?? row.promptStorageKey;
+  const promptStorageUrl = row.prompt_storage_url ?? row.promptStorageUrl;
+  const qcReportPathValue = row.qc_report_path ?? row.qcReportPath;
+  const qcReportStorageKey = row.qc_report_storage_key ?? row.qcReportStorageKey;
+  const qcReportStorageUrl = row.qc_report_storage_url ?? row.qcReportStorageUrl;
+  const filePath = relativePath(storageRelativePath);
   const probe = parseJsonValue(row.output_probe_json, {});
   const output = {
     outputId: row.output_uid,
@@ -1585,21 +1674,21 @@ function outputRowToOutput(row, taskIds = []) {
     durationSec: row.duration_sec === null || row.duration_sec === undefined ? probe.durationSec : Number(row.duration_sec),
     kind: row.output_kind,
     filePath,
-    previewUrl: row.storage_url || (filePath ? `/file?path=${encodeURIComponent(filePath)}` : ""),
-    promptPath: row.prompt_path ? relativePath(row.prompt_path) : "",
+    previewUrl: storageUrl || (filePath ? `/file?path=${encodeURIComponent(filePath)}` : ""),
+    promptPath: promptPathValue ? relativePath(promptPathValue) : "",
     qcStatus: row.qc_status,
     downloadEligible: row.download_eligible === 1 || row.download_eligible === true,
     visualPreviewRequired: row.visual_preview_required === 1 || row.visual_preview_required === true,
     previewConfirmed: row.preview_confirmed === 1 || row.preview_confirmed === true,
     previewConfirmedAt: isoDate(row.preview_confirmed_at),
-    qcReportPath: relativePath(row.qc_report_path)
+    qcReportPath: relativePath(qcReportPathValue)
   };
-  if (row.storage_key) output.storageKey = row.storage_key;
-  if (row.storage_url) output.storageUrl = row.storage_url;
-  if (row.prompt_storage_key) output.promptStorageKey = row.prompt_storage_key;
-  if (row.prompt_storage_url) output.promptStorageUrl = row.prompt_storage_url;
-  if (row.qc_report_storage_key) output.qcReportStorageKey = row.qc_report_storage_key;
-  if (row.qc_report_storage_url) output.qcReportStorageUrl = row.qc_report_storage_url;
+  if (storageKey) output.storageKey = storageKey;
+  if (storageUrl) output.storageUrl = storageUrl;
+  if (promptStorageKey) output.promptStorageKey = promptStorageKey;
+  if (promptStorageUrl) output.promptStorageUrl = promptStorageUrl;
+  if (qcReportStorageKey) output.qcReportStorageKey = qcReportStorageKey;
+  if (qcReportStorageUrl) output.qcReportStorageUrl = qcReportStorageUrl;
   return output;
 }
 
@@ -1812,6 +1901,7 @@ async function loadBatchByRunRow(conn, facts, run) {
       gs.script_uid,
       prompt_asset.storage_key AS prompt_storage_key,
       prompt_asset.storage_url AS prompt_storage_url,
+      output_asset.storage_relative_path AS output_storage_relative_path,
       output_asset.storage_key AS output_storage_key,
       output_asset.storage_url AS output_storage_url
     FROM workflow_tasks wt
@@ -1862,10 +1952,10 @@ async function loadBatchByRunRow(conn, facts, run) {
     ORDER BY wo.id ASC`,
     [run.id]
   );
-  const outputs = outputRows.map((row) => outputRowToOutput(
+  let outputs = outputRows.map((row) => outputRowToOutput(
     { ...row, run_uid: run.run_uid },
     taskIdsByOutput.get(row.output_uid) || []
-  ));
+  )).filter((output) => output.kind !== "stitch_failed");
   const [stitchRows] = await conn.execute(
     `SELECT
       wo.output_uid,
@@ -1899,7 +1989,19 @@ async function loadBatchByRunRow(conn, facts, run) {
     tool: row.stitch_tool ? { provider: row.stitch_tool } : undefined,
     createdAt: isoDate(row.created_at)
   }));
+  const stitchReportByOutputId = new Map(stitchReports.map((report) => [report.outputId, report]));
+  outputs = outputs.map((output) => {
+    const report = stitchReportByOutputId.get(output.outputId);
+    if (!report) return output;
+    return {
+      ...output,
+      stitchReportPath: report.reportPath,
+      stitchReportStorageKey: report.reportStorageKey,
+      stitchReportStorageUrl: report.reportStorageUrl
+    };
+  });
   const request = parseJsonValue(run.request_json, {});
+  const capability = parseJsonValue(run.capability_json, {});
   const estimatePayload = parseJsonValue(run.estimate_json, null);
   const estimate = {
     ...(estimatePayload?.estimate || estimatePayload || request.estimate || {}),
@@ -1913,10 +2015,15 @@ async function loadBatchByRunRow(conn, facts, run) {
     userId: facts.username || "mysql",
     projectRoot: projectRoot({ userProjectRoot: "" }) || "current_project",
     templateSnapshot: parseJsonValue(run.template_snapshot_json, null),
-    referenceVideo: referenceSnapshotFromRunRow(run),
+    referenceVideo: withAssetPreviewUrl(referenceSnapshotFromRunRow(run)),
     decomposition: parseJsonValue(run.decomposition_json, null),
     estimate,
     branchDrafts: request.branchDrafts || request.branches || [],
+    previewType: capability.previewType,
+    plans: capability.plans || [],
+    previewConfirmedAt: capability.previewConfirmedAt,
+    previewConfirmedBy: capability.previewConfirmedBy,
+    previewConfirmationNotes: capability.previewConfirmationNotes,
     scripts,
     tasks,
     outputs,
@@ -1946,31 +2053,32 @@ async function loadRemixByRunRow(conn, facts, run) {
   );
   const [taskRows] = await conn.execute(
     `SELECT
-      task_uid,
-      task_kind,
-      status,
-      model_image,
-      model_video,
-      image_task_id,
-      seedance_task_id,
-      provider_job_id,
-      attempts,
-      max_attempts,
-      started_at,
-      finished_at,
-      error_code,
-      error_message,
-      request_summary_json,
-      response_summary_json,
+      wt.task_uid,
+      wt.task_kind,
+      wt.status,
+      wt.model_image,
+      wt.model_video,
+      wt.image_task_id,
+      wt.seedance_task_id,
+      wt.provider_job_id,
+      wt.attempts,
+      wt.max_attempts,
+      wt.started_at,
+      wt.finished_at,
+      wt.error_code,
+      wt.error_message,
+      wt.request_summary_json,
+      wt.response_summary_json,
       prompt_asset.storage_key AS prompt_storage_key,
       prompt_asset.storage_url AS prompt_storage_url,
+      output_asset.storage_relative_path AS output_storage_relative_path,
       output_asset.storage_key AS output_storage_key,
       output_asset.storage_url AS output_storage_url
     FROM workflow_tasks wt
     LEFT JOIN asset_files prompt_asset ON prompt_asset.id = wt.prompt_asset_file_id
     LEFT JOIN asset_files output_asset ON output_asset.id = wt.output_asset_file_id
-    WHERE run_id = ?
-    ORDER BY id ASC`,
+    WHERE wt.run_id = ?
+    ORDER BY wt.id ASC`,
     [run.id]
   );
   const tasks = taskRows.map((row) => taskRowToTask({ ...row, run_uid: run.run_uid }));
@@ -2017,7 +2125,7 @@ async function loadRemixByRunRow(conn, facts, run) {
   const request = parseJsonValue(run.request_json, {});
   const capabilityJson = parseJsonValue(run.capability_json, {});
   const capability = capabilityJson.remixProvider || capabilityJson.provider ? (capabilityJson.remixProvider || capabilityJson) : {};
-  const source = assetRowToRemixSource({
+  const source = withAssetPreviewUrl(assetRowToRemixSource({
     asset_uid: run.source_asset_uid,
     file_name: run.source_file_name,
     mime_type: run.source_mime_type,
@@ -2032,7 +2140,7 @@ async function loadRemixByRunRow(conn, facts, run) {
     storage_url: run.source_storage_url,
     created_at: run.source_created_at,
     updated_at: run.source_updated_at
-  });
+  }));
   const regions = regionRows.map(regionRowToRegion).filter(Boolean);
   const remix = {
     remixId: run.run_uid,
@@ -2099,6 +2207,8 @@ export async function loadBatchDetailFromMysql(context, batchId) {
   }
 }
 
+const REMIX_SOURCE_SUBMIT_LOCKED_STATUSES = ["queued", "running", "qc", "preview_required", "succeeded"];
+
 export async function loadActiveRemixFromMysql(context) {
   const pool = await getPool();
   if (!pool) return null;
@@ -2121,6 +2231,37 @@ export async function loadActiveRemixFromMysql(context) {
     return run ? await loadRemixByRunRow(conn, facts, run) : null;
   } catch (error) {
     console.warn(`[mysql-facts] failed to load active remix: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function loadBlockingRemixForSourceFromMysql(context, sourceId) {
+  const pool = await getPool();
+  if (!pool || !sourceId) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const placeholders = REMIX_SOURCE_SUBMIT_LOCKED_STATUSES.map(() => "?").join(", ");
+    const [rows] = await conn.execute(
+      `SELECT wr.run_uid
+      FROM workflow_runs wr
+      INNER JOIN asset_files af ON af.id = wr.source_asset_file_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_type = 'remix'
+        AND af.asset_uid = ?
+        AND wr.status IN (${placeholders})
+      ORDER BY wr.updated_at DESC, wr.id DESC
+      LIMIT 1`,
+      [facts.projectId, facts.userId, sourceId, ...REMIX_SOURCE_SUBMIT_LOCKED_STATUSES]
+    );
+    if (!rows[0]?.run_uid) return null;
+    const run = await loadRemixRunRows(conn, facts, rows[0].run_uid);
+    return run ? await loadRemixByRunRow(conn, facts, run) : null;
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load blocking remix for source ${sourceId}: ${error.message}`);
     return null;
   } finally {
     conn.release();
@@ -2151,6 +2292,11 @@ function normalizeBoolean(value) {
   return value === true || value === "true" || value === "1";
 }
 
+function normalizeGallerySourceType(query = {}) {
+  const sourceType = String(query.sourceType || query.runType || "").trim();
+  return sourceType === "pipeline" || sourceType === "remix" ? sourceType : "";
+}
+
 export async function loadGalleryItemsFromMysql(context, query = {}) {
   const pool = await getPool();
   if (!pool) return null;
@@ -2158,10 +2304,12 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
   try {
     const facts = await ensureContextFacts(conn, context);
     const pagination = normalizePagination(query);
+    const sourceType = normalizeGallerySourceType(query);
     const params = [facts.projectId, facts.userId];
     const filters = [
       "wr.project_id = ?",
-      "wr.user_id = ?"
+      "wr.user_id = ?",
+      "wo.output_kind <> 'stitch_failed'"
     ];
     if (query.remixId) {
       filters.push("wr.run_type = 'remix'");
@@ -2174,7 +2322,12 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
       params.push(String(query.batchId));
     }
     if (!query.remixId && !query.batchId) {
-      filters.push("wr.run_type IN ('pipeline', 'remix')");
+      if (sourceType) {
+        filters.push("wr.run_type = ?");
+        params.push(sourceType);
+      } else {
+        filters.push("wr.run_type IN ('pipeline', 'remix')");
+      }
     }
     if (normalizeBoolean(query.downloadEligibleOnly)) {
       filters.push("wo.download_eligible = 1");
@@ -2188,6 +2341,8 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
       params.push(String(query.kind));
     }
     const whereClause = filters.join(" AND ");
+    const limit = Number(pagination.pageSize);
+    const offset = Number(pagination.offset);
     const [countRows] = await conn.execute(
       `SELECT COUNT(*) AS total
       FROM workflow_outputs wo
@@ -2236,8 +2391,8 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
       JOIN asset_files af ON af.id = wo.asset_file_id
       WHERE ${whereClause}
       ORDER BY wo.created_at DESC, wo.id DESC
-      LIMIT ? OFFSET ?`,
-      [...params, pagination.pageSize, pagination.offset]
+      LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     const items = rows.map((row) => {
       const template = parseJsonValue(row.template_snapshot_json, {});
@@ -2260,6 +2415,7 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
       filters: {
         ...(query.batchId ? { batchId: String(query.batchId) } : {}),
         ...(query.remixId ? { remixId: String(query.remixId) } : {}),
+        ...(sourceType ? { sourceType } : {}),
         downloadEligibleOnly: normalizeBoolean(query.downloadEligibleOnly),
         ...(query.qcStatus ? { qcStatus: String(query.qcStatus) } : {}),
         ...(query.kind ? { kind: String(query.kind) } : {}),
@@ -2483,7 +2639,7 @@ export async function loadActivePipelineRunFromMysql(context) {
       WHERE project_id = ?
         AND user_id = ?
         AND run_type = 'pipeline'
-        AND status IN ('checking', 'queued', 'running', 'stitching', 'qc')
+        AND status IN ('checking', 'queued', 'running', 'stitching', 'qc', 'preview_required')
       ORDER BY updated_at DESC, id DESC
       LIMIT 1`,
       [facts.projectId, facts.userId]
@@ -2498,8 +2654,132 @@ export async function loadActivePipelineRunFromMysql(context) {
   }
 }
 
+const ACTIVE_TASK_LIST_STATUSES = Object.freeze([
+  "checking",
+  "queued",
+  "running",
+  "stitching",
+  "qc",
+  "preview_required",
+  "partial_failed"
+]);
+
+function taskSummaryFromRunRow(row) {
+  const template = parseJsonValue(row.template_snapshot_json, {});
+  const type = row.run_type === "remix" ? "remix" : "batch";
+  return {
+    taskId: row.run_uid,
+    type,
+    typeLabel: type === "remix" ? "竞品素材改造" : "网赚素材管线",
+    batchId: type === "batch" ? row.run_uid : undefined,
+    remixId: type === "remix" ? row.run_uid : undefined,
+    status: row.status,
+    targetChannel: row.target_channel || template?.draft?.targetChannels?.[0] || "generic",
+    operationType: row.operation_type || "",
+    productName: template?.draft?.productName || template?.displayName || "",
+    createdAt: isoDate(row.created_at),
+    updatedAt: isoDate(row.updated_at),
+    startedAt: isoDate(row.started_at),
+    finishedAt: isoDate(row.finished_at),
+    stopReason: row.stop_reason || "",
+    isActive: ACTIVE_TASK_LIST_STATUSES.includes(row.status)
+  };
+}
+
+function normalizeTaskScope(query = {}) {
+  const scope = String(query.scope || "all").trim();
+  if (scope === "active" || scope === "running") return "active";
+  if (scope === "terminal" || scope === "done") return "terminal";
+  return "all";
+}
+
+function normalizeTaskRunType(query = {}) {
+  const runType = String(query.runType || query.type || "").trim();
+  if (runType === "pipeline" || runType === "batch") return "pipeline";
+  if (runType === "remix") return "remix";
+  return "";
+}
+
+export async function loadWorkflowTasksFromMysql(context, query = {}) {
+  const pool = await getPool();
+  if (!pool) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const pagination = normalizePagination(query);
+    const params = [facts.projectId, facts.userId];
+    const filters = [
+      "wr.project_id = ?",
+      "wr.user_id = ?",
+      "wr.run_type IN ('pipeline', 'remix')"
+    ];
+    const runType = normalizeTaskRunType(query);
+    if (runType) {
+      filters.push("wr.run_type = ?");
+      params.push(runType);
+    }
+    const scope = normalizeTaskScope(query);
+    if (scope === "active") {
+      filters.push(`wr.status IN (${ACTIVE_TASK_LIST_STATUSES.map(() => "?").join(", ")})`);
+      params.push(...ACTIVE_TASK_LIST_STATUSES);
+    } else if (scope === "terminal") {
+      filters.push("wr.status IN ('succeeded', 'failed', 'stopped', 'skipped', 'draft')");
+    }
+    const whereClause = filters.join(" AND ");
+    const limit = Number(pagination.pageSize);
+    const offset = Number(pagination.offset);
+    const [countRows] = await conn.execute(
+      `SELECT COUNT(*) AS total
+      FROM workflow_runs wr
+      WHERE ${whereClause}`,
+      params
+    );
+    const total = Number(countRows[0]?.total || 0);
+    const [rows] = await conn.execute(
+      `SELECT
+        wr.run_uid,
+        wr.run_type,
+        wr.status,
+        wr.operation_type,
+        wr.target_channel,
+        wr.stop_reason,
+        wr.template_snapshot_json,
+        wr.started_at,
+        wr.finished_at,
+        wr.created_at,
+        wr.updated_at
+      FROM workflow_runs wr
+      WHERE ${whereClause}
+      ORDER BY wr.updated_at DESC, wr.id DESC
+      LIMIT ${limit} OFFSET ${offset}`,
+      params
+    );
+    return {
+      items: rows.map(taskSummaryFromRunRow),
+      pagination: paginationMeta(pagination, total)
+    };
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load workflow tasks: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
 function runType(batch) {
   return batch.type === "remix" ? "remix" : "pipeline";
+}
+
+function capabilitySnapshotForBatch(batch) {
+  const base = batch.capabilities || batch.estimate?.capabilities || {};
+  return {
+    ...base,
+    ...(batch.previewType ? { previewType: batch.previewType } : {}),
+    ...(Array.isArray(batch.plans) && batch.plans.length ? { plans: batch.plans } : {}),
+    ...(batch.previewConfirmedAt ? { previewConfirmedAt: batch.previewConfirmedAt } : {}),
+    ...(batch.previewConfirmedBy ? { previewConfirmedBy: batch.previewConfirmedBy } : {}),
+    ...(batch.previewConfirmationNotes ? { previewConfirmationNotes: batch.previewConfirmationNotes } : {})
+  };
 }
 
 function requestSnapshot(batch) {
@@ -2687,9 +2967,38 @@ function outputKind(output) {
   return runType({ type: output.sourceType }) === "remix" ? "remix_video" : "segment_video";
 }
 
+function reportOutputForSync(batch, report) {
+  if (!report?.outputId || !report.reportPath) return null;
+  const existing = (Array.isArray(batch.outputs) ? batch.outputs : []).find((output) => output.outputId === report.outputId);
+  if (existing) return existing;
+  return {
+    outputId: report.outputId,
+    sourceType: "pipeline",
+    kind: "stitch_failed",
+    filePath: report.reportPath,
+    durationSec: null,
+    qcStatus: "fail",
+    downloadEligible: false,
+    visualPreviewRequired: false,
+    previewConfirmed: false,
+    storageKey: report.reportStorageKey,
+    storageUrl: report.reportStorageUrl
+  };
+}
+
 async function syncWorkflowOutputs(conn, facts, batch, runId) {
-  for (const output of Array.isArray(batch.outputs) ? batch.outputs : []) {
+  const reportOutputs = (Array.isArray(batch.stitchReports) ? batch.stitchReports : [])
+    .map((report) => reportOutputForSync(batch, report))
+    .filter(Boolean);
+  const outputs = [
+    ...(Array.isArray(batch.outputs) ? batch.outputs : []),
+    ...reportOutputs
+  ];
+  const seenOutputIds = new Set();
+  for (const output of outputs) {
     if (!output?.outputId || !output?.filePath) continue;
+    if (seenOutputIds.has(output.outputId)) continue;
+    seenOutputIds.add(output.outputId);
     const assetId = await upsertAssetFile(conn, facts, {
       assetUid: `asset_${output.outputId}`,
       storageScope: "user",
@@ -3148,7 +3457,7 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         batch.targetChannel || batch.request?.targetChannel || batch.estimate?.request?.targetChannel || null,
         batch.templateSnapshot ? json(batch.templateSnapshot) : null,
         json(requestSnapshot(batch)),
-        json(batch.capabilities || batch.estimate?.capabilities || {}),
+        json(capabilitySnapshotForBatch(batch)),
         json(batch.qcSummary || {}),
         batch.stopReason || null,
         mysqlDate(batch.startedAt),
@@ -3196,18 +3505,24 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         status: "active"
       }) : null;
       const requestSummary = {
-        ...(task.requestSummary || { batchId: batch.batchId, scriptId: task.scriptId, promptPath: task.promptPath }),
+        ...(task.requestSummary || {}),
+        batchId: batch.batchId,
+        scriptId: task.scriptId,
+        ...(task.promptPath ? { promptPath: task.promptPath } : {}),
         ...(task.branchId ? { branchId: task.branchId } : {}),
         ...(task.branchIndex ? { branchIndex: task.branchIndex } : {}),
         ...(task.branchLabel ? { branchLabel: task.branchLabel } : {}),
         ...(task.branchVariantIndex ? { branchVariantIndex: task.branchVariantIndex } : {}),
         ...(task.segmentIndex ? { segmentIndex: task.segmentIndex } : {}),
+        ...(task.planId ? { planId: task.planId } : {}),
         ...(task.durationSec ? { durationSec: task.durationSec } : {}),
         ...(task.promptStorageKey ? { promptStorageKey: task.promptStorageKey } : {}),
         ...(task.promptStorageUrl ? { promptStorageUrl: task.promptStorageUrl } : {})
       };
       const responseSummary = {
-        ...(task.responseSummary || { outputPath: task.outputPath || null, remoteUrlStored: task.remoteUrlStored }),
+        ...(task.responseSummary || {}),
+        outputPath: task.outputPath || task.responseSummary?.outputPath || null,
+        remoteUrlStored: task.remoteUrlStored ?? task.responseSummary?.remoteUrlStored,
         ...(taskOutput?.outputId ? { outputId: taskOutput.outputId } : {}),
         ...(task.outputStorageKey || taskOutput?.storageKey ? { outputStorageKey: task.outputStorageKey || taskOutput?.storageKey } : {}),
         ...(task.outputStorageUrl || taskOutput?.storageUrl ? { outputStorageUrl: task.outputStorageUrl || taskOutput?.storageUrl } : {})
@@ -3276,7 +3591,7 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
             taskId,
             Number(task.attempts),
             TERMINAL_STATUSES.has(task.status) ? task.status === "succeeded" ? "succeeded" : "failed" : "running",
-            task.provider || "mock",
+            task.provider || "seedance",
             task.seedanceTaskId || task.imageTaskId || null,
             mysqlDate(task.startedAt) || mysqlDate(new Date()),
             mysqlDate(task.finishedAt),

@@ -1,12 +1,15 @@
+import { configuredApiKey } from "./llm-config.mjs";
 import { WangzhuanError } from "./http.mjs";
 
-export const DEFAULT_SEEDANCE_MODEL = "doubao-seedance-2-0-260128";
+export const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
 
 const DEFAULT_TIMEOUT_MS = 600_000;
-const DEFAULT_SUBMIT_PATH = "/contents/generations/tasks";
+const DEFAULT_SUBMIT_PATH = "/seedance/videos/generations";
+const DEFAULT_TASK_POLL_PATH = "/seedance/tasks";
 const SEEDANCE_720P_MODELS = new Set([
   "doubao-seedance-2-0-260128",
   "doubao-seedance-2-0-fast-260128",
+  "dreamina-seedance-2-0-260128",
   "dreamina-seedance-2-0-fast-260128"
 ]);
 const ASSET_KEY_ORDER = Object.freeze([
@@ -65,19 +68,40 @@ export function collectSeedanceMedia(batch = {}, task = {}) {
   return items;
 }
 
-function appendMediaContent(content, media) {
+function referenceTypeFromMediaItem(item = {}) {
+  if (item?.type === "video_url") return "video";
+  if (item?.type === "audio_url") return "audio";
+  return "image";
+}
+
+function buildReferenceItems(media = []) {
+  const items = [];
   for (const item of Array.isArray(media) ? media : []) {
-    const type = item?.type === "video_url" || item?.type === "audio_url" ? item.type : "image_url";
-    const url = cleanString(item?.url || item?.[type]?.url);
+    const url = cleanString(item?.url);
     if (!url) continue;
-    const upstreamItem = {
-      type,
-      [type]: { url }
+    const reference = {
+      type: referenceTypeFromMediaItem(item),
+      url
     };
     const role = cleanString(item?.role);
-    if (role) upstreamItem.role = role;
-    content.push(upstreamItem);
+    if (role) reference.role = role;
+    items.push(reference);
   }
+  return items;
+}
+
+export function resolveSeedanceModel(batch = {}, provider = {}, task = {}) {
+  const draft = batch.templateSnapshot?.draft || {};
+  return cleanString(
+    task?.modelVideo,
+    cleanString(
+      batch.estimate?.request?.seedanceModel,
+      cleanString(
+        draft.seedanceModel,
+        cleanString(provider?.config?.model, cleanString(provider?.model, DEFAULT_SEEDANCE_MODEL))
+      )
+    )
+  );
 }
 
 export function buildSeedanceGenerationPayload({
@@ -97,21 +121,20 @@ export function buildSeedanceGenerationPayload({
 } = {}) {
   const promptText = cleanString(prompt);
   const normalizedModel = cleanString(model, DEFAULT_SEEDANCE_MODEL);
-  const content = [];
-  if (promptText) content.push({ type: "text", text: promptText });
-  appendMediaContent(content, media);
+  const references = buildReferenceItems(media);
   const payload = {
     model: normalizedModel,
-    content
+    prompt: promptText,
+    duration: Number(duration)
   };
-  const normalizedMode = cleanString(mode, content.some((item) => item.type !== "text") ? "omni_reference" : "text_to_video");
+  const normalizedMode = cleanString(mode, references.length ? "omni_reference" : "text_to_video");
   if (normalizedMode) payload.mode = normalizedMode;
   const normalizedResolution = normalizeResolution(normalizedModel, resolution);
   if (normalizedResolution) payload.resolution = normalizedResolution;
   if (ratio) payload.ratio = ratio;
-  if (duration !== undefined && duration !== null) payload.duration = Number(duration);
   payload.watermark = watermark === undefined || watermark === null ? false : Boolean(watermark);
   if (generateAudio !== undefined && generateAudio !== null) payload.generate_audio = Boolean(generateAudio);
+  if (references.length) payload.references = references;
   if (seed !== undefined && seed !== null && seed !== "") payload.seed = Number(seed);
   if (cameraFixed !== undefined && cameraFixed !== null) payload.camera_fixed = Boolean(cameraFixed);
   if (returnLastFrame !== undefined && returnLastFrame !== null) payload.return_last_frame = Boolean(returnLastFrame);
@@ -125,16 +148,17 @@ function configuredProvider(context = {}, capability = {}) {
   const config = context.config?.wangzhuan?.seedanceProvider && typeof context.config.wangzhuan.seedanceProvider === "object"
     ? context.config.wangzhuan.seedanceProvider
     : {};
-  const apiKeyEnv = cleanString(capability.apiKeyEnv, cleanString(config.apiKeyEnv, "VIDEO_AIGC_API_KEY"));
+  const apiKeyEnv = cleanString(capability.apiKeyEnv, cleanString(config.apiKeyEnv, "WANGZHUAN_LLM_API_KEY"));
   const apiKey = cleanString(
     capability.apiKey,
-    cleanString(config.apiKey, cleanString(process.env.WANGZHUAN_SEEDANCE_API_KEY, cleanString(process.env[apiKeyEnv])))
+    cleanString(config.apiKey, cleanString(process.env.WANGZHUAN_SEEDANCE_API_KEY, configuredApiKey({ apiKeyEnv, apiKey: config.apiKey })))
   );
   const timeoutMs = positiveNumber(capability.timeoutMs ?? config.timeoutMs, DEFAULT_TIMEOUT_MS);
   return {
     provider: cleanString(capability.provider, cleanString(config.provider, "seedance")),
     endpoint: cleanString(capability.endpoint, cleanString(config.endpoint, cleanString(process.env.WANGZHUAN_SEEDANCE_ENDPOINT))).replace(/\/+$/, ""),
     submitPath: cleanString(capability.submitPath, cleanString(config.submitPath, DEFAULT_SUBMIT_PATH)),
+    taskPollPath: cleanString(capability.taskPollPath, cleanString(config.taskPollPath, DEFAULT_TASK_POLL_PATH)),
     model: cleanString(capability.model, cleanString(config.model, cleanString(process.env.WANGZHUAN_SEEDANCE_MODEL, DEFAULT_SEEDANCE_MODEL))),
     apiKeyEnv,
     apiKey,
@@ -200,11 +224,19 @@ async function readJsonResponse(response, provider, operation) {
   return payload;
 }
 
+function unwrapUpstreamPayload(payload = {}) {
+  if (payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
+    return payload.data;
+  }
+  return payload;
+}
+
 export function parseSeedanceSubmitResponse(payload = {}) {
-  const taskId = cleanString(payload.id, cleanString(payload.task_id, cleanString(payload.taskId)));
+  const body = unwrapUpstreamPayload(payload);
+  const taskId = cleanString(body.task_id, cleanString(body.id, cleanString(body.taskId)));
   return {
     taskId,
-    status: cleanString(payload.status, "queued"),
+    status: cleanString(body.status, "queued"),
     responsePayload: payload
   };
 }
@@ -219,9 +251,9 @@ export function normalizeSeedanceTaskStatus(status = "") {
   return "queued";
 }
 
-export function seedanceTaskUrl(endpoint, taskId, submitPath = DEFAULT_SUBMIT_PATH) {
-  const base = seedanceSubmitUrl(endpoint, submitPath).replace(/\/+$/, "");
-  return `${base}/${encodeURIComponent(cleanString(taskId))}`;
+export function seedanceTaskUrl(endpoint, taskId, taskPollPath = DEFAULT_TASK_POLL_PATH) {
+  const base = `${cleanString(endpoint).replace(/\/+$/, "")}/${cleanString(taskPollPath, DEFAULT_TASK_POLL_PATH).replace(/^\/+/, "")}`;
+  return `${base.replace(/\/+$/, "")}/${encodeURIComponent(cleanString(taskId))}`;
 }
 
 function nestedVideoUrl(value, depth = 0) {
@@ -249,16 +281,21 @@ function nestedVideoUrl(value, depth = 0) {
 }
 
 export function extractSeedanceVideoUrl(payload = {}) {
+  const previewUrl = cleanString(payload.preview_url);
+  if (/^https?:\/\//i.test(previewUrl)) return previewUrl;
+  const result = payload.result;
+  if (typeof result === "string" && /^https?:\/\//i.test(result)) return result;
   return nestedVideoUrl(payload);
 }
 
 export function parseSeedancePollResponse(payload = {}) {
-  const taskId = cleanString(payload.id, cleanString(payload.task_id, cleanString(payload.taskId)));
-  const status = normalizeSeedanceTaskStatus(payload.status || payload.state || payload.task_status);
+  const body = unwrapUpstreamPayload(payload);
+  const taskId = cleanString(body.id, cleanString(body.task_id, cleanString(body.taskId)));
+  const status = normalizeSeedanceTaskStatus(body.status || body.state || body.task_status);
   return {
     taskId,
     status,
-    videoUrl: extractSeedanceVideoUrl(payload),
+    videoUrl: extractSeedanceVideoUrl(body),
     responsePayload: payload
   };
 }
@@ -286,9 +323,10 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
   const config = configuredProvider(context, capability);
   if (!config.endpoint) return null;
   if (!config.apiKey) {
-    throw upstreamError("未配置 Seedance API Key", {
+    throw upstreamError(`未配置 Seedance API Key，请在环境变量 ${config.apiKeyEnv}、WANGZHUAN_SEEDANCE_API_KEY 或 LLM 共用 Skylink 密钥中配置后重启服务`, {
       provider: config.provider,
-      apiKeyEnv: config.apiKeyEnv
+      apiKeyEnv: config.apiKeyEnv,
+      upstreamMessage: `未配置 Seedance API Key，请在环境变量 ${config.apiKeyEnv} 中配置 Skylink project API Key 后重启服务`
     });
   }
   const fetchImpl = context.fetch || globalThis.fetch;
@@ -305,6 +343,7 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
     provider: config.provider,
     model: config.model,
     submitPath: config.submitPath,
+    taskPollPath: config.taskPollPath,
     endpoint: config.endpoint,
     config,
     async createTask(payload) {
@@ -316,7 +355,7 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
       return parseSeedanceSubmitResponse(await readJsonResponse(response, config.provider, "create_seedance_task"));
     },
     async getTask(taskId) {
-      const response = await fetchWithTimeout(fetchImpl, seedanceTaskUrl(config.endpoint, taskId, config.submitPath), {
+      const response = await fetchWithTimeout(fetchImpl, seedanceTaskUrl(config.endpoint, taskId, config.taskPollPath), {
         method: "GET",
         headers: authHeaders(config.apiKey)
       }, config.timeoutMs, config.provider);
@@ -345,13 +384,15 @@ export function summarizeSeedanceRequest(payload, provider = {}) {
     provider: cleanString(provider.provider, "seedance"),
     model: payload?.model || "",
     submitPath: provider.submitPath || provider.config?.submitPath || DEFAULT_SUBMIT_PATH,
+    taskPollPath: provider.taskPollPath || provider.config?.taskPollPath || DEFAULT_TASK_POLL_PATH,
     mode: payload?.mode || "",
     ratio: payload?.ratio || "",
     duration: payload?.duration,
     resolution: payload?.resolution || "",
     generate_audio: payload?.generate_audio,
     watermark: payload?.watermark,
-    content: Array.isArray(payload?.content) ? payload.content : []
+    prompt: payload?.prompt || "",
+    references: Array.isArray(payload?.references) ? payload.references : []
   };
 }
 

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 任务管理</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="wz-body">
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <a class="topbar-link" href="/wangzhuan.html">网赚素材管线</a>
+        <a class="topbar-link" href="/competitor-remix.html">竞品素材改造</a>
+      </nav>
+      <div class="topbar-account">
+        <a class="topbar-account-link active" href="/wangzhuan-tasks.html" aria-current="page">任务管理</a>
+        <span id="wzTasksUserBadge">未登录</span>
+        <button id="wzTasksLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/wangzhuan.html">
+          <span>▣</span>
+          <b>网赚素材管线</b>
+        </a>
+        <a class="platform-nav-item" href="/competitor-remix.html">
+          <span>◇</span>
+          <b>竞品素材改造</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>网赚平台</small>
+      </div>
+    </aside>
+
+    <main class="app wz-app wz-tasks-app">
+      <section class="operation-pane">
+        <div id="wzTasksGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
+
+        <header class="wz-tasks-head">
+          <div>
+            <h1>任务管理</h1>
+            <p>查看进行中的素材管线批次与竞品改造任务，在此确认预案、停止任务或前往工作台继续编辑。</p>
+          </div>
+          <button id="wzTasksRefreshBtn" class="mini ghost" type="button">刷新列表</button>
+        </header>
+
+        <div class="wz-tasks-layout">
+          <section class="wz-tasks-list-pane" aria-label="任务列表">
+            <div class="wz-tasks-filters" role="tablist" aria-label="任务状态">
+              <button id="wzTasksScopeActive" class="wz-tasks-filter active" type="button" data-scope="active">进行中</button>
+              <button id="wzTasksScopeAll" class="wz-tasks-filter" type="button" data-scope="all">全部</button>
+              <button id="wzTasksScopeDone" class="wz-tasks-filter" type="button" data-scope="terminal">已完成</button>
+            </div>
+            <div class="wz-tasks-type-filters" role="tablist" aria-label="任务类型">
+              <button id="wzTasksTypeAll" class="wz-tasks-type-filter active" type="button" data-run-type="">全部类型</button>
+              <button id="wzTasksTypePipeline" class="wz-tasks-type-filter pipeline" type="button" data-run-type="pipeline">网赚素材管线</button>
+              <button id="wzTasksTypeRemix" class="wz-tasks-type-filter remix" type="button" data-run-type="remix">竞品素材改造</button>
+            </div>
+            <div id="wzTasksList" class="wz-list empty-line">加载中…</div>
+            <div id="wzTasksPager" class="wz-gallery-pager" hidden></div>
+          </section>
+
+          <section class="wz-tasks-detail-pane" aria-label="任务详情">
+            <div id="wzTasksDetailEmpty" class="wz-list empty-line">从左侧选择一个任务查看详情</div>
+            <div id="wzTasksDetail" hidden></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="wzTasksLoginModal" class="modal-backdrop login-backdrop" hidden>
+      <div class="modal-panel login-panel">
+        <h2>登录 Touka AI素材中台</h2>
+        <p>登录后可查看与管理任务。</p>
+        <label>账号 <input id="wangzhuanLoginUsername" type="text" autocomplete="username" /></label>
+        <label>密码 <input id="wangzhuanLoginPassword" type="password" autocomplete="current-password" /></label>
+        <div class="login-status"></div>
+        <div class="modal-actions">
+          <button id="wangzhuanLoginBtn" type="button">登录</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/wangzhuan-tasks.js" type="module"></script>
+  </body>
+</html>

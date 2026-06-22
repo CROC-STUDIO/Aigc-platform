@@ -84,6 +84,10 @@ export function makeGenerationTaskId(batchId, seq) {
   return `gen_${batchShortId(batchId)}_${pad(seq, 3)}`;
 }
 
+export function makePlanId(batchId, seq) {
+  return `plan_${batchShortId(batchId)}_${pad(seq, 3)}`;
+}
+
 export function makeOutputId(batchId, seq) {
   return `out_${batchShortId(batchId)}_${pad(seq, 3)}`;
 }

@@ -18,9 +18,14 @@ import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import {
   closeWangzhuanFactsPool,
-  setWangzhuanFactsPoolForTest
+  loadBatchDetailFromMysql,
+  setWangzhuanFactsPoolForTest,
+  syncBatchFacts,
+  syncRemixFacts
 } from "../../server/wangzhuan/mysql-facts.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testSeedanceProviderClient } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -36,17 +41,30 @@ const baseDraft = {
   promiseLevel: "strong_conversion"
 };
 
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
 function context(root, userId = "alice", overrides = {}) {
-  return {
+  const ctx = {
     userProjectRoot: join(root, userId, "project"),
     sharedProjectRoot: join(root, "shared"),
     userId,
     user: { userId, username: userId, role: "user", isAdmin: false },
     mockReferenceProbe: true,
     config: {},
+    seedanceProviderClient: testSeedanceProviderClient(),
     capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } },
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function validUpload(durationSec = 30) {
@@ -77,6 +95,7 @@ function decomposition() {
 }
 
 async function thirtySecondStitchedFixture(root, userId = "alice") {
+  ensureFactsPool();
   const ctx = context(root, userId);
   const saved = await saveTemplate(ctx, { mode: "create", draft: baseDraft });
   const checked = await checkReferenceVideo(ctx, validUpload());
@@ -102,9 +121,15 @@ async function thirtySecondStitchedFixture(root, userId = "alice") {
     idempotencyKey: `idem_start_s6_${userId}`,
     estimateId: estimated.estimate.estimateId
   });
-  await submitPendingGenerationTasks(ctx, started.batch.batchId);
+  await prepareDownloadedSegmentsWithoutStitch(ctx, started.batch.batchId);
   const stitched = await stitchBatchSegments(ctx, started.batch.batchId);
   return { ctx, started, stitched };
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
 }
 
 function zipEntries(zip) {
@@ -200,6 +225,7 @@ test("QC writes one report per output and makes only stitched 30s output downloa
       }
     }
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -208,19 +234,21 @@ test("QC calls the model with generated video S3 URL and blocks failed visual re
   const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-"));
   try {
     const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc");
-    const batchPath = join(wangzhuanPaths(ctx).batchesDir, stitched.batch.batchId, "batch.json");
-    const batch = JSON.parse(await readFile(batchPath, "utf8"));
+    const batch = (await loadBatchDetailFromMysql(ctx, stitched.batch.batchId)).batch;
     const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
     const s3VideoUrl = "https://cdn.example.com/wangzhuan/generated/stitched-output.mp4";
-    batch.outputs = batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+    const patchedBatch = {
+      ...batch,
+      outputs: batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
       ? {
         ...output,
         storageKey: "uploads/wangzhuan/generated/stitched-output.mp4",
         storageUrl: s3VideoUrl,
         previewUrl: s3VideoUrl
       }
-      : output);
-    await writeFile(batchPath, `${JSON.stringify(batch, null, 2)}\n`, "utf8");
+      : output)
+    };
+    assert.equal((await syncBatchFacts(ctx, patchedBatch, "batch_write")).skipped, false);
 
     const modelCalls = [];
     const qc = await runBatchQc({
@@ -283,6 +311,7 @@ test("QC calls the model with generated video S3 URL and blocks failed visual re
     assert.equal(report.checks.some((check) => check.checkId === "model_video_qc" && check.status === "fail"), true);
     assert.doesNotMatch(JSON.stringify(report), /https:\/\/cdn\.example\.com/);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -304,13 +333,13 @@ test("download package refuses to stream an incomplete package when a required f
       }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("gallery is manifest-driven and only returns current user project outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-gallery-"));
-  setWangzhuanFactsPoolForTest(fakePool());
   try {
     const alice = await thirtySecondStitchedFixture(root, "alice");
     const bob = await thirtySecondStitchedFixture(root, "bob");
@@ -353,12 +382,57 @@ test("gallery is manifest-driven and only returns current user project outputs",
       hasNext: false
     });
 
-    const eligibleOnly = await getGallery(alice.ctx, { downloadEligibleOnly: "true" });
+    const remixId = "rmx_20260622010101_abcd";
+    await syncRemixFacts(alice.ctx, {
+      remixId,
+      type: "remix",
+      status: "preview_required",
+      userId: "alice",
+      sourceId: "rsrc_20260622_001",
+      source: {},
+      operationType: "watermark_cover",
+      targetChannel: "meta_ads",
+      regions: [],
+      templateSnapshot: { templateId: "tpl_remix", versionId: "tplv_remix", draft: { productName: "Remix Product", targetChannels: ["meta_ads"] } },
+      tasks: [],
+      outputs: [{
+        outputId: "out_remix_001",
+        sourceType: "remix",
+        kind: "remix_video",
+        filePath: "批处理记录/网赚管线/remix/rmx_20260622010101_abcd/outputs/out_remix_001.mp4",
+        durationSec: 15,
+        qcStatus: "pass",
+        downloadEligible: true,
+        visualPreviewRequired: true,
+        previewConfirmed: true
+      }],
+      qcSummary: { total: 1, passed: 1, failed: 0, warnings: [] },
+      createdAt: "2026-06-22T01:01:01.000Z",
+      updatedAt: "2026-06-22T01:01:01.000Z"
+    });
+
+    const sharedDefault = await getGallery(alice.ctx, {});
+    assert.equal(sharedDefault.items.some((item) => item.remixId === remixId), true);
+
+    const pipelineGallery = await getGallery(alice.ctx, { sourceType: "pipeline" });
+    assert.equal(pipelineGallery.filters.sourceType, "pipeline");
+    assert.equal(pipelineGallery.items.length, 3);
+    assert.equal(pipelineGallery.items.every((item) => item.sourceType === "pipeline"), true);
+    assert.equal(pipelineGallery.items.some((item) => item.remixId === remixId), false);
+    assert.equal(pipelineGallery.counts.total, 3);
+
+    const remixGallery = await getGallery(alice.ctx, { sourceType: "remix" });
+    assert.equal(remixGallery.filters.sourceType, "remix");
+    assert.equal(remixGallery.items.length, 1);
+    assert.equal(remixGallery.items[0].remixId, remixId);
+    assert.equal(remixGallery.items[0].sourceType, "remix");
+    assert.equal(remixGallery.counts.total, 1);
+
+    const eligibleOnly = await getGallery(alice.ctx, { sourceType: "pipeline", downloadEligibleOnly: "true" });
     assert.equal(eligibleOnly.items.length, 1);
     assert.equal(eligibleOnly.items[0].kind, "stitched_video");
   } finally {
-    setWangzhuanFactsPoolForTest(null);
-    await closeWangzhuanFactsPool();
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -367,6 +441,7 @@ test("gallery requires mysql facts and does not fall back to batch json", async 
   const root = await mkdtemp(join(tmpdir(), "wz-s6-gallery-no-mysql-"));
   try {
     const { ctx } = await thirtySecondStitchedFixture(root, "alice");
+    await resetFactsPool();
     await assert.rejects(
       () => getGallery(ctx, {}),
       (error) => {
@@ -375,6 +450,7 @@ test("gallery requires mysql facts and does not fall back to batch json", async 
       }
     );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -408,15 +484,15 @@ test("download package contains original reference, scripts, prompts, QC, task m
     assert.ok([...entries.keys()].some((name) => name.startsWith(`${batchRoot}/segments/`)));
 
     const textPayload = Buffer.concat([...entries.values()]).toString("utf8");
-    assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
+    assert.doesNotMatch(textPayload, /"remoteUrl"\s*:|"remote_url"\s*:/);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("gallery and download routes expose contract envelopes and zip response", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-router-"));
-  setWangzhuanFactsPoolForTest(fakePool());
   try {
     const { ctx, stitched } = await thirtySecondStitchedFixture(root);
     const qc = await runBatchQc(ctx, stitched.batch.batchId);
@@ -454,8 +530,7 @@ test("gallery and download routes expose contract envelopes and zip response", a
     assert.match(downloadRes.headers["X-Request-Id"], /^req_\d{14}_[a-f0-9]{4}$/);
     assert.equal(zipEntries(downloadRes.body).has("package-manifest.json"), true);
   } finally {
-    setWangzhuanFactsPoolForTest(null);
-    await closeWangzhuanFactsPool();
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

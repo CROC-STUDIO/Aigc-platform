@@ -1,12 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import {
-  appendEvent,
-  readBatch,
-  writeBatch,
-  writeTaskMaps
-} from "./pipeline.mjs";
+import { readBatch, writeBatch, writeTaskMaps } from "./pipeline.mjs";
 import {
   createSeedanceProviderClient,
   normalizeSeedanceTaskStatus,
@@ -14,6 +9,7 @@ import {
 } from "./seedance-provider.mjs";
 import { finalizeFifteenSecondBatch, stitchBatchSegments } from "./stitch.mjs";
 import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
+import { WangzhuanError } from "./http.mjs";
 
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
 
@@ -25,7 +21,7 @@ function taskSegmentPath(context, batchId, generationTaskId) {
   return join(wangzhuanPaths(context).batchesDir, batchId, "segments", `${generationTaskId}.mp4`);
 }
 
-function isMockGenerationTask(task = {}) {
+function isLegacyMockGenerationTask(task = {}) {
   if (task.provider === "mock") return true;
   const seedanceTaskId = String(task.seedanceTaskId || "");
   return seedanceTaskId.startsWith("mock_");
@@ -58,35 +54,26 @@ async function writeSegmentBuffer(context, batchId, generationTaskId, buffer) {
 }
 
 async function pollGenerationTask(context, batch, task, provider, now) {
-  if (isMockGenerationTask(task)) {
-    const outputPath = await writeSegmentBuffer(
-      context,
-      batch.batchId,
-      task.generationTaskId,
-      Buffer.from([
-        "mock segment video",
-        `batch=${batch.batchId}`,
-        `task=${task.generationTaskId}`,
-        `seedance=${task.seedanceTaskId || ""}`
-      ].join("\n"))
-    );
+  if (isLegacyMockGenerationTask(task)) {
     return {
       ...task,
-      status: "downloaded",
-      outputPath,
-      remoteUrlStored: false,
+      status: "failed",
       finishedAt: now,
+      errorCode: "upstream_failed",
+      errorMessage: "任务使用了 Mock 提交，无法轮询真实上游",
       responseSummary: {
         ...(task.responseSummary || {}),
-        status: "succeeded",
-        upstreamStatus: "succeeded",
-        mock: true
+        status: "failed",
+        upstreamStatus: "failed"
       }
     };
   }
 
   if (!provider?.getTask) {
-    throw new Error("Seedance provider 未配置 poll 能力");
+    throw new WangzhuanError("upstream_failed", "Seedance provider 未配置 poll 能力", {
+      generationTaskId: task.generationTaskId,
+      batchId: batch.batchId
+    });
   }
 
   const polled = await provider.getTask(task.seedanceTaskId || task.providerJobId);
@@ -117,24 +104,28 @@ async function pollGenerationTask(context, batch, task, provider, now) {
     };
   }
 
-  let outputPath = task.outputPath || "";
-  if (polled.videoUrl && provider.downloadVideo) {
-    const buffer = await provider.downloadVideo(polled.videoUrl);
-    outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
-  } else if (!outputPath) {
-    outputPath = await writeSegmentBuffer(
-      context,
-      batch.batchId,
-      task.generationTaskId,
-      Buffer.from(`seedance placeholder\nbatch=${batch.batchId}\ntask=${task.generationTaskId}\n`)
-    );
+  if (!polled.videoUrl || typeof provider.downloadVideo !== "function") {
+    return {
+      ...task,
+      status: "failed",
+      finishedAt: now,
+      errorCode: "upstream_failed",
+      errorMessage: polled.videoUrl ? "Seedance provider 未配置视频下载能力" : "Seedance 上游未返回视频地址",
+      responseSummary: {
+        ...(task.responseSummary || {}),
+        ...responseSummary
+      }
+    };
   }
+
+  const buffer = await provider.downloadVideo(polled.videoUrl);
+  const outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
 
   return {
     ...task,
     status: "downloaded",
     outputPath,
-    remoteUrlStored: Boolean(polled.videoUrl),
+    remoteUrlStored: true,
     finishedAt: now,
     responseSummary: {
       ...(task.responseSummary || {}),
@@ -186,7 +177,6 @@ export async function pollUpstreamBatch(context, batchId) {
   if (tasksChanged) {
     batch = await writeBatch(context, { ...batch, tasks: nextTasks });
     await writeTaskMaps(context, batch);
-    await appendEvent(context, batchId, { event: "upstream_polled", polledCount });
   }
 
   const durationSec = Number(batch.estimate?.durationSec || 15);

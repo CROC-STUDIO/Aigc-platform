@@ -8,9 +8,37 @@ import {
   checkReferenceVideo,
   draftReferenceVideoDecomposition,
   decomposeReferenceVideo,
+  getReferenceVideoWorkflowState,
   loadReferenceVideoProbe,
   validateVideoDecomposition
 } from "../../server/wangzhuan/reference-videos.mjs";
+import {
+  closeWangzhuanFactsPool,
+  setWangzhuanFactsPoolForTest,
+  syncReferenceVideoFact
+} from "../../server/wangzhuan/mysql-facts.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
+
+test.afterEach(async () => {
+  await resetFactsPool();
+});
 
 const baseVideo = Buffer.from("fake mp4 bytes");
 
@@ -19,7 +47,8 @@ function dataUrl(buffer = baseVideo, mimeType = "video/mp4") {
 }
 
 function context(root, config = {}) {
-  return {
+  ensureFactsPool();
+  const ctx = {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
@@ -28,6 +57,20 @@ function context(root, config = {}) {
     extractReferenceFrames: async () => [],
     config
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
+}
+
+async function persistPatchedProbe(ctx, referenceVideo, patch) {
+  const patched = {
+    ...referenceVideo,
+    ...patch
+  };
+  const probePath = join(ctx.userProjectRoot, dirname(referenceVideo.storedPath), "probe.json");
+  await writeFile(probePath, `${JSON.stringify(patched, null, 2)}\n`, "utf8");
+  const synced = await syncReferenceVideoFact(ctx, patched);
+  assert.equal(synced.skipped, false);
+  return patched;
 }
 
 function validUpload(overrides = {}) {
@@ -200,6 +243,25 @@ test("validates and stores a manual decomposition for a checked reference video"
   }
 });
 
+test("returns workflow state with confirmed decomposition after decompose", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-workflow-state-"));
+  try {
+    const ctx = context(root);
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    await decomposeReferenceVideo(ctx, {
+      idempotencyKey: "idem_workflow_state",
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      decomposition: validDecomposition()
+    });
+    const state = await getReferenceVideoWorkflowState(ctx, checked.referenceVideo.referenceVideoId);
+    assert.equal(state.referenceVideo.referenceVideoId, checked.referenceVideo.referenceVideoId);
+    assert.equal(state.decompositionConfirmed, true);
+    assert.equal(state.decomposition.hook, validDecomposition().hook);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("drafts reference video decomposition by calling configured llm", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-"));
   try {
@@ -216,11 +278,11 @@ test("drafts reference video decomposition by calling configured llm", async () 
       callWangzhuanLlm: async ({ messages, llmConfig, referenceVideo, visionInputs }) => {
         assert.equal(llmConfig.model, "gpt-5.4");
         assert.equal(llmConfig.timeoutMs, 180000);
-        assert.equal(referenceVideo.fileDataUrl.startsWith("data:video/mp4;base64,"), true);
+        assert.match(referenceVideo.storageUrl, /^https:\/\//);
         assert.equal(visionInputs.frames.length, 2);
         const userContent = messages.find((item) => item.role === "user").content;
         assert.equal(Array.isArray(userContent), true);
-        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_data?.startsWith("data:video/mp4;base64,")), true);
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_url?.startsWith("https://")), true);
         assert.equal(userContent.filter((part) => part.type === "image_url").length, 2);
         assert.match(userContent.map((part) => part.text || "").join("\n"), /Cash Demo\.mp4/);
         return JSON.stringify(validDecomposition({
@@ -302,12 +364,10 @@ test("draft decomposition sends S3 video URL and sampled frames to the model gat
     };
     const checked = await checkReferenceVideo(ctx, validUpload());
     const s3VideoUrl = "https://cdn.example.com/uploads/reference/ref_20260618_001/original.mp4";
-    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
-    await writeFile(probePath, `${JSON.stringify({
-      ...checked.referenceVideo,
+    await persistPatchedProbe(ctx, checked.referenceVideo, {
       storageKey: "uploads/reference/ref_20260618_001/original.mp4",
       storageUrl: s3VideoUrl
-    }, null, 2)}\n`, "utf8");
+    });
 
     const result = await draftReferenceVideoDecomposition(ctx, {
       referenceVideoId: checked.referenceVideo.referenceVideoId,
@@ -373,12 +433,10 @@ test("draft decomposition converts relative proxy storage URL into a direct S3 U
     };
     const checked = await checkReferenceVideo(ctx, validUpload());
     const storageKey = "uploads/PROJECT_ROOT_P/users/admin/批处理记录/网赚管线/reference-videos/ref_20260618_017/original.mp4";
-    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
-    await writeFile(probePath, `${JSON.stringify({
-      ...checked.referenceVideo,
+    await persistPatchedProbe(ctx, checked.referenceVideo, {
       storageKey,
       storageUrl: `/api/public/assets/${encodeURIComponent(storageKey)}`
-    }, null, 2)}\n`, "utf8");
+    });
 
     const result = await draftReferenceVideoDecomposition(ctx, {
       referenceVideoId: checked.referenceVideo.referenceVideoId,
@@ -430,12 +488,10 @@ test("draft decomposition exposes S3 video URL to custom llm callers", async () 
       }
     };
     const checked = await checkReferenceVideo(ctx, validUpload());
-    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
-    await writeFile(probePath, `${JSON.stringify({
-      ...checked.referenceVideo,
+    await persistPatchedProbe(ctx, checked.referenceVideo, {
       storageKey: "uploads/reference/custom/original.mp4",
       storageUrl: s3VideoUrl
-    }, null, 2)}\n`, "utf8");
+    });
 
     const result = await draftReferenceVideoDecomposition(ctx, {
       referenceVideoId: checked.referenceVideo.referenceVideoId,
@@ -473,12 +529,10 @@ test("draft decomposition dumps the redacted model request by request id", async
       ]
     };
     const checked = await checkReferenceVideo(ctx, validUpload());
-    const probePath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
-    await writeFile(probePath, `${JSON.stringify({
-      ...checked.referenceVideo,
+    await persistPatchedProbe(ctx, checked.referenceVideo, {
       storageKey: "uploads/reference/debug/original.mp4",
       storageUrl: s3VideoUrl
-    }, null, 2)}\n`, "utf8");
+    });
 
     await draftReferenceVideoDecomposition(ctx, {
       referenceVideoId: checked.referenceVideo.referenceVideoId,
@@ -684,7 +738,7 @@ test("draft decomposition maps Chinese llm field names to contract fields", asyn
   }
 });
 
-test("draft decomposition stringifies object values returned for contract fields", async () => {
+test("draft decomposition flattens object values returned for contract fields", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-object-values-"));
   try {
     const ctx = {
@@ -709,6 +763,8 @@ test("draft decomposition stringifies object values returned for contract fields
     assert.match(result.decomposition.scene, /short-form vertical ad scene/);
     assert.match(result.decomposition.subject, /reward cue/);
     assert.match(result.decomposition.hook, /show reward immediately/);
+    assert.doesNotMatch(result.decomposition.scene, /^[\[{]/);
+    assert.doesNotMatch(result.decomposition.subject, /^[\[{]/);
     assert.deepEqual(result.decomposition.missingFields, []);
   } finally {
     await rm(root, { recursive: true, force: true });

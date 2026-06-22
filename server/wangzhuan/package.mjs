@@ -4,8 +4,8 @@ import { basename, extname, join, resolve } from "node:path";
 
 import { makePackageId } from "./ids.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { loadRemixDetailFromMysql, syncDownloadPackageFact } from "./mysql-facts.mjs";
-import { openWangzhuanObjectStream, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, loadRemixDetailFromMysql, syncDownloadPackageFact } from "./mysql-facts.mjs";
+import { openWangzhuanObjectStream } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 function currentUserId(context) {
@@ -38,9 +38,12 @@ function resolveUserPath(context, relativePath) {
 
 async function readBatch(context, batchId) {
   validateBatchId(batchId);
-  const target = join(wangzhuanPaths(context).batchesDir, batchId, "batch.json");
-  if (!existsSync(target)) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
-  const batch = JSON.parse(await readFile(target, "utf8"));
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
+  }
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  const batch = detail?.batch;
+  if (!batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   if (batch.userId !== currentUserId(context) && context.user?.role !== "admin" && !context.user?.isAdmin) {
     throw new WangzhuanError("permission_denied", "当前账号无权访问该批次", { batchId });
   }
@@ -482,8 +485,10 @@ export async function buildDownloadPackage(context, request = {}) {
   }
 
   addStringFile(files, "package-manifest.json", manifest);
-  await writeAtomicJson(join(wangzhuanPaths(context).batchesDir, "packages", `${manifest.packageId}.manifest.json`), manifest);
-  await syncDownloadPackageFact(context, manifest);
+  const synced = await syncDownloadPackageFact(context, manifest);
+  if (synced?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存下载包记录");
+  }
   await recordTelemetryEvent(context, "batch_downloaded", {
     packageId: manifest.packageId,
     batchIds,

@@ -10,6 +10,7 @@ import {
   projectStorageDescriptor,
   uploadProjectAsset
 } from "../object-storage.mjs";
+import { WangzhuanError } from "./http.mjs";
 
 const PIPELINE_DIR = "网赚管线";
 const RECORD_DIR = "批处理记录";
@@ -25,17 +26,12 @@ export function wangzhuanPaths(context) {
   return {
     sharedRoot,
     userRoot,
-    templatesPath: join(sharedRoot, "templates.json"),
-    channelRulesPath: join(sharedRoot, "channel-rules.json"),
-    auditPath: join(sharedRoot, "audit.jsonl"),
-    telemetryPath: join(userRoot, "telemetry.jsonl"),
     referenceVideosDir: join(userRoot, "reference-videos"),
     estimatesDir: join(userRoot, "estimates"),
     batchesDir: join(userRoot, "batches"),
     remixSourcesDir: join(userRoot, "remix-sources"),
     remixEstimatesDir: join(userRoot, "remix-estimates"),
-    remixDir: join(userRoot, "remix"),
-    idempotencyDir: join(userRoot, "idempotency")
+    remixDir: join(userRoot, "remix")
   };
 }
 
@@ -54,20 +50,53 @@ function localPreviewUrl(relativePath) {
   return `/file?path=${encodeURIComponent(relativePath)}`;
 }
 
-export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhuan_file") {
-  if (typeof context.syncWangzhuanAsset === "function") {
-    return context.syncWangzhuanAsset({ fullPath, assetKind });
+function assertSyncedObjectStorage(storage, assetKind, { required = false } = {}) {
+  if (!required) return storage;
+  if (!storage?.storageKey || !storage?.storageUrl) {
+    throw new WangzhuanError("object_storage_upload_failed", "产品素材上传到 S3 失败", {
+      assetKind,
+      storageKey: storage?.storageKey || "",
+      storageUrl: storage?.storageUrl || ""
+    });
   }
-  if (!objectStorageEnabled()) return null;
+  if (!/^https:\/\//i.test(String(storage.storageUrl))) {
+    throw new WangzhuanError("object_storage_upload_failed", "S3 返回的素材 URL 不是 https 公网地址", {
+      assetKind,
+      storageUrl: storage.storageUrl
+    });
+  }
+  return storage;
+}
+
+export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhuan_file", options = {}) {
+  const required = Boolean(options.required);
+  if (typeof context.syncWangzhuanAsset === "function") {
+    return assertSyncedObjectStorage(
+      await context.syncWangzhuanAsset({ fullPath, assetKind, required }),
+      assetKind,
+      { required }
+    );
+  }
+  if (!objectStorageEnabled()) {
+    if (required) {
+      throw new WangzhuanError("object_storage_required", "对象存储未配置，无法上传产品素材到 S3", {
+        assetKind,
+        requiredEnv: ["S3_BUCKET", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+      });
+    }
+    return null;
+  }
   try {
-    return await uploadProjectAsset({
+    const storage = await uploadProjectAsset({
       fullPath,
       userRoot: context.userProjectRoot,
       sharedRoot: context.sharedProjectRoot,
       userId: currentUserId(context),
       assetKind
     });
+    return assertSyncedObjectStorage(storage, assetKind, { required });
   } catch (error) {
+    if (required || error instanceof WangzhuanError) throw error;
     console.warn(`[object-storage] failed to upload ${assetKind}: ${error.message}`);
     return null;
   }

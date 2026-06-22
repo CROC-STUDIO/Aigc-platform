@@ -15,7 +15,6 @@ import {
 } from "./ids.mjs";
 import {
   openWangzhuanObjectStream,
-  previewUrlForWangzhuanAsset,
   syncWangzhuanAsset,
   toProjectRelative,
   wangzhuanPaths,
@@ -25,6 +24,7 @@ import {
   findActiveResourceLock,
   loadActivePipelineRunFromMysql,
   loadActiveRemixFromMysql,
+  loadBlockingRemixForSourceFromMysql,
   loadEstimateFromMysql,
   loadIdempotencyFactFromMysql,
   loadRemixDetailFromMysql,
@@ -435,10 +435,11 @@ async function writeText(target, text) {
 }
 
 async function syncRelativeAsset(context, fullPath, assetKind) {
-  const storage = await syncWangzhuanAsset(context, fullPath, assetKind);
+  const storage = await syncWangzhuanAsset(context, fullPath, assetKind, { required: true });
   return {
     storedPath: toProjectRelative(context.userProjectRoot, fullPath),
-    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {})
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl
   };
 }
 
@@ -507,7 +508,8 @@ function providerJobSnapshot(job, capability) {
     createdAt: job?.created_at || job?.createdAt || null,
     updatedAt: job?.updated_at || job?.updatedAt || null,
     startedAt: job?.started_at || job?.startedAt || null,
-    finishedAt: job?.finished_at || job?.finishedAt || null
+    finishedAt: job?.finished_at || job?.finishedAt || null,
+    downloadUrl: job?.download_url || job?.downloadUrl || job?.output_url || job?.outputUrl || job?.result_url || job?.resultUrl || ""
   };
 }
 
@@ -517,6 +519,19 @@ function remixStatusFromProvider(status) {
   if (status === "review_required") return "preview_required";
   if (status === "running") return "running";
   return "queued";
+}
+
+function remixFailureFromError(error) {
+  return error instanceof WangzhuanError && error.code === "upstream_failed"
+    ? {
+        code: error.code,
+        message: error.message,
+        ...error.data
+      }
+    : {
+        code: "upstream_failed",
+        message: "视频处理平台下载失败"
+      };
 }
 
 function providerPayload(record, source) {
@@ -622,6 +637,18 @@ async function materializeProviderSubmission(context, record, remixId, capabilit
   };
 }
 
+function assertRemoteRemixProvider(context, capability) {
+  if (!hasRemoteRemixProvider(context, capability)) {
+    throw new WangzhuanError("unsupported_capability", "竞品改造接口未配置，无法创建视频处理任务", {
+      capability: {
+        ...capability,
+        status: "unsupported",
+        unsupportedReason: "missing video processing endpoint"
+      }
+    });
+  }
+}
+
 async function writeQcReport(context, remix, output, qcStatus) {
   const report = {
     schemaVersion: "qc_report.v1",
@@ -665,61 +692,8 @@ async function writeQcReport(context, remix, output, qcStatus) {
   const storage = await syncRelativeAsset(context, target, "remix_qc_report");
   return {
     qcReportPath: storage.storedPath,
-    qcReportStorageKey: storage.storageKey || "",
-    qcReportStorageUrl: storage.storageUrl || ""
-  };
-}
-
-async function materializeMockRemix(context, record, remixId) {
-  const taskId = makeRemixTaskId(remixId);
-  const outputId = makeRemixOutputId(remixId);
-  const promptTarget = join(remixDir(context, remixId), "prompts", `${taskId}_remix.txt`);
-  const outputTarget = join(remixDir(context, remixId), "outputs", `${outputId}.mp4`);
-  const filePath = toProjectRelative(context.userProjectRoot, outputTarget);
-  await writeText(promptTarget, `${promptText(record)}\n`);
-  const promptAsset = await syncRelativeAsset(context, promptTarget, "remix_prompt");
-  await writeText(outputTarget, [
-    "mock remix video",
-    `remix=${remixId}`,
-    `operation=${record.request.operationType}`,
-    `provider=${record.capability.provider}`
-  ].join("\n"));
-  const storage = await syncWangzhuanAsset(context, outputTarget, "remix_output_video");
-  return {
-    tasks: [{
-      generationTaskId: taskId,
-      remixId,
-      status: "qc",
-      modelImage: "not_required",
-      modelVideo: record.capability.provider || REMIX_MODEL_VIDEO,
-      seedanceTaskId: `mock_remix_${taskId}`,
-      promptPath: promptAsset.storedPath,
-      promptStorageKey: promptAsset.storageKey || "",
-      promptStorageUrl: promptAsset.storageUrl || "",
-      outputPath: filePath,
-      remoteUrlStored: false,
-      attempts: 1,
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString()
-    }],
-    output: {
-      outputId,
-      sourceType: "remix",
-      remixId,
-      generationTaskIds: [taskId],
-      durationSec: Number(record.source?.durationSec || 15),
-      kind: "remix_video",
-      filePath,
-      previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
-      ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
-      promptPath: promptAsset.storedPath,
-      promptStorageKey: promptAsset.storageKey || "",
-      promptStorageUrl: promptAsset.storageUrl || "",
-      qcStatus: "manual_required",
-      downloadEligible: false,
-      visualPreviewRequired: true,
-      previewConfirmed: false
-    }
+    qcReportStorageKey: storage.storageKey,
+    qcReportStorageUrl: storage.storageUrl
   };
 }
 
@@ -731,7 +705,7 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
   const filePath = toProjectRelative(context.userProjectRoot, outputTarget);
   await mkdir(dirname(outputTarget), { recursive: true });
   await writeFile(outputTarget, outputBuffer);
-  const storage = await syncWangzhuanAsset(context, outputTarget, "remix_output_video");
+  const storage = await syncWangzhuanAsset(context, outputTarget, "remix_output_video", { required: true });
   const output = {
     outputId,
     sourceType: "remix",
@@ -740,8 +714,9 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
     durationSec: Number(remix.source?.durationSec || 15),
     kind: "remix_video",
     filePath,
-    previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
-    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
+    previewUrl: storage.storageUrl,
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl,
     promptPath: task?.promptPath || "",
     promptStorageKey: task?.promptStorageKey || "",
     promptStorageUrl: task?.promptStorageUrl || "",
@@ -789,6 +764,16 @@ async function findActiveBatch(context) {
   return loadActivePipelineRunFromMysql(context);
 }
 
+async function assertSourceSubmitUnlocked(context, sourceId) {
+  const blocking = await loadBlockingRemixForSourceFromMysql(context, sourceId);
+  if (!blocking?.remix) return;
+  throw new WangzhuanError("batch_already_running", "该素材已提交改造，请勿重复提交", {
+    remixId: blocking.remix.remixId,
+    status: blocking.remix.status,
+    sourceId
+  });
+}
+
 export async function uploadRemixSource(context, request = {}) {
   const limits = effectiveLimits(context.config || {});
   const fileName = safeFileName(request.fileName || request.name);
@@ -810,7 +795,7 @@ export async function uploadRemixSource(context, request = {}) {
   await mkdir(sourceRoot, { recursive: true });
   const originalPath = join(sourceRoot, `original${ext}`);
   await writeFile(originalPath, buffer);
-  const storage = await syncWangzhuanAsset(context, originalPath, "remix_source");
+  const storage = await syncWangzhuanAsset(context, originalPath, "remix_source", { required: true });
   const mediaProbe = await probeRemixSource(context, originalPath, request, mimeType);
   const width = mediaProbe.width;
   const height = mediaProbe.height;
@@ -836,7 +821,8 @@ export async function uploadRemixSource(context, request = {}) {
     status: "pass",
     issues: [],
     storedPath: toProjectRelative(context.userProjectRoot, originalPath),
-    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl,
     userId: currentUserId(context),
     createdAt: new Date().toISOString()
   };
@@ -852,7 +838,7 @@ export async function uploadRemixSource(context, request = {}) {
   return {
     sourceId,
     probe,
-    previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, probe.storedPath)
+    previewUrl: storage.storageUrl
   };
 }
 
@@ -882,6 +868,7 @@ export async function startDirectMaskEdit(context, request = {}) {
 
   const normalized = validateDirectMaskEditRequest(request, effectiveLimits(context.config || {}));
   const source = await loadSourceProbe(context, normalized.sourceId);
+  await assertSourceSubmitUnlocked(context, source.sourceId);
   const capability = preflightRemixProvider(context, normalized.operationType);
   if (capability.status !== "supported" && capability.status !== "degraded") {
     throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
@@ -898,8 +885,8 @@ export async function startDirectMaskEdit(context, request = {}) {
     sourceType: "base64_data_url",
     mimeType: "image/png",
     storedPath: maskAsset.storedPath,
-    storageKey: maskAsset.storageKey || "",
-    storageUrl: maskAsset.storageUrl || ""
+    storageKey: maskAsset.storageKey,
+    storageUrl: maskAsset.storageUrl
   };
   const record = {
     schemaVersion: "remix-direct-mask-edit.v1",
@@ -915,10 +902,9 @@ export async function startDirectMaskEdit(context, request = {}) {
     userId: currentUserId(context),
     createdAt: now
   };
-  const materialized = hasRemoteRemixProvider(context, capability)
-    ? await materializeProviderSubmission(context, record, remixId, capability, { maskDataUrl: normalized.maskDataUrl })
-    : await materializeMockRemix(context, record, remixId);
-  let remix = hasRemoteRemixProvider(context, capability) ? {
+  assertRemoteRemixProvider(context, capability);
+  const materialized = await materializeProviderSubmission(context, record, remixId, capability, { maskDataUrl: normalized.maskDataUrl });
+  let remix = {
     remixId,
     type: "remix",
     status: remixStatusFromProvider(materialized.providerJob.status),
@@ -942,34 +928,7 @@ export async function startDirectMaskEdit(context, request = {}) {
     },
     createdAt: now,
     updatedAt: now
-  } : {
-    remixId,
-    type: "remix",
-    status: "preview_required",
-    userId: currentUserId(context),
-    sourceId: source.sourceId,
-    source,
-    operationType: normalized.operationType,
-    regions: normalized.regions,
-    targetChannel: normalized.targetChannel,
-    templateSnapshot: record.templateSnapshot,
-    capability,
-    maskSource,
-    tasks: materialized.tasks,
-    outputs: [materialized.output],
-    qcSummary: {
-      total: 1,
-      passed: 0,
-      failed: 1,
-      warnings: [{ outputId: materialized.output.outputId, qcStatus: "manual_required" }]
-    },
-    createdAt: now,
-    updatedAt: now
   };
-  if (!hasRemoteRemixProvider(context, capability)) {
-    const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
-    remix.outputs[0] = { ...materialized.output, ...qcReportPath };
-  }
   remix = await writeRemix(context, remix);
   const result = { remix, downloadSummary: downloadSummary(remix) };
   await recordIdempotencyFact(context, "remix_mask_edit_start", request.idempotencyKey, requestHash, {
@@ -1052,6 +1011,7 @@ export async function startRemix(context, request = {}) {
   if (record.estimateHash !== hashPayload(record.request)) {
     throw new WangzhuanError("validation_error", "estimate 已失效，请重新估算", { estimateId: request.estimateId });
   }
+  await assertSourceSubmitUnlocked(context, record.source?.sourceId || record.request?.sourceId);
   const capability = preflightRemixProvider(context, record.request.operationType);
   if (capability.status !== "supported" && capability.status !== "degraded") {
     throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
@@ -1059,11 +1019,9 @@ export async function startRemix(context, request = {}) {
 
   const remixId = makeRemixId();
   const now = new Date().toISOString();
-  const remoteEnabled = hasRemoteRemixProvider(context, capability);
-  const materialized = remoteEnabled
-    ? await materializeProviderSubmission(context, { ...record, capability }, remixId, capability)
-    : await materializeMockRemix(context, { ...record, capability }, remixId);
-  let remix = remoteEnabled ? {
+  assertRemoteRemixProvider(context, capability);
+  const materialized = await materializeProviderSubmission(context, { ...record, capability }, remixId, capability);
+  let remix = {
     remixId,
     type: "remix",
     status: remixStatusFromProvider(materialized.providerJob.status),
@@ -1086,33 +1044,7 @@ export async function startRemix(context, request = {}) {
     },
     createdAt: now,
     updatedAt: now
-  } : {
-    remixId,
-    type: "remix",
-    status: "preview_required",
-    userId: currentUserId(context),
-    sourceId: record.source.sourceId,
-    source: record.source,
-    operationType: record.request.operationType,
-    regions: record.request.regions,
-    targetChannel: record.request.targetChannel,
-    templateSnapshot: record.templateSnapshot,
-    capability,
-    tasks: materialized.tasks,
-    outputs: [materialized.output],
-    qcSummary: {
-      total: 1,
-      passed: 0,
-      failed: 1,
-      warnings: [{ outputId: materialized.output.outputId, qcStatus: "manual_required" }]
-    },
-    createdAt: now,
-    updatedAt: now
   };
-  if (!remoteEnabled) {
-    const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
-    remix.outputs[0] = { ...materialized.output, ...qcReportPath };
-  }
   remix = await writeRemix(context, remix);
   const result = { remix, downloadSummary: downloadSummary(remix) };
   await recordIdempotencyFact(context, "remix_start", request.idempotencyKey, requestHash, {
@@ -1141,7 +1073,36 @@ export async function getRemixDetail(context, remixId) {
         }))
       };
       if (jobSnapshot.status === "succeeded" || jobSnapshot.status === "review_required") {
-        nextRemix = await materializeProviderOutput(context, nextRemix, jobSnapshot, await client.downloadJob(jobSnapshot.jobId));
+        try {
+          const outputBuffer = jobSnapshot.downloadUrl && client.downloadUrl
+            ? await client.downloadUrl(jobSnapshot.downloadUrl)
+            : await client.downloadJob(jobSnapshot.jobId);
+          nextRemix = await materializeProviderOutput(context, nextRemix, jobSnapshot, outputBuffer);
+        } catch (error) {
+          const failure = remixFailureFromError(error);
+          nextRemix = {
+            ...nextRemix,
+            status: "failed",
+            providerJob: {
+              ...jobSnapshot,
+              status: "failed"
+            },
+            tasks: (nextRemix.tasks || []).map((task) => ({
+              ...task,
+              status: "failed",
+              errorCode: failure.code,
+              errorMessage: failure.message,
+              responseSummary: failure,
+              finishedAt: new Date().toISOString()
+            })),
+            qcSummary: {
+              total: 0,
+              passed: 0,
+              failed: 1,
+              warnings: [{ providerJobId: jobSnapshot.jobId, qcStatus: "fail", ...failure }]
+            }
+          };
+        }
       }
       if (jobSnapshot.status === "failed") {
         nextRemix = {

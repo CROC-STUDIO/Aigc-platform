@@ -1,27 +1,29 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { buildDownloadPackage } from "../../server/wangzhuan/package.mjs";
-import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest, syncTemplateStoreFacts } from "../../server/wangzhuan/mysql-facts.mjs";
+import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest, syncBatchFacts, syncTemplateStoreFacts } from "../../server/wangzhuan/mysql-facts.mjs";
+import { pollUpstreamBatch } from "../../server/wangzhuan/upstream-poll.mjs";
 import { stopBatch, submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { runBatchQc } from "../../server/wangzhuan/qc.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
 import {
   confirmRemixPreview,
   estimateRemix,
+  getRemixDetail,
   startRemix,
   uploadRemixSource
 } from "../../server/wangzhuan/remix.mjs";
 import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
-import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { adminTemplateAction, saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { recordTelemetryEvent } from "../../server/wangzhuan/telemetry.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { testSeedanceProviderClient, prepareDownloadedSegmentsWithoutStitch } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -38,15 +40,37 @@ const baseDraft = {
 };
 
 function context(root, userId = "alice", overrides = {}) {
-  return {
+  const ctx = {
     userProjectRoot: join(root, userId, "project"),
     sharedProjectRoot: join(root, "shared"),
     userId,
     user: { userId, username: userId, role: "user", isAdmin: false },
     mockReferenceProbe: true,
-    config: {},
+    config: {
+      wangzhuan: {
+        remixProvider: {
+          endpoint: "https://video-aigc.skylink-gateway.com/api/v1"
+        }
+      }
+    },
+    seedanceProviderClient: testSeedanceProviderClient(),
+    remixProviderClient: {
+      provider: "video_aigc",
+      async createJob() {
+        return { job_id: "job_telemetry_001", status: "queued" };
+      },
+      async getJob(jobId) {
+        return { job_id: jobId, status: "review_required", download_url: "https://cdn.example.com/remix.mp4" };
+      },
+      async downloadJob() {
+        return Buffer.from("remix output video bytes");
+      },
+      async downloadUrl() {
+        return Buffer.from("remix output video bytes");
+      }
+    },
     capabilities: {
-      stitcher: { status: "available", provider: "mock_stitch", version: "test" },
+      stitcher: { status: "available", provider: "ffmpeg", version: "test" },
       remix: {
         provider: "function_k",
         status: "supported",
@@ -55,6 +79,8 @@ function context(root, userId = "alice", overrides = {}) {
     },
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function adminContext(root) {
@@ -110,9 +136,43 @@ function region() {
   };
 }
 
-async function readJsonl(target) {
-  const text = await readFile(target, "utf8");
-  return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+let activePool = null;
+
+function ensureFactsPool() {
+  if (!activePool) {
+    activePool = fakePool();
+    setWangzhuanFactsPoolForTest(activePool);
+  }
+  return activePool;
+}
+
+async function resetFactsPool() {
+  activePool = null;
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
+
+function mysqlTelemetryRows(pool) {
+  return pool.state.telemetryEvents.map((row) => ({
+    event: row.event_name,
+    eventId: row.event_uid,
+    requestId: row.request_id || undefined,
+    userId: "alice",
+    role: row.role_snapshot,
+    occurredAt: row.occurred_at,
+    payload: JSON.parse(row.payload_json)
+  }));
+}
+
+function mysqlAuditRows(pool) {
+  return pool.state.auditEvents.map((row) => ({
+    event: row.action,
+    eventId: row.audit_uid,
+    requestId: row.request_id || undefined,
+    role: row.actor_role,
+    occurredAt: row.occurred_at,
+    payload: JSON.parse(row.metadata_json)
+  }));
 }
 
 function assertNoSensitiveTelemetryText(text, root) {
@@ -147,6 +207,7 @@ async function pipelineFixture(ctx, template, referenceVideoId, durationSec = 30
 
 test("telemetry writer produces common envelopes for telemetry and audit with redaction", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s8-redact-"));
+  const pool = ensureFactsPool();
   try {
     const ctx = context(root);
     const emitted = await recordTelemetryEvent(
@@ -181,21 +242,26 @@ test("telemetry writer produces common envelopes for telemetry and audit with re
     assert.equal("remote_url" in emitted.telemetry.payload, false);
     assert.equal(emitted.telemetry.payload.promptText, "[redacted]");
 
-    const paths = wangzhuanPaths(ctx);
-    const telemetry = await readJsonl(paths.telemetryPath);
-    const audit = await readJsonl(paths.auditPath);
+    const telemetry = mysqlTelemetryRows(pool);
+    const audit = mysqlAuditRows(pool);
     assert.equal(telemetry.length, 1);
     assert.equal(audit.length, 1);
-    assert.deepEqual(telemetry[0], emitted.telemetry);
-    assert.deepEqual(audit[0], emitted.audit);
+    assert.equal(telemetry[0].eventId, emitted.telemetry.eventId);
+    assert.equal(telemetry[0].event, emitted.telemetry.event);
+    assert.deepEqual(telemetry[0].payload, emitted.telemetry.payload);
+    assert.equal(audit[0].eventId, emitted.audit.eventId);
+    assert.equal(audit[0].event, emitted.audit.event);
+    assert.deepEqual(audit[0].payload, emitted.audit.payload);
     assertNoSensitiveTelemetryText(JSON.stringify({ telemetry, audit }), root);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("pipeline, QC, package, remix, and admin flows write parseable telemetry and audit events", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s8-flow-"));
+  const pool = ensureFactsPool();
   try {
     const ctx = context(root);
     const saved = await saveTemplate(ctx, { mode: "create", draft: baseDraft });
@@ -211,11 +277,10 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
 
     const started = await pipelineFixture(ctx, saved.template, checked.referenceVideo.referenceVideoId, 30, 1, "deliverable");
     await submitPendingGenerationTasks(ctx, started.batch.batchId);
-    const stitched = await stitchBatchSegments(ctx, started.batch.batchId);
+    const stitched = await pollUpstreamBatch(ctx, started.batch.batchId);
     const qc = await runBatchQc(ctx, stitched.batch.batchId);
     const packaged = await buildDownloadPackage(ctx, { batchIds: [qc.batch.batchId] });
 
-    setWangzhuanFactsPoolForTest(fakePool());
     await syncTemplateStoreFacts(ctx, {
       schemaVersion: "templates.v1",
       defaultTemplateId: saved.template.templateId,
@@ -235,9 +300,10 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
       idempotencyKey: "idem_s8_remix_start",
       estimateId: remixEstimate.estimateId
     });
-    await confirmRemixPreview(ctx, remix.remix.remixId, {
+    const remixDetail = await getRemixDetail(ctx, remix.remix.remixId);
+    await confirmRemixPreview(ctx, remixDetail.remix.remixId, {
       idempotencyKey: "idem_s8_remix_confirm",
-      outputId: remix.remix.outputs[0].outputId
+      outputId: remixDetail.remix.outputs[0].outputId
     });
 
     await adminTemplateAction(adminContext(root), {
@@ -245,9 +311,8 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
       templateId: saved.template.templateId
     });
 
-    const paths = wangzhuanPaths(ctx);
-    const telemetry = await readJsonl(paths.telemetryPath);
-    const audit = await readJsonl(paths.auditPath);
+    const telemetry = mysqlTelemetryRows(pool);
+    const audit = mysqlAuditRows(pool);
     const telemetryEvents = new Set(telemetry.map((item) => item.event));
     const auditEvents = new Set(audit.map((item) => item.event));
 
@@ -283,28 +348,26 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
     const startedEvent = telemetry.find((item) => item.event === "generation_batch_started" && item.payload.batchId === qc.batch.batchId);
     assert.equal(startedEvent.payload.durationSec, 30);
     assert.equal(startedEvent.payload.variantCount, 1);
-    assert.deepEqual(startedEvent.payload.models, ["gpt-image-2", "doubao-seedance-2-0-260128"]);
+    assert.deepEqual(startedEvent.payload.models, ["gpt-image-2", "dreamina-seedance-2-0-260128"]);
 
     const submitted = telemetry.filter((item) => item.event === "generation_task_submitted" && item.payload.batchId === qc.batch.batchId);
     assert.equal(submitted.length, 2);
-    assert.ok(submitted.every((item) => item.payload.seedanceTaskId?.startsWith("mock_seedance_")));
+    assert.ok(submitted.every((item) => item.payload.seedanceTaskId?.startsWith("remote_")));
 
     const downloaded = telemetry.find((item) => item.event === "batch_downloaded" && item.payload.packageId === packaged.manifest.packageId);
     assert.equal(downloaded.payload.itemCount, 1);
     assert.deepEqual(downloaded.payload.batchIds, [qc.batch.batchId]);
 
     assertNoSensitiveTelemetryText(JSON.stringify({ telemetry, audit }), root);
-    assert.equal(existsSync(paths.telemetryPath), true);
-    assert.equal(existsSync(paths.auditPath), true);
   } finally {
-    setWangzhuanFactsPoolForTest(null);
-    await closeWangzhuanFactsPool();
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("failed stitch attempts are observable without leaking paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s8-stitch-fail-"));
+  const pool = ensureFactsPool();
   try {
     const ctx = context(root);
     const saved = await saveTemplate(ctx, { mode: "create", draft: baseDraft });
@@ -315,16 +378,17 @@ test("failed stitch attempts are observable without leaking paths", async () => 
       decomposition: decomposition()
     });
     const started = await pipelineFixture(ctx, saved.template, checked.referenceVideo.referenceVideoId, 30, 1, "stitch_fail");
-    await submitPendingGenerationTasks(ctx, started.batch.batchId);
+    await prepareDownloadedSegmentsWithoutStitch(ctx, started.batch.batchId);
     await stitchBatchSegments(ctx, started.batch.batchId, { forceFail: true });
 
-    const telemetry = await readJsonl(wangzhuanPaths(ctx).telemetryPath);
+    const telemetry = mysqlTelemetryRows(pool);
     const failed = telemetry.find((item) => item.event === "stitch_completed" && item.payload.status === "failed");
     assert.ok(failed);
     assert.equal(failed.payload.batchId, started.batch.batchId);
     assert.equal(failed.payload.errorCode, "stitch_failed");
     assertNoSensitiveTelemetryText(JSON.stringify(telemetry), root);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

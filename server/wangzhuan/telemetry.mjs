@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
+import { WangzhuanError } from "./http.mjs";
 import { compactTimestamp, shortHex } from "./ids.mjs";
 import { recordMysqlTelemetryEvent } from "./mysql-facts.mjs";
-import { appendJsonl, wangzhuanPaths } from "./storage.mjs";
 
 function currentUser(context) {
   return context.user ?? context.currentUser?.() ?? null;
@@ -96,16 +96,15 @@ export async function recordTelemetryEvent(context, event, payload = {}, options
     payload: sanitizeTelemetryPayload(payload)
   };
 
-  const paths = wangzhuanPaths(context);
-  await appendJsonl(paths.telemetryPath, telemetry);
-
   let audit;
   if (options.audit) {
     audit = { ...telemetry };
-    await appendJsonl(paths.auditPath, audit);
   }
 
-  await recordMysqlTelemetryEvent(context, telemetry, audit);
+  const recorded = await recordMysqlTelemetryEvent(context, telemetry, audit);
+  if (recorded?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法记录业务事件");
+  }
 
   return { telemetry, audit };
 }

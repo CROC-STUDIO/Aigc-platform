@@ -111,10 +111,21 @@ export function createRemixProviderClient(context = {}, capability = {}) {
       headers: authHeaders(config.apiKey)
     }, config.timeoutMs);
     if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let payload = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        payload = {};
+      }
       throw upstreamError("视频处理平台下载失败", {
         provider: config.provider,
         operation,
-        status: response.status
+        status: response.status,
+        upstreamCode: payload.code || payload.error || payload.status || "",
+        upstreamMessage: typeof payload.detail === "string"
+          ? payload.detail
+          : payload.message || payload.error_message || text.slice(0, 200)
       });
     }
     return Buffer.from(await response.arrayBuffer());
@@ -130,6 +141,27 @@ export function createRemixProviderClient(context = {}, capability = {}) {
     },
     async downloadJob(jobId) {
       return downloadRequest(`/jobs/${encodeURIComponent(jobId)}/download`, "download_job");
+    },
+    async downloadUrl(url) {
+      const targetUrl = cleanString(url);
+      if (!/^https?:\/\//i.test(targetUrl)) {
+        throw upstreamError("视频处理平台下载地址无效", {
+          provider: config.provider,
+          operation: "download_url"
+        });
+      }
+      const response = await fetchWithTimeout(fetchImpl, targetUrl, {
+        method: "GET",
+        headers: authHeaders(config.apiKey)
+      }, config.timeoutMs);
+      if (!response.ok) {
+        throw upstreamError("视频处理平台下载失败", {
+          provider: config.provider,
+          operation: "download_url",
+          status: response.status
+        });
+      }
+      return Buffer.from(await response.arrayBuffer());
     }
   };
 }

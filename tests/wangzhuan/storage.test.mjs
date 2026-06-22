@@ -16,10 +16,15 @@ test("builds shared and user wangzhuan storage paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-storage-"));
   try {
     const paths = wangzhuanPaths({ sharedProjectRoot: join(root, "shared"), userProjectRoot: join(root, "user") });
-    assert.equal(paths.templatesPath, join(root, "shared", "批处理记录", "网赚管线", "templates.json"));
-    assert.equal(paths.channelRulesPath, join(root, "shared", "批处理记录", "网赚管线", "channel-rules.json"));
-    assert.equal(paths.auditPath, join(root, "shared", "批处理记录", "网赚管线", "audit.jsonl"));
-    assert.equal(paths.telemetryPath, join(root, "user", "批处理记录", "网赚管线", "telemetry.jsonl"));
+    assert.equal(paths.sharedRoot, join(root, "shared", "批处理记录", "网赚管线"));
+    assert.equal(paths.userRoot, join(root, "user", "批处理记录", "网赚管线"));
+    assert.equal(paths.referenceVideosDir, join(root, "user", "批处理记录", "网赚管线", "reference-videos"));
+    assert.equal(paths.batchesDir, join(root, "user", "批处理记录", "网赚管线", "batches"));
+    assert.equal(Object.hasOwn(paths, "templatesPath"), false);
+    assert.equal(Object.hasOwn(paths, "channelRulesPath"), false);
+    assert.equal(Object.hasOwn(paths, "auditPath"), false);
+    assert.equal(Object.hasOwn(paths, "telemetryPath"), false);
+    assert.equal(Object.hasOwn(paths, "idempotencyDir"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

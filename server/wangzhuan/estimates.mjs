@@ -1,7 +1,4 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import { effectiveLimits } from "./config.mjs";
 import { branchSummaries, normalizeBranchDrafts } from "./branches.mjs";
@@ -11,12 +8,17 @@ import {
   TARGET_CHANNELS
 } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { makeBatchId, makeEstimateId } from "./ids.mjs";
+import { makeBatchId } from "./ids.mjs";
 import {
   findActiveResourceLock,
+  hasWangzhuanFactsStore,
+  loadActivePipelineRunFromMysql,
+  loadActiveRemixFromMysql,
   loadEstimateFromMysql,
+  loadIdempotencyFactFromMysql,
   loadTemplateStoreFromMysql,
   loadVideoDecompositionFromMysql,
+  nextPipelineEstimateIdFromMysql,
   recordIdempotencyFact,
   syncBatchFacts,
   syncEstimateFact,
@@ -24,21 +26,12 @@ import {
 } from "./mysql-facts.mjs";
 import { prepareBatchForPipeline } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
-import { DEFAULT_SEEDANCE_MODEL } from "./seedance-provider.mjs";
+import { DEFAULT_SEEDANCE_MODEL, resolveSeedanceModel } from "./seedance-provider.mjs";
 import { preflightStitcher } from "./stitch.mjs";
-import { readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
-const ESTIMATE_INDEX_DEFAULT = Object.freeze({
-  schemaVersion: "estimates.v1",
-  nextSeq: 1,
-  items: []
-});
-const ACTIVE_BATCH_STATUSES = new Set(["checking", "queued", "running", "stitching", "qc"]);
-const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
-
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
 }
@@ -83,31 +76,11 @@ function makeConfirmationToken() {
   return `confirm_${randomBytes(8).toString("hex")}`;
 }
 
-function idempotencyFile(paths, endpoint, idempotencyKey) {
-  const safeEndpoint = endpoint.replace(/[^a-z0-9_-]+/gi, "_");
-  const digest = createHash("sha256").update(String(idempotencyKey)).digest("hex").slice(0, 24);
-  return join(paths.idempotencyDir, `${safeEndpoint}_${digest}.json`);
-}
-
-async function readIdempotentResult(paths, endpoint, idempotencyKey) {
-  if (!idempotencyKey) return null;
-  const target = idempotencyFile(paths, endpoint, idempotencyKey);
-  if (!existsSync(target)) return null;
-  return JSON.parse(await readFile(target, "utf8")).result;
-}
-
-async function writeIdempotentResult(paths, endpoint, idempotencyKey, result) {
-  if (!idempotencyKey) return;
-  await writeAtomicJson(idempotencyFile(paths, endpoint, idempotencyKey), {
-    endpoint,
-    result,
-    createdAt: new Date().toISOString()
-  });
-}
-
 async function loadTemplateVersion(context, templateId, versionId) {
-  const store = await loadTemplateStoreFromMysql(context)
-    ?? await readJsonOrDefault(wangzhuanPaths(context).templatesPath, { templates: [] });
+  const store = await loadTemplateStoreFromMysql(context);
+  if (!store) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取模板状态");
+  }
   const template = (Array.isArray(store.templates) ? store.templates : []).find((item) => {
     return item.templateId === templateId && item.versionId === versionId && item.status !== "deleted";
   });
@@ -120,14 +93,10 @@ async function loadTemplateVersion(context, templateId, versionId) {
 async function loadReferenceDecomposition(context, referenceVideoId) {
   const mysqlDecomposition = await loadVideoDecompositionFromMysql(context, referenceVideoId);
   if (mysqlDecomposition) return mysqlDecomposition;
-  const target = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "decomposition.json");
-  if (!existsSync(target)) {
-    throw new WangzhuanError("schema_invalid", "拆解结果不完整，请重试或手动补充", {
-      referenceVideoId,
-      missingFields: ["decomposition"]
-    });
-  }
-  return JSON.parse(await readFile(target, "utf8"));
+  throw new WangzhuanError("schema_invalid", "拆解结果不完整，请重试或手动补充", {
+    referenceVideoId,
+    missingFields: ["decomposition"]
+  });
 }
 
 function validateTemplateForPromise(template, promiseLevel) {
@@ -208,18 +177,16 @@ function capabilitySnapshot(context, durationSec) {
 }
 
 async function nextEstimateId(context) {
-  const paths = wangzhuanPaths(context);
-  const indexPath = join(paths.estimatesDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, ESTIMATE_INDEX_DEFAULT);
-  const estimateId = makeEstimateId(index.nextSeq || 1);
-  index.nextSeq = (index.nextSeq || 1) + 1;
-  index.items = Array.isArray(index.items) ? index.items : [];
-  return { estimateId, indexPath, index };
+  const estimateId = await nextPipelineEstimateIdFromMysql(context);
+  if (!estimateId) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法生成估算编号");
+  }
+  return estimateId;
 }
 
 export async function estimateBatch(context, request = {}) {
-  const paths = wangzhuanPaths(context);
-  const replay = await readIdempotentResult(paths, "batches_estimate", request.idempotencyKey);
+  const requestHash = hashPayload(request);
+  const replay = await loadIdempotencyFactFromMysql(context, "batches_estimate", request.idempotencyKey, requestHash);
   if (replay) return replay;
 
   const limits = effectiveLimits(context.config || {});
@@ -267,6 +234,7 @@ export async function estimateBatch(context, request = {}) {
     branchCount,
     seedanceSegmentCount: counts.seedanceSegmentCount
   } : {};
+  const seedanceModel = resolveSeedanceModel({ templateSnapshot: template, estimate: { request: request } });
   const normalizedRequest = {
     templateId: request.templateId,
     versionId: request.versionId,
@@ -279,10 +247,11 @@ export async function estimateBatch(context, request = {}) {
     variantCount: normalized.variantCount,
     requestedConcurrency: normalized.requestedConcurrency,
     outputRatio: request.outputRatio,
+    seedanceModel,
     branches
   };
   const estimateHash = hashPayload(normalizedRequest);
-  const { estimateId, indexPath, index } = await nextEstimateId(context);
+  const estimateId = await nextEstimateId(context);
   const now = new Date().toISOString();
   const estimate = {
     estimateId,
@@ -291,7 +260,7 @@ export async function estimateBatch(context, request = {}) {
     branchCount,
     branchSummaries: branchSummaries(branches),
     ...counts,
-    models: [MODEL_IMAGE, MODEL_VIDEO],
+    models: [MODEL_IMAGE, seedanceModel],
     maxRetryPerTask: limits.maxRetryPerTask,
     requestedConcurrency: normalized.requestedConcurrency,
     confirmationRequired,
@@ -319,10 +288,10 @@ export async function estimateBatch(context, request = {}) {
     projectRoot: context.userProjectRoot,
     createdAt: now
   };
-  await writeAtomicJson(join(paths.estimatesDir, estimateId, "estimate.json"), record);
-  await syncEstimateFact(context, record, confirmationToken);
-  index.items.push({ estimateId, createdBy: currentUserId(context), createdAt: now });
-  await writeAtomicJson(indexPath, index);
+  const syncedEstimate = await syncEstimateFact(context, record, confirmationToken);
+  if (syncedEstimate?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存估算结果");
+  }
   if (confirmationRequired) {
     await recordTelemetryEvent(context, "generation_limit_confirmed", {
       estimateId,
@@ -335,7 +304,12 @@ export async function estimateBatch(context, request = {}) {
   }
 
   const result = { estimate, limits, capabilities };
-  await writeIdempotentResult(paths, "batches_estimate", request.idempotencyKey, result);
+  if (request.idempotencyKey) {
+    await recordIdempotencyFact(context, "batches_estimate", request.idempotencyKey, requestHash, {
+      type: "estimate",
+      response: result
+    });
+  }
   return result;
 }
 
@@ -345,58 +319,36 @@ export async function loadEstimate(context, estimateId) {
   }
   const mysqlEstimate = await loadEstimateFromMysql(context, estimateId);
   if (mysqlEstimate) return mysqlEstimate;
-  const target = join(wangzhuanPaths(context).estimatesDir, estimateId, "estimate.json");
-  if (!existsSync(target)) {
-    throw new WangzhuanError("validation_error", "estimate 不存在，请重新估算", { estimateId });
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取估算结果");
   }
-  return JSON.parse(await readFile(target, "utf8"));
+  throw new WangzhuanError("validation_error", "estimate 不存在，请重新估算", { estimateId });
 }
 
 async function findActiveBatch(context) {
-  const index = await readJsonOrDefault(join(wangzhuanPaths(context).batchesDir, "index.json"), {
-    schemaVersion: "batches.v1",
-    items: []
-  });
-  for (const item of Array.isArray(index.items) ? index.items : []) {
-    const batchPath = join(wangzhuanPaths(context).batchesDir, item.batchId, "batch.json");
-    if (!existsSync(batchPath)) continue;
-    const batch = JSON.parse(await readFile(batchPath, "utf8"));
-    if (ACTIVE_BATCH_STATUSES.has(batch.status)) return batch;
-  }
-  return null;
+  const active = await loadActivePipelineRunFromMysql(context);
+  return active?.batchId ? active : null;
 }
 
 async function findActiveRemix(context) {
-  const index = await readJsonOrDefault(join(wangzhuanPaths(context).remixDir, "index.json"), {
-    schemaVersion: "remix.v1",
-    items: []
-  });
-  for (const item of Array.isArray(index.items) ? index.items : []) {
-    const remixPath = join(wangzhuanPaths(context).remixDir, item.remixId, "remix.json");
-    if (!existsSync(remixPath)) continue;
-    const remix = JSON.parse(await readFile(remixPath, "utf8"));
-    if (ACTIVE_REMIX_STATUSES.has(remix.status)) return remix;
-  }
-  return null;
+  const detail = await loadActiveRemixFromMysql(context);
+  return detail?.remix || null;
 }
 
 async function saveBatch(context, batch) {
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.batchesDir, batch.batchId, "batch.json"), batch);
-  const indexPath = join(paths.batchesDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, { schemaVersion: "batches.v1", items: [] });
-  index.items = Array.isArray(index.items) ? index.items : [];
-  if (!index.items.some((item) => item.batchId === batch.batchId)) {
-    index.items.push({
+  const synced = await syncBatchFacts(context, batch, "batch_created");
+  if (synced?.skipped) {
+    const detail = synced.error?.message || synced.error?.code || null;
+    if (!await hasWangzhuanFactsStore()) {
+      throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存批次状态");
+    }
+    throw new WangzhuanError("database_unavailable", detail
+      ? `批次状态保存失败：${String(detail).slice(0, 300)}`
+      : "批次状态保存失败，请确认数据库迁移已执行到最新版本（含 pending_preview 任务状态）", {
       batchId: batch.batchId,
-      status: batch.status,
-      estimateId: batch.estimate.estimateId,
-      createdBy: batch.userId,
-      createdAt: batch.createdAt
+      cause: detail
     });
   }
-  await writeAtomicJson(indexPath, index);
-  await syncBatchFacts(context, batch, "batch_created");
 }
 
 async function assertCanStartFromEstimate(context, record, request) {
@@ -441,8 +393,8 @@ export async function startBatchFromEstimate(context, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
-  const paths = wangzhuanPaths(context);
-  const replay = await readIdempotentResult(paths, "batches_start", request.idempotencyKey);
+  const requestHash = hashPayload(request);
+  const replay = await loadIdempotencyFactFromMysql(context, "batches_start", request.idempotencyKey, requestHash);
   if (replay) return replay;
 
   const record = await loadEstimate(context, request.estimateId);
@@ -495,10 +447,9 @@ export async function startBatchFromEstimate(context, request = {}) {
   await saveBatch(context, batch);
   const preparedBatch = await prepareBatchForPipeline(context, batch);
   const result = { batch: preparedBatch };
-  await writeIdempotentResult(paths, "batches_start", request.idempotencyKey, result);
-  await recordIdempotencyFact(context, "batches_start", request.idempotencyKey, hashPayload(request), {
+  await recordIdempotencyFact(context, "batches_start", request.idempotencyKey, requestHash, {
     type: "batch",
-    response: { batchId: preparedBatch.batchId, status: preparedBatch.status }
+    response: result
   });
   await recordTelemetryEvent(context, "generation_batch_started", {
     batchId: preparedBatch.batchId,
@@ -510,6 +461,87 @@ export async function startBatchFromEstimate(context, request = {}) {
     scriptCount: record.estimate.scriptCount,
     seedanceSegmentCount: record.estimate.seedanceSegmentCount,
     stitchTaskCount: record.estimate.stitchTaskCount
+  }, { audit: true });
+  return result;
+}
+
+export async function prepareBatchPlanFromEstimate(context, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload(request);
+  const replay = await loadIdempotencyFactFromMysql(context, "batches_plan", request.idempotencyKey, requestHash);
+  if (replay) return replay;
+
+  const record = await loadEstimate(context, request.estimateId);
+  await assertCanStartFromEstimate(context, record, request);
+  if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
+    throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
+      estimateId: record.estimate.estimateId,
+      capability: "stitcher"
+    });
+  }
+  const active = await findActiveBatch(context);
+  if (active) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      batchId: active.batchId,
+      status: active.status
+    });
+  }
+  const activeRemix = await findActiveRemix(context);
+  if (activeRemix) {
+    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
+      runningResource: "remix",
+      remixId: activeRemix.remixId,
+      status: activeRemix.status
+    });
+  }
+
+  const now = new Date().toISOString();
+  const batch = {
+    batchId: makeBatchId(),
+    type: "pipeline",
+    status: "preview_required",
+    previewType: "seedance_plan",
+    userId: currentUserId(context),
+    projectRoot: context.projectName || "current_project",
+    templateSnapshot: record.templateSnapshot,
+    referenceVideo: record.referenceVideo,
+    decomposition: record.decomposition,
+    estimate: record.estimate,
+    scripts: [],
+    tasks: [],
+    plans: [],
+    outputs: [],
+    qcSummary: {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      warnings: []
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+  await saveBatch(context, batch);
+  const preparedBatch = await prepareBatchForPipeline(context, batch, {
+    useLlmPlans: true,
+    llmConfig: request.llmConfig || {},
+    knowledgeNotes: request.knowledgeNotes || ""
+  });
+  const result = {
+    batch: preparedBatch,
+    plans: preparedBatch.plans || []
+  };
+  await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
+    type: "batch_plan",
+    response: result
+  });
+  await recordTelemetryEvent(context, "seedance_plan_generated", {
+    batchId: preparedBatch.batchId,
+    estimateId: record.estimate.estimateId,
+    idempotencyKey: request.idempotencyKey,
+    planCount: preparedBatch.plans?.length || 0,
+    previewType: preparedBatch.previewType
   }, { audit: true });
   return result;
 }

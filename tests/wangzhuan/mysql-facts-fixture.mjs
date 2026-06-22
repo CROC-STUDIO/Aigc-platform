@@ -27,6 +27,8 @@ export function fakePool() {
     schedulerJobs: new Map(),
     stateTransitionRules: new Set(),
     stateTransitionEvents: [],
+    telemetryEvents: [],
+    auditEvents: [],
     resourceLocks: new Map(),
     nextUserId: 101,
     nextProjectId: 201,
@@ -92,7 +94,7 @@ export function fakePool() {
           .map((asset_uid) => ({ asset_uid }));
         return [rows];
       }
-      if (sql.trim().startsWith("SELECT estimate_uid")) {
+      if (sql.trim().startsWith("SELECT estimate_uid") && sql.includes("FROM work_estimates")) {
         const prefix = String(params[1] || "").replace(/%$/, "");
         const rows = [...state.estimates.keys()]
           .filter((estimateUid) => estimateUid.startsWith(prefix))
@@ -102,11 +104,21 @@ export function fakePool() {
           .map((estimate_uid) => ({ estimate_uid }));
         return [rows];
       }
+      if (sql.trim().startsWith("SELECT reference_video_uid") && sql.includes("FROM reference_videos")) {
+        const prefix = String(params[1] || "").replace(/%$/, "");
+        const rows = [...state.referenceVideos.keys()]
+          .filter((referenceVideoUid) => referenceVideoUid.startsWith(prefix))
+          .sort()
+          .reverse()
+          .slice(0, 1)
+          .map((reference_video_uid) => ({ reference_video_uid }));
+        return [rows];
+      }
       if (sql.includes("SELECT id FROM work_estimates") && sql.includes("estimate_uid")) {
         const estimate = state.estimates.get(params.at(-1));
         return [estimate ? [{ id: estimate.id }] : []];
       }
-      if (sql.includes("SELECT id FROM workflow_runs") && sql.includes("run_uid")) {
+      if (/^\s*SELECT\s+id\s+FROM\s+workflow_runs\s+WHERE/i.test(sql) && sql.includes("run_uid")) {
         const id = state.runs.get(params.at(-1));
         return [id ? [{ id }] : []];
       }
@@ -305,7 +317,7 @@ export function fakePool() {
         });
         return [{ insertId: state.scripts.get(scriptUid).id }];
       }
-      if (sql.includes("SELECT id FROM workflow_outputs") && sql.includes("output_uid")) {
+      if (/^\s*SELECT\s+id\s+FROM\s+workflow_outputs\s+WHERE/i.test(sql) && sql.includes("output_uid")) {
         const output = state.outputs.get(params.at(-1));
         return [output ? [{ id: output.id }] : []];
       }
@@ -394,6 +406,17 @@ export function fakePool() {
           templateDbId: params[1],
           versionNumber: params[2],
           status: params[3],
+          productName: params[4],
+          cta: params[5],
+          ending: params[6],
+          currencySymbol: params[7],
+          languageCode: params[8],
+          defaultOutputRatio: params[9],
+          defaultDurationSec: params[10],
+          promiseLevel: params[11],
+          targetChannelsJson: params[12],
+          regionsJson: params[13],
+          truthRulesJson: params[14],
           draftJson: params[15],
           createdBy: params[16],
           createdAt: params[17]
@@ -520,6 +543,34 @@ export function fakePool() {
         });
         return [{ affectedRows: 1 }];
       }
+      if (sql.includes("INSERT INTO telemetry_events")) {
+        state.telemetryEvents.push({
+          event_uid: params[0],
+          event_name: params[1],
+          project_id: params[2],
+          user_id: params[3],
+          role_snapshot: params[4],
+          request_id: params[5],
+          payload_json: params[6],
+          occurred_at: params[7]
+        });
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes("INSERT INTO audit_events")) {
+        state.auditEvents.push({
+          audit_uid: params[0],
+          project_id: params[1],
+          actor_user_id: params[2],
+          actor_role: params[3],
+          action: params[4],
+          target_type: params[5],
+          target_uid: params[6],
+          request_id: params[7],
+          metadata_json: params[8],
+          occurred_at: params[9]
+        });
+        return [{ affectedRows: 1 }];
+      }
       if (sql.includes("SELECT id FROM reference_videos") && sql.includes("reference_video_uid")) {
         const reference = state.referenceVideos.get(params.at(-1));
         return [reference ? [{ id: reference.id }] : []];
@@ -596,6 +647,7 @@ export function fakePool() {
           id: existing?.id ?? state.nextEstimateId++,
           estimateUid,
           estimateType: params[1],
+          templateVersionId: params[4],
           referenceVideoId: params[5],
           sourceAssetFileId: params[6],
           requestHash: params[7],
@@ -736,8 +788,9 @@ export function fakePool() {
           });
         return [rows];
       }
-      if (sql.includes("FROM workflow_tasks") && sql.includes("ORDER BY id ASC")
-        || sql.includes("FROM workflow_tasks wt") && sql.includes("ORDER BY wt.id ASC")) {
+      if ((sql.includes("FROM workflow_tasks") && sql.includes("ORDER BY id ASC")
+        || sql.includes("FROM workflow_tasks wt") && sql.includes("ORDER BY wt.id ASC"))
+        && !sql.includes("FROM workflow_outputs wo")) {
         const rows = (state.taskRowsByRunId.get(params[0]) || []).map((task) => {
           const promptAsset = [...state.assets.values()].find((item) => item.id === task.prompt_asset_file_id) || {};
           const outputAsset = [...state.assets.values()].find((item) => item.id === task.output_asset_file_id) || {};
@@ -745,6 +798,8 @@ export function fakePool() {
           return {
             ...task,
             script_uid: script.scriptUid,
+            provider: task.provider,
+            output_storage_relative_path: outputAsset.relativePath,
             prompt_storage_key: promptAsset.storageKey,
             prompt_storage_url: promptAsset.storageUrl,
             output_storage_key: outputAsset.storageKey,
@@ -753,7 +808,7 @@ export function fakePool() {
         });
         return [rows];
       }
-      if (sql.includes("FROM workflow_outputs wo") && sql.includes("WHERE wo.run_id")) {
+      if (sql.includes("FROM workflow_outputs wo") && sql.includes("WHERE wo.run_id") && sql.includes("af.storage_relative_path")) {
         const rows = (state.outputRowsByRunId.get(params[0]) || []).map((output) => {
           const asset = [...state.assets.values()].find((item) => item.id === output.asset_file_id) || {};
           const firstTask = (state.taskRowsByRunId.get(params[0]) || [])[0] || {};
@@ -809,6 +864,24 @@ export function fakePool() {
           });
         return [rows];
       }
+      if (sql.includes("INNER JOIN asset_files af ON af.id = wr.source_asset_file_id")
+        && sql.includes("FROM workflow_runs wr")
+        && sql.includes("run_type = 'remix'")
+        && sql.includes("af.asset_uid = ?")) {
+        const projectId = params[0];
+        const userId = params[1];
+        const sourceId = params[2];
+        const lockedStatuses = new Set(params.slice(3));
+        const row = [...state.runRows.values()]
+          .filter((run) => {
+            if (run.project_id !== projectId || run.user_id !== userId || run.run_type !== "remix") return false;
+            if (!lockedStatuses.has(run.status)) return false;
+            const source = [...state.assets.values()].find((asset) => asset.id === run.source_asset_file_id);
+            return source?.assetUid === sourceId;
+          })
+          .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)) || right.id - left.id)[0];
+        return [row ? [{ run_uid: row.run_uid }] : []];
+      }
       if (sql.includes("SELECT run_uid") && sql.includes("FROM workflow_runs") && sql.includes("run_type = 'remix'")) {
         const projectId = params[0];
         const userId = params[1];
@@ -827,9 +900,55 @@ export function fakePool() {
           return run.project_id === projectId
             && run.user_id === userId
             && run.run_type === "pipeline"
-            && ["checking", "queued", "running", "stitching", "qc"].includes(run.status);
+            && ["checking", "queued", "running", "stitching", "qc", "preview_required"].includes(run.status);
         });
         return [row ? [{ run_uid: row.run_uid, status: row.status }] : []];
+      }
+      if (sql.includes("FROM workflow_runs wr") && sql.includes("ORDER BY wr.updated_at DESC") && !sql.includes("JOIN workflow_outputs")) {
+        const projectId = params[0];
+        const userId = params[1];
+        let rows = [...state.runRows.values()].filter((run) => {
+          return run.project_id === projectId
+            && run.user_id === userId
+            && ["pipeline", "remix"].includes(run.run_type);
+        });
+        if (sql.includes("wr.run_type = 'pipeline'")) {
+          rows = rows.filter((run) => run.run_type === "pipeline");
+        } else if (sql.includes("wr.run_type = 'remix'")) {
+          rows = rows.filter((run) => run.run_type === "remix");
+        } else if (sql.includes("wr.run_type = ?")) {
+          const requestedRunType = params.find((item) => item === "pipeline" || item === "remix");
+          if (requestedRunType) rows = rows.filter((run) => run.run_type === requestedRunType);
+        }
+        const activeStatuses = ["checking", "queued", "running", "stitching", "qc", "preview_required", "partial_failed"];
+        if (sql.includes("wr.status IN ('checking'")) {
+          rows = rows.filter((run) => activeStatuses.includes(run.status));
+        } else if (sql.includes("wr.status IN ('succeeded'")) {
+          rows = rows.filter((run) => ["succeeded", "failed", "stopped", "skipped", "draft"].includes(run.status));
+        }
+        rows.sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")) || right.id - left.id);
+        if (/SELECT\s+COUNT\(\*\)\s+AS\s+total/i.test(sql)) {
+          return [[{ total: rows.length }]];
+        }
+        const limitMatch = sql.match(/LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i);
+        if (limitMatch) {
+          const limit = Number(limitMatch[1]);
+          const offset = Number(limitMatch[2]);
+          rows = rows.slice(offset, offset + limit);
+        }
+        return [rows.map((run) => ({
+          run_uid: run.run_uid,
+          run_type: run.run_type,
+          status: run.status,
+          operation_type: run.operation_type,
+          target_channel: run.target_channel,
+          stop_reason: run.stop_reason,
+          template_snapshot_json: run.template_snapshot_json,
+          started_at: run.started_at,
+          finished_at: run.finished_at,
+          created_at: run.created_at,
+          updated_at: run.updated_at
+        }))];
       }
       if (sql.includes("FROM state_transition_events")) {
         const runUid = params[0];
@@ -842,11 +961,16 @@ export function fakePool() {
         for (const output of state.outputs.values()) {
           const run = state.runRows.get(output.run_id);
           if (!run) continue;
+          if (output.output_kind === "stitch_failed") continue;
           if (run.project_id !== params[0] || run.user_id !== params[1]) continue;
           if (sql.includes("wr.run_type = 'remix'") && run.run_type !== "remix") continue;
           if (sql.includes("wr.run_type = 'pipeline'") && run.run_type !== "pipeline") continue;
+          if (sql.includes("wr.run_type = ?")) {
+            const requestedRunType = params.find((item) => item === "pipeline" || item === "remix");
+            if (requestedRunType && run.run_type !== requestedRunType) continue;
+          }
           if (sql.includes("wr.run_type IN ('pipeline', 'remix')") && !["pipeline", "remix"].includes(run.run_type)) continue;
-          if (params.includes(run.run_uid) === false && (sql.includes("wr.run_uid = ?"))) continue;
+          if (sql.includes("wr.run_uid = ?") && !params.includes(run.run_uid)) continue;
           if (sql.includes("wo.download_eligible = 1") && !(output.download_eligible === 1 || output.download_eligible === true)) continue;
           if (sql.includes("wo.qc_status = ?") && !params.includes(output.qc_status)) continue;
           if (sql.includes("wo.output_kind = ?") && !params.includes(output.output_kind)) continue;
@@ -896,9 +1020,10 @@ export function fakePool() {
           }
           return [[...grouped.values()]];
         }
-        if (sql.includes("LIMIT ? OFFSET ?")) {
-          const limit = Number(params.at(-2));
-          const offset = Number(params.at(-1));
+        const pageMatch = sql.match(/LIMIT\s+(\?|[0-9]+)\s+OFFSET\s+(\?|[0-9]+)/i);
+        if (pageMatch) {
+          const limit = pageMatch[1] === "?" ? Number(params.at(-2)) : Number(pageMatch[1]);
+          const offset = pageMatch[2] === "?" ? Number(params.at(-1)) : Number(pageMatch[2]);
           return [rows.slice(offset, offset + limit)];
         }
         return [rows];
@@ -907,6 +1032,8 @@ export function fakePool() {
         const estimate = state.estimates.get(params[0]);
         const source = [...state.assets.values()].find((asset) => asset.id === estimate?.sourceAssetFileId) || {};
         const reference = [...state.referenceVideos.values()].find((item) => item.id === estimate?.referenceVideoId) || null;
+        const templateVersion = [...state.templateVersions.values()].find((item) => item.id === estimate?.templateVersionId) || {};
+        const template = [...state.templates.values()].find((item) => item.id === templateVersion.templateDbId) || {};
         const referenceProbe = reference?.probe ? JSON.parse(reference.probe) : {};
         const decomposition = reference
           ? state.decompositions.get(reference.referenceVideoId)
@@ -920,23 +1047,13 @@ export function fakePool() {
           confirmation_expires_at: estimate.expiresAt,
           token_hash_available: Boolean(estimate.tokenHash),
           status: estimate.status,
-          template_uid: "tpl_cash_reward_us_en_001",
-          template_version_uid: "tplv_cash_reward_us_en_001_0001",
-          template_version_number: 1,
-          template_status: "active",
-          template_draft_json: JSON.stringify({
-            displayName: "Cash Reward US EN",
-            productName: "Lucky Cash",
-            cta: "Install today",
-            ending: "Claim your bonus today",
-            currencySymbol: "$",
-            language: "en-US",
-            regions: ["US"],
-            targetChannels: ["meta_ads"],
-            defaultOutputRatio: "9:16",
-            defaultDurationSec: 15,
-            promiseLevel: "strong_conversion"
-          }),
+          template_uid: template.templateId,
+          template_version_uid: templateVersion.versionId,
+          template_version_number: templateVersion.versionNumber,
+          template_status: templateVersion.status || template.status,
+          template_draft_json: templateVersion.draftJson,
+          template_created_by: "alice",
+          template_created_at: templateVersion.createdAt || "2026-06-18 00:00:00.000",
           reference_video_uid: reference?.referenceVideoId,
           reference_status: reference?.status,
           reference_probe_json: reference?.probe || null,

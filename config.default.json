@@ -16,6 +16,10 @@
           "logo_icon_cover_or_replace",
           "text_cta_ending_replace"
         ]
+      },
+      "stitcher": {
+        "status": "available",
+        "provider": "ffmpeg"
       }
     },
     "remixProvider": {
@@ -26,10 +30,11 @@
     },
     "seedanceProvider": {
       "provider": "seedance",
-      "endpoint": "",
-      "submitPath": "/contents/generations/tasks",
-      "model": "doubao-seedance-2-0-260128",
-      "apiKeyEnv": "VIDEO_AIGC_API_KEY",
+      "endpoint": "https://skylink-gateway.com/api/v1",
+      "submitPath": "/seedance/videos/generations",
+      "taskPollPath": "/seedance/tasks",
+      "model": "dreamina-seedance-2-0-260128",
+      "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 600000,
       "ratio": "9:16",
       "resolution": "720p",

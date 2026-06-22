@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import test from "node:test";
 
+import {
+  closeWangzhuanFactsPool,
+  setWangzhuanFactsPoolForTest,
+  syncBatchFacts
+} from "../../server/wangzhuan/mysql-facts.mjs";
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import {
   getBatchDetail,
@@ -13,8 +18,11 @@ import {
   submitPendingGenerationTasks
 } from "../../server/wangzhuan/pipeline.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
-import { wangzhuanPaths, writeAtomicJson } from "../../server/wangzhuan/storage.mjs";
+import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
+import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
+import { testSeedanceProviderClient } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -44,15 +52,18 @@ const baseDraft = {
 };
 
 function context(root, overrides = {}) {
-  return {
+  const ctx = {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: "alice",
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
     mockReferenceProbe: true,
     config: {},
+    seedanceProviderClient: testSeedanceProviderClient(),
     ...overrides
   };
+  attachMockObjectStorage(ctx);
+  return ctx;
 }
 
 function validUpload() {
@@ -83,6 +94,7 @@ function decomposition() {
 }
 
 async function fixture(root, overrides = {}) {
+  setWangzhuanFactsPoolForTest(fakePool());
   const ctx = context(root, overrides.context);
   const saved = await saveTemplate(ctx, { mode: "create", draft: overrides.draft || baseDraft });
   const checked = await checkReferenceVideo(ctx, validUpload());
@@ -109,6 +121,11 @@ async function fixture(root, overrides = {}) {
     estimateId: estimated.estimate.estimateId
   });
   return { ctx, started };
+}
+
+async function resetFactsPool() {
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
 }
 
 test("start prepares 15s scripts, prompt files, and pending generation tasks", async () => {
@@ -151,7 +168,8 @@ test("start prepares 15s scripts, prompt files, and pending generation tasks", a
 
     const paths = wangzhuanPaths(ctx);
     assert.equal(existsSync(join(paths.batchesDir, batch.batchId, "task-map", "task-id-map.json")), true);
-    assert.equal(existsSync(join(paths.batchesDir, batch.batchId, "tasks.jsonl")), true);
+    const detail = await getBatchDetail(ctx, batch.batchId);
+    assert.equal(detail.events.some((event) => event.entityUid === batch.batchId && event.toStatus === "queued"), true);
 
     const processFiles = [
       "00-brief.json",
@@ -172,38 +190,29 @@ test("start prepares 15s scripts, prompt files, and pending generation tasks", a
     assert.match(prompts.items[0].seedancePrompt, /Store page: https:\/\/play\.google\.com/);
     assert.match(prompts.items[0].seedancePrompt, /No competitor logo/);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("mock submit assigns local task ids and keeps remote URLs out of manifest and task map", async () => {
+test("submit rejects when seedance provider is not configured", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-submit-"));
   try {
-    const { ctx, started } = await fixture(root, { variantCount: 2 });
-    const result = await submitPendingGenerationTasks(ctx, started.batch.batchId);
-
-    assert.equal(result.submittedCount, 2);
-    assert.equal(result.batch.status, "running");
-    for (const task of result.batch.tasks) {
-      assert.equal(task.status, "waiting_upstream");
-      assert.match(task.imageTaskId, /^mock_img_gen_[a-f0-9]{4}_\d{3}$/);
-      assert.match(task.seedanceTaskId, /^mock_seedance_gen_[a-f0-9]{4}_\d{3}$/);
-      assert.equal(task.remoteUrlStored, false);
-      assert.equal(Object.hasOwn(task, "remoteUrl"), false);
-      assert.equal(task.attempts, 1);
-      assert.ok(task.startedAt);
-    }
-
-    const taskMapPath = join(wangzhuanPaths(ctx).batchesDir, started.batch.batchId, "task-map", "task-id-map.json");
-    const taskMapText = await readFile(taskMapPath, "utf8");
-    assert.match(taskMapText, /mock_seedance_gen_/);
-    assert.doesNotMatch(taskMapText, /"remoteUrl"\s*:|"remote_url"\s*:|https?:\/\//);
+    const { ctx, started } = await fixture(root, {
+      variantCount: 2,
+      context: { seedanceProviderClient: null, config: {} }
+    });
+    await assert.rejects(
+      () => submitPendingGenerationTasks(ctx, started.batch.batchId),
+      (error) => error.code === "upstream_failed"
+    );
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("remote submit sends each branch asset URL in Seedance content payload", async () => {
+test("remote submit sends each branch asset URL in Seedance references payload", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-seedance-"));
   const submissions = [];
   try {
@@ -259,26 +268,28 @@ test("remote submit sends each branch asset URL in Seedance content payload", as
     assert.equal(result.submittedCount, 2);
     assert.equal(submissions.length, 2);
     assert.equal(result.batch.tasks.map((task) => task.branchId).join(","), "branch_news,branch_wallet");
-    assert.deepEqual(submissions[0].payload.content.map((item) => item.type), ["text", "image_url", "image_url"]);
-    assert.deepEqual(submissions[0].payload.content.slice(1).map((item) => item.image_url.url), [
+    assert.equal(submissions[0].payload.mode, "omni_reference");
+    assert.match(submissions[0].payload.prompt, /News Cash|news/i);
+    assert.deepEqual(submissions[0].payload.references.map((item) => item.url), [
       "https://cdn.example.com/wangzhuan/news-icon.png",
       "https://cdn.example.com/wangzhuan/news-screen.png"
     ]);
-    assert.deepEqual(submissions[1].payload.content.slice(1).map((item) => item.image_url.url), [
+    assert.deepEqual(submissions[1].payload.references.map((item) => item.url), [
       "https://cdn.example.com/wangzhuan/wallet-icon.png",
       "https://cdn.example.com/wangzhuan/wallet-screen.png"
     ]);
-    assert.equal(submissions[0].payload.model, "doubao-seedance-2-0-260128");
+    assert.equal(submissions[0].payload.model, "dreamina-seedance-2-0-260128");
     assert.equal(submissions[0].payload.ratio, "9:16");
     assert.equal(submissions[0].payload.duration, 15);
     assert.equal(submissions[0].payload.watermark, false);
     assert.equal(result.batch.tasks[0].seedanceTaskId, `remote_${result.batch.tasks[0].generationTaskId}`);
     assert.equal(result.batch.tasks[0].provider, "seedance");
-    assert.deepEqual(result.batch.tasks[0].requestSummary.content.slice(1).map((item) => item.image_url.url), [
+    assert.deepEqual(result.batch.tasks[0].requestSummary.references.map((item) => item.url), [
       "https://cdn.example.com/wangzhuan/news-icon.png",
       "https://cdn.example.com/wangzhuan/news-screen.png"
     ]);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -320,9 +331,12 @@ test("remote submit failure persists Seedance request summary for debugging", as
     assert.equal(task.status, "failed");
     assert.equal(task.errorCode, "upstream_failed");
     assert.equal(task.responseSummary.upstreamCode, "InvalidParameter");
-    assert.deepEqual(task.requestSummary.content.map((item) => item.type), ["text", "image_url"]);
-    assert.equal(task.requestSummary.content[1].image_url.url, "https://cdn.example.com/wangzhuan/news-icon.png");
+    assert.equal(task.requestSummary.mode, "omni_reference");
+    assert.deepEqual(task.requestSummary.references.map((item) => item.url), [
+      "https://cdn.example.com/wangzhuan/news-icon.png"
+    ]);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -334,7 +348,6 @@ test("scheduler retry resubmits only the failed generation task", async () => {
     const submitted = await submitPendingGenerationTasks(ctx, started.batch.batchId);
     const now = new Date().toISOString();
     const failedTaskId = submitted.batch.tasks[0].generationTaskId;
-    const batchPath = join(wangzhuanPaths(ctx).batchesDir, submitted.batch.batchId, "batch.json");
     const failedBatch = {
       ...submitted.batch,
       status: "running",
@@ -346,7 +359,7 @@ test("scheduler retry resubmits only the failed generation task", async () => {
         finishedAt: now
       } : task)
     };
-    await writeAtomicJson(batchPath, failedBatch);
+    await syncBatchFacts(ctx, failedBatch, "batch_write");
 
     const result = await retryFailedGenerationTask(ctx, submitted.batch.batchId, failedTaskId);
 
@@ -357,18 +370,19 @@ test("scheduler retry resubmits only the failed generation task", async () => {
     assert.equal(retried.status, "waiting_upstream");
     assert.equal(retried.errorCode, undefined);
     assert.equal(retried.attempts, 2);
-    assert.match(retried.seedanceTaskId, /^mock_seedance_gen_[a-f0-9]{4}_\d{3}$/);
+    assert.match(retried.seedanceTaskId, /^remote_gen_[a-f0-9]{4}_\d{3}$/);
     assert.equal(untouched.attempts, 1);
     assert.equal(untouched.status, "waiting_upstream");
 
     const detail = await getBatchDetail(ctx, submitted.batch.batchId);
-    assert.equal(detail.events.some((event) => event.event === "generation_task_retried" && event.generationTaskId === failedTaskId), true);
+    assert.equal(detail.events.some((event) => event.entityUid === failedTaskId && event.toStatus === "waiting_upstream"), true);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("stop before mock submit marks pending tasks stopped and prevents later submission", async () => {
+test("stop before submit marks pending tasks stopped and prevents later submission", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-stop-"));
   try {
     const { ctx, started } = await fixture(root, { variantCount: 2 });
@@ -390,6 +404,7 @@ test("stop before mock submit marks pending tasks stopped and prevents later sub
       assert.equal(Object.hasOwn(task, "seedanceTaskId"), false);
     }
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -411,15 +426,17 @@ test("batch detail returns manifest events and a download summary without packag
       missingFiles: []
     });
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("start prepares 30s batches as two 15s segments when mock stitcher is available", async () => {
+test("start prepares 30s batches as two 15s segments when stitcher is available", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-30s-"));
   try {
+    setWangzhuanFactsPoolForTest(fakePool());
     const ctx = context(root, {
-      capabilities: { stitcher: { status: "available", provider: "mock_stitch" } }
+      capabilities: { stitcher: { status: "available", provider: "ffmpeg" } }
     });
     const saved = await saveTemplate(ctx, { mode: "create", draft: baseDraft });
     const checked = await checkReferenceVideo(ctx, validUpload());
@@ -459,6 +476,7 @@ test("start prepares 30s batches as two 15s segments when mock stitcher is avail
     const batchEntries = await readdir(wangzhuanPaths(ctx).batchesDir);
     assert.equal(batchEntries.includes(started.batch.batchId), true);
   } finally {
+    await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

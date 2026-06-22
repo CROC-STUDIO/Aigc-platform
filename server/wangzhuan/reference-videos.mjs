@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 import { execFile } from "node:child_process";
@@ -6,16 +5,19 @@ import { promisify } from "node:util";
 
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { makeReferenceVideoId } from "./ids.mjs";
 import { resolveLlmConfig } from "./llm-config.mjs";
 import {
+  hasWangzhuanFactsStore,
   loadReferenceVideoProbeFromMysql,
+  loadVideoDecompositionFromMysql,
+  nextReferenceVideoIdFromMysql,
   syncReferenceVideoFact,
   syncVideoDecompositionFact
 } from "./mysql-facts.mjs";
-import { previewUrlForWangzhuanAsset, readJsonOrDefault, syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { buildPublicUrl } from "../object-storage.mjs";
+import { flattenDecompositionFieldValue } from "./decomposition-text.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
@@ -220,16 +222,6 @@ async function probeReferenceVideo(context, filePath, request) {
   return ffprobeReferenceVideo(filePath, { timeoutMs });
 }
 
-async function nextReferenceSeq(paths) {
-  const indexPath = join(paths.referenceVideosDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, { schemaVersion: "reference-videos.v1", nextSeq: 1, items: [] });
-  return { indexPath, index };
-}
-
-async function saveReferenceIndex(indexPath, index) {
-  await writeAtomicJson(indexPath, index);
-}
-
 export async function checkReferenceVideo(context, request = {}) {
   const paths = wangzhuanPaths(context);
   const limits = effectiveLimits(context.config || {});
@@ -248,15 +240,16 @@ export async function checkReferenceVideo(context, request = {}) {
     });
   }
 
-  const { indexPath, index } = await nextReferenceSeq(paths);
-  const referenceVideoId = makeReferenceVideoId(index.nextSeq || 1);
-  index.nextSeq = (index.nextSeq || 1) + 1;
+  const referenceVideoId = await nextReferenceVideoIdFromMysql(context);
+  if (!referenceVideoId) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存参考视频状态");
+  }
 
   const referenceDir = join(paths.referenceVideosDir, referenceVideoId);
   await mkdir(referenceDir, { recursive: true });
   const originalPath = join(referenceDir, `original${ext}`);
   await writeFile(originalPath, buffer);
-  const storage = await syncWangzhuanAsset(context, originalPath, "reference_video");
+  const storage = await syncWangzhuanAsset(context, originalPath, "reference_video", { required: true });
 
   const mediaProbe = await probeReferenceVideo(context, originalPath, request);
   const durationSec = mediaProbe.durationSec;
@@ -299,19 +292,15 @@ export async function checkReferenceVideo(context, request = {}) {
     status: issues.some((item) => item.severity === "error") ? "fail" : issues.length ? "warn" : "pass",
     issues,
     storedPath: toProjectRelative(context.userProjectRoot, originalPath),
-    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {})
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl
   };
 
   await writeAtomicJson(join(referenceDir, "probe.json"), probe);
-  index.items = Array.isArray(index.items) ? index.items : [];
-  index.items.push({
-    referenceVideoId,
-    probePath: toProjectRelative(context.userProjectRoot, join(referenceDir, "probe.json")),
-    createdBy: context.userId,
-    createdAt: new Date().toISOString()
-  });
-  await saveReferenceIndex(indexPath, index);
-  await syncReferenceVideoFact(context, probe);
+  const synced = await syncReferenceVideoFact(context, probe);
+  if (synced?.skipped) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存参考视频状态");
+  }
   await recordTelemetryEvent(context, "reference_video_checked", {
     referenceVideoId,
     status: probe.status,
@@ -320,7 +309,7 @@ export async function checkReferenceVideo(context, request = {}) {
     issueCodes: probe.issues.map((item) => item.code)
   });
 
-  return { referenceVideo: { ...probe, previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, probe.storedPath) } };
+  return { referenceVideo: { ...probe, previewUrl: storage.storageUrl } };
 }
 
 function mimeForExt(ext) {
@@ -334,23 +323,14 @@ export async function loadReferenceVideoProbe(context, referenceVideoId) {
   if (!/^ref_\d{8}_\d{3}$/.test(String(referenceVideoId || ""))) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
-  const probePath = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "probe.json");
-  const mysqlProbe = await loadReferenceVideoProbeFromMysql(context, referenceVideoId);
-  if (mysqlProbe) {
-    if (!existsSync(probePath)) return mysqlProbe;
-    const fileProbe = JSON.parse(await readFile(probePath, "utf8"));
-    return {
-      ...fileProbe,
-      ...mysqlProbe,
-      storedPath: mysqlProbe.storedPath || fileProbe.storedPath,
-      storageKey: mysqlProbe.storageKey || fileProbe.storageKey,
-      storageUrl: mysqlProbe.storageUrl || fileProbe.storageUrl
-    };
+  if (!await hasWangzhuanFactsStore()) {
+    throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取参考视频状态");
   }
-  if (!existsSync(probePath)) {
+  const mysqlProbe = await loadReferenceVideoProbeFromMysql(context, referenceVideoId);
+  if (!mysqlProbe) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
-  return JSON.parse(await readFile(probePath, "utf8"));
+  return mysqlProbe;
 }
 
 export function validateVideoDecomposition(referenceVideoId, decomposition = {}) {
@@ -383,8 +363,8 @@ export function validateVideoDecomposition(referenceVideoId, decomposition = {})
 function firstStringValue(source, keys) {
   for (const key of keys) {
     const value = source?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (value && typeof value === "object") return JSON.stringify(value);
+    if (typeof value === "string" && value.trim()) return flattenDecompositionFieldValue(value.trim());
+    if (value && typeof value === "object") return flattenDecompositionFieldValue(value);
   }
   return "";
 }
@@ -890,6 +870,32 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
   };
 }
 
+async function loadConfirmedDecomposition(context, referenceVideoId) {
+  const mysqlDecomposition = await loadVideoDecompositionFromMysql(context, referenceVideoId);
+  if (mysqlDecomposition) {
+    const missingFields = Array.isArray(mysqlDecomposition.missingFields) ? mysqlDecomposition.missingFields : [];
+    if (!missingFields.length) return mysqlDecomposition;
+  }
+  const target = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "decomposition.json");
+  try {
+    const parsed = validateVideoDecomposition(referenceVideoId, JSON.parse(await readFile(target, "utf8")));
+    if (!parsed.missingFields.length) return parsed;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+export async function getReferenceVideoWorkflowState(context, referenceVideoId) {
+  const probe = await loadReferenceVideoProbe(context, referenceVideoId);
+  const decomposition = await loadConfirmedDecomposition(context, referenceVideoId);
+  return {
+    referenceVideo: probe,
+    decomposition,
+    decompositionConfirmed: Boolean(decomposition?.referenceVideoId)
+  };
+}
+
 export async function decomposeReferenceVideo(context, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
@@ -918,3 +924,5 @@ export async function decomposeReferenceVideo(context, request = {}) {
     warnings: []
   };
 }
+
+export { callOpenAiCompatibleLlm, parseLlmJsonContent };
