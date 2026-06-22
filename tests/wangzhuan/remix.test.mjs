@@ -8,6 +8,11 @@ import test from "node:test";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { getGallery } from "../../server/wangzhuan/gallery.mjs";
+import {
+  closeWangzhuanFactsPool,
+  loadRemixSourceFromMysql,
+  setWangzhuanFactsPoolForTest
+} from "../../server/wangzhuan/mysql-facts.mjs";
 import { buildDownloadPackage } from "../../server/wangzhuan/package.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
 import {
@@ -22,6 +27,7 @@ import {
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -48,6 +54,55 @@ function context(root, userId = "alice", overrides = {}) {
     ...overrides
   };
 }
+
+function objectStorageContext(root, userId = "alice", overrides = {}) {
+  const objectStore = new Map();
+  const ctx = context(root, userId, {
+    ...overrides,
+    async syncWangzhuanAsset({ fullPath, assetKind }) {
+      const relativePath = fullPath
+        .slice(ctx.userProjectRoot.length)
+        .replace(/^[\\/]+/, "")
+        .replace(/\\/g, "/");
+      const safeRelativePath = Buffer.from(relativePath, "utf8").toString("hex").slice(0, 64);
+      const safeName = basename(fullPath).replace(/[^a-zA-Z0-9._-]+/g, "_") || "asset";
+      const storageKey = `uploads/test/${userId}/${assetKind}/${safeRelativePath}_${safeName}`;
+      objectStore.set(storageKey, await readFile(fullPath));
+      return {
+        storageKey,
+        storageUrl: `https://cdn.test/${encodeURIComponent(storageKey)}`
+      };
+    },
+    async openWangzhuanObjectStream(storageKey) {
+      const buffer = objectStore.get(storageKey);
+      if (!buffer) throw new Error(`missing object ${storageKey}`);
+      return { body: Readable.from([buffer]) };
+    }
+  });
+  return { ctx, objectStore };
+}
+
+function attachMysqlFacts() {
+  const pool = fakePool();
+  setWangzhuanFactsPoolForTest(pool);
+  return pool;
+}
+
+let currentPool = null;
+
+async function detachMysqlFacts() {
+  setWangzhuanFactsPoolForTest(null);
+  await closeWangzhuanFactsPool();
+}
+
+test.beforeEach(() => {
+  currentPool = attachMysqlFacts();
+});
+
+test.afterEach(async () => {
+  currentPool = null;
+  await detachMysqlFacts();
+});
 
 function sourceUpload(fileName = "competitor.mp4", mimeType = "video/mp4") {
   return {
@@ -193,7 +248,9 @@ test("remix upload stores source material and rejects invalid file types", async
     assert.match(uploaded.previewUrl, /^\/file\?path=/);
     assert.equal(uploaded.previewUrl.includes(root), false);
     assert.equal(existsSync(join(ctx.userProjectRoot, uploaded.probe.storedPath)), true);
-    assert.equal(existsSync(join(wangzhuanPaths(ctx).remixSourcesDir, uploaded.sourceId, "source-probe.json")), true);
+    const sourceFact = await loadRemixSourceFromMysql(ctx, uploaded.sourceId);
+    assert.equal(sourceFact.sourceId, uploaded.sourceId);
+    assert.equal(sourceFact.storedPath, uploaded.probe.storedPath);
 
     await assert.rejects(
       () => uploadRemixSource(ctx, sourceUpload("notes.txt", "text/plain")),
@@ -464,14 +521,14 @@ test("remix start creates preview-required output and preview confirm makes it d
     assert.equal(packaged.manifest.items.length, 1);
     assert.equal(entries.has("package-manifest.json"), true);
     assert.equal(entries.has(`${remixRoot}/source/original.mp4`), true);
-    assert.equal(entries.has(`${remixRoot}/source/source-probe.json`), true);
+    assert.equal(entries.has(`${remixRoot}/source/source-probe.json`), false);
     assert.equal(entries.has(`${remixRoot}/regions/regions.json`), true);
     assert.equal(entries.has(`${remixRoot}/prompts/${started.remix.tasks[0].generationTaskId}_remix.txt`), true);
     assert.equal(entries.has(`${remixRoot}/qc/${started.remix.outputs[0].outputId}.json`), true);
     assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.csv`), true);
     assert.equal(entries.has(`${remixRoot}/task-map/task-id-map.json`), true);
     assert.equal(entries.has(`${remixRoot}/outputs/${started.remix.outputs[0].outputId}.mp4`), true);
-    assert.equal(entries.has(`${remixRoot}/remix.json`), true);
+    assert.equal(entries.has(`${remixRoot}/remix.json`), false);
     assert.equal(entries.has(`${remixRoot}/preview-confirmation.json`), true);
 
     const textPayload = Buffer.concat([...entries.values()]).toString("utf8");
@@ -482,11 +539,76 @@ test("remix start creates preview-required output and preview confirm makes it d
   }
 });
 
+test("remix package is driven by mysql asset storage keys when local cache files are gone", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-s3-package-"));
+  try {
+    const { ctx, objectStore } = objectStorageContext(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_s7_s3_remix_start",
+      estimateId: estimated.estimateId
+    });
+    const confirmed = await confirmRemixPreview(ctx, started.remix.remixId, {
+      idempotencyKey: "idem_s7_s3_preview_confirm",
+      outputId: started.remix.outputs[0].outputId,
+      notes: "object storage backed"
+    });
+
+    const detail = await getRemixDetail(ctx, confirmed.remix.remixId);
+    const task = detail.remix.tasks[0];
+    const output = detail.remix.outputs[0];
+    assert.ok(detail.remix.source.storageKey);
+    assert.ok(task.promptStorageKey);
+    assert.ok(output.storageKey);
+    assert.ok(output.qcReportStorageKey);
+
+    assert.equal(currentPool.state.assets.get(detail.remix.source.sourceId).storageKey, detail.remix.source.storageKey);
+    assert.equal(currentPool.state.assets.get(`asset_prompt_${task.generationTaskId}`).storageKey, task.promptStorageKey);
+    assert.equal(currentPool.state.assets.get(`asset_${output.outputId}`).storageKey, output.storageKey);
+    assert.equal(currentPool.state.assets.get(`asset_qc_${output.outputId}`).storageKey, output.qcReportStorageKey);
+
+    await rm(join(ctx.userProjectRoot, detail.remix.source.storedPath), { force: true });
+    await rm(join(ctx.userProjectRoot, task.promptPath), { force: true });
+    await rm(join(ctx.userProjectRoot, output.filePath), { force: true });
+    await rm(join(ctx.userProjectRoot, output.qcReportPath), { force: true });
+    await rm(join(wangzhuanPaths(ctx).remixDir, confirmed.remix.remixId, "preview-confirmation.json"), { force: true });
+
+    const packaged = await buildDownloadPackage(ctx, { remixIds: [confirmed.remix.remixId] });
+    const entries = zipEntries(packaged.zip);
+    const remixRoot = `remix/${confirmed.remix.remixId}`;
+    assert.equal(packaged.manifest.missingFiles.length, 0);
+    assert.equal(entries.get(`${remixRoot}/source/original.mp4`).toString("utf8"), "source material");
+    assert.equal(entries.get(`${remixRoot}/outputs/${output.outputId}.mp4`).toString("utf8"), objectStore.get(output.storageKey).toString("utf8"));
+    assert.match(entries.get(`${remixRoot}/prompts/${task.generationTaskId}_remix.txt`).toString("utf8"), /Operation: watermark_cover/);
+    assert.match(entries.get(`${remixRoot}/qc/${output.outputId}.json`).toString("utf8"), /"qcStatus": "pass"/);
+    assert.match(entries.get(`${remixRoot}/preview-confirmation.json`).toString("utf8"), /object storage backed/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("remix start submits configured video platform job for mask editing", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s7-provider-"));
   try {
     const providerCalls = [];
-    const ctx = context(root, "alice", {
+    const { ctx } = objectStorageContext(root, "alice", {
       capabilities: {
         remix: {
           provider: "video_aigc",
@@ -510,6 +632,7 @@ test("remix start submits configured video platform job for mask editing", async
     });
     const template = await templateFixture(ctx);
     const source = await uploadRemixSource(ctx, sourceUpload());
+    await rm(join(ctx.userProjectRoot, source.probe.storedPath), { force: true });
     const estimated = await estimateRemix(ctx, {
       sourceId: source.sourceId,
       templateId: template.templateId,

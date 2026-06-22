@@ -5,6 +5,7 @@ import {
   deleteObject,
   deleteRecordedAssetMetadata,
   getRecordedAssetMetadata,
+  openObjectStream,
   objectStorageEnabled,
   projectStorageDescriptor,
   uploadProjectAsset
@@ -54,6 +55,9 @@ function localPreviewUrl(relativePath) {
 }
 
 export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhuan_file") {
+  if (typeof context.syncWangzhuanAsset === "function") {
+    return context.syncWangzhuanAsset({ fullPath, assetKind });
+  }
   if (!objectStorageEnabled()) return null;
   try {
     return await uploadProjectAsset({
@@ -67,6 +71,13 @@ export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhu
     console.warn(`[object-storage] failed to upload ${assetKind}: ${error.message}`);
     return null;
   }
+}
+
+export async function openWangzhuanObjectStream(context, storageKey) {
+  if (typeof context.openWangzhuanObjectStream === "function") {
+    return context.openWangzhuanObjectStream(storageKey);
+  }
+  return openObjectStream(storageKey);
 }
 
 export async function getWangzhuanAssetMetadata(context, relativePath) {

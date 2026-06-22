@@ -1,9 +1,9 @@
 // Horizontal node-canvas controller for the 网赚 pipeline.
 // - Draws SVG links between nodes based on their REAL DOM positions
 //   (no hard-coded coordinates → never misaligns, fully responsive).
-// - Supports fan-out: "+ 添加改写分支" clones the rewrite node as an
-//   extension slot (disabled placeholder) until the backend accepts
-//   multiple drafts. The first branch keeps all real IDs / JS bindings.
+// - Supports fan-out: "+ 添加改写分支" clones the rewrite node as a real
+//   editable branch. The first branch keeps IDs for legacy bindings; clones
+//   use data-branch-field attributes so business JS can save every branch.
 // - Step bar click → smooth scroll; scroll → highlight current stage.
 // Self-contained, no imports, safe to load with `defer`.
 (() => {
@@ -150,6 +150,47 @@
   const addBtn = document.getElementById("wzAddBranchBtn");
   const baseNode = document.getElementById("wzNodeRewrite");
   let branchSeq = 1; // 3.1 is the real node
+  const branchFieldIds = {
+    wzProductName: "productName",
+    wzProductLink: "productLink",
+    wzCta: "cta",
+    wzLanguage: "language",
+    wzTargetChannel: "targetChannel",
+    wzTargetRegion: "targetRegion",
+    wzMaterialDirection: "materialDirection",
+    wzVoiceoverStyle: "voiceoverStyle",
+    wzPromiseLevel: "promiseLevel",
+    wzProjectName: "projectName",
+    wzBatchName: "batchName",
+    wzTemplateSelect: "templateSelect",
+    wzDisplayName: "displayName",
+    wzGenerationMode: "generationMode",
+    wzTemplateChannel: "templateChannel",
+    wzRegions: "regions",
+    wzDefaultDuration: "defaultDuration",
+    wzEnding: "ending",
+    wzCurrencySymbol: "currencySymbol",
+    wzProductIconFile: "productIconFile",
+    wzProductScreenshotFile: "productScreenshotFile",
+    wzProductRecordingFile: "productRecordingFile",
+    wzEndingAssetFile: "endingAssetFile",
+    wzPersonAssetFile: "personAssetFile",
+    wzRewardElementFile: "rewardElementFile",
+    wzVariantPrompt: "variantPrompt",
+    wzCustomPrompt: "customPrompt",
+    wzNegativePrompt: "negativePrompt"
+  };
+
+  function branchId(value) {
+    return String(value || "").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 48) || `branch_${branchSeq}`;
+  }
+
+  function markCloneFields(node) {
+    for (const el of node.querySelectorAll("[id]")) {
+      const field = branchFieldIds[el.id];
+      if (field) el.dataset.branchField = field;
+    }
+  }
 
   function wireBranch(node) {
     ensureCollapseButtons();
@@ -181,45 +222,60 @@
     });
   }
 
-  function addBranch() {
+  function createBranchNode(draft = {}, options = {}) {
     if (!baseNode) return;
     branchSeq += 1;
     const clone = baseNode.cloneNode(true);
+    markCloneFields(clone);
 
-    // Strip identity from the clone so it can't break ID-based business JS.
+    // Remove duplicate IDs while keeping data-branch-field for business JS.
     clone.removeAttribute("id");
     clone.classList.add("wz-node-clone");
     clone.dataset.branch = String(branchSeq - 1);
+    clone.dataset.branchId = branchId(draft.branchId || draft.id || `branch_${branchSeq}`);
+    clone.dataset.branchLabel = draft.branchLabel || draft.label || "";
     for (const el of clone.querySelectorAll("[id]")) el.removeAttribute("id");
     for (const el of clone.querySelectorAll("[name]")) el.removeAttribute("name");
+    for (const el of clone.querySelectorAll('input[type="file"]')) {
+      el.value = "";
+      el.dataset.storageUrl = "";
+      el.dataset.storageKey = "";
+      el.dataset.storedPath = "";
+      el.dataset.uploadedFileName = "";
+    }
     // Drop state classes/pills carried over from the original.
     clone.classList.remove("focused", "collapsed", "state-done", "state-current", "state-pending");
     clone.querySelector(".wz-node-state")?.remove();
 
-    // Replace the "保存模板" button (needs a real ID/handler) with a remove button.
     const head = clone.querySelector(".panel-head");
     const saveBtn = head?.querySelector("button");
     if (saveBtn) {
+      saveBtn.removeAttribute("id");
+      saveBtn.className = "mini wz-save-branch";
+      saveBtn.textContent = "保存全部分支";
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "mini ghost wz-branch-remove";
       rm.textContent = "移除";
-      saveBtn.replaceWith(rm);
-    }
-    // The rules box inside the clone is just a static hint now.
-    const clonedRules = clone.querySelector(".wz-list");
-    if (clonedRules) {
-      clonedRules.className = "wz-list empty-line";
-      clonedRules.textContent = "保存后端多分支接口就绪后自动加载渠道规则";
+      head.appendChild(rm);
     }
 
     branchesWrap.appendChild(clone);
     renumberBranches();
     wireBranch(clone);
-    clone.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    if (options.focus !== false) {
+      clone.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
     scheduleDraw();
+    window.dispatchEvent(new CustomEvent("wz:branch-created", { detail: { node: clone, draft } }));
+    return clone;
   }
 
+  function addBranch() {
+    createBranchNode();
+  }
+
+  window.wzCreateBranchNode = createBranchNode;
   addBtn?.addEventListener("click", addBranch);
 
   // --- Step bar: smooth scroll + active highlight -------------------------

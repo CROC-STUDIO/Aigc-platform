@@ -5,11 +5,14 @@ import { WangzhuanError, requirePermission, sendErrorEnvelope, sendOk } from "./
 import { makeRequestId } from "./ids.mjs";
 import { publicLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
-import { getBatchDetail, stopBatch } from "./pipeline.mjs";
+import { getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
+import { uploadProductAsset } from "./product-assets.mjs";
+import { runBatchQc } from "./qc.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo, draftReferenceVideoDecomposition } from "./reference-videos.mjs";
 import {
   confirmRemixPreview,
   estimateRemix,
+  getActiveRemix,
   getRemixDetail,
   startDirectMaskEdit,
   startRemix,
@@ -17,6 +20,7 @@ import {
   uploadRemixSource
 } from "./remix.mjs";
 import { retryStitch } from "./stitch.mjs";
+import { pollUpstreamBatch } from "./upstream-poll.mjs";
 import { adminTemplateAction, listTemplates, saveTemplate } from "./templates.mjs";
 
 function buildContext(context) {
@@ -34,7 +38,7 @@ function queryObject(url) {
 }
 
 function batchRoute(pathname) {
-  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch))?$/);
+  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch|qc))?$/);
   if (!match) return null;
   return { batchId: match[1], action: match[2] || "detail" };
 }
@@ -80,16 +84,25 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       return sendOk(res, await checkReferenceVideo(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/draft-decomposition") {
-      return sendOk(res, await draftReferenceVideoDecomposition(scoped, await context.readJson(req)), requestId);
+      return sendOk(res, await draftReferenceVideoDecomposition(scoped, await context.readJson(req), { requestId }), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/decompose") {
       return sendOk(res, await decomposeReferenceVideo(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-assets/upload") {
+      return sendOk(res, await uploadProductAsset(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/estimate") {
       return sendOk(res, await estimateBatch(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/start") {
-      return sendOk(res, await startBatchFromEstimate(scoped, await context.readJson(req)), requestId);
+      const started = await startBatchFromEstimate(scoped, await context.readJson(req));
+      const submitted = await submitPendingGenerationTasks(scoped, started.batch.batchId);
+      const polled = await pollUpstreamBatch(scoped, started.batch.batchId);
+      return sendOk(res, { ...submitted, batch: polled.batch, startedBatch: started.batch }, requestId);
+    }
+    if (req.method === "GET" && url.pathname === "/api/wangzhuan/batches/active") {
+      return sendOk(res, await getActiveBatch(scoped), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/upload") {
       return sendOk(res, await uploadRemixSource(scoped, await context.readJson(req)), requestId);
@@ -103,6 +116,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/mask-edit") {
       return sendOk(res, await startDirectMaskEdit(scoped, await context.readJson(req)), requestId);
     }
+    if (req.method === "GET" && url.pathname === "/api/wangzhuan/remix/active") {
+      return sendOk(res, await getActiveRemix(scoped), requestId);
+    }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {
       return sendOk(res, await getBatchDetail(scoped, batch.batchId), requestId);
@@ -112,6 +128,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (batch && req.method === "POST" && batch.action === "retry-stitch") {
       return sendOk(res, await retryStitch(scoped, batch.batchId, await context.readJson(req)), requestId);
+    }
+    if (batch && req.method === "POST" && batch.action === "qc") {
+      return sendOk(res, await runBatchQc(scoped, batch.batchId), requestId);
     }
     const remix = remixRoute(url.pathname);
     if (remix && req.method === "GET" && remix.action === "detail") {

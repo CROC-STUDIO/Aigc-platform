@@ -10,20 +10,33 @@ import { createRemixProviderClient, hasRemoteRemixProvider } from "./remix-provi
 import { ffprobeMediaFile } from "./reference-videos.mjs";
 import {
   makeGenerationTaskId,
-  makeRemixEstimateId,
   makeRemixId,
-  makeRemixSourceId,
   makeOutputId
 } from "./ids.mjs";
 import {
+  openWangzhuanObjectStream,
   previewUrlForWangzhuanAsset,
-  readJsonOrDefault,
   syncWangzhuanAsset,
   toProjectRelative,
   wangzhuanPaths,
   writeAtomicJson
 } from "./storage.mjs";
-import { findActiveResourceLock, syncRemixFacts } from "./mysql-facts.mjs";
+import {
+  findActiveResourceLock,
+  loadActivePipelineRunFromMysql,
+  loadActiveRemixFromMysql,
+  loadEstimateFromMysql,
+  loadIdempotencyFactFromMysql,
+  loadRemixDetailFromMysql,
+  loadRemixSourceFromMysql,
+  loadTemplateStoreFromMysql,
+  nextRemixEstimateIdFromMysql,
+  nextRemixSourceIdFromMysql,
+  recordIdempotencyFact,
+  syncEstimateFact,
+  syncRemixFacts,
+  syncRemixSourceFact
+} from "./mysql-facts.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const MATERIAL_EXTS = new Set([".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg"]);
@@ -54,8 +67,13 @@ function isAdmin(context) {
 async function assertNoMysqlResourceLock(context) {
   const activeMysqlLock = await findActiveResourceLock(context);
   if (!activeMysqlLock) return;
+  const runningResource = activeMysqlLock.runType === "pipeline"
+    ? "pipeline_batch"
+    : activeMysqlLock.runType === "remix"
+      ? "remix"
+      : activeMysqlLock.runType || "mysql_resource_lock";
   throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-    runningResource: activeMysqlLock.runType || "mysql_resource_lock",
+    runningResource,
     batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
     remixId: activeMysqlLock.runType === "remix" ? activeMysqlLock.runId : undefined,
     status: activeMysqlLock.runStatus || activeMysqlLock.status
@@ -157,45 +175,16 @@ function parseMaskDataUrl(maskDataUrl) {
   return buffer;
 }
 
-function idempotencyFile(paths, endpoint, idempotencyKey, resourceId = "") {
-  const safeEndpoint = endpoint.replace(/[^a-z0-9_-]+/gi, "_");
-  const digest = createHash("sha256").update(`${resourceId}:${String(idempotencyKey)}`).digest("hex").slice(0, 24);
-  return join(paths.idempotencyDir, `${safeEndpoint}_${digest}.json`);
+async function nextSourceSeq(context) {
+  const sourceId = await nextRemixSourceIdFromMysql(context);
+  if (!sourceId) throw new WangzhuanError("database_unavailable", "MySQL 未就绪，无法创建素材记录", {});
+  return sourceId;
 }
 
-async function readIdempotentResult(paths, endpoint, idempotencyKey, resourceId = "") {
-  if (!idempotencyKey) return null;
-  const target = idempotencyFile(paths, endpoint, idempotencyKey, resourceId);
-  if (!existsSync(target)) return null;
-  return JSON.parse(await readFile(target, "utf8")).result;
-}
-
-async function writeIdempotentResult(paths, endpoint, idempotencyKey, result, resourceId = "") {
-  if (!idempotencyKey) return;
-  await writeAtomicJson(idempotencyFile(paths, endpoint, idempotencyKey, resourceId), {
-    endpoint,
-    resourceId,
-    result,
-    createdAt: new Date().toISOString()
-  });
-}
-
-async function nextSourceSeq(paths) {
-  const indexPath = join(paths.remixSourcesDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, { schemaVersion: "remix-sources.v1", nextSeq: 1, items: [] });
-  const sourceId = makeRemixSourceId(index.nextSeq || 1);
-  index.nextSeq = (index.nextSeq || 1) + 1;
-  index.items = Array.isArray(index.items) ? index.items : [];
-  return { sourceId, indexPath, index };
-}
-
-async function nextEstimateSeq(paths) {
-  const indexPath = join(paths.remixEstimatesDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, { schemaVersion: "remix-estimates.v1", nextSeq: 1, items: [] });
-  const estimateId = makeRemixEstimateId(index.nextSeq || 1);
-  index.nextSeq = (index.nextSeq || 1) + 1;
-  index.items = Array.isArray(index.items) ? index.items : [];
-  return { estimateId, indexPath, index };
+async function nextEstimateSeq(context) {
+  const estimateId = await nextRemixEstimateIdFromMysql(context);
+  if (!estimateId) throw new WangzhuanError("database_unavailable", "MySQL 未就绪，无法创建估算记录", {});
+  return estimateId;
 }
 
 function validateSourceId(sourceId) {
@@ -226,10 +215,6 @@ function remixDir(context, remixId) {
   return join(wangzhuanPaths(context).remixDir, remixId);
 }
 
-function remixPath(context, remixId) {
-  return join(remixDir(context, remixId), "remix.json");
-}
-
 function resolveUserPath(context, relativePath) {
   if (!relativePath || String(relativePath).match(/^[A-Za-z]:[\\/]|^\//)) {
     throw new WangzhuanError("validation_error", "文件路径不合法", { path: relativePath });
@@ -243,7 +228,10 @@ function resolveUserPath(context, relativePath) {
 }
 
 async function loadTemplateVersion(context, templateId, versionId) {
-  const store = await readJsonOrDefault(wangzhuanPaths(context).templatesPath, { templates: [] });
+  const store = await loadTemplateStoreFromMysql(context);
+  if (!store) {
+    throw new WangzhuanError("database_unavailable", "MySQL 未就绪，无法读取模板配置", { templateId, versionId });
+  }
   const template = (Array.isArray(store.templates) ? store.templates : []).find((item) => {
     return item.templateId === templateId && item.versionId === versionId && item.status !== "deleted";
   });
@@ -255,11 +243,10 @@ async function loadTemplateVersion(context, templateId, versionId) {
 
 async function loadSourceProbe(context, sourceId) {
   validateSourceId(sourceId);
-  const target = join(sourceDir(context, sourceId), "source-probe.json");
-  if (!existsSync(target)) {
+  const probe = await loadRemixSourceFromMysql(context, sourceId);
+  if (!probe) {
     throw new WangzhuanError("invalid_material", "素材不符合要求，请上传图片或视频", { sourceId });
   }
-  const probe = JSON.parse(await readFile(target, "utf8"));
   if (probe.userId !== currentUserId(context) && !isAdmin(context)) {
     throw new WangzhuanError("permission_denied", "当前账号无权执行该操作", { sourceId });
   }
@@ -281,11 +268,12 @@ async function probeRemixSource(context, filePath, request, mimeType) {
 }
 
 async function readRemix(context, remixId) {
-  const target = remixPath(context, remixId);
-  if (!existsSync(target)) {
+  validateRemixId(remixId);
+  const detail = await loadRemixDetailFromMysql(context, remixId);
+  const remix = detail?.remix;
+  if (!remix) {
     throw new WangzhuanError("remix_not_found", "改造任务不存在或无权限", { remixId });
   }
-  const remix = JSON.parse(await readFile(target, "utf8"));
   if (remix.userId !== currentUserId(context) && !isAdmin(context)) {
     throw new WangzhuanError("permission_denied", "当前账号无权执行该操作", { remixId });
   }
@@ -295,28 +283,11 @@ async function readRemix(context, remixId) {
 async function writeRemix(context, remix) {
   const now = new Date().toISOString();
   const next = { ...remix, updatedAt: now };
-  const paths = wangzhuanPaths(context);
-  await writeAtomicJson(join(paths.remixDir, next.remixId, "remix.json"), next);
-  const indexPath = join(paths.remixDir, "index.json");
-  const index = await readJsonOrDefault(indexPath, { schemaVersion: "remix.v1", items: [] });
-  index.items = Array.isArray(index.items) ? index.items : [];
-  const existing = index.items.find((item) => item.remixId === next.remixId);
-  if (existing) {
-    existing.status = next.status;
-    existing.updatedAt = now;
-  } else {
-    index.items.push({
-      remixId: next.remixId,
-      status: next.status,
-      sourceId: next.sourceId,
-      createdBy: next.userId,
-      createdAt: next.createdAt,
-      updatedAt: now
-    });
+  const synced = await syncRemixFacts(context, next, "remix_write");
+  if (synced.skipped) {
+    throw new WangzhuanError("database_unavailable", "MySQL 写入失败，改造任务未保存", { remixId: next.remixId });
   }
-  await writeAtomicJson(indexPath, index);
-  await syncRemixFacts(context, next, "remix_write");
-  return next;
+  return (await loadRemixDetailFromMysql(context, next.remixId))?.remix || next;
 }
 
 function normalizeCapability(raw, operationType) {
@@ -463,6 +434,14 @@ async function writeText(target, text) {
   await writeFile(target, text, "utf8");
 }
 
+async function syncRelativeAsset(context, fullPath, assetKind) {
+  const storage = await syncWangzhuanAsset(context, fullPath, assetKind);
+  return {
+    storedPath: toProjectRelative(context.userProjectRoot, fullPath),
+    ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {})
+  };
+}
+
 function remixShortId(remixId) {
   return String(remixId || "").split("_").pop();
 }
@@ -494,7 +473,20 @@ function promptText(record) {
 }
 
 async function sourceDataUrl(context, source) {
-  const buffer = await readFile(resolveUserPath(context, source.storedPath));
+  let buffer = null;
+  if (source.storageKey) {
+    try {
+      const object = await openWangzhuanObjectStream(context, source.storageKey);
+      const chunks = [];
+      for await (const chunk of object.body) chunks.push(Buffer.from(chunk));
+      buffer = Buffer.concat(chunks);
+    } catch {
+      buffer = null;
+    }
+  }
+  if (!buffer) {
+    buffer = await readFile(resolveUserPath(context, source.storedPath));
+  }
   return `data:${source.mimeType || "application/octet-stream"};base64,${buffer.toString("base64")}`;
 }
 
@@ -595,8 +587,8 @@ async function materializeProviderSubmission(context, record, remixId, capabilit
   }
   const taskId = makeRemixTaskId(remixId);
   const promptTarget = join(remixDir(context, remixId), "prompts", `${taskId}_remix.txt`);
-  const promptPath = toProjectRelative(context.userProjectRoot, promptTarget);
   await writeText(promptTarget, `${promptText(record)}\n`);
+  const promptAsset = await syncRelativeAsset(context, promptTarget, "remix_prompt");
   const source = await sourceDataUrl(context, record.source);
   const payload = options.maskDataUrl
     ? providerPayloadWithMask(record, source, options.maskDataUrl)
@@ -619,51 +611,15 @@ async function materializeProviderSubmission(context, record, remixId, capabilit
       modelVideo: capability.provider || client.provider || REMIX_MODEL_VIDEO,
       providerJobId: jobSnapshot.jobId,
       seedanceTaskId: jobSnapshot.jobId,
-      promptPath,
+      promptPath: promptAsset.storedPath,
+      promptStorageKey: promptAsset.storageKey || "",
+      promptStorageUrl: promptAsset.storageUrl || "",
       remoteUrlStored: false,
       attempts: 1,
       startedAt: now,
       finishedAt: null
     }]
   };
-}
-
-async function writeTaskMap(context, remix) {
-  const targetDir = join(remixDir(context, remix.remixId), "task-map");
-  const jsonPath = join(targetDir, "task-id-map.json");
-  await writeAtomicJson(jsonPath, remix.tasks);
-  const output = remix.outputs[0];
-  const task = remix.tasks[0];
-  const headers = [
-    "source_type",
-    "remix_id",
-    "script_id",
-    "generation_task_id",
-    "image_task_id",
-    "seedance_task_id",
-    "model_image",
-    "model_video",
-    "output_id",
-    "output_file",
-    "qc_status",
-    "error_code"
-  ];
-  const row = [
-    "remix",
-    remix.remixId,
-    "",
-    task.generationTaskId,
-    task.imageTaskId || "",
-    task.seedanceTaskId || "",
-    task.modelImage,
-    task.modelVideo,
-    output?.outputId || "",
-    output?.filePath || "",
-    output?.qcStatus || "",
-    task.errorCode || ""
-  ];
-  const csv = [headers, row].map((values) => values.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
-  await writeText(join(targetDir, "task-id-map.csv"), `${csv}\n`);
 }
 
 async function writeQcReport(context, remix, output, qcStatus) {
@@ -706,7 +662,12 @@ async function writeQcReport(context, remix, output, qcStatus) {
   };
   const target = join(remixDir(context, remix.remixId), "qc", `${output.outputId}.json`);
   await writeAtomicJson(target, report);
-  return toProjectRelative(context.userProjectRoot, target);
+  const storage = await syncRelativeAsset(context, target, "remix_qc_report");
+  return {
+    qcReportPath: storage.storedPath,
+    qcReportStorageKey: storage.storageKey || "",
+    qcReportStorageUrl: storage.storageUrl || ""
+  };
 }
 
 async function materializeMockRemix(context, record, remixId) {
@@ -714,9 +675,9 @@ async function materializeMockRemix(context, record, remixId) {
   const outputId = makeRemixOutputId(remixId);
   const promptTarget = join(remixDir(context, remixId), "prompts", `${taskId}_remix.txt`);
   const outputTarget = join(remixDir(context, remixId), "outputs", `${outputId}.mp4`);
-  const promptPath = toProjectRelative(context.userProjectRoot, promptTarget);
   const filePath = toProjectRelative(context.userProjectRoot, outputTarget);
   await writeText(promptTarget, `${promptText(record)}\n`);
+  const promptAsset = await syncRelativeAsset(context, promptTarget, "remix_prompt");
   await writeText(outputTarget, [
     "mock remix video",
     `remix=${remixId}`,
@@ -732,7 +693,9 @@ async function materializeMockRemix(context, record, remixId) {
       modelImage: "not_required",
       modelVideo: record.capability.provider || REMIX_MODEL_VIDEO,
       seedanceTaskId: `mock_remix_${taskId}`,
-      promptPath,
+      promptPath: promptAsset.storedPath,
+      promptStorageKey: promptAsset.storageKey || "",
+      promptStorageUrl: promptAsset.storageUrl || "",
       outputPath: filePath,
       remoteUrlStored: false,
       attempts: 1,
@@ -749,7 +712,9 @@ async function materializeMockRemix(context, record, remixId) {
       filePath,
       previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
       ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
-      promptPath,
+      promptPath: promptAsset.storedPath,
+      promptStorageKey: promptAsset.storageKey || "",
+      promptStorageUrl: promptAsset.storageUrl || "",
       qcStatus: "manual_required",
       downloadEligible: false,
       visualPreviewRequired: true,
@@ -778,6 +743,8 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
     previewUrl: storage?.storageUrl || await previewUrlForWangzhuanAsset(context, filePath),
     ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}),
     promptPath: task?.promptPath || "",
+    promptStorageKey: task?.promptStorageKey || "",
+    promptStorageUrl: task?.promptStorageUrl || "",
     qcStatus: "manual_required",
     downloadEligible: false,
     visualPreviewRequired: true,
@@ -789,6 +756,8 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
     providerJobId: jobSnapshot.jobId,
     seedanceTaskId: jobSnapshot.jobId,
     outputPath: filePath,
+    outputStorageKey: storage?.storageKey || "",
+    outputStorageUrl: storage?.storageUrl || "",
     finishedAt: new Date().toISOString()
   };
   const nextRemix = {
@@ -807,40 +776,20 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
   const qcReportPath = await writeQcReport(context, nextRemix, output, "manual_required");
   return {
     ...nextRemix,
-    outputs: [{ ...output, qcReportPath }]
+    outputs: [{ ...output, ...qcReportPath }]
   };
 }
 
 async function findActiveRemix(context) {
-  const index = await readJsonOrDefault(join(wangzhuanPaths(context).remixDir, "index.json"), {
-    schemaVersion: "remix.v1",
-    items: []
-  });
-  for (const item of Array.isArray(index.items) ? index.items : []) {
-    const target = remixPath(context, item.remixId);
-    if (!existsSync(target)) continue;
-    const remix = JSON.parse(await readFile(target, "utf8"));
-    if (ACTIVE_REMIX_STATUSES.has(remix.status)) return remix;
-  }
-  return null;
+  const detail = await loadActiveRemixFromMysql(context);
+  return detail?.remix || null;
 }
 
 async function findActiveBatch(context) {
-  const index = await readJsonOrDefault(join(wangzhuanPaths(context).batchesDir, "index.json"), {
-    schemaVersion: "batches.v1",
-    items: []
-  });
-  for (const item of Array.isArray(index.items) ? index.items : []) {
-    const target = join(wangzhuanPaths(context).batchesDir, item.batchId, "batch.json");
-    if (!existsSync(target)) continue;
-    const batch = JSON.parse(await readFile(target, "utf8"));
-    if (["checking", "queued", "running", "stitching", "qc"].includes(batch.status)) return batch;
-  }
-  return null;
+  return loadActivePipelineRunFromMysql(context);
 }
 
 export async function uploadRemixSource(context, request = {}) {
-  const paths = wangzhuanPaths(context);
   const limits = effectiveLimits(context.config || {});
   const fileName = safeFileName(request.fileName || request.name);
   const ext = extname(fileName).toLowerCase();
@@ -856,7 +805,7 @@ export async function uploadRemixSource(context, request = {}) {
     });
   }
 
-  const { sourceId, indexPath, index } = await nextSourceSeq(paths);
+  const sourceId = await nextSourceSeq(context);
   const sourceRoot = sourceDir(context, sourceId);
   await mkdir(sourceRoot, { recursive: true });
   const originalPath = join(sourceRoot, `original${ext}`);
@@ -891,13 +840,10 @@ export async function uploadRemixSource(context, request = {}) {
     userId: currentUserId(context),
     createdAt: new Date().toISOString()
   };
-  await writeAtomicJson(join(sourceRoot, "source-probe.json"), probe);
-  index.items.push({
-    sourceId,
-    createdBy: currentUserId(context),
-    createdAt: probe.createdAt
-  });
-  await writeAtomicJson(indexPath, index);
+  const synced = await syncRemixSourceFact(context, probe);
+  if (synced.skipped) {
+    throw new WangzhuanError("database_unavailable", "MySQL 写入失败，源素材未保存", { sourceId });
+  }
   await recordTelemetryEvent(context, "competitor_material_uploaded", {
     remixSourceId: sourceId,
     mimeType: probe.mimeType,
@@ -914,14 +860,9 @@ export async function startDirectMaskEdit(context, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
-  const paths = wangzhuanPaths(context);
-  const replay = await readIdempotentResult(paths, "remix_mask_edit_start", request.idempotencyKey);
+  const requestHash = hashPayload(request);
+  const replay = await loadIdempotencyFactFromMysql(context, "remix_mask_edit_start", request.idempotencyKey, requestHash);
   if (replay) return replay;
-  if (context.getLegacyRunState?.()?.running) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "existing_ad_batch"
-    });
-  }
   await assertNoMysqlResourceLock(context);
   const activeBatch = await findActiveBatch(context);
   if (activeBatch) {
@@ -952,10 +893,13 @@ export async function startDirectMaskEdit(context, request = {}) {
   const maskTarget = join(targetDir, "regions", "mask.png");
   await mkdir(dirname(maskTarget), { recursive: true });
   await writeFile(maskTarget, maskBuffer);
+  const maskAsset = await syncRelativeAsset(context, maskTarget, "remix_mask");
   const maskSource = {
     sourceType: "base64_data_url",
     mimeType: "image/png",
-    storedPath: toProjectRelative(context.userProjectRoot, maskTarget)
+    storedPath: maskAsset.storedPath,
+    storageKey: maskAsset.storageKey || "",
+    storageUrl: maskAsset.storageUrl || ""
   };
   const record = {
     schemaVersion: "remix-direct-mask-edit.v1",
@@ -1024,18 +968,18 @@ export async function startDirectMaskEdit(context, request = {}) {
   };
   if (!hasRemoteRemixProvider(context, capability)) {
     const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
-    remix.outputs[0] = { ...materialized.output, qcReportPath };
+    remix.outputs[0] = { ...materialized.output, ...qcReportPath };
   }
-  await writeAtomicJson(join(targetDir, "regions", "regions.json"), remix.regions);
   remix = await writeRemix(context, remix);
-  await writeTaskMap(context, remix);
   const result = { remix, downloadSummary: downloadSummary(remix) };
-  await writeIdempotentResult(paths, "remix_mask_edit_start", request.idempotencyKey, result);
+  await recordIdempotencyFact(context, "remix_mask_edit_start", request.idempotencyKey, requestHash, {
+    type: "remix",
+    response: result
+  });
   return result;
 }
 
 export async function estimateRemix(context, request = {}) {
-  const paths = wangzhuanPaths(context);
   const limits = effectiveLimits(context.config || {});
   const normalized = validateEstimateRequest(request, limits);
   const source = await loadSourceProbe(context, normalized.sourceId);
@@ -1045,11 +989,11 @@ export async function estimateRemix(context, request = {}) {
     throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
   }
 
-  const { estimateId, indexPath, index } = await nextEstimateSeq(paths);
+  const estimateId = await nextEstimateSeq(context);
   const now = new Date().toISOString();
   const record = {
     schemaVersion: "remix-estimate.v1",
-    estimateId,
+    estimate: { estimateId },
     request: normalized,
     estimateHash: hashPayload(normalized),
     source,
@@ -1059,9 +1003,10 @@ export async function estimateRemix(context, request = {}) {
     userId: currentUserId(context),
     createdAt: now
   };
-  await writeAtomicJson(join(paths.remixEstimatesDir, estimateId, "estimate.json"), record);
-  index.items.push({ estimateId, createdBy: currentUserId(context), createdAt: now });
-  await writeAtomicJson(indexPath, index);
+  const synced = await syncEstimateFact(context, record);
+  if (synced.skipped) {
+    throw new WangzhuanError("database_unavailable", "MySQL 写入失败，估算未保存", { estimateId });
+  }
   return {
     estimateId,
     capability,
@@ -1072,25 +1017,20 @@ export async function estimateRemix(context, request = {}) {
 
 export async function loadRemixEstimate(context, estimateId) {
   validateEstimateId(estimateId);
-  const target = join(wangzhuanPaths(context).remixEstimatesDir, estimateId, "estimate.json");
-  if (!existsSync(target)) {
+  const record = await loadEstimateFromMysql(context, estimateId);
+  if (!record || record.schemaVersion !== "remix-estimate.v1") {
     throw new WangzhuanError("validation_error", "estimate 不存在，请重新估算", { estimateId });
   }
-  return JSON.parse(await readFile(target, "utf8"));
+  return record;
 }
 
 export async function startRemix(context, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
-  const paths = wangzhuanPaths(context);
-  const replay = await readIdempotentResult(paths, "remix_start", request.idempotencyKey);
+  const requestHash = hashPayload(request);
+  const replay = await loadIdempotencyFactFromMysql(context, "remix_start", request.idempotencyKey, requestHash);
   if (replay) return replay;
-  if (context.getLegacyRunState?.()?.running) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "existing_ad_batch"
-    });
-  }
   await assertNoMysqlResourceLock(context);
   const activeBatch = await findActiveBatch(context);
   if (activeBatch) {
@@ -1171,13 +1111,14 @@ export async function startRemix(context, request = {}) {
   };
   if (!remoteEnabled) {
     const qcReportPath = await writeQcReport(context, remix, materialized.output, "manual_required");
-    remix.outputs[0] = { ...materialized.output, qcReportPath };
+    remix.outputs[0] = { ...materialized.output, ...qcReportPath };
   }
-  await writeAtomicJson(join(remixDir(context, remixId), "regions", "regions.json"), remix.regions);
   remix = await writeRemix(context, remix);
-  await writeTaskMap(context, remix);
   const result = { remix, downloadSummary: downloadSummary(remix) };
-  await writeIdempotentResult(paths, "remix_start", request.idempotencyKey, result);
+  await recordIdempotencyFact(context, "remix_start", request.idempotencyKey, requestHash, {
+    type: "remix",
+    response: result
+  });
   return result;
 }
 
@@ -1215,7 +1156,6 @@ export async function getRemixDetail(context, remixId) {
         };
       }
       const saved = await writeRemix(context, nextRemix);
-      await writeTaskMap(context, saved);
       return {
         remix: saved,
         downloadSummary: downloadSummary(saved)
@@ -1226,6 +1166,11 @@ export async function getRemixDetail(context, remixId) {
     remix,
     downloadSummary: downloadSummary(remix)
   };
+}
+
+export async function getActiveRemix(context) {
+  const detail = await loadActiveRemixFromMysql(context);
+  return detail || { remix: null, downloadSummary: downloadSummary({ outputs: [] }) };
 }
 
 export async function stopRemix(context, remixId, request = {}) {
@@ -1264,7 +1209,6 @@ export async function stopRemix(context, remixId, request = {}) {
     }
   };
   const saved = await writeRemix(context, nextRemix);
-  await writeTaskMap(context, saved);
   await recordTelemetryEvent(context, "competitor_remix_stopped", {
     remixId: saved.remixId,
     providerJobId: saved.providerJob?.jobId || "",
@@ -1276,25 +1220,12 @@ export async function stopRemix(context, remixId, request = {}) {
   };
 }
 
-async function writePreviewConfirmation(context, remix, output, request) {
-  const confirmation = {
-    schemaVersion: "preview_confirmation.v1",
-    remixId: remix.remixId,
-    outputId: output.outputId,
-    confirmedBy: currentUserId(context),
-    confirmedAt: remix.previewConfirmedAt,
-    notes: String(request.notes || "")
-  };
-  await writeAtomicJson(join(remixDir(context, remix.remixId), "preview-confirmation.json"), confirmation);
-  return confirmation;
-}
-
 export async function confirmRemixPreview(context, remixId, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
-  const paths = wangzhuanPaths(context);
-  const replay = await readIdempotentResult(paths, "remix_preview_confirm", request.idempotencyKey, remixId);
+  const requestHash = hashPayload({ remixId, ...request });
+  const replay = await loadIdempotencyFactFromMysql(context, "remix_preview_confirm", request.idempotencyKey, requestHash);
   if (replay) return replay;
   const remix = await readRemix(context, remixId);
   const outputId = request.outputId || remix.outputs?.[0]?.outputId;
@@ -1316,6 +1247,7 @@ export async function confirmRemixPreview(context, remixId, request = {}) {
     outputs: remix.outputs.map((item) => item.outputId === outputId ? nextOutput : item),
     previewConfirmedBy: currentUserId(context),
     previewConfirmedAt: now,
+    previewConfirmationNotes: String(request.notes || ""),
     qcSummary: {
       total: remix.outputs.length,
       passed: 1,
@@ -1323,13 +1255,11 @@ export async function confirmRemixPreview(context, remixId, request = {}) {
       warnings: []
     }
   };
-  await writePreviewConfirmation(context, nextRemix, nextOutput, request);
   const qcReportPath = await writeQcReport(context, nextRemix, nextOutput, "pass");
   const saved = await writeRemix(context, {
     ...nextRemix,
-    outputs: nextRemix.outputs.map((item) => item.outputId === outputId ? { ...nextOutput, qcReportPath } : item)
+    outputs: nextRemix.outputs.map((item) => item.outputId === outputId ? { ...nextOutput, ...qcReportPath } : item)
   });
-  await writeTaskMap(context, saved);
   await recordTelemetryEvent(context, "competitor_preview_confirmed", {
     remixId: saved.remixId,
     outputId,
@@ -1337,6 +1267,9 @@ export async function confirmRemixPreview(context, remixId, request = {}) {
     confirmedBy: saved.previewConfirmedBy
   }, { audit: true });
   const result = { remix: saved, downloadSummary: downloadSummary(saved) };
-  await writeIdempotentResult(paths, "remix_preview_confirm", request.idempotencyKey, result, remixId);
+  await recordIdempotencyFact(context, "remix_preview_confirm", request.idempotencyKey, requestHash, {
+    type: "remix",
+    response: result
+  });
   return result;
 }

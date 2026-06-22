@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { dirname, join } from "node:path";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
+import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest } from "../../server/wangzhuan/mysql-facts.mjs";
 import { submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import { startDirectMaskEdit, uploadRemixSource } from "../../server/wangzhuan/remix.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
 import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
+import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
 
 function jsonReq(method, body = {}) {
   const stream = Readable.from([JSON.stringify(body)]);
@@ -421,6 +425,39 @@ test("reference video check endpoint returns the new success envelope", async ()
   }
 });
 
+test("product asset upload endpoint returns a reusable stored asset link for template drafts", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "wz-router-product-asset-"));
+  try {
+    const res = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        branchId: "branch_news",
+        assetKey: "productIcon",
+        fileName: "news-icon.png",
+        mimeType: "image/png",
+        content: `data:image/png;base64,${Buffer.from("png").toString("base64")}`
+      }),
+      res,
+      new URL("http://localhost/api/wangzhuan/product-assets/upload"),
+      tempContext(root)
+    );
+
+    assert.equal(res.statusCode, 200);
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.code, "ok");
+    assert.equal(payload.data.asset.branchId, "branch_news");
+    assert.equal(payload.data.asset.assetKey, "productIcon");
+    assert.match(payload.data.asset.storedPath, /product-assets\/branch_news\/productIcon\/news-icon\.png$/);
+    assert.match(payload.data.asset.previewUrl, /^\/file\?path=|^https?:\/\//);
+    assert.equal(Object.hasOwn(payload.data.asset, "content"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reference video draft endpoint calls llm and returns a decomposition draft", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -477,6 +514,91 @@ test("reference video draft endpoint calls llm and returns a decomposition draft
     assert.equal(payload.data.decomposition.scene, "Model scene");
     assert.equal(payload.data.draft.source, "llm");
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reference video draft endpoint writes a redacted model request dump for the response request id", async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const root = await mkdtemp(join(tmpdir(), "wz-router-draft-dump-"));
+  const previousFetch = globalThis.fetch;
+  try {
+    const moduleContext = {
+      userProjectRoot: join(root, "user"),
+      sharedProjectRoot: join(root, "shared"),
+      userId: "user",
+      user: { userId: "user", username: "user", role: "user", isAdmin: false },
+      mockReferenceProbe: true,
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,cm91dGVyLWZyYW1l" }
+      ],
+      readJson: context("user").readJson,
+      currentUser: () => ({ userId: "user", username: "user", role: "user", isAdmin: false }),
+      currentUserId: () => "user",
+      currentProjectRoot: () => join(root, "user"),
+      currentBaseProjectRoot: () => join(root, "shared")
+    };
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        scene: "Router dump scene",
+        subject: "Router dump subject",
+        action: "Router dump action",
+        camera: "Router dump camera",
+        lighting: "Router dump lighting",
+        style: "Router dump style",
+        quality: "Router dump quality",
+        hook: "Router dump hook"
+      })
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+    const checked = await checkReferenceVideo(moduleContext, {
+      fileName: "demo.mp4",
+      mimeType: "video/mp4",
+      content: `data:video/mp4;base64,${Buffer.from("video").toString("base64")}`,
+      durationSec: 15,
+      width: 720,
+      height: 1280,
+      canExtractFrame: true
+    });
+    const videoUrl = "https://cdn.example.com/router-dump/original.mp4";
+    const probePath = join(moduleContext.userProjectRoot, dirname(checked.referenceVideo.storedPath), "probe.json");
+    await writeFile(probePath, `${JSON.stringify({
+      ...checked.referenceVideo,
+      storageKey: "uploads/router-dump/original.mp4",
+      storageUrl: videoUrl
+    }, null, 2)}\n`, "utf8");
+
+    const res = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        referenceVideoId: checked.referenceVideo.referenceVideoId,
+        llmConfig: {
+          provider: "skylink",
+          endpoint: "https://skylink-gateway.com/api/v1",
+          model: "GPT-5.4",
+          temperature: 0.2,
+          apiKey: "router-secret-key"
+        }
+      }),
+      res,
+      new URL("http://localhost/api/wangzhuan/reference-videos/draft-decomposition"),
+      moduleContext
+    );
+
+    assert.equal(res.statusCode, 200);
+    const payload = JSON.parse(res.body);
+    assert.match(payload.requestId, /^req_\d{14}_[a-f0-9]{4}$/);
+    const dumpPath = join(moduleContext.userProjectRoot, dirname(checked.referenceVideo.storedPath), `llm-request-${payload.requestId}.json`);
+    const dump = JSON.parse(await readFile(dumpPath, "utf8"));
+    assert.equal(dump.requestId, payload.requestId);
+    assert.equal(dump.request.headers.Authorization, "Bearer <REDACTED:WANGZHUAN_LLM_API_KEY>");
+    assert.equal(JSON.stringify(dump).includes("router-secret-key"), false);
+    assert.equal(dump.request.body.input.find((item) => item.role === "user").content.some((part) => part.type === "input_file" && part.file_url === videoUrl), true);
+  } finally {
+    globalThis.fetch = previousFetch;
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -609,6 +731,7 @@ test("remix stop endpoint returns a contract envelope", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const root = await mkdtemp(join(tmpdir(), "wz-router-remix-stop-"));
+  setWangzhuanFactsPoolForTest(fakePool());
   try {
     const moduleContext = {
       userProjectRoot: join(root, "user"),
@@ -674,6 +797,8 @@ test("remix stop endpoint returns a contract envelope", async () => {
     assert.equal(stopPayload.data.remix.tasks.every((task) => task.status === "stopped"), true);
     assert.equal(stopPayload.data.downloadSummary.packageReady, false);
   } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -703,6 +828,72 @@ test("retry-stitch endpoint returns a contract envelope and qc-ready batch", asy
     assert.equal(payload.code, "ok");
     assert.equal(payload.data.batch.status, "qc");
     assert.equal(payload.data.batch.outputs.some((output) => output.kind === "stitched_video"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("batch qc endpoint runs generated video model review and returns updated download summary", async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "wz-router-model-qc-"));
+  try {
+    const fx = await failedThirtySecondStitchFixture(root);
+    const retryContext = {
+      ...tempContext(root),
+      capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } }
+    };
+    const retried = await stitchBatchSegments({
+      userProjectRoot: join(root, "user"),
+      sharedProjectRoot: join(root, "shared"),
+      userId: "user",
+      user: { userId: "user", username: "user", role: "user", isAdmin: false },
+      mockReferenceProbe: true,
+      capabilities: retryContext.capabilities
+    }, fx.started.batch.batchId);
+    const moduleContext = {
+      userProjectRoot: join(root, "user"),
+      sharedProjectRoot: join(root, "shared"),
+      userId: "user",
+      user: { userId: "user", username: "user", role: "user", isAdmin: false },
+      mockReferenceProbe: true
+    };
+    const batchPath = join(wangzhuanPaths(moduleContext).batchesDir, retried.batch.batchId, "batch.json");
+    const batch = JSON.parse(await readFile(batchPath, "utf8"));
+    const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
+    batch.outputs = batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+      ? { ...output, storageUrl: "https://cdn.example.com/generated/qc-pass.mp4", previewUrl: "https://cdn.example.com/generated/qc-pass.mp4" }
+      : output);
+    await writeFile(batchPath, `${JSON.stringify(batch, null, 2)}\n`, "utf8");
+
+    const qcRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {}),
+      qcRes,
+      new URL(`http://localhost/api/wangzhuan/batches/${retried.batch.batchId}/qc`),
+      {
+        ...tempContext(root),
+        callWangzhuanLlm: async () => JSON.stringify({
+          passed: true,
+          score: 0.91,
+          summary: "生成视频符合脚本、拆解和 Seedance prompt。",
+          matched: ["scene", "cta", "reward_feedback"],
+          issues: [],
+          recommendedAction: "approve"
+        })
+      }
+    );
+
+    assert.equal(qcRes.statusCode, 200);
+    const payload = JSON.parse(qcRes.body);
+    assert.equal(payload.code, "ok");
+    assert.equal(payload.data.batch.status, "succeeded");
+    assert.equal(payload.data.downloadSummary.packageReady, true);
+    const reviewedOutput = payload.data.batch.outputs.find((output) => output.outputId === stitchedOutput.outputId);
+    assert.equal(reviewedOutput.qcStatus, "pass");
+    assert.equal(reviewedOutput.downloadEligible, true);
+    assert.equal(reviewedOutput.modelQcSummary.score, 0.91);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

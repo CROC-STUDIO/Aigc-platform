@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
@@ -59,7 +59,7 @@ async function readBatch(context, batchId) {
   return batch;
 }
 
-async function writeBatch(context, batch) {
+async function writeBatch(context, batch, triggerName = "stitch_progress") {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
   const paths = wangzhuanPaths(context);
@@ -75,7 +75,7 @@ async function writeBatch(context, batch) {
     }
     await writeAtomicJson(indexPath, index);
   }
-  await syncBatchFacts(context, next, "stitch_progress");
+  await syncBatchFacts(context, next, triggerName);
   return next;
 }
 
@@ -163,13 +163,28 @@ function groupTasksByVariant(batch) {
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     const script = scriptsById.get(task.scriptId);
     if (!script) continue;
-    if (!groups.has(script.variantIndex)) groups.set(script.variantIndex, []);
-    groups.get(script.variantIndex).push({ task, script });
+    const key = `${script.branchId || "default"}:${script.branchVariantIndex || script.variantIndex || 1}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        branchId: script.branchId || "",
+        branchLabel: script.branchLabel || "",
+        branchVariantIndex: Number(script.branchVariantIndex || script.variantIndex || 1),
+        variantIndex: Number(script.variantIndex || 1),
+        entries: []
+      });
+    }
+    groups.get(key).entries.push({ task, script });
   }
-  return [...groups.entries()].map(([variantIndex, entries]) => ({
-    variantIndex,
-    entries: entries.sort((left, right) => left.script.segmentIndex - right.script.segmentIndex)
-  })).sort((left, right) => left.variantIndex - right.variantIndex);
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      entries: group.entries.sort((left, right) => left.script.segmentIndex - right.script.segmentIndex)
+    }))
+    .sort((left, right) => {
+      const branchSort = String(left.branchId).localeCompare(String(right.branchId));
+      return branchSort || left.branchVariantIndex - right.branchVariantIndex;
+    });
 }
 
 function segmentOutputPath(context, batchId, outputId) {
@@ -214,19 +229,32 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
       const outputId = takeOutputId(batch, sequenceState);
       const target = segmentOutputPath(context, batch.batchId, outputId);
       const filePath = userRelative(context, target);
-      await writeText(target, [
-        "mock segment video",
-        `batch=${batch.batchId}`,
-        `variant=${entry.script.variantIndex}`,
-        `segment=${entry.script.segmentIndex}`,
-        `task=${entry.task.generationTaskId}`
-      ].join("\n"));
+      const taskSource = entry.task.outputPath
+        ? join(context.userProjectRoot, entry.task.outputPath)
+        : "";
+      if (taskSource && existsSync(taskSource)) {
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(taskSource, target);
+      } else {
+        await writeText(target, [
+          "mock segment video",
+          `batch=${batch.batchId}`,
+          `branch=${entry.script.branchId || "default"}`,
+          `variant=${entry.script.variantIndex}`,
+          `branchVariant=${entry.script.branchVariantIndex || entry.script.variantIndex}`,
+          `segment=${entry.script.segmentIndex}`,
+          `task=${entry.task.generationTaskId}`
+        ].join("\n"));
+      }
       const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video");
       outputs.push({
         outputId,
         sourceType: "pipeline",
         batchId: batch.batchId,
         scriptId: entry.script.scriptId,
+        branchId: entry.script.branchId || "",
+        branchLabel: entry.script.branchLabel || "",
+        branchVariantIndex: entry.script.branchVariantIndex || entry.script.variantIndex,
         generationTaskIds: [entry.task.generationTaskId],
         durationSec: 15,
         kind: "segment_video",
@@ -296,7 +324,10 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
   return {
     ...report,
     reportPath,
-    variantIndex: group.variantIndex
+    variantIndex: group.variantIndex,
+    branchId: group.branchId || "",
+    branchLabel: group.branchLabel || "",
+    branchVariantIndex: group.branchVariantIndex
   };
 }
 
@@ -307,7 +338,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
   await writeText(target, [
     "mock stitched video",
     `batch=${batch.batchId}`,
-    `variant=${group.variantIndex}`,
+    `branch=${group.branchId || "default"}`,
+    `variant=${group.branchVariantIndex}`,
     `segments=${segmentOutputs.map((output) => output.outputId).join(",")}`
   ].join("\n"));
   const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video");
@@ -323,6 +355,9 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       outputId,
       sourceType: "pipeline",
       batchId: batch.batchId,
+      branchId: group.branchId || "",
+      branchLabel: group.branchLabel || "",
+      branchVariantIndex: group.branchVariantIndex,
       generationTaskIds: group.entries.map((entry) => entry.task.generationTaskId),
       durationSec: 30,
       kind: "stitched_video",
@@ -338,9 +373,62 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
     report: {
       ...report,
       reportPath,
-      variantIndex: group.variantIndex
+      variantIndex: group.variantIndex,
+      branchId: group.branchId || "",
+      branchLabel: group.branchLabel || "",
+      branchVariantIndex: group.branchVariantIndex
     }
   };
+}
+
+export async function materializeBatchSegmentOutputs(context, batchId) {
+  const batch = await readBatch(context, batchId);
+  const groups = groupTasksByVariant(batch);
+  if (!groups.length) {
+    throw new WangzhuanError("no_segments", "没有可用于产出的分段视频", { batchId });
+  }
+  const sequenceState = { next: nextOutputSequence(batch) };
+  const segmentOutputs = await materializeSegmentOutputs(context, batch, groups, sequenceState);
+  const existingNonSegmentOutputs = (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => output.kind !== "segment_video");
+  const tasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
+    const segment = segmentOutputs.find((output) => (output.generationTaskIds || []).includes(task.generationTaskId));
+    if (!segment) return task;
+    return {
+      ...task,
+      status: task.status === "waiting_upstream" ? "downloaded" : task.status,
+      outputPath: task.outputPath || segment.filePath
+    };
+  });
+  const saved = await writeBatch(context, {
+    ...batch,
+    tasks,
+    outputs: [...segmentOutputs, ...existingNonSegmentOutputs]
+  }, "segments_completed");
+  await writeTaskMaps(context, saved);
+  await appendEvent(context, batchId, {
+    event: "segments_materialized",
+    segmentCount: segmentOutputs.length
+  });
+  return saved;
+}
+
+export async function finalizeFifteenSecondBatch(context, batchId) {
+  const batch = await readBatch(context, batchId);
+  if (Number(batch.estimate?.durationSec) !== 15) return batch;
+  if (["qc", "succeeded", "partial_failed", "failed", "stopped"].includes(batch.status)) return batch;
+  if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) return batch;
+  if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "waiting_upstream")) return batch;
+
+  let working = batch;
+  const hasSegments = (Array.isArray(working.outputs) ? working.outputs : []).some((output) => output.kind === "segment_video");
+  if (!hasSegments) {
+    working = await materializeBatchSegmentOutputs(context, batchId);
+  }
+  if (working.status === "running" || working.status === "queued") {
+    working = await writeBatch(context, { ...working, status: "qc" }, "generation_completed");
+    await appendEvent(context, batchId, { event: "generation_completed", durationSec: 15 });
+  }
+  return working;
 }
 
 export async function stitchBatchSegments(context, batchId, options = {}) {
@@ -419,7 +507,7 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
     tasks,
     outputs: nextOutputs,
     stitchReports
-  });
+  }, nextStatus === "qc" ? "stitch_completed" : "stitch_progress");
   await writeTaskMaps(context, saved);
   await appendEvent(context, batchId, {
     event: nextStatus === "qc" ? "stitch_succeeded" : "stitch_failed",

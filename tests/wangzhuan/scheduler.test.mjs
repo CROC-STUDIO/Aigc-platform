@@ -11,7 +11,7 @@ import {
 } from "../../server/wangzhuan/mysql-facts.mjs";
 import { runDueSchedulerJob } from "../../server/wangzhuan/scheduler.mjs";
 import { wangzhuanPaths, writeAtomicJson } from "../../server/wangzhuan/storage.mjs";
-import { context as mysqlContext, fakePool } from "./mysql-facts.test.mjs";
+import { context as mysqlContext, fakePool } from "./mysql-facts-fixture.mjs";
 
 function schedulerContext(root) {
   return {
@@ -41,7 +41,7 @@ test("scheduler worker claims task_retry jobs and resubmits failed generation ta
           attempts: 0,
           maxAttempts: 2,
           modelImage: "gpt-image-2",
-          modelVideo: "dreamina-seedance-2-0-260128",
+          modelVideo: "doubao-seedance-2-0-260128",
           promptPath: "批处理记录/网赚管线/batches/wzb_20260618000300_abcd/prompts/a.txt"
         }
       ],

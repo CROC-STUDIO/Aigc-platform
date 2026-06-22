@@ -46,7 +46,7 @@
       </div>
     </aside>
 
-    <main class="app wz-app">
+    <main class="app wz-app wz-workbench">
       <section class="operation-pane">
         <section class="topbar wz-page-head">
           <div>
@@ -62,6 +62,10 @@
         </section>
 
         <div id="remixGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
+        <div id="remixActiveLockActions" class="wz-lock-actions" hidden>
+          <span id="remixActiveLockText"></span>
+          <button id="remixStopActiveLockBtn" class="ghost" type="button">停止占用任务</button>
+        </div>
 
         <nav class="wz-canvas-toolbar" id="remixStepbar" aria-label="流程步骤导航">
           <a class="wz-stepbar-item" href="#remixNodeSource" data-step="1">
@@ -118,6 +122,13 @@
                     <div id="remixMaskLayer" class="remix-mask-layer"></div>
                   </div>
                   <div class="wz-warning">框选区域会合成一张 mask 预览图；确认后提交视频处理平台 ai_remove 手动任务。</div>
+                  <label>改造类型
+                    <select id="remixOperationType">
+                      <option value="watermark_cover">水印区域遮挡</option>
+                      <option value="logo_icon_cover_or_replace">Logo/Icon 区域遮挡或替换</option>
+                      <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
+                    </select>
+                  </label>
                 </div>
               </section>
 
@@ -149,6 +160,7 @@
                   <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
                   <div class="modal-actions wz-actions">
                     <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
+                    <button id="remixStopBtn" class="ghost" type="button" hidden>停止改造</button>
                     <button id="remixDownloadBtn" class="ghost" type="button" disabled>下载交付包</button>
                   </div>
                 </div>

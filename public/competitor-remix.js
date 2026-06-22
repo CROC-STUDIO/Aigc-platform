@@ -25,6 +25,10 @@ const els = {
   envelopeBadge: $("#remixEnvelopeBadge"),
   capabilityBadge: $("#remixCapabilityBadge"),
   globalError: $("#remixGlobalError"),
+  activeLockActions: $("#remixActiveLockActions"),
+  activeLockText: $("#remixActiveLockText"),
+  stopActiveLockBtn: $("#remixStopActiveLockBtn"),
+  operationType: $("#remixOperationType"),
   sourceCount: $("#remixTemplateCount"),
   regionCount: $("#remixRegionCount"),
   outputCount: $("#remixOutputCount"),
@@ -42,6 +46,7 @@ const els = {
   statusBadge: $("#remixStatusBadge"),
   detailBox: $("#remixDetailBox"),
   confirmBtn: $("#remixConfirmBtn"),
+  stopBtn: $("#remixStopBtn"),
   downloadBtn: $("#remixDownloadBtn"),
   refreshGalleryBtn: $("#remixRefreshGalleryBtn"),
   galleryBox: $("#remixGalleryBox")
@@ -53,11 +58,14 @@ const state = {
   regions: [],
   detail: null,
   gallery: null,
+  galleryPage: 1,
+  galleryPageSize: 20,
   pollTimer: 0,
   selectedRegionId: "",
   maskDrag: null,
   submitBlocked: false,
-  actualMediaCache: null
+  actualMediaCache: null,
+  activeLock: null
 };
 
 const MIN_MASK_SIZE = 0.03;
@@ -69,6 +77,68 @@ const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_requi
 
 function isActiveRemixStatus(status) {
   return ACTIVE_REMIX_STATUSES.has(status);
+}
+
+function selectedOperationType() {
+  return els.operationType?.value || DEFAULT_DIRECT_OPERATION;
+}
+
+function activeLockFromError(error) {
+  if (error?.code !== "batch_already_running") return null;
+  const data = error.data || {};
+  if (data.remixId) {
+    return {
+      type: "remix",
+      id: data.remixId,
+      status: data.status || "",
+      label: `竞品改造任务 ${data.remixId}${data.status ? ` · ${data.status}` : ""}`
+    };
+  }
+  if (data.batchId) {
+    return {
+      type: "batch",
+      id: data.batchId,
+      status: data.status || "",
+      label: `素材管线批次 ${data.batchId}${data.status ? ` · ${data.status}` : ""}`
+    };
+  }
+  return null;
+}
+
+function renderActiveLock(lock = state.activeLock) {
+  if (!els.activeLockActions) return;
+  state.activeLock = lock || null;
+  if (!state.activeLock) {
+    els.activeLockActions.hidden = true;
+    if (els.activeLockText) els.activeLockText.textContent = "";
+    return;
+  }
+  els.activeLockActions.hidden = false;
+  const href = state.activeLock.type === "batch" ? "/wangzhuan.html" : "/competitor-remix.html";
+  els.activeLockText.innerHTML = `当前占用：${escapeHtml(state.activeLock.label)} · <a href="${href}">打开任务页</a>`;
+  els.stopActiveLockBtn.disabled = false;
+}
+
+async function stopActiveLock() {
+  const lock = state.activeLock;
+  if (!lock) return;
+  const url = lock.type === "batch"
+    ? `/api/wangzhuan/batches/${encodeURIComponent(lock.id)}/stop`
+    : `/api/wangzhuan/remix/${encodeURIComponent(lock.id)}/stop`;
+  setBusy(els.stopActiveLockBtn, true, "停止中");
+  try {
+    await apiEnvelope(url, {
+      method: "POST",
+      body: JSON.stringify({ reason: "frontend_stop_active_lock" })
+    });
+    renderActiveLock(null);
+    clearError(els.globalError);
+    els.capabilityBadge.textContent = "占用任务已停止";
+  } catch (error) {
+    renderError(els.globalError, error, "停止占用任务失败");
+  } finally {
+    setBusy(els.stopActiveLockBtn, false);
+  }
 }
 
 function activeRemixNotice(status) {
@@ -86,7 +156,32 @@ function syncMetrics() {
   els.uploadBtn.disabled = activeRemix;
   els.sourceFile.disabled = activeRemix;
   els.clearMaskBtn.disabled = activeRemix;
+  els.operationType.disabled = activeRemix;
+  els.stopBtn.hidden = !activeRemix;
+  els.stopBtn.disabled = !activeRemix;
   els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
+}
+
+function galleryPaginationHtml(gallery) {
+  const pagination = gallery?.pagination || {
+    page: state.galleryPage,
+    pageSize: state.galleryPageSize,
+    total: gallery?.counts?.total || gallery?.items?.length || 0,
+    totalPages: gallery?.items?.length ? 1 : 0,
+    hasPrev: false,
+    hasNext: false
+  };
+  const totalPages = pagination.totalPages || 0;
+  const pageLabel = totalPages ? `${pagination.page} / ${totalPages}` : "0 / 0";
+  return `
+    <div class="wz-gallery-pager">
+      <span>共 ${escapeHtml(pagination.total || 0)} 条 · 第 ${escapeHtml(pageLabel)} 页</span>
+      <div>
+        <button type="button" class="ghost" data-gallery-page="${pagination.page - 1}" ${pagination.hasPrev ? "" : "disabled"}>上一页</button>
+        <button type="button" class="ghost" data-gallery-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
+      </div>
+    </div>
+  `;
 }
 
 function clampNumber(value, min = 0, max = 1) {
@@ -579,12 +674,16 @@ function renderGallery() {
   const gallery = state.gallery;
   if (!gallery?.items?.length) {
     els.galleryBox.className = "wz-gallery empty-line";
-    els.galleryBox.textContent = "暂无可展示结果";
+    els.galleryBox.innerHTML = `
+      <span>暂无可展示结果</span>
+      ${galleryPaginationHtml(gallery)}
+    `;
     syncMetrics();
     return;
   }
   els.galleryBox.className = "wz-gallery";
-  els.galleryBox.innerHTML = gallery.items.map((item) => `
+  els.galleryBox.innerHTML = `
+    ${gallery.items.map((item) => `
     <article class="wz-output">
       <div>
         <strong>${escapeHtml(item.outputId)}</strong>
@@ -593,7 +692,9 @@ function renderGallery() {
       ${badge(item.qcStatus, { pass: "QC 通过", manual_required: "需人工确认", fail: "QC 失败" })}
       ${item.previewUrl ? `<a href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noreferrer">预览文件</a>` : ""}
     </article>
-  `).join("");
+  `).join("")}
+    ${galleryPaginationHtml(gallery)}
+  `;
   syncMetrics();
 }
 
@@ -660,7 +761,7 @@ async function startMaskEdit() {
   }
   const previousDetail = state.detail;
   state.submitBlocked = false;
-  state.detail = { remix: { status: "queued", remixId: "提交中", operationType: DEFAULT_DIRECT_OPERATION, targetChannel: "generic", regions, tasks: [], outputs: [], providerJob: { status: "submitting" }, qcSummary: { total: 0, passed: 0, failed: 0 } }, downloadSummary: { downloadEligibleCount: 0, packageReady: false, missingFiles: [] } };
+  state.detail = { remix: { status: "queued", remixId: "提交中", operationType: selectedOperationType(), targetChannel: "generic", regions, tasks: [], outputs: [], providerJob: { status: "submitting" }, qcSummary: { total: 0, passed: 0, failed: 0 } }, downloadSummary: { downloadEligibleCount: 0, packageReady: false, missingFiles: [] } };
   renderDetail();
   setBusy(els.maskConfirmBtn, true, "提交中");
   try {
@@ -669,6 +770,8 @@ async function startMaskEdit() {
       body: JSON.stringify({
         idempotencyKey: idempotencyKey("remix_mask_edit"),
         sourceId: state.source.sourceId,
+        operationType: selectedOperationType(),
+        targetChannel: "generic",
         regions,
         maskDataUrl: maskPreviewDataUrl()
       })
@@ -683,6 +786,7 @@ async function startMaskEdit() {
     if (error.code === "unsupported_capability") {
       state.submitBlocked = true;
     }
+    renderActiveLock(activeLockFromError(error));
     state.detail = previousDetail;
     renderDetail();
     renderError(els.globalError, error, "改造启动失败");
@@ -716,6 +820,25 @@ function startPolling() {
   state.pollTimer = window.setTimeout(tick, 1200);
 }
 
+async function stopRemix() {
+  const remixId = state.detail?.remix?.remixId;
+  if (!remixId || !isActiveRemixStatus(state.detail?.remix?.status)) return;
+  clearError(els.globalError);
+  setBusy(els.stopBtn, true, "停止中");
+  try {
+    state.detail = await apiEnvelope(`/api/wangzhuan/remix/${encodeURIComponent(remixId)}/stop`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "frontend_stop" })
+    });
+    renderDetail();
+    await loadGallery();
+  } catch (error) {
+    renderError(els.globalError, error, "停止改造失败");
+  } finally {
+    setBusy(els.stopBtn, false);
+  }
+}
+
 async function confirmPreview() {
   const remix = state.detail?.remix;
   const output = remix?.outputs?.[0];
@@ -740,12 +863,42 @@ async function confirmPreview() {
   }
 }
 
-async function loadGallery() {
+async function loadGallery(options = {}) {
+  const requestedPage = Number(options.page || state.galleryPage || 1);
+  state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
   const remixId = state.detail?.remix?.remixId;
-  const params = remixId ? `?${new URLSearchParams({ remixId })}` : "";
+  const query = new URLSearchParams({
+    page: String(state.galleryPage),
+    pageSize: String(state.galleryPageSize)
+  });
+  if (remixId) query.set("remixId", remixId);
+  const params = `?${query}`;
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
+  state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
   els.envelopeBadge.textContent = "Envelope: ok";
   renderGallery();
+}
+
+async function loadActiveRemix() {
+  const detail = await apiEnvelope("/api/wangzhuan/remix/active");
+  if (!detail?.remix) {
+    state.detail = null;
+    renderDetail();
+    return null;
+  }
+  state.detail = detail;
+  state.source = detail.remix.source
+    ? { sourceId: detail.remix.source.sourceId, probe: detail.remix.source, previewUrl: detail.remix.source.storageUrl || "" }
+    : state.source;
+  state.regions = Array.isArray(detail.remix.regions) ? detail.remix.regions : [];
+  state.selectedRegionId = state.regions[0]?.regionId || "";
+  if (els.operationType && detail.remix.operationType) {
+    els.operationType.value = detail.remix.operationType;
+  }
+  renderSource();
+  renderDetail();
+  if (isActiveRemixStatus(detail.remix.status)) startPolling();
+  return detail;
 }
 
 async function downloadRemixPackage() {
@@ -777,8 +930,17 @@ function bindEvents() {
   });
   els.maskConfirmBtn.addEventListener("click", startMaskEdit);
   els.confirmBtn.addEventListener("click", confirmPreview);
+  els.stopBtn.addEventListener("click", stopRemix);
+  els.stopActiveLockBtn?.addEventListener("click", stopActiveLock);
   els.downloadBtn.addEventListener("click", downloadRemixPackage);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
+  els.galleryBox.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("[data-gallery-page]");
+    if (!button || button.disabled) return;
+    loadGallery({ page: Number(button.dataset.galleryPage) })
+      .catch((error) => renderError(els.globalError, error, "图库刷新失败"));
+  });
 }
 
 async function init() {
@@ -800,7 +962,10 @@ async function init() {
 
 async function loadInitialData() {
   clearError(els.globalError);
+  renderActiveLock(null);
+  await loadActiveRemix();
   await loadGallery();
+  els.envelopeBadge.textContent = "Envelope: ok";
 }
 
 init();

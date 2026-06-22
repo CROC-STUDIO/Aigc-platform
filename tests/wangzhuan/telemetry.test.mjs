@@ -7,6 +7,7 @@ import test from "node:test";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { buildDownloadPackage } from "../../server/wangzhuan/package.mjs";
+import { closeWangzhuanFactsPool, setWangzhuanFactsPoolForTest, syncTemplateStoreFacts } from "../../server/wangzhuan/mysql-facts.mjs";
 import { stopBatch, submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
 import { runBatchQc } from "../../server/wangzhuan/qc.mjs";
 import { checkReferenceVideo, decomposeReferenceVideo } from "../../server/wangzhuan/reference-videos.mjs";
@@ -20,6 +21,7 @@ import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { adminTemplateAction, saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { recordTelemetryEvent } from "../../server/wangzhuan/telemetry.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -213,6 +215,13 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
     const qc = await runBatchQc(ctx, stitched.batch.batchId);
     const packaged = await buildDownloadPackage(ctx, { batchIds: [qc.batch.batchId] });
 
+    setWangzhuanFactsPoolForTest(fakePool());
+    await syncTemplateStoreFacts(ctx, {
+      schemaVersion: "templates.v1",
+      defaultTemplateId: saved.template.templateId,
+      nextTemplateSeq: 2,
+      templates: [saved.template]
+    });
     const source = await uploadRemixSource(ctx, sourceUpload());
     const remixEstimate = await estimateRemix(ctx, {
       sourceId: source.sourceId,
@@ -274,7 +283,7 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
     const startedEvent = telemetry.find((item) => item.event === "generation_batch_started" && item.payload.batchId === qc.batch.batchId);
     assert.equal(startedEvent.payload.durationSec, 30);
     assert.equal(startedEvent.payload.variantCount, 1);
-    assert.deepEqual(startedEvent.payload.models, ["gpt-image-2", "dreamina-seedance-2-0-260128"]);
+    assert.deepEqual(startedEvent.payload.models, ["gpt-image-2", "doubao-seedance-2-0-260128"]);
 
     const submitted = telemetry.filter((item) => item.event === "generation_task_submitted" && item.payload.batchId === qc.batch.batchId);
     assert.equal(submitted.length, 2);
@@ -288,6 +297,8 @@ test("pipeline, QC, package, remix, and admin flows write parseable telemetry an
     assert.equal(existsSync(paths.telemetryPath), true);
     assert.equal(existsSync(paths.auditPath), true);
   } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

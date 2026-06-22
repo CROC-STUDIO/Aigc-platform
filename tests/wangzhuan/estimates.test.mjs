@@ -193,6 +193,112 @@ test("returns confirmation token for soft limits and validates it on start", asy
   }
 });
 
+test("estimates and starts every configured branch with its own prompt inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-est-branches-"));
+  try {
+    const branchDraft = {
+      ...baseDraft,
+      displayName: "Multi Branch Reward",
+      productName: "News Cash",
+      cta: "Open the news offer",
+      ending: "Try the news path today",
+      materialDirection: "新闻主播壳",
+      customPrompt: "Use a blue virtual news studio.",
+      assetFileNames: {
+        productIcon: "news-icon.png"
+      },
+      assetUrls: {
+        productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
+        productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
+      },
+      branches: [
+        {
+          branchId: "branch_news",
+          branchLabel: "新闻主播壳",
+          productName: "News Cash",
+          cta: "Open the news offer",
+          ending: "Try the news path today",
+          materialDirection: "新闻主播壳",
+          customPrompt: "Use a blue virtual news studio.",
+          assetFileNames: {
+            productIcon: "news-icon.png"
+          },
+          assetStorageKeys: {
+            productIcon: "uploads/wangzhuan/news-icon.png"
+          },
+          assetUrls: {
+            productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
+            productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
+          }
+        },
+        {
+          branchId: "branch_wallet",
+          branchLabel: "钱包提现壳",
+          productName: "Wallet Win",
+          cta: "Check the wallet task",
+          ending: "Try the wallet path today",
+          materialDirection: "提现按钮",
+          customPrompt: "Focus on a wallet dashboard and withdrawal button.",
+          assetFileNames: {
+            productIcon: "wallet-icon.png"
+          },
+          assetUrls: {
+            productIcon: "https://cdn.example.com/wangzhuan/wallet-icon.png",
+            productScreenshot: "https://cdn.example.com/wangzhuan/wallet-screen.png"
+          }
+        }
+      ]
+    };
+    const fx = await fixture(root, branchDraft);
+    const estimated = await estimateBatch(fx.ctx, request(fx, { variantCount: 2 }));
+
+    assert.equal(estimated.estimate.branchCount, 2);
+    assert.equal(estimated.estimate.variantCount, 2);
+    assert.equal(estimated.estimate.scriptCount, 4);
+    assert.equal(estimated.estimate.seedanceSegmentCount, 4);
+    assert.equal(estimated.estimate.imageTaskCount, 4);
+    assert.deepEqual(
+      estimated.estimate.branchSummaries.map((branch) => [branch.branchId, branch.productName, branch.cta]),
+      [
+        ["branch_news", "News Cash", "Open the news offer"],
+        ["branch_wallet", "Wallet Win", "Check the wallet task"]
+      ]
+    );
+
+    const started = await startBatchFromEstimate(fx.ctx, {
+      idempotencyKey: "idem_start_branch_estimate",
+      estimateId: estimated.estimate.estimateId
+    });
+    const { batch } = started;
+
+    assert.equal(batch.scripts.length, 4);
+    assert.equal(batch.tasks.length, 4);
+    assert.deepEqual([...new Set(batch.scripts.map((script) => script.branchId))], ["branch_news", "branch_wallet"]);
+    assert.deepEqual(batch.scripts.map((script) => script.branchVariantIndex), [1, 2, 1, 2]);
+    assert.equal(batch.scripts.some((script) => script.body.includes("News Cash") && script.body.includes("新闻主播壳")), true);
+    assert.equal(batch.scripts.some((script) => script.body.includes("Wallet Win") && script.body.includes("提现按钮")), true);
+
+    const newsTask = batch.tasks.find((task) => task.branchId === "branch_news");
+    const walletTask = batch.tasks.find((task) => task.branchId === "branch_wallet");
+    const newsPrompt = await readFile(join(fx.ctx.userProjectRoot, newsTask.promptPath), "utf8");
+    const walletPrompt = await readFile(join(fx.ctx.userProjectRoot, walletTask.promptPath), "utf8");
+
+    assert.match(newsPrompt, /Product: News Cash/);
+    assert.match(newsPrompt, /CTA: Open the news offer/);
+    assert.match(newsPrompt, /Material direction: 新闻主播壳/);
+    assert.match(newsPrompt, /Product icon URL: https:\/\/cdn\.example\.com\/wangzhuan\/news-icon\.png/);
+    assert.doesNotMatch(newsPrompt, /Product icon asset: news-icon\.png/);
+    assert.match(newsPrompt, /Additional user prompt: Use a blue virtual news studio\./);
+    assert.match(walletPrompt, /Product: Wallet Win/);
+    assert.match(walletPrompt, /CTA: Check the wallet task/);
+    assert.match(walletPrompt, /Material direction: 提现按钮/);
+    assert.match(walletPrompt, /Product icon URL: https:\/\/cdn\.example\.com\/wangzhuan\/wallet-icon\.png/);
+    assert.match(walletPrompt, /Additional user prompt: Focus on a wallet dashboard and withdrawal button\./);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("start is idempotent and refuses a second running batch in the same user project", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-est-lock-"));
   try {

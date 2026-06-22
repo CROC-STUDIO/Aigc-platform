@@ -176,7 +176,7 @@ $env:REVERSE_PROMPT_MODEL="gemini-3-flash-preview"
 
 - 顶部 `生成模式` 选择 `图片` 时，只用 `gpt-image-2` 生成效果图。
 - 顶部 `生成模式` 选择 `图片+视频` 时，每个任务会先用 `gpt-image-2` 生成效果图，再用该效果图作为 Seedance 2.0 `image_to_video` 参考生成 15 秒竖屏 9:16 视频。
-- 视频阶段使用 `dreamina-seedance-2-0-260128`、`720p`、`15s`，并会等待 Seedance 任务完成后下载 MP4 到 `效果图`。
+- 视频阶段默认使用 `doubao-seedance-2-0-260128`、`720p`、`15s`；如需走 BytePlus/Dreamina 上游，可在 `wangzhuan.seedanceProvider.model` 中覆盖为实际 endpoint 模型。
 - 该模式会同时消耗图片生成额度和 Seedance 视频额度，运行时间会明显长于只生成图片。
 - 导入或上传视频素材时，页面会保留视频预览，并保存一张封面/参考帧作为 `gpt-image-2` 的竞品参考图。
 - 视频素材会先反推视频节奏、镜头关系和玩法提示，再用于图片首帧和 Seedance 视频提示词，不能直接照搬竞品角色、UI、地图装饰或品牌元素。

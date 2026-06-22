@@ -16,6 +16,11 @@ import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
+import {
+  closeWangzhuanFactsPool,
+  setWangzhuanFactsPoolForTest
+} from "../../server/wangzhuan/mysql-facts.mjs";
+import { fakePool } from "./mysql-facts-fixture.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -199,6 +204,89 @@ test("QC writes one report per output and makes only stitched 30s output downloa
   }
 });
 
+test("QC calls the model with generated video S3 URL and blocks failed visual review", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-"));
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc");
+    const batchPath = join(wangzhuanPaths(ctx).batchesDir, stitched.batch.batchId, "batch.json");
+    const batch = JSON.parse(await readFile(batchPath, "utf8"));
+    const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
+    const s3VideoUrl = "https://cdn.example.com/wangzhuan/generated/stitched-output.mp4";
+    batch.outputs = batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+      ? {
+        ...output,
+        storageKey: "uploads/wangzhuan/generated/stitched-output.mp4",
+        storageUrl: s3VideoUrl,
+        previewUrl: s3VideoUrl
+      }
+      : output);
+    await writeFile(batchPath, `${JSON.stringify(batch, null, 2)}\n`, "utf8");
+
+    const modelCalls = [];
+    const qc = await runBatchQc({
+      ...ctx,
+      callWangzhuanLlm: async ({ messages, llmConfig, generatedVideo, visionInputs, output, tasks, scripts }) => {
+        modelCalls.push({ messages, llmConfig, generatedVideo, visionInputs, output, tasks, scripts });
+        assert.equal(llmConfig.model, "gpt-5.4");
+        assert.equal(output.outputId, stitchedOutput.outputId);
+        assert.equal(generatedVideo.fileUrl, s3VideoUrl);
+        assert.equal(generatedVideo.fileDataUrl, undefined);
+        assert.equal(visionInputs.fileUrl, s3VideoUrl);
+        assert.equal(visionInputs.fileDataUrl, undefined);
+        assert.equal(tasks.length, 2);
+        assert.equal(scripts.length, 2);
+        const userContent = messages.find((item) => item.role === "user").content;
+        const text = userContent.map((part) => part.text || "").join("\n");
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_url === s3VideoUrl), true);
+        assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_data?.startsWith("data:video/mp4;base64,")), false);
+        assert.match(text, /Phone app reward screen/);
+        assert.match(text, /Lucky Cash/);
+        assert.match(text, /Seedance/);
+        return JSON.stringify({
+          passed: false,
+          score: 0.42,
+          summary: "生成视频没有明显展示奖励反馈和 App 任务界面。",
+          issues: [
+            {
+              code: "missing_reward_feedback",
+              severity: "major",
+              message: "画面缺少脚本要求的奖励反馈。"
+            }
+          ],
+          matched: ["camera", "lighting"],
+          recommendedAction: "regenerate"
+        });
+      }
+    }, stitched.batch.batchId);
+
+    assert.equal(modelCalls.length, 1);
+    assert.equal(qc.batch.status, "partial_failed");
+    assert.deepEqual(qc.batch.qcSummary, {
+      total: 3,
+      passed: 2,
+      failed: 1,
+      warnings: []
+    });
+    const reviewedOutput = qc.batch.outputs.find((output) => output.outputId === stitchedOutput.outputId);
+    assert.equal(reviewedOutput.qcStatus, "fail");
+    assert.equal(reviewedOutput.downloadEligible, false);
+    assert.equal(reviewedOutput.modelQcSummary.passed, false);
+    assert.equal(reviewedOutput.modelQcSummary.score, 0.42);
+
+    const reportPath = join(wangzhuanPaths(ctx).batchesDir, qc.batch.batchId, "qc", `${stitchedOutput.outputId}.json`);
+    const report = JSON.parse(await readFile(reportPath, "utf8"));
+    assert.equal(report.modelReview.provider, "skylink");
+    assert.equal(report.modelReview.model, "gpt-5.4");
+    assert.equal(report.modelReview.passed, false);
+    assert.equal(report.modelReview.score, 0.42);
+    assert.deepEqual(report.modelReview.issues.map((issue) => issue.code), ["missing_reward_feedback"]);
+    assert.equal(report.checks.some((check) => check.checkId === "model_video_qc" && check.status === "fail"), true);
+    assert.doesNotMatch(JSON.stringify(report), /https:\/\/cdn\.example\.com/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("download package refuses to stream an incomplete package when a required file is missing", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-missing-"));
   try {
@@ -222,6 +310,7 @@ test("download package refuses to stream an incomplete package when a required f
 
 test("gallery is manifest-driven and only returns current user project outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-gallery-"));
+  setWangzhuanFactsPoolForTest(fakePool());
   try {
     const alice = await thirtySecondStitchedFixture(root, "alice");
     const bob = await thirtySecondStitchedFixture(root, "bob");
@@ -240,9 +329,51 @@ test("gallery is manifest-driven and only returns current user project outputs",
     assert.equal(gallery.counts.downloadEligible, 1);
     assert.equal(gallery.counts.byQcStatus.pass, 3);
 
+    const firstPage = await getGallery(alice.ctx, { page: "1", pageSize: "2" });
+    assert.equal(firstPage.items.length, 2);
+    assert.equal(firstPage.counts.total, 3);
+    assert.equal(firstPage.counts.downloadEligible, 1);
+    assert.deepEqual(firstPage.pagination, {
+      page: 1,
+      pageSize: 2,
+      total: 3,
+      totalPages: 2,
+      hasPrev: false,
+      hasNext: true
+    });
+
+    const secondPage = await getGallery(alice.ctx, { page: "2", pageSize: "2" });
+    assert.equal(secondPage.items.length, 1);
+    assert.deepEqual(secondPage.pagination, {
+      page: 2,
+      pageSize: 2,
+      total: 3,
+      totalPages: 2,
+      hasPrev: true,
+      hasNext: false
+    });
+
     const eligibleOnly = await getGallery(alice.ctx, { downloadEligibleOnly: "true" });
     assert.equal(eligibleOnly.items.length, 1);
     assert.equal(eligibleOnly.items[0].kind, "stitched_video");
+  } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("gallery requires mysql facts and does not fall back to batch json", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-gallery-no-mysql-"));
+  try {
+    const { ctx } = await thirtySecondStitchedFixture(root, "alice");
+    await assert.rejects(
+      () => getGallery(ctx, {}),
+      (error) => {
+        assert.equal(error.code, "database_unavailable");
+        return true;
+      }
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -285,6 +416,7 @@ test("download package contains original reference, scripts, prompts, QC, task m
 
 test("gallery and download routes expose contract envelopes and zip response", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-router-"));
+  setWangzhuanFactsPoolForTest(fakePool());
   try {
     const { ctx, stitched } = await thirtySecondStitchedFixture(root);
     const qc = await runBatchQc(ctx, stitched.batch.batchId);
@@ -293,13 +425,21 @@ test("gallery and download routes expose contract envelopes and zip response", a
     await handleWangzhuanRequest(
       jsonReq("GET"),
       galleryRes,
-      new URL("http://localhost/api/wangzhuan/gallery?downloadEligibleOnly=true"),
+      new URL("http://localhost/api/wangzhuan/gallery?downloadEligibleOnly=true&page=1&pageSize=1"),
       routerContext(ctx)
     );
     assert.equal(galleryRes.statusCode, 200);
     const galleryPayload = JSON.parse(galleryRes.body.toString("utf8"));
     assert.equal(galleryPayload.code, "ok");
     assert.equal(galleryPayload.data.items.length, 1);
+    assert.deepEqual(galleryPayload.data.pagination, {
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      totalPages: 1,
+      hasPrev: false,
+      hasNext: false
+    });
 
     const downloadRes = captureRes();
     await handleWangzhuanRequest(
@@ -314,6 +454,8 @@ test("gallery and download routes expose contract envelopes and zip response", a
     assert.match(downloadRes.headers["X-Request-Id"], /^req_\d{14}_[a-f0-9]{4}$/);
     assert.equal(zipEntries(downloadRes.body).has("package-manifest.json"), true);
   } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
     await rm(root, { recursive: true, force: true });
   }
 });

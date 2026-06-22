@@ -203,6 +203,130 @@ test("mock submit assigns local task ids and keeps remote URLs out of manifest a
   }
 });
 
+test("remote submit sends each branch asset URL in Seedance content payload", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-pipeline-seedance-"));
+  const submissions = [];
+  try {
+    const branchDraft = {
+      ...baseDraft,
+      assetUrls: {
+        productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
+        productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
+      },
+      branches: [
+        {
+          branchId: "branch_news",
+          branchLabel: "新闻主播壳",
+          productName: "News Cash",
+          cta: "Try news rewards",
+          assetUrls: {
+            productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
+            productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
+          }
+        },
+        {
+          branchId: "branch_wallet",
+          branchLabel: "钱包收益壳",
+          productName: "Wallet Cash",
+          cta: "Try wallet rewards",
+          assetUrls: {
+            productIcon: "https://cdn.example.com/wangzhuan/wallet-icon.png",
+            productScreenshot: "https://cdn.example.com/wangzhuan/wallet-screen.png"
+          }
+        }
+      ]
+    };
+    const { ctx, started } = await fixture(root, {
+      variantCount: 1,
+      draft: branchDraft,
+      context: {
+        seedanceProviderClient: {
+          provider: "seedance",
+          async createTask(payload, meta) {
+            submissions.push({ payload, meta });
+            return {
+              taskId: `remote_${meta.generationTaskId}`,
+              status: "queued",
+              responsePayload: { id: `remote_${meta.generationTaskId}`, status: "queued" }
+            };
+          }
+        }
+      }
+    });
+
+    const result = await submitPendingGenerationTasks(ctx, started.batch.batchId);
+
+    assert.equal(result.submittedCount, 2);
+    assert.equal(submissions.length, 2);
+    assert.equal(result.batch.tasks.map((task) => task.branchId).join(","), "branch_news,branch_wallet");
+    assert.deepEqual(submissions[0].payload.content.map((item) => item.type), ["text", "image_url", "image_url"]);
+    assert.deepEqual(submissions[0].payload.content.slice(1).map((item) => item.image_url.url), [
+      "https://cdn.example.com/wangzhuan/news-icon.png",
+      "https://cdn.example.com/wangzhuan/news-screen.png"
+    ]);
+    assert.deepEqual(submissions[1].payload.content.slice(1).map((item) => item.image_url.url), [
+      "https://cdn.example.com/wangzhuan/wallet-icon.png",
+      "https://cdn.example.com/wangzhuan/wallet-screen.png"
+    ]);
+    assert.equal(submissions[0].payload.model, "doubao-seedance-2-0-260128");
+    assert.equal(submissions[0].payload.ratio, "9:16");
+    assert.equal(submissions[0].payload.duration, 15);
+    assert.equal(submissions[0].payload.watermark, false);
+    assert.equal(result.batch.tasks[0].seedanceTaskId, `remote_${result.batch.tasks[0].generationTaskId}`);
+    assert.equal(result.batch.tasks[0].provider, "seedance");
+    assert.deepEqual(result.batch.tasks[0].requestSummary.content.slice(1).map((item) => item.image_url.url), [
+      "https://cdn.example.com/wangzhuan/news-icon.png",
+      "https://cdn.example.com/wangzhuan/news-screen.png"
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remote submit failure persists Seedance request summary for debugging", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-pipeline-seedance-fail-"));
+  try {
+    const { ctx, started } = await fixture(root, {
+      variantCount: 1,
+      draft: {
+        ...baseDraft,
+        assetUrls: {
+          productIcon: "https://cdn.example.com/wangzhuan/news-icon.png"
+        }
+      },
+      context: {
+        seedanceProviderClient: {
+          provider: "seedance",
+          async createTask() {
+            const error = new Error("Seedance 上游返回失败状态");
+            error.code = "upstream_failed";
+            error.data = {
+              status: 400,
+              upstreamCode: "InvalidParameter",
+              upstreamMessage: "bad content"
+            };
+            throw error;
+          }
+        }
+      }
+    });
+
+    const result = await submitPendingGenerationTasks(ctx, started.batch.batchId);
+
+    assert.equal(result.submittedCount, 0);
+    assert.equal(result.failedSubmitCount, 1);
+    assert.equal(result.batch.status, "failed");
+    const task = result.batch.tasks[0];
+    assert.equal(task.status, "failed");
+    assert.equal(task.errorCode, "upstream_failed");
+    assert.equal(task.responseSummary.upstreamCode, "InvalidParameter");
+    assert.deepEqual(task.requestSummary.content.map((item) => item.type), ["text", "image_url"]);
+    assert.equal(task.requestSummary.content[1].image_url.url, "https://cdn.example.com/wangzhuan/news-icon.png");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("scheduler retry resubmits only the failed generation task", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-retry-"));
   try {

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { effectiveLimits } from "./config.mjs";
+import { branchSummaries, normalizeBranchDrafts } from "./branches.mjs";
 import {
   PROMISE_LEVELS,
   REQUIRED_STRONG_TRUTH_FIELDS,
@@ -23,12 +24,13 @@ import {
 } from "./mysql-facts.mjs";
 import { prepareBatchForPipeline } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
+import { DEFAULT_SEEDANCE_MODEL } from "./seedance-provider.mjs";
 import { preflightStitcher } from "./stitch.mjs";
 import { readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
-const MODEL_VIDEO = "dreamina-seedance-2-0-260128";
+const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
 const ESTIMATE_INDEX_DEFAULT = Object.freeze({
   schemaVersion: "estimates.v1",
   nextSeq: 1,
@@ -170,13 +172,14 @@ function validateEstimateRequest(request, limits) {
   return { durationSec, variantCount, requestedConcurrency };
 }
 
-function computeCounts(durationSec, variantCount) {
+function computeCounts(durationSec, variantCount, branchCount = 1) {
   const multiplier = durationSec === 30 ? 2 : 1;
+  const totalVariants = variantCount * Math.max(1, branchCount);
   return {
-    scriptCount: variantCount * multiplier,
-    seedanceSegmentCount: variantCount * multiplier,
-    stitchTaskCount: durationSec === 30 ? variantCount : 0,
-    imageTaskCount: variantCount * multiplier
+    scriptCount: totalVariants * multiplier,
+    seedanceSegmentCount: totalVariants * multiplier,
+    stitchTaskCount: durationSec === 30 ? totalVariants : 0,
+    imageTaskCount: totalVariants * multiplier
   };
 }
 
@@ -241,8 +244,19 @@ export async function estimateBatch(context, request = {}) {
     throw new WangzhuanError("invalid_video", "参考视频检查未通过", { referenceVideoId: referenceVideo.referenceVideoId });
   }
   const decomposition = await loadReferenceDecomposition(context, request.referenceVideoId);
+  const branches = normalizeBranchDrafts(template.draft, request.branches);
+  const branchCount = Math.max(1, branches.length);
   const capabilities = capabilitySnapshot(context, normalized.durationSec);
-  const counts = computeCounts(normalized.durationSec, normalized.variantCount);
+  const counts = computeCounts(normalized.durationSec, normalized.variantCount, branchCount);
+  if (counts.seedanceSegmentCount > limits.hardGenerationTasks) {
+    throw new WangzhuanError("hard_limit_exceeded", "任务数超过上限，请降低数量", {
+      field: "variantCount",
+      variantCount: normalized.variantCount,
+      branchCount,
+      seedanceSegmentCount: counts.seedanceSegmentCount,
+      hardGenerationTasks: limits.hardGenerationTasks
+    });
+  }
   const confirmationRequired = normalized.variantCount > limits.confirmGenerationTasks
     || counts.seedanceSegmentCount > limits.confirm30sSegments;
   const confirmationToken = confirmationRequired ? makeConfirmationToken() : undefined;
@@ -250,6 +264,7 @@ export async function estimateBatch(context, request = {}) {
     confirmGenerationTasks: limits.confirmGenerationTasks,
     confirm30sSegments: limits.confirm30sSegments,
     variantCount: normalized.variantCount,
+    branchCount,
     seedanceSegmentCount: counts.seedanceSegmentCount
   } : {};
   const normalizedRequest = {
@@ -263,7 +278,8 @@ export async function estimateBatch(context, request = {}) {
     durationSec: normalized.durationSec,
     variantCount: normalized.variantCount,
     requestedConcurrency: normalized.requestedConcurrency,
-    outputRatio: request.outputRatio
+    outputRatio: request.outputRatio,
+    branches
   };
   const estimateHash = hashPayload(normalizedRequest);
   const { estimateId, indexPath, index } = await nextEstimateId(context);
@@ -272,6 +288,8 @@ export async function estimateBatch(context, request = {}) {
     estimateId,
     durationSec: normalized.durationSec,
     variantCount: normalized.variantCount,
+    branchCount,
+    branchSummaries: branchSummaries(branches),
     ...counts,
     models: [MODEL_IMAGE, MODEL_VIDEO],
     maxRetryPerTask: limits.maxRetryPerTask,

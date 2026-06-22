@@ -4,8 +4,8 @@ import { basename, extname, join, resolve } from "node:path";
 
 import { makePackageId } from "./ids.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { syncDownloadPackageFact } from "./mysql-facts.mjs";
-import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { loadRemixDetailFromMysql, syncDownloadPackageFact } from "./mysql-facts.mjs";
+import { openWangzhuanObjectStream, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 function currentUserId(context) {
@@ -49,9 +49,9 @@ async function readBatch(context, batchId) {
 
 async function readRemix(context, remixId) {
   validateRemixId(remixId);
-  const target = join(wangzhuanPaths(context).remixDir, remixId, "remix.json");
-  if (!existsSync(target)) throw new WangzhuanError("remix_not_found", "改造任务不存在或无权限", { remixId });
-  const remix = JSON.parse(await readFile(target, "utf8"));
+  const detail = await loadRemixDetailFromMysql(context, remixId);
+  const remix = detail?.remix;
+  if (!remix) throw new WangzhuanError("remix_not_found", "改造任务不存在或无权限", { remixId });
   if (remix.userId !== currentUserId(context) && context.user?.role !== "admin" && !context.user?.isAdmin) {
     throw new WangzhuanError("permission_denied", "当前账号无权执行该操作", { remixId });
   }
@@ -84,6 +84,33 @@ async function addDiskFile(context, files, missingFiles, zipPath, relativePath) 
     return;
   }
   files.push({ zipPath: zipSafeName(zipPath), data: await readFile(target) });
+}
+
+async function bufferFromStream(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+async function addStoredFile(context, files, missingFiles, zipPath, asset = {}) {
+  if (asset.storageKey) {
+    try {
+      const object = await openWangzhuanObjectStream(context, asset.storageKey);
+      files.push({ zipPath: zipSafeName(zipPath), data: await bufferFromStream(object.body) });
+      return;
+    } catch {
+      // Fall through to the local processing cache below.
+    }
+  }
+  if (asset.filePath || asset.storedPath || asset.promptPath || asset.qcReportPath) {
+    const relativePath = asset.filePath || asset.storedPath || asset.promptPath || asset.qcReportPath;
+    const target = relativePath ? resolveUserPath(context, relativePath) : "";
+    if (target && existsSync(target)) {
+      files.push({ zipPath: zipSafeName(zipPath), data: await readFile(target) });
+      return;
+    }
+  }
+  missingFiles.push(zipPath);
 }
 
 function outputPackagePath(batchRoot, output) {
@@ -273,17 +300,15 @@ async function collectRemixFiles(context, remix, request, packageItems, missingF
   const selectedOutputs = packageRemixOutputSelection(remix, request);
   if (!selectedOutputs.length) return { files, selectedOutputs };
 
-  addStringFile(files, `${remixRoot}/remix.json`, sanitizedRemix(remix));
   const sourceExt = extname(remix.source?.storedPath || "") || ".mp4";
-  await addDiskFile(context, files, missingFiles, `${remixRoot}/source/original${sourceExt}`, remix.source?.storedPath);
-  addStringFile(files, `${remixRoot}/source/source-probe.json`, remix.source || {});
+  await addStoredFile(context, files, missingFiles, `${remixRoot}/source/original${sourceExt}`, remix.source || {});
   addStringFile(files, `${remixRoot}/regions/regions.json`, remix.regions || []);
 
   const outputPathById = new Map();
   for (const output of selectedOutputs) {
     const zipPath = `${remixRoot}/outputs/${output.outputId}${extname(output.filePath) || ".mp4"}`;
     outputPathById.set(output.outputId, zipPath);
-    await addDiskFile(context, files, missingFiles, zipPath, output.filePath);
+    await addStoredFile(context, files, missingFiles, zipPath, output);
     packageItems.push({
       sourceType: "remix",
       remixId: remix.remixId,
@@ -298,18 +323,36 @@ async function collectRemixFiles(context, remix, request, packageItems, missingF
 
   for (const task of Array.isArray(remix.tasks) ? remix.tasks : []) {
     const promptName = `${task.generationTaskId}_remix.txt`;
-    await addDiskFile(context, files, missingFiles, `${remixRoot}/prompts/${promptName}`, task.promptPath);
+    await addStoredFile(context, files, missingFiles, `${remixRoot}/prompts/${promptName}`, {
+      promptPath: task.promptPath,
+      storageKey: task.promptStorageKey,
+      storageUrl: task.promptStorageUrl
+    });
   }
 
   for (const output of Array.isArray(remix.outputs) ? remix.outputs : []) {
     const reportPath = output.qcReportPath || join("批处理记录", "网赚管线", "remix", remix.remixId, "qc", `${output.outputId}.json`);
-    await addDiskFile(context, files, missingFiles, `${remixRoot}/qc/${output.outputId}.json`, reportPath);
+    await addStoredFile(context, files, missingFiles, `${remixRoot}/qc/${output.outputId}.json`, {
+      qcReportPath: reportPath,
+      storageKey: output.qcReportStorageKey,
+      storageUrl: output.qcReportStorageUrl
+    });
   }
 
   const rows = remixTaskMapRows(remix, selectedOutputs, outputPathById);
   addStringFile(files, `${remixRoot}/task-map/task-id-map.csv`, taskMapCsv(rows));
   addStringFile(files, `${remixRoot}/task-map/task-id-map.json`, sanitizedTasks(remix));
-  await addDiskFile(context, files, missingFiles, `${remixRoot}/preview-confirmation.json`, join("批处理记录", "网赚管线", "remix", remix.remixId, "preview-confirmation.json"));
+  const confirmedOutput = (Array.isArray(remix.outputs) ? remix.outputs : []).find((output) => output.previewConfirmed) || null;
+  if (confirmedOutput || remix.previewConfirmedAt) {
+    addStringFile(files, `${remixRoot}/preview-confirmation.json`, {
+      schemaVersion: "preview_confirmation.v1",
+      remixId: remix.remixId,
+      outputId: confirmedOutput?.outputId || "",
+      confirmedBy: remix.previewConfirmedBy || currentUserId(context),
+      confirmedAt: remix.previewConfirmedAt || confirmedOutput?.previewConfirmedAt || remix.updatedAt || new Date().toISOString(),
+      notes: remix.previewConfirmationNotes || ""
+    });
+  }
 
   return { files, selectedOutputs };
 }

@@ -334,9 +334,19 @@ export async function loadReferenceVideoProbe(context, referenceVideoId) {
   if (!/^ref_\d{8}_\d{3}$/.test(String(referenceVideoId || ""))) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
-  const mysqlProbe = await loadReferenceVideoProbeFromMysql(context, referenceVideoId);
-  if (mysqlProbe) return mysqlProbe;
   const probePath = join(wangzhuanPaths(context).referenceVideosDir, referenceVideoId, "probe.json");
+  const mysqlProbe = await loadReferenceVideoProbeFromMysql(context, referenceVideoId);
+  if (mysqlProbe) {
+    if (!existsSync(probePath)) return mysqlProbe;
+    const fileProbe = JSON.parse(await readFile(probePath, "utf8"));
+    return {
+      ...fileProbe,
+      ...mysqlProbe,
+      storedPath: mysqlProbe.storedPath || fileProbe.storedPath,
+      storageKey: mysqlProbe.storageKey || fileProbe.storageKey,
+      storageUrl: mysqlProbe.storageUrl || fileProbe.storageUrl
+    };
+  }
   if (!existsSync(probePath)) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
@@ -703,7 +713,40 @@ function dropFileParts(messages = []) {
   }));
 }
 
-async function callOpenAiCompatibleLlm(llmConfig, messages) {
+function modelInputMode(messages = []) {
+  const hasFileUrlInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_url));
+  const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_data));
+  return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
+}
+
+function redactedModelRequest({ requestId, inputMode, url, headers, body }) {
+  const apiKeyEnv = headers?.Authorization ? "WANGZHUAN_LLM_API_KEY" : "API_KEY";
+  return {
+    requestId,
+    createdAt: new Date().toISOString(),
+    inputMode,
+    request: {
+      method: "POST",
+      url,
+      headers: {
+        ...headers,
+        ...(headers?.Authorization ? { Authorization: `Bearer <REDACTED:${apiKeyEnv}>` } : {})
+      },
+      body
+    }
+  };
+}
+
+async function maybeDumpModelRequest(context, probe, request) {
+  const requestId = String(request?.requestId || "").trim();
+  if (!requestId || !context?.userProjectRoot || !probe?.referenceVideoId) return;
+  const target = join(wangzhuanPaths(context).referenceVideosDir, probe.referenceVideoId, `llm-request-${requestId}.json`);
+  await writeAtomicJson(target, request);
+}
+
+async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
   if (!llmConfig.apiKey) {
     const apiKeyEnv = llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY";
     throw new WangzhuanError("model_failed", "未配置网赚拆解模型 API Key", {
@@ -722,16 +765,17 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
     "Content-Type": "application/json",
     Authorization: `Bearer ${llmConfig.apiKey}`
   };
+  const redactedHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer <REDACTED:${llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY"}>`
+  };
   const responsesPayload = {
     model: llmConfig.model,
     input: responsesInputFromMessages(messages),
     temperature: llmConfig.temperature,
     text: { format: { type: "json_object" } }
   };
-  const hasFileUrlInput = messages.some((message) => Array.isArray(message.content)
-    && message.content.some((part) => part?.type === "file" && part.file?.file_url));
-  const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
-    && message.content.some((part) => part?.type === "file" && part.file?.file_data));
+  const inputMode = modelInputMode(messages);
   const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
   const chatPayload = {
     model: llmConfig.model,
@@ -739,15 +783,26 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
     temperature: llmConfig.temperature,
     response_format: { type: "json_object" }
   };
+  const useResponses = canUseResponsesInput(messages);
+  const initialUrl = useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint);
+  if (typeof options.dumpRequest === "function") {
+    await options.dumpRequest(redactedModelRequest({
+      requestId: options.requestId,
+      inputMode,
+      url: initialUrl,
+      headers: redactedHeaders,
+      body: useResponses ? responsesPayload : chatPayload
+    }));
+  }
   try {
-    response = await fetch(canUseResponsesInput(messages) ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint), {
+    response = await fetch(initialUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify(canUseResponsesInput(messages) ? responsesPayload : chatPayload),
+      body: JSON.stringify(useResponses ? responsesPayload : chatPayload),
       signal: controller.signal
     });
     payload = await response.json().catch(() => ({}));
-    if (canUseResponsesInput(messages) && [400, 404, 415, 422].includes(response.status)) {
+    if (useResponses && ([400, 404, 415, 422].includes(response.status) || response.status >= 500)) {
       response = await fetch(chatCompletionsUrl(llmConfig.endpoint), {
         method: "POST",
         headers,
@@ -761,7 +816,7 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
-      inputMode: hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only",
+      inputMode,
       reason
     });
   } finally {
@@ -772,14 +827,14 @@ async function callOpenAiCompatibleLlm(llmConfig, messages) {
       provider: llmConfig.provider,
       model: llmConfig.model,
       status: response.status,
-      inputMode: hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only",
+      inputMode,
       upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
     });
   }
   return llmResponseText(payload);
 }
 
-export async function draftReferenceVideoDecomposition(context, request = {}) {
+export async function draftReferenceVideoDecomposition(context, request = {}, options = {}) {
   const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
   if (probe.status === "fail") {
     throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
@@ -806,7 +861,10 @@ export async function draftReferenceVideoDecomposition(context, request = {}) {
       },
       visionInputs
     })
-    : await callOpenAiCompatibleLlm(llmConfig, messages);
+    : await callOpenAiCompatibleLlm(llmConfig, messages, {
+      requestId: options.requestId,
+      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+    });
   const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
   if (decomposition.missingFields.length) {
     throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {

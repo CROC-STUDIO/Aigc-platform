@@ -46,7 +46,7 @@
       </div>
     </aside>
 
-    <main class="app wz-app">
+    <main class="app wz-app wz-workbench">
       <section class="operation-pane">
         <section class="topbar wz-page-head">
           <div>
@@ -121,7 +121,7 @@
               <section class="wz-node" id="wzNodeDecompose" data-node="decompose" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
                   <h2>GPT 拆解脚本</h2>
-                  <span>按 JSON 拆分脚本</span>
+                  <span>按 JSON 格式拆分脚本</span>
                 </div>
                 <div class="wz-node-body">
                   <div id="wzDecompositionStatus" class="wz-info">先读取参考视频信息，再调用模型生成拆解草稿。</div>
@@ -329,7 +329,7 @@
                   <details class="wz-details wz-advanced-settings">
                     <summary>高级设置：Seedance 模型名</summary>
                     <label>Seedance 模型
-                      <input id="wzSeedanceModel" type="text" value="dreamina-seedance-2-0-260128" placeholder="你配置 Seedance 模型名" />
+                      <input id="wzSeedanceModel" type="text" value="doubao-seedance-2-0-260128" placeholder="你配置 Seedance 模型名" />
                     </label>
                   </details>
                   <div id="wzEstimateBox" class="wz-estimate empty-line">尚未估算</div>
@@ -358,7 +358,11 @@
               <section class="wz-node" id="wzNodeLog" data-node="log" data-port-in="1">
                 <div class="panel-head">
                   <h2>运行日志</h2>
-                  <span id="wzBatchBadge">未开始</span>
+                  <div class="panel-actions">
+                    <button id="wzRunQcBtn" class="mini" type="button" disabled>运行视频质检</button>
+                    <button id="wzRetryStitchBtn" class="mini ghost" type="button" hidden>重试拼接</button>
+                    <span id="wzBatchBadge">未开始</span>
+                  </div>
                 </div>
                 <div class="wz-node-body">
                   <div id="wzBatchBox" class="wz-list empty-line">暂无批次</div>

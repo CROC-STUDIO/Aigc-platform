@@ -33,6 +33,7 @@ const els = {
   ruleCount: $("#wzRuleCount"),
   taskCount: $("#wzTaskCount"),
   downloadCount: $("#wzDownloadCount"),
+  branches: $("#wzBranches"),
   templateSelect: $("#wzTemplateSelect"),
   createTemplateBtn: $("#wzCreateTemplateBtn"),
   projectName: $("#wzProjectName"),
@@ -89,6 +90,8 @@ const els = {
   seedanceModel: $("#wzSeedanceModel"),
   startBatchBtn: $("#wzStartBatchBtn"),
   stopBatchBtn: $("#wzStopBatchBtn"),
+  runQcBtn: $("#wzRunQcBtn"),
+  retryStitchBtn: $("#wzRetryStitchBtn"),
   batchBadge: $("#wzBatchBadge"),
   batchBox: $("#wzBatchBox"),
   refreshGalleryBtn: $("#wzRefreshGalleryBtn"),
@@ -109,9 +112,12 @@ const state = {
   capabilities: null,
   batchDetail: null,
   gallery: null,
+  galleryPage: 1,
+  galleryPageSize: 20,
   llmDefaults: null,
   activeLock: null,
-  pollTimer: 0
+  pollTimer: 0,
+  pollIntervalMs: 2000
 };
 
 const assetInputKeys = [
@@ -123,6 +129,58 @@ const assetInputKeys = [
   ["rewardElement", "rewardElementFile"]
 ];
 
+const branchFieldIds = {
+  productName: "wzProductName",
+  productLink: "wzProductLink",
+  cta: "wzCta",
+  language: "wzLanguage",
+  targetChannel: "wzTargetChannel",
+  targetRegion: "wzTargetRegion",
+  materialDirection: "wzMaterialDirection",
+  voiceoverStyle: "wzVoiceoverStyle",
+  promiseLevel: "wzPromiseLevel",
+  projectName: "wzProjectName",
+  batchName: "wzBatchName",
+  templateSelect: "wzTemplateSelect",
+  displayName: "wzDisplayName",
+  generationMode: "wzGenerationMode",
+  templateChannel: "wzTemplateChannel",
+  regions: "wzRegions",
+  defaultDuration: "wzDefaultDuration",
+  ending: "wzEnding",
+  currencySymbol: "wzCurrencySymbol",
+  productIconFile: "wzProductIconFile",
+  productScreenshotFile: "wzProductScreenshotFile",
+  productRecordingFile: "wzProductRecordingFile",
+  endingAssetFile: "wzEndingAssetFile",
+  personAssetFile: "wzPersonAssetFile",
+  rewardElementFile: "wzRewardElementFile",
+  variantPrompt: "wzVariantPrompt",
+  customPrompt: "wzCustomPrompt",
+  negativePrompt: "wzNegativePrompt"
+};
+
+const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，下一步点击“重新估算”生成批次预估。";
+
+function isDecompositionConfirmed() {
+  return Boolean(state.decomposition?.referenceVideoId || (state.decomposition && state.referenceVideo?.referenceVideoId));
+}
+
+function focusBatchStep() {
+  const batchNode = document.getElementById("wzNodeBatch");
+  if (!batchNode) return;
+  for (const node of document.querySelectorAll(".wz-canvas .wz-node")) {
+    node.classList.toggle("focused", node === batchNode);
+  }
+  for (const item of document.querySelectorAll("#wzStepbar .wz-stepbar-item")) {
+    item.classList.toggle("active", item.dataset.step === "4");
+  }
+  requestAnimationFrame(() => {
+    batchNode.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    els.estimateBtn?.focus({ preventScroll: true });
+  });
+}
+
 function syncMetrics() {
   els.templateCount.textContent = state.templates.length;
   els.ruleCount.textContent = state.channelRules.length;
@@ -131,12 +189,215 @@ function syncMetrics() {
   els.downloadCount.textContent = state.batchDetail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
 }
 
+function galleryPaginationHtml(gallery) {
+  const pagination = gallery?.pagination || {
+    page: state.galleryPage,
+    pageSize: state.galleryPageSize,
+    total: gallery?.counts?.total || gallery?.items?.length || 0,
+    totalPages: gallery?.items?.length ? 1 : 0,
+    hasPrev: false,
+    hasNext: false
+  };
+  const totalPages = pagination.totalPages || 0;
+  const pageLabel = totalPages ? `${pagination.page} / ${totalPages}` : "0 / 0";
+  return `
+    <div class="wz-gallery-pager">
+      <span>共 ${escapeHtml(pagination.total || 0)} 条 · 第 ${escapeHtml(pageLabel)} 页</span>
+      <div>
+        <button type="button" class="ghost" data-gallery-page="${pagination.page - 1}" ${pagination.hasPrev ? "" : "disabled"}>上一页</button>
+        <button type="button" class="ghost" data-gallery-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderTruthFields() {
   els.truthFields.innerHTML = strongTruthFields.map(([key, label]) => `
     <label>${escapeHtml(label)}
       <input data-truth-field="${escapeHtml(key)}" type="text" />
     </label>
   `).join("");
+  markBranchFields();
+}
+
+function markBranchFields(root = els.branches) {
+  if (!root) return;
+  for (const [field, id] of Object.entries(branchFieldIds)) {
+    const node = root.querySelector(`#${id}`);
+    if (node) node.dataset.branchField = field;
+  }
+  for (const [assetKey, field] of assetInputKeys) {
+    const input = root.querySelector(`[data-branch-field="${field}"]`);
+    if (input) input.dataset.assetKey = assetKey;
+  }
+  const base = document.getElementById("wzNodeRewrite");
+  if (base && !base.dataset.branchId) base.dataset.branchId = "branch_1";
+}
+
+function branchNodes() {
+  markBranchFields();
+  return [...(els.branches?.querySelectorAll(".wz-node-branch") || [])];
+}
+
+function branchField(node, field) {
+  return node?.querySelector(`[data-branch-field="${field}"]`) || null;
+}
+
+function fieldValue(node, field) {
+  const input = branchField(node, field);
+  return input ? String(input.value || "").trim() : "";
+}
+
+function setFieldValue(node, field, value) {
+  const input = branchField(node, field);
+  if (!input || value === undefined || value === null) return;
+  input.value = Array.isArray(value) ? value.join(",") : String(value);
+}
+
+function branchTitle(node, index) {
+  const explicit = node?.dataset.branchLabel || "";
+  const title = node?.querySelector(".wz-branch-title")?.textContent?.trim() || "";
+  return explicit || title || `改写 3.${index + 1}`;
+}
+
+function collectBranchAssets(node) {
+  const assetFileNames = {};
+  const assetUrls = {};
+  const assetStorageKeys = {};
+  for (const [assetKey, field] of assetInputKeys) {
+    const input = branchField(node, field);
+    const file = input?.files?.[0];
+    const savedName = input?.dataset.uploadedFileName || "";
+    const savedUrl = input?.dataset.storageUrl || "";
+    const savedStorageKey = input?.dataset.storageKey || "";
+    if (file?.name) assetFileNames[assetKey] = file.name;
+    else if (savedName) assetFileNames[assetKey] = savedName;
+    if (savedUrl) assetUrls[assetKey] = savedUrl;
+    if (savedStorageKey) assetStorageKeys[assetKey] = savedStorageKey;
+  }
+  return { assetFileNames, assetUrls, assetStorageKeys };
+}
+
+function collectTruthRules(node) {
+  const truthRules = {};
+  for (const input of node.querySelectorAll("[data-truth-field]")) {
+    truthRules[input.dataset.truthField] = input.value.trim();
+  }
+  return truthRules;
+}
+
+function collectBranchDrafts() {
+  return branchNodes().map((node, index) => {
+    const { assetFileNames, assetUrls, assetStorageKeys } = collectBranchAssets(node);
+    const targetChannel = fieldValue(node, "targetChannel") || fieldValue(node, "templateChannel") || "meta_ads";
+    const regions = (fieldValue(node, "regions") || fieldValue(node, "targetRegion") || "US")
+      .split(",").map((item) => item.trim()).filter(Boolean);
+    const branchId = node.dataset.branchId || `branch_${index + 1}`;
+    return {
+      branchId,
+      branchIndex: index + 1,
+      branchLabel: branchTitle(node, index),
+      displayName: fieldValue(node, "displayName") || `改写 3.${index + 1}`,
+      productName: fieldValue(node, "productName"),
+      productLink: fieldValue(node, "productLink"),
+      cta: fieldValue(node, "cta"),
+      ending: fieldValue(node, "ending"),
+      currencySymbol: fieldValue(node, "currencySymbol"),
+      language: fieldValue(node, "language") || "en-US",
+      regions,
+      targetChannels: [targetChannel],
+      defaultOutputRatio: "9:16",
+      defaultDurationSec: Number(fieldValue(node, "defaultDuration") || 15),
+      promiseLevel: fieldValue(node, "promiseLevel") || "stable",
+      assetFileNames,
+      assetUrls,
+      assetStorageKeys,
+      materialDirection: fieldValue(node, "materialDirection"),
+      voiceoverStyle: fieldValue(node, "voiceoverStyle"),
+      variantPrompt: fieldValue(node, "variantPrompt"),
+      customPrompt: fieldValue(node, "customPrompt"),
+      negativePrompt: fieldValue(node, "negativePrompt"),
+      truthRules: collectTruthRules(node)
+    };
+  }).filter((branch) => branch.productName || branch.cta || branch.materialDirection || Object.keys(branch.assetUrls).length);
+}
+
+function fillBranchDraft(node, draft = {}, index = 0) {
+  if (!node) return;
+  markBranchFields(node);
+  node.dataset.branchId = draft.branchId || draft.id || node.dataset.branchId || `branch_${index + 1}`;
+  node.dataset.branchLabel = draft.branchLabel || draft.label || draft.displayName || "";
+  setFieldValue(node, "productName", draft.productName);
+  setFieldValue(node, "productLink", draft.productLink);
+  setFieldValue(node, "cta", draft.cta);
+  setFieldValue(node, "language", draft.language);
+  setFieldValue(node, "targetChannel", draft.targetChannels?.[0] || draft.targetChannel);
+  setFieldValue(node, "targetRegion", draft.regions?.[0] || draft.targetRegion);
+  setFieldValue(node, "materialDirection", draft.materialDirection);
+  setFieldValue(node, "voiceoverStyle", draft.voiceoverStyle);
+  setFieldValue(node, "promiseLevel", draft.promiseLevel);
+  setFieldValue(node, "projectName", draft.projectName);
+  setFieldValue(node, "batchName", draft.batchName);
+  setFieldValue(node, "displayName", draft.displayName);
+  setFieldValue(node, "generationMode", draft.generationMode);
+  setFieldValue(node, "templateChannel", draft.targetChannels?.[0] || draft.templateChannel);
+  setFieldValue(node, "regions", Array.isArray(draft.regions) ? draft.regions.join(",") : draft.regions);
+  setFieldValue(node, "defaultDuration", draft.defaultDurationSec || draft.defaultDuration);
+  setFieldValue(node, "ending", draft.ending);
+  setFieldValue(node, "currencySymbol", draft.currencySymbol);
+  setFieldValue(node, "variantPrompt", draft.variantPrompt);
+  setFieldValue(node, "customPrompt", draft.customPrompt);
+  setFieldValue(node, "negativePrompt", draft.negativePrompt);
+  for (const [assetKey, field] of assetInputKeys) {
+    const input = branchField(node, field);
+    if (!input) continue;
+    input.dataset.uploadedFileName = draft.assetFileNames?.[assetKey] || "";
+    input.dataset.storageUrl = draft.assetUrls?.[assetKey] || "";
+    input.dataset.storageKey = draft.assetStorageKeys?.[assetKey] || "";
+  }
+  for (const input of node.querySelectorAll("[data-truth-field]")) {
+    input.value = draft.truthRules?.[input.dataset.truthField] || "";
+  }
+}
+
+function applyBranches(draft = {}) {
+  const drafts = Array.isArray(draft.branches) && draft.branches.length ? draft.branches : [draft];
+  const base = document.getElementById("wzNodeRewrite");
+  for (const clone of els.branches?.querySelectorAll(".wz-node-branch:not(#wzNodeRewrite)") || []) clone.remove();
+  if (base) fillBranchDraft(base, drafts[0] || draft, 0);
+  for (let index = 1; index < drafts.length; index += 1) {
+    const node = window.wzCreateBranchNode?.(drafts[index], { focus: false });
+    fillBranchDraft(node, drafts[index], index);
+  }
+  window.dispatchEvent(new CustomEvent("wz:branches-applied"));
+}
+
+async function uploadBranchAssets() {
+  for (const node of branchNodes()) {
+    const branchId = node.dataset.branchId || "branch_1";
+    for (const [assetKey, field] of assetInputKeys) {
+      const input = branchField(node, field);
+      const file = input?.files?.[0];
+      if (!file) continue;
+      if (input.dataset.uploadedFileName === file.name && input.dataset.storageUrl) continue;
+      const content = await dataUrlFromFile(file);
+      const data = await apiEnvelope("/api/wangzhuan/product-assets/upload", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId,
+          assetKey,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          content
+        })
+      });
+      const asset = data.asset || {};
+      input.dataset.uploadedFileName = asset.fileName || file.name;
+      input.dataset.storageUrl = asset.storageUrl || asset.previewUrl || "";
+      input.dataset.storageKey = asset.storageKey || "";
+      input.dataset.storedPath = asset.storedPath || "";
+    }
+  }
 }
 
 function draftFromForm() {
@@ -144,11 +405,8 @@ function draftFromForm() {
   for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
     truthRules[input.dataset.truthField] = input.value.trim();
   }
-  const assetFileNames = {};
-  for (const [key, elementKey] of assetInputKeys) {
-    const file = els[elementKey]?.files?.[0];
-    if (file?.name) assetFileNames[key] = file.name;
-  }
+  const branches = collectBranchDrafts();
+  const primaryBranch = branches[0] || {};
   return {
     displayName: els.displayName.value.trim(),
     productName: els.productName.value.trim(),
@@ -162,7 +420,9 @@ function draftFromForm() {
     defaultOutputRatio: "9:16",
     defaultDurationSec: Number(els.defaultDuration.value),
     promiseLevel: els.promiseLevel.value,
-    assetFileNames,
+    assetFileNames: primaryBranch.assetFileNames || {},
+    assetUrls: primaryBranch.assetUrls || {},
+    assetStorageKeys: primaryBranch.assetStorageKeys || {},
     llmConfig: {
       provider: els.llmProvider.value.trim(),
       model: els.llmModel.value.trim(),
@@ -176,7 +436,8 @@ function draftFromForm() {
     voiceoverStyle: els.voiceoverStyle.value.trim(),
     customPrompt: els.customPrompt.value.trim(),
     negativePrompt: els.negativePrompt.value.trim(),
-    truthRules
+    truthRules,
+    branches
   };
 }
 
@@ -219,6 +480,7 @@ function applyTemplate(template) {
     input.value = draft.truthRules?.[input.dataset.truthField] || "";
   }
   els.truthDetails.open = els.promiseLevel.value === "strong_commitment";
+  applyBranches(draft);
 }
 
 function renderTemplates() {
@@ -330,13 +592,19 @@ function renderReference() {
       ])}
     </div>
     ${(probe.issues || []).map((item) => `<div class="wz-warning">${escapeHtml(item.message)}</div>`).join("")}
+    ${isDecompositionConfirmed() ? `<div class="wz-success">${escapeHtml(DECOMPOSITION_CONFIRMED_MESSAGE)}</div>` : ""}
   `;
   els.draftDecompositionBtn.disabled = probe.status === "fail";
-  els.decomposeBtn.disabled = !state.decomposition;
+  els.decomposeBtn.disabled = probe.status === "fail" || isDecompositionConfirmed() || !els.decompositionText.value.trim();
   els.decompositionStatus.className = probe.status === "fail" ? "wz-warning" : "wz-info";
-  els.decompositionStatus.textContent = probe.status === "fail"
-    ? "参考视频检查未通过，不能自动拆解。"
-    : "视频信息已读取。点击“自动拆解参考视频”调用模型生成草稿。";
+  if (probe.status === "fail") {
+    els.decompositionStatus.textContent = "参考视频检查未通过，不能自动拆解。";
+  } else if (isDecompositionConfirmed()) {
+    els.decompositionStatus.className = "wz-success";
+    els.decompositionStatus.textContent = DECOMPOSITION_CONFIRMED_MESSAGE;
+  } else {
+    els.decompositionStatus.textContent = "视频信息已读取。点击“自动拆解参考视频”调用模型生成草稿。";
+  }
 }
 
 async function draftReferenceVideoDecomposition() {
@@ -385,7 +653,9 @@ function renderEstimate() {
   const estimate = state.estimate?.estimate;
   if (!estimate) {
     els.estimateBox.className = "wz-estimate empty-line";
-    els.estimateBox.textContent = "尚未估算";
+    els.estimateBox.textContent = isDecompositionConfirmed()
+      ? "脚本已确认，点击“重新估算”查看本批任务数和消耗。"
+      : "尚未估算";
     els.startBatchBtn.disabled = true;
     syncMetrics();
     return;
@@ -399,6 +669,7 @@ function renderEstimate() {
     <div class="wz-kv-grid">
       ${renderKeyValues([
         ["estimateId", estimate.estimateId],
+        ["裂变子节点", estimate.branchCount || 1],
         ["脚本", estimate.scriptCount],
         ["Seedance 分段", estimate.seedanceSegmentCount],
         ["拼接任务", estimate.stitchTaskCount],
@@ -424,13 +695,19 @@ function renderBatch() {
     els.batchBox.className = "wz-list empty-line";
     els.batchBox.textContent = "暂无批次";
     els.stopBatchBtn.disabled = true;
+    els.runQcBtn.disabled = true;
     syncMetrics();
     return;
   }
   els.batchBadge.innerHTML = badge(batch.status, batchStatusLabels);
   els.stopBatchBtn.disabled = terminalBatchStatus(batch.status);
+  els.retryStitchBtn.hidden = batch.status !== "partial_failed";
+  els.retryStitchBtn.disabled = batch.status !== "partial_failed";
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   const events = Array.isArray(detail.events) ? detail.events : [];
+  const qcRunnable = batch.status === "qc" || outputs.some((output) => output.qcStatus === "not_started");
+  els.runQcBtn.disabled = !qcRunnable;
   els.batchBox.className = "wz-list";
   els.batchBox.innerHTML = `
     <article class="wz-row">
@@ -446,7 +723,8 @@ function renderBatch() {
         ["可下载", detail.downloadSummary?.downloadEligibleCount || 0],
         ["包状态", detail.downloadSummary?.packageReady ? "ready" : "not_ready"],
         ["QC 通过", batch.qcSummary?.passed || 0],
-        ["QC 失败", batch.qcSummary?.failed || 0]
+        ["QC 失败", batch.qcSummary?.failed || 0],
+        ["模型视频质检", outputs.some((output) => output.modelQcSummary) ? "已执行" : "待执行"]
       ])}
     </div>
     <div class="wz-task-list">
@@ -468,12 +746,16 @@ function renderGallery() {
   const gallery = state.gallery;
   if (!gallery?.items?.length) {
     els.galleryBox.className = "wz-gallery empty-line";
-    els.galleryBox.textContent = "暂无可展示结果";
+    els.galleryBox.innerHTML = `
+      <span>暂无可展示结果</span>
+      ${galleryPaginationHtml(gallery)}
+    `;
     syncMetrics();
     return;
   }
   els.galleryBox.className = "wz-gallery";
-  els.galleryBox.innerHTML = gallery.items.map((item) => `
+  els.galleryBox.innerHTML = `
+    ${gallery.items.map((item) => `
     <article class="wz-output">
       <div>
         <strong>${escapeHtml(item.outputId)}</strong>
@@ -481,8 +763,11 @@ function renderGallery() {
       </div>
       ${badge(item.qcStatus, { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" })}
       ${item.previewUrl ? `<a href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noreferrer">预览文件</a>` : ""}
+      ${item.modelQcSummary ? `<small>模型质检 ${escapeHtml(item.modelQcSummary.score ?? "-")} · ${escapeHtml(item.modelQcSummary.summary || "")}</small>` : ""}
     </article>
-  `).join("");
+  `).join("")}
+    ${galleryPaginationHtml(gallery)}
+  `;
   syncMetrics();
 }
 
@@ -517,7 +802,10 @@ function renderActiveLock(lock = state.activeLock) {
     return;
   }
   els.activeLockActions.hidden = false;
-  els.activeLockText.textContent = `当前占用：${state.activeLock.label}`;
+  const href = state.activeLock.type === "remix"
+    ? "/competitor-remix.html"
+    : "/wangzhuan.html";
+  els.activeLockText.innerHTML = `当前占用：${escapeHtml(state.activeLock.label)} · <a href="${href}">打开任务页</a>`;
   els.stopActiveLockBtn.disabled = false;
 }
 
@@ -543,9 +831,19 @@ async function loadRules() {
 }
 
 async function saveTemplate() {
+  clearError(els.globalError);
+  setBusy(els.createTemplateBtn, true, "上传素材");
+  try {
+    await uploadBranchAssets();
+  } catch (error) {
+    setBusy(els.createTemplateBtn, false);
+    renderError(els.globalError, error, "产品素材上传失败");
+    return;
+  }
   const draft = draftFromForm();
   const missing = missingStrongFields(draft);
   if (missing.length) {
+    setBusy(els.createTemplateBtn, false);
     els.truthDetails.open = true;
     renderError(els.globalError, {
       code: "strong_rule_missing",
@@ -554,7 +852,6 @@ async function saveTemplate() {
     }, "模板校验");
     return;
   }
-  clearError(els.globalError);
   setBusy(els.createTemplateBtn, true, "保存中");
   try {
     const body = state.selectedTemplate
@@ -622,14 +919,17 @@ async function decomposeReferenceVideo() {
       })
     });
     state.decomposition = data.decomposition;
-    els.decomposeBtn.disabled = true;
+    state.estimate = null;
+    renderReference();
+    renderEstimate();
     els.decompositionStatus.className = "wz-success";
-    els.decompositionStatus.textContent = "脚本拆解已确认保存，可以继续估算生成批次。";
-    els.referenceBox.insertAdjacentHTML("beforeend", `<div class="wz-success">脚本拆解已确认，可以继续估算生成批次。</div>`);
+    els.decompositionStatus.textContent = DECOMPOSITION_CONFIRMED_MESSAGE;
+    focusBatchStep();
   } catch (error) {
     renderError(els.globalError, error, "拆解失败");
   } finally {
     setBusy(els.decomposeBtn, false);
+    els.decomposeBtn.disabled = isDecompositionConfirmed() || !els.decompositionText.value.trim();
   }
 }
 
@@ -652,6 +952,11 @@ function estimateRequest() {
     variantCount: Number(els.variantCount.value),
     requestedConcurrency: Number(els.concurrency.value),
     outputRatio: "9:16",
+    branches: collectBranchDrafts(),
+    templateSnapshot: {
+      versionId: template?.versionId,
+      draft: draftFromForm()
+    },
     llmConfig: {
       provider: els.llmProvider.value.trim(),
       model: els.llmModel.value.trim(),
@@ -703,16 +1008,15 @@ async function loadBatchDetail() {
 
 function startPolling() {
   window.clearTimeout(state.pollTimer);
-  let attempts = 0;
   const tick = async () => {
-    attempts += 1;
     try {
       const detail = await loadBatchDetail();
       await loadGallery();
-      if (!detail?.batch || terminalBatchStatus(detail.batch.status) || attempts >= 10) return;
-      state.pollTimer = window.setTimeout(tick, 2000);
+      if (!detail?.batch || terminalBatchStatus(detail.batch.status)) return;
+      state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     } catch (error) {
       renderError(els.globalError, error, "批次轮询失败");
+      state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     }
   };
   state.pollTimer = window.setTimeout(tick, 1200);
@@ -740,7 +1044,15 @@ async function startBatch() {
         ...(estimate.confirmationToken ? { confirmationToken: estimate.confirmationToken } : {})
       })
     });
-    state.batchDetail = { batch: data.batch, events: [], downloadSummary: { outputsTotal: 0, downloadEligibleCount: 0, packageReady: false, missingFiles: [] } };
+    if (data.batch?.batchId) {
+      state.batchDetail = await loadBatchDetail();
+    } else {
+      state.batchDetail = {
+        batch: data.startedBatch,
+        events: [],
+        downloadSummary: { outputsTotal: 0, downloadEligibleCount: 0, packageReady: false, missingFiles: [] }
+      };
+    }
     renderBatch();
     startPolling();
   } catch (error) {
@@ -765,6 +1077,60 @@ async function stopBatch() {
     renderError(els.globalError, error, "停止失败");
   } finally {
     setBusy(els.stopBatchBtn, false);
+  }
+}
+
+async function retryStitch() {
+  const batchId = state.batchDetail?.batch?.batchId;
+  if (!batchId) return;
+  clearError(els.globalError);
+  setBusy(els.retryStitchBtn, true, "重试中");
+  try {
+    state.batchDetail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/retry-stitch`, {
+      method: "POST",
+      body: JSON.stringify({ idempotencyKey: idempotencyKey("retry_stitch") })
+    });
+    renderBatch();
+    await loadGallery();
+    if (!terminalBatchStatus(state.batchDetail?.batch?.status)) startPolling();
+  } catch (error) {
+    renderError(els.globalError, error, "重试拼接失败");
+  } finally {
+    setBusy(els.retryStitchBtn, false);
+  }
+}
+
+async function loadActiveBatch() {
+  const detail = await apiEnvelope("/api/wangzhuan/batches/active");
+  if (!detail?.batch) {
+    state.batchDetail = null;
+    renderBatch();
+    return null;
+  }
+  state.batchDetail = detail;
+  renderBatch();
+  await loadGallery();
+  if (!terminalBatchStatus(detail.batch.status)) startPolling();
+  return detail;
+}
+
+async function runVideoQc() {
+  const batchId = state.batchDetail?.batch?.batchId;
+  if (!batchId) return;
+  clearError(els.globalError);
+  setBusy(els.runQcBtn, true, "质检中");
+  try {
+    state.batchDetail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/qc`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    renderBatch();
+    await loadGallery();
+  } catch (error) {
+    renderError(els.globalError, error, "视频质检失败");
+  } finally {
+    setBusy(els.runQcBtn, false);
+    renderBatch();
   }
 }
 
@@ -795,10 +1161,18 @@ async function stopActiveLock() {
   }
 }
 
-async function loadGallery() {
+async function loadGallery(options = {}) {
+  const requestedPage = Number(options.page || state.galleryPage || 1);
+  state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
   const batchId = state.batchDetail?.batch?.batchId;
-  const params = batchId ? `?${new URLSearchParams({ batchId })}` : "";
+  const query = new URLSearchParams({
+    page: String(state.galleryPage),
+    pageSize: String(state.galleryPageSize)
+  });
+  if (batchId) query.set("batchId", batchId);
+  const params = `?${query}`;
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
+  state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
   renderGallery();
 }
 
@@ -833,6 +1207,10 @@ function bindEvents() {
   });
   els.targetChannel.addEventListener("change", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
   els.createTemplateBtn.addEventListener("click", saveTemplate);
+  els.branches?.addEventListener("click", (event) => {
+    if (!event.target.closest(".wz-save-branch")) return;
+    saveTemplate();
+  });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
   els.useSampleVideoBtn.addEventListener("click", () => {
     els.referenceFile.click();
@@ -859,7 +1237,9 @@ function bindEvents() {
   els.decompositionText.addEventListener("input", () => {
     if (!state.referenceVideo || state.referenceVideo.status === "fail") return;
     state.decomposition = null;
-    els.decomposeBtn.disabled = !els.decompositionText.value.trim();
+    state.estimate = null;
+    renderEstimate();
+    els.decomposeBtn.disabled = isDecompositionConfirmed() || !els.decompositionText.value.trim();
     els.decompositionStatus.className = "wz-info";
     els.decompositionStatus.textContent = "已修改拆解 JSON，请确认无误后保存。";
   });
@@ -868,8 +1248,17 @@ function bindEvents() {
   els.confirmLimits.addEventListener("change", renderEstimate);
   els.startBatchBtn.addEventListener("click", startBatch);
   els.stopBatchBtn.addEventListener("click", stopBatch);
+  els.runQcBtn.addEventListener("click", runVideoQc);
+  els.retryStitchBtn.addEventListener("click", retryStitch);
   els.stopActiveLockBtn.addEventListener("click", stopActiveLock);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
+  els.galleryBox.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("[data-gallery-page]");
+    if (!button || button.disabled) return;
+    loadGallery({ page: Number(button.dataset.galleryPage) })
+      .catch((error) => renderError(els.globalError, error, "图库刷新失败"));
+  });
   els.includeSegments.addEventListener("change", renderBatch);
   els.downloadBtn.addEventListener("click", downloadPackage);
 }
@@ -880,7 +1269,8 @@ async function loadInitialData() {
   await loadLlmConfig();
   await loadTemplates();
   await loadRules();
-  await loadGallery();
+  await loadActiveBatch();
+  if (!state.batchDetail) await loadGallery();
   els.envelopeBadge.textContent = "Envelope: ok";
   syncMetrics();
 }

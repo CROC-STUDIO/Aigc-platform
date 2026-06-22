@@ -3037,6 +3037,27 @@ button.mini {
   text-decoration: none;
 }
 
+.wz-gallery-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wz-gallery-pager div {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.wz-gallery-pager button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .remix-source-preview {
   display: grid;
   place-items: center;
@@ -3755,6 +3776,11 @@ button.mini {
   .wz-row,
   .wz-output {
     grid-template-columns: 1fr;
+  }
+
+  .wz-gallery-pager {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .wz-rule-groups {

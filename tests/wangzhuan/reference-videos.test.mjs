@@ -569,6 +569,64 @@ test("draft decomposition falls back to chat image frames when video file input 
   }
 });
 
+test("draft decomposition falls back to chat image frames when video upstream returns 5xx", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-fallback-5xx-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body });
+      if (String(url).endsWith("/responses")) {
+        return new Response(JSON.stringify({ error: { message: "Upstream request failed" } }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify(validDecomposition({
+              scene: "Fallback recovered from upstream failure",
+              subject: "Recovered subject"
+            }))
+          }
+        }]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,NXh4LWZyYW1l" }
+      ]
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "GPT-5.4",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-key"
+      }
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1/responses");
+    assert.equal(calls[1].url, "https://skylink-gateway.com/api/v1/chat/completions");
+    const chatContent = calls[1].body.messages.find((item) => item.role === "user").content;
+    assert.equal(chatContent.some((part) => part.type === "file"), false);
+    assert.equal(chatContent.some((part) => part.type === "image_url" && part.image_url.url === "data:image/jpeg;base64,NXh4LWZyYW1l"), true);
+    assert.equal(result.decomposition.scene, "Fallback recovered from upstream failure");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("draft decomposition accepts nested llm JSON payloads", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-draft-nested-"));
   try {

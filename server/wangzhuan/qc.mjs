@@ -1,13 +1,24 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { basename, dirname, extname, join, parse, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { resolveLlmConfig } from "./llm-config.mjs";
 import { syncBatchFacts } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { buildPublicUrl } from "../object-storage.mjs";
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_LLM_TIMEOUT_MS = 180000;
+const DEFAULT_GENERATED_FRAME_COUNT = 3;
+const MAX_GENERATED_FRAME_COUNT = 6;
+const DEFAULT_MAX_LOCAL_VIDEO_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MODEL_QC_THRESHOLD = 0.7;
 
 const SCRIPT_REQUIRED_FIELDS = Object.freeze([
   "scriptId",
@@ -98,6 +109,203 @@ function check(checkId, status, message, field = "") {
     severity: status === "pass" ? "info" : status,
     message,
     ...(field ? { field } : {})
+  };
+}
+
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function clampInteger(value, fallback, min, max) {
+  const number = Math.trunc(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function cleanText(value, max = 4000) {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function safeJson(value, max = 4000) {
+  if (value === undefined || value === null || value === "") return "";
+  try {
+    return JSON.stringify(value, null, 2).slice(0, max);
+  } catch {
+    return String(value).slice(0, max);
+  }
+}
+
+function mimeForExt(ext) {
+  if (ext === ".mp4") return "video/mp4";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mov") return "video/quicktime";
+  return "application/octet-stream";
+}
+
+function externalHttpUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function directObjectStorageUrl(storageKey) {
+  const key = String(storageKey || "").replace(/^\/+/, "");
+  if (!key) return "";
+  if (externalHttpUrl(process.env.S3_PUBLIC_BASE_URL)) {
+    return buildPublicUrl(key, process.env);
+  }
+  const bucket = String(process.env.S3_BUCKET || "").trim();
+  const region = String(process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "").trim();
+  if (!bucket || !region) return "";
+  const endpoint = String(process.env.S3_ENDPOINT || "").trim();
+  const forcePathStyle = ["1", "true", "yes", "on"].includes(String(process.env.S3_FORCE_PATH_STYLE || "").trim().toLowerCase());
+  const encodedKey = key.split("/").map((part) => encodeURIComponent(part)).join("/");
+  if (endpoint) {
+    const url = new URL(endpoint);
+    if (forcePathStyle) return `${url.origin.replace(/\/+$/, "")}/${encodeURIComponent(bucket)}/${encodedKey}`;
+    return `${url.protocol}//${bucket}.${url.host}/${encodedKey}`;
+  }
+  return `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`;
+}
+
+function resolveModelFileUrl(asset = {}) {
+  return externalHttpUrl(asset.storageUrl) || externalHttpUrl(asset.previewUrl) || directObjectStorageUrl(asset.storageKey) || "";
+}
+
+function generatedFrameTimestamps(durationSec, frameCount) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0 || frameCount <= 0) return [];
+  if (frameCount === 1) return [Math.max(0, Math.round(Math.min(duration * 0.5, duration - 0.1) * 100) / 100)];
+  const start = Math.min(0.5, Math.max(0, duration - 0.1));
+  const end = Math.max(start, duration - 0.25);
+  return Array.from({ length: frameCount }, (_, index) => {
+    const raw = start + ((end - start) * index) / Math.max(1, frameCount - 1);
+    return Math.round(raw * 100) / 100;
+  });
+}
+
+async function ffmpegExtractGeneratedFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
+  const frames = [];
+  const frameDir = join(parse(filePath).dir, "qc-llm-frames");
+  await rm(frameDir, { recursive: true, force: true }).catch(() => {});
+  await mkdir(frameDir, { recursive: true });
+  try {
+    for (let index = 0; index < timestampsSec.length; index += 1) {
+      const timestampSec = timestampsSec[index];
+      const framePath = join(frameDir, `frame-${String(index + 1).padStart(2, "0")}.jpg`);
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-ss",
+        String(timestampSec),
+        "-i",
+        filePath,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale='min(720,iw)':-2",
+        "-q:v",
+        "3",
+        framePath
+      ], {
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        timeout: timeoutMs,
+        windowsHide: true
+      });
+      const buffer = await readFile(framePath);
+      if (buffer.length) {
+        frames.push({
+          index,
+          timestampSec,
+          mimeType: "image/jpeg",
+          dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`
+        });
+      }
+    }
+  } finally {
+    await rm(frameDir, { recursive: true, force: true }).catch(() => {});
+  }
+  return frames;
+}
+
+async function extractGeneratedFrames(context, filePath, timestampsSec, output) {
+  if (!timestampsSec.length) return [];
+  if (typeof context.extractGeneratedVideoFrames === "function") {
+    return context.extractGeneratedVideoFrames({ filePath, timestampsSec, output });
+  }
+  const timeoutMs = numberOrZero(context.config?.wangzhuan?.llm?.frameExtractTimeoutMs) || 20000;
+  return ffmpegExtractGeneratedFrames(filePath, timestampsSec, { timeoutMs });
+}
+
+async function collectGeneratedVideoVisionInputs(context, output) {
+  const videoPath = resolveUserPath(context, output.filePath);
+  const mimeType = output.mimeType || mimeForExt(extname(videoPath).toLowerCase());
+  const fileUrl = resolveModelFileUrl(output);
+  const frameCount = clampInteger(
+    context.config?.wangzhuan?.llm?.generatedFrameCount ?? context.config?.wangzhuan?.llm?.referenceFrameCount,
+    DEFAULT_GENERATED_FRAME_COUNT,
+    1,
+    MAX_GENERATED_FRAME_COUNT
+  );
+  const timestampsSec = generatedFrameTimestamps(output.durationSec, frameCount);
+  const warnings = [];
+  let frames = [];
+  try {
+    frames = await extractGeneratedFrames(context, videoPath, timestampsSec, output);
+  } catch (error) {
+    warnings.push({
+      code: "generated_frame_extract_failed",
+      message: "生成视频抽帧失败，已改为仅传视频文件给模型",
+      reason: String(error?.message || error?.code || "unknown").slice(0, 160)
+    });
+  }
+  if (output.storageUrl && !fileUrl) {
+    warnings.push({
+      code: "generated_video_storage_url_not_external",
+      message: "生成视频存储地址不是可外部访问的 HTTP(S) URL，已回退为本地文件输入",
+      reason: "storage_url_not_http"
+    });
+  }
+  if (fileUrl) {
+    return {
+      fileName: basename(videoPath),
+      mimeType,
+      fileUrl,
+      frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+      timestampsSec,
+      warnings
+    };
+  }
+  const info = await stat(videoPath);
+  const maxBytes = numberOrZero(context.config?.wangzhuan?.llm?.maxLocalVideoBytes) || DEFAULT_MAX_LOCAL_VIDEO_BYTES;
+  if (info.size > maxBytes) {
+    warnings.push({
+      code: "generated_video_too_large_for_inline_input",
+      message: "本地生成视频过大，模型质检仅使用抽帧画面",
+      reason: `size=${info.size};max=${maxBytes}`
+    });
+    return {
+      fileName: basename(videoPath),
+      mimeType,
+      frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+      timestampsSec,
+      warnings
+    };
+  }
+  const videoBuffer = await readFile(videoPath);
+  return {
+    fileName: basename(videoPath),
+    mimeType,
+    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
+    frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+    timestampsSec,
+    warnings
   };
 }
 
@@ -206,6 +414,415 @@ function textForPolicy(batch, tasks) {
     .toLowerCase();
 }
 
+function scriptReviewSummary(scripts = []) {
+  return scripts.map((script) => ({
+    scriptId: script.scriptId,
+    branchId: script.branchId || "",
+    branchLabel: script.branchLabel || "",
+    branchVariantIndex: script.branchVariantIndex || script.variantIndex || 1,
+    segmentIndex: script.segmentIndex || 1,
+    durationSec: script.durationSec || 15,
+    hook: script.hook || "",
+    body: script.body || "",
+    cta: script.cta || "",
+    ending: script.ending || "",
+    rewardExpression: script.rewardExpression || "",
+    materialDirection: script.branchDraft?.materialDirection || "",
+    voiceoverStyle: script.branchDraft?.voiceoverStyle || "",
+    branchProductName: script.branchDraft?.productName || ""
+  }));
+}
+
+function taskReviewSummary(tasks = []) {
+  return tasks.map((task) => ({
+    generationTaskId: task.generationTaskId,
+    scriptId: task.scriptId,
+    branchId: task.branchId || "",
+    branchLabel: task.branchLabel || "",
+    segmentIndex: task.segmentIndex || 1,
+    provider: task.provider || "mock",
+    modelVideo: task.modelVideo || "",
+    seedanceTaskId: task.seedanceTaskId || "",
+    requestSummary: task.requestSummary || null,
+    responseSummary: task.responseSummary || null
+  }));
+}
+
+function templateReviewSummary(batch) {
+  const draft = batch.templateSnapshot?.draft || {};
+  return {
+    templateId: batch.templateSnapshot?.templateId || "",
+    versionId: batch.templateSnapshot?.versionId || "",
+    productName: draft.productName || "",
+    cta: draft.cta || "",
+    ending: draft.ending || "",
+    currencySymbol: draft.currencySymbol || "",
+    language: draft.language || "",
+    regions: Array.isArray(draft.regions) ? draft.regions : [],
+    targetChannels: Array.isArray(draft.targetChannels) ? draft.targetChannels : [],
+    promiseLevel: draft.promiseLevel || "",
+    materialDirection: draft.materialDirection || "",
+    voiceoverStyle: draft.voiceoverStyle || "",
+    truthRules: draft.truthRules || {}
+  };
+}
+
+function generatedVideoProbePrompt(output, visionInputs) {
+  return [
+    `outputId：${output.outputId}`,
+    `kind：${output.kind || "-"}`,
+    `sourceType：${output.sourceType || "-"}`,
+    `durationSec：${output.durationSec || "-"}`,
+    `branchId：${output.branchId || "-"}`,
+    `branchLabel：${output.branchLabel || "-"}`,
+    `branchVariantIndex：${output.branchVariantIndex || "-"}`,
+    `generationTaskIds：${(output.generationTaskIds || []).join(", ") || "-"}`,
+    `modelInputMode：${visionInputs.fileUrl ? "file_url" : visionInputs.fileDataUrl ? "file_data" : "frames_only"}`,
+    `sampledFrameCount：${visionInputs.frames?.length || 0}`
+  ].join("\n");
+}
+
+function buildGeneratedVideoQcMessages(batch, output, tasks, scripts, llmConfig, visionInputs) {
+  const promptText = [
+    "请对生成好的视频做网赚素材视觉质检，判断它是否达到本批次的生成效果要求。",
+    "",
+    "生成视频信息：",
+    generatedVideoProbePrompt(output, visionInputs),
+    "",
+    "参考视频拆解要求：",
+    safeJson(batch.decomposition || {}, 6000),
+    "",
+    "模板和裂变子节点配置：",
+    safeJson(templateReviewSummary(batch), 6000),
+    "",
+    "本输出关联脚本：",
+    safeJson(scriptReviewSummary(scripts), 10000),
+    "",
+    "本输出关联 Seedance 任务摘要：",
+    safeJson(taskReviewSummary(tasks), 12000),
+    "",
+    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
+    "",
+    "质检标准：",
+    "1. 必须结合生成视频/抽帧画面判断，不要只看文字配置。",
+    "2. 判断画面是否符合拆解里的 scene/subject/action/camera/lighting/style/quality/hook。",
+    "3. 判断是否体现脚本要求的产品名、收益/奖励反馈、CTA、口播/字幕/镜头节奏等核心转化点。",
+    "4. 判断是否明显偏离 Seedance prompt、裂变子节点配置、目标语言/地区/渠道规则。",
+    "5. 如出现空画面、严重穿帮、主体缺失、文案不符、产品或奖励反馈缺失、过度夸大收益、疑似侵权复刻，应判为不通过。",
+    "",
+    "只返回 JSON 对象，字段：",
+    JSON.stringify({
+      passed: "boolean，整体是否可进入下载交付",
+      score: "0-1 的数字，低于阈值通常不通过",
+      summary: "中文一句话质检结论",
+      matched: ["已达标的要点"],
+      issues: [{ code: "问题编码", severity: "minor|major|critical", message: "问题说明" }],
+      recommendedAction: "approve|regenerate|manual_review"
+    }, null, 2)
+  ].join("\n");
+  const userContent = [{ type: "text", text: promptText }];
+  if (visionInputs.fileUrl) {
+    userContent.push({
+      type: "file",
+      file: {
+        filename: visionInputs.fileName || `${output.outputId}.mp4`,
+        file_url: visionInputs.fileUrl
+      }
+    });
+  } else if (visionInputs.fileDataUrl) {
+    userContent.push({
+      type: "file",
+      file: {
+        filename: visionInputs.fileName || `${output.outputId}.mp4`,
+        file_data: visionInputs.fileDataUrl
+      }
+    });
+  }
+  for (const frame of visionInputs.frames || []) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: frame.dataUrl }
+    });
+  }
+  return [
+    {
+      role: "system",
+      content: [
+        "你是短视频广告生成结果的资深质检员。",
+        "你必须严格基于生成视频画面、抽帧和配置目标做判断。",
+        "你只输出严格 JSON 对象，不要 markdown，不要解释。",
+        "若画面与脚本/拆解目标不一致，宁可判为不通过或人工复核。"
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: userContent
+    }
+  ];
+}
+
+function parseLlmJsonContent(content) {
+  const text = String(content || "").trim();
+  if (!text) {
+    throw new WangzhuanError("model_failed", "模型没有返回视频质检内容", { reason: "empty_content" });
+  }
+  const candidates = [
+    text,
+    text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim(),
+    text.match(/\{[\s\S]*\}/)?.[0]
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // Try the next candidate form.
+    }
+  }
+  throw new WangzhuanError("model_failed", "模型返回不是合法 JSON，请重试或手动复核", { reason: "invalid_json" });
+}
+
+function chatCompletionsUrl(endpoint) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  return clean.endsWith("/chat/completions") ? clean : `${clean}/chat/completions`;
+}
+
+function responsesUrl(endpoint) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  if (clean.endsWith("/responses")) return clean;
+  if (clean.endsWith("/chat/completions")) return clean.replace(/\/chat\/completions$/, "/responses");
+  return `${clean}/responses`;
+}
+
+function llmResponseText(payload = {}) {
+  const message = payload?.choices?.[0]?.message;
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => typeof part === "string" ? part : part?.text || part?.content || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  return typeof payload?.output_text === "string" ? payload.output_text : "";
+}
+
+function responsesInputFromMessages(messages = []) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: Array.isArray(message.content)
+      ? message.content.map((part) => {
+        if (part?.type === "text") return { type: "input_text", text: part.text || "" };
+        if (part?.type === "image_url") return { type: "input_image", image_url: part.image_url?.url || "" };
+        if (part?.type === "file") {
+          return {
+            type: "input_file",
+            filename: part.file?.filename || "generated-video.mp4",
+            ...(part.file?.file_url ? { file_url: part.file.file_url } : { file_data: part.file?.file_data || "" })
+          };
+        }
+        return part;
+      })
+      : [{ type: "input_text", text: String(message.content || "") }]
+  }));
+}
+
+function canUseResponsesInput(messages = []) {
+  return messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file"));
+}
+
+function dropFileParts(messages = []) {
+  return messages.map((message) => ({
+    ...message,
+    content: Array.isArray(message.content)
+      ? message.content.filter((part) => part?.type !== "file")
+      : message.content
+  }));
+}
+
+function modelInputMode(messages = []) {
+  const hasFileUrlInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_url));
+  const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "file" && part.file?.file_data));
+  return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
+}
+
+async function callOpenAiCompatibleLlm(llmConfig, messages) {
+  if (!llmConfig.apiKey) {
+    const apiKeyEnv = llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY";
+    throw new WangzhuanError("model_failed", "未配置视频质检模型 API Key", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      apiKeyEnv,
+      upstreamMessage: `未配置模型 API Key，请在环境变量 ${apiKeyEnv} 中配置后重启服务`
+    });
+  }
+  const controller = new AbortController();
+  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || DEFAULT_LLM_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  let payload = {};
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${llmConfig.apiKey}`
+  };
+  const responsesPayload = {
+    model: llmConfig.model,
+    input: responsesInputFromMessages(messages),
+    temperature: llmConfig.temperature,
+    text: { format: { type: "json_object" } }
+  };
+  const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
+  const chatPayload = {
+    model: llmConfig.model,
+    messages: chatMessages,
+    temperature: llmConfig.temperature,
+    response_format: { type: "json_object" }
+  };
+  const useResponses = canUseResponsesInput(messages);
+  const inputMode = modelInputMode(messages);
+  try {
+    response = await fetch(useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(useResponses ? responsesPayload : chatPayload),
+      signal: controller.signal
+    });
+    payload = await response.json().catch(() => ({}));
+    if (useResponses && ([400, 404, 415, 422].includes(response.status) || response.status >= 500)) {
+      response = await fetch(chatCompletionsUrl(llmConfig.endpoint), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(chatPayload),
+        signal: controller.signal
+      });
+      payload = await response.json().catch(() => ({}));
+    }
+  } catch (error) {
+    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    throw new WangzhuanError("model_failed", reason === "timeout" ? "视频质检模型请求超时" : "视频质检模型请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      inputMode,
+      reason
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    throw new WangzhuanError("model_failed", "视频质检模型请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      status: response.status,
+      inputMode,
+      upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
+    });
+  }
+  return llmResponseText(payload);
+}
+
+function normalizeModelReview(raw = {}, llmConfig = {}, visionInputs = {}, warnings = []) {
+  const score = Math.max(0, Math.min(1, Number(raw.score ?? raw.matchScore ?? 0)));
+  const threshold = DEFAULT_MODEL_QC_THRESHOLD;
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues.map((issue, index) => ({
+      code: cleanText(issue?.code || `issue_${index + 1}`, 80),
+      severity: cleanText(issue?.severity || "major", 24),
+      message: cleanText(issue?.message || issue?.description || issue, 500)
+    })).filter((issue) => issue.message)
+    : [];
+  const passed = raw.passed === true || (raw.passed !== false && score >= threshold && issues.every((issue) => issue.severity === "minor"));
+  return {
+    provider: llmConfig.provider,
+    model: llmConfig.model,
+    passed,
+    score,
+    threshold,
+    summary: cleanText(raw.summary || raw.conclusion || (passed ? "模型视频质检通过" : "模型视频质检未通过"), 600),
+    matched: Array.isArray(raw.matched) ? raw.matched.map((item) => cleanText(item, 160)).filter(Boolean).slice(0, 20) : [],
+    issues,
+    recommendedAction: cleanText(raw.recommendedAction || (passed ? "approve" : "regenerate"), 80),
+    inputMode: visionInputs.fileUrl ? "file_url" : visionInputs.fileDataUrl ? "file_data" : "frames_only",
+    frameCount: visionInputs.frames?.length || 0,
+    warnings
+  };
+}
+
+function modelReviewCheck(modelReview) {
+  if (!modelReview) return null;
+  if (modelReview.passed) {
+    return check("model_video_qc", "pass", `模型视频质检通过：${modelReview.summary}`);
+  }
+  return check("model_video_qc", "fail", `模型视频质检未通过：${modelReview.summary}`, "modelReview");
+}
+
+function shouldRunModelVideoQc(context, batch, output) {
+  if (output.sourceType !== "pipeline") return false;
+  if (!output.filePath) return false;
+  const isFinalStitchedOutput = output.kind === "stitched_video";
+  const isFinalSingleSegmentOutput = Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15;
+  if (!isFinalStitchedOutput && !isFinalSingleSegmentOutput) return false;
+  if (typeof context.callWangzhuanLlm === "function" || typeof context.callWangzhuanQcLlm === "function") return true;
+  return Boolean(context.config?.wangzhuan?.llm && typeof context.config.wangzhuan.llm === "object");
+}
+
+async function runModelVideoQc(context, batch, output, tasks, scripts) {
+  const llmConfig = resolveLlmConfig(context.config || {});
+  const visionInputs = await collectGeneratedVideoVisionInputs(context, output);
+  if (!visionInputs.fileUrl && !visionInputs.fileDataUrl && !(visionInputs.frames || []).length) {
+    throw new WangzhuanError("model_failed", "视频质检缺少可供模型分析的视频或抽帧输入", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      inputMode: "none"
+    });
+  }
+  const messages = buildGeneratedVideoQcMessages(batch, output, tasks, scripts, llmConfig, visionInputs);
+  const publicLlmConfig = {
+    provider: llmConfig.provider,
+    endpoint: llmConfig.endpoint,
+    model: llmConfig.model,
+    temperature: llmConfig.temperature,
+    timeoutMs: llmConfig.timeoutMs,
+    apiKeyEnv: llmConfig.apiKeyEnv
+  };
+  const content = typeof context.callWangzhuanQcLlm === "function"
+    ? await context.callWangzhuanQcLlm({
+      messages,
+      llmConfig: publicLlmConfig,
+      generatedVideo: {
+        ...output,
+        fileUrl: visionInputs.fileUrl,
+        fileDataUrl: visionInputs.fileDataUrl,
+        frameCount: visionInputs.frames.length
+      },
+      visionInputs,
+      output,
+      batch,
+      tasks,
+      scripts
+    })
+    : typeof context.callWangzhuanLlm === "function"
+      ? await context.callWangzhuanLlm({
+        messages,
+        llmConfig: publicLlmConfig,
+        generatedVideo: {
+          ...output,
+          fileUrl: visionInputs.fileUrl,
+          fileDataUrl: visionInputs.fileDataUrl,
+          frameCount: visionInputs.frames.length
+        },
+        visionInputs,
+        output,
+        batch,
+        tasks,
+        scripts
+      })
+      : await callOpenAiCompatibleLlm(llmConfig, messages);
+  return normalizeModelReview(parseLlmJsonContent(content), publicLlmConfig, visionInputs, visionInputs.warnings || []);
+}
+
 function productTextReplacementCheck(batch, tasks) {
   const productName = String(batch.templateSnapshot?.draft?.productName || "").trim().toLowerCase();
   const text = textForPolicy(batch, tasks);
@@ -268,6 +885,7 @@ function downloadEligibility(batch, output, qcStatus) {
 
 async function qcReportForOutput(context, batch, output) {
   const tasks = tasksForOutput(batch, output);
+  const scripts = scriptsForTasks(batch, tasks, output);
   const checks = [
     await scriptSchemaCheck(context, batch, output, tasks),
     templateSnapshotCheck(batch),
@@ -281,6 +899,34 @@ async function qcReportForOutput(context, batch, output) {
   ];
   const stitchCheck = await stitchReportPresenceCheck(context, batch, output);
   if (stitchCheck) checks.push(stitchCheck);
+  let modelReview = null;
+  if (shouldRunModelVideoQc(context, batch, output) && !checks.some((item) => item.status === "fail")) {
+    try {
+      modelReview = await runModelVideoQc(context, batch, output, tasks, scripts);
+      const modelCheck = modelReviewCheck(modelReview);
+      if (modelCheck) checks.push(modelCheck);
+    } catch (error) {
+      modelReview = {
+        provider: error?.data?.provider || resolveLlmConfig(context.config || {}).provider,
+        model: error?.data?.model || resolveLlmConfig(context.config || {}).model,
+        passed: false,
+        score: 0,
+        threshold: DEFAULT_MODEL_QC_THRESHOLD,
+        summary: cleanText(error?.message || "视频质检模型请求失败", 600),
+        matched: [],
+        issues: [{
+          code: error?.code || "model_failed",
+          severity: "critical",
+          message: cleanText(error?.data?.upstreamMessage || error?.message || "视频质检模型请求失败", 600)
+        }],
+        recommendedAction: "manual_review",
+        inputMode: error?.data?.inputMode || "",
+        frameCount: 0,
+        warnings: []
+      };
+      checks.push(check("model_video_qc", "fail", `模型视频质检失败：${modelReview.summary}`, "modelReview"));
+    }
+  }
   const qcStatus = qcStatusFromChecks(checks);
   return {
     schemaVersion: "qc_report.v1",
@@ -292,7 +938,8 @@ async function qcReportForOutput(context, batch, output) {
     visualPreviewRequired: Boolean(output.visualPreviewRequired),
     previewConfirmed: Boolean(output.previewConfirmed),
     checks,
-    summary: qcStatus === "pass" ? "QC passed" : "QC requires attention",
+    ...(modelReview ? { modelReview } : {}),
+    summary: modelReview?.summary || (qcStatus === "pass" ? "QC passed" : "QC requires attention"),
     createdAt: new Date().toISOString()
   };
 }
@@ -326,7 +973,20 @@ export async function runBatchQc(context, batchId) {
       ...output,
       qcStatus: report.qcStatus,
       downloadEligible: downloadEligibility(batch, output, report.qcStatus),
-      qcReportPath: toProjectRelative(context.userProjectRoot, reportTarget)
+      qcReportPath: toProjectRelative(context.userProjectRoot, reportTarget),
+      qcChecks: report.checks,
+      qcSummary: report.summary,
+      ...(report.modelReview ? {
+        modelQcSummary: {
+          provider: report.modelReview.provider,
+          model: report.modelReview.model,
+          passed: report.modelReview.passed,
+          score: report.modelReview.score,
+          summary: report.modelReview.summary,
+          issueCodes: report.modelReview.issues.map((issue) => issue.code),
+          recommendedAction: report.modelReview.recommendedAction
+        }
+      } : {})
     });
   }
 

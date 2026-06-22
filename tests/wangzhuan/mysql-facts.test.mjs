@@ -7,9 +7,16 @@ import {
   completeSchedulerJob,
   failSchedulerJob,
   findActiveResourceLock,
+  loadActivePipelineRunFromMysql,
+  loadBatchDetailFromMysql,
+  loadActiveRemixFromMysql,
   loadChannelRuleStoreFromMysql,
   loadEstimateFromMysql,
+  loadGalleryItemsFromMysql,
+  loadIdempotencyFactFromMysql,
   loadReferenceVideoProbeFromMysql,
+  loadRemixDetailFromMysql,
+  loadRemixSourceFromMysql,
   loadTemplateStoreFromMysql,
   loadVideoDecompositionFromMysql,
   recordIdempotencyFact,
@@ -18,6 +25,7 @@ import {
   syncDownloadPackageFact,
   syncEstimateFact,
   syncRemixFacts,
+  syncRemixSourceFact,
   syncReferenceVideoFact,
   syncChannelRuleStoreFacts,
   syncBatchFacts,
@@ -25,438 +33,7 @@ import {
   syncVideoDecompositionFact
 } from "../../server/wangzhuan/mysql-facts.mjs";
 
-export function fakePool() {
-  const calls = [];
-  const state = {
-    users: new Map(),
-    projects: new Map(),
-    roles: new Map([["user", 11], ["admin", 12]]),
-    runs: new Map(),
-    runStatuses: new Map(),
-    tasks: new Map(),
-    templates: new Map(),
-    templateVersions: new Map(),
-    templateRows: [],
-    channelRows: [],
-    assets: new Map(),
-    referenceVideos: new Map(),
-    decompositions: new Map(),
-    estimates: new Map(),
-    scripts: new Map(),
-    outputs: new Map(),
-    schedulerJobs: new Map(),
-    stateTransitionRules: new Set(),
-    activeResourceLock: null,
-    nextUserId: 101,
-    nextProjectId: 201,
-    nextRunId: 301,
-    nextTaskId: 401,
-    nextTemplateId: 501,
-    nextTemplateVersionId: 601,
-    nextAssetId: 701,
-    nextReferenceVideoId: 801,
-    nextDecompositionId: 901,
-    nextEstimateId: 1001,
-    nextScriptId: 1101,
-    nextOutputId: 1201,
-    nextSchedulerJobId: 1301
-  };
-
-  const conn = {
-    calls,
-    async beginTransaction() {
-      calls.push({ sql: "BEGIN", params: [] });
-    },
-    async commit() {
-      calls.push({ sql: "COMMIT", params: [] });
-    },
-    async rollback() {
-      calls.push({ sql: "ROLLBACK", params: [] });
-    },
-    release() {
-      calls.push({ sql: "RELEASE", params: [] });
-    },
-    async execute(sql, params = []) {
-      calls.push({ sql, params });
-
-      if (sql.includes("SELECT id FROM app_users WHERE username")) {
-        const id = state.users.get(params[0]);
-        return [id ? [{ id }] : []];
-      }
-      if (sql.includes("INSERT INTO app_users")) {
-        state.users.set(params[1], state.nextUserId++);
-        return [{ insertId: state.users.get(params[1]) }];
-      }
-      if (sql.includes("SELECT id FROM rbac_roles")) {
-        const id = state.roles.get(params[0]);
-        return [id ? [{ id }] : []];
-      }
-      if (sql.includes("SELECT id FROM projects WHERE project_key")) {
-        const id = state.projects.get(params[0]);
-        return [id ? [{ id }] : []];
-      }
-      if (sql.includes("INSERT INTO projects")) {
-        state.projects.set(params[1], state.nextProjectId++);
-        return [{ insertId: state.projects.get(params[1]) }];
-      }
-      if (sql.includes("SELECT id FROM workflow_runs") && sql.includes("run_uid")) {
-        const id = state.runs.get(params.at(-1));
-        return [id ? [{ id }] : []];
-      }
-      if (sql.includes("SELECT status FROM workflow_runs WHERE id")) {
-        return [[{ status: state.runStatuses.get(params[0]) || "queued" }]];
-      }
-      if (sql.includes("INSERT IGNORE INTO state_transition_rules")) {
-        state.stateTransitionRules.add(`${params[0]}|${params[1]}|${params[2]}|${params[3]}`);
-        return [{ affectedRows: 1 }];
-      }
-      if (sql.includes("FROM state_transition_rules")) {
-        const key = `${params[0]}|${params[1]}|${params[2]}|${params[3]}`;
-        return [state.stateTransitionRules.has(key) ? [{ id: 1 }] : []];
-      }
-      if (sql.includes("FROM scheduler_jobs sj") && sql.includes("FOR UPDATE SKIP LOCKED")) {
-        const workerId = params.at(-1);
-        const rows = [...state.schedulerJobs.values()]
-          .filter((job) => job.status === "pending" || (job.status === "running" && job.lockedBy === workerId))
-          .sort((a, b) => (a.priority - b.priority) || (a.id - b.id))
-          .slice(0, 1)
-          .map((job) => ({
-            id: job.id,
-            job_uid: job.jobUid,
-            job_type: job.jobType,
-            status: job.status,
-            attempts: job.attempts,
-            max_attempts: job.maxAttempts,
-            payload_json: JSON.stringify(job.payload),
-            run_uid: job.runUid,
-            task_uid: job.taskUid,
-            username: "alice",
-            project_key: "root:test"
-          }));
-        return [rows];
-      }
-      if (sql.includes("UPDATE scheduler_jobs") && sql.includes("status = 'succeeded'")) {
-        const job = [...state.schedulerJobs.values()].find((item) => item.id === params.at(-2));
-        if (job) {
-          job.status = "succeeded";
-          job.lockedBy = null;
-        }
-        return [{ affectedRows: job ? 1 : 0 }];
-      }
-      if (sql.includes("UPDATE scheduler_jobs") && sql.includes("last_error_code")) {
-        const job = [...state.schedulerJobs.values()].find((item) => item.id === params.at(-2));
-        if (job) {
-          job.status = params[0];
-          job.lastErrorCode = params[3];
-          job.lastErrorMessage = params[4];
-          job.lockedBy = null;
-        }
-        return [{ affectedRows: job ? 1 : 0 }];
-      }
-      if (sql.includes("UPDATE scheduler_jobs") && sql.includes("status = 'running'")) {
-        const job = [...state.schedulerJobs.values()].find((item) => item.id === params[2]);
-        if (job) {
-          job.status = "running";
-          job.lockedBy = params[0];
-          job.attempts += 1;
-        }
-        return [{ affectedRows: job ? 1 : 0 }];
-      }
-      if (sql.includes("INSERT INTO resource_locks")) {
-        state.activeResourceLock = {
-          lock_key: params[0],
-          lock_type: "upstream_generation",
-          status: "active",
-          run_uid: [...state.runs.entries()].find(([, id]) => id === params[3])?.[0] || "",
-          run_type: "pipeline",
-          run_status: "running",
-          expires_at: "2026-06-18 02:00:00.000"
-        };
-        return [{ affectedRows: 1 }];
-      }
-      if (sql.includes("UPDATE resource_locks")) {
-        state.activeResourceLock = null;
-        return [{ affectedRows: 1 }];
-      }
-      if (sql.includes("FROM resource_locks rl")) {
-        return [state.activeResourceLock ? [state.activeResourceLock] : []];
-      }
-      if (sql.includes("INSERT INTO workflow_runs")) {
-        const existing = state.runs.get(params[0]);
-        const id = existing ?? state.nextRunId++;
-        state.runs.set(params[0], id);
-        state.runStatuses.set(id, params[2]);
-        return [{ insertId: state.runs.get(params[0]) }];
-      }
-      if (sql.includes("SELECT id, status, attempts FROM workflow_tasks")) {
-        const task = state.tasks.get(params.at(-1));
-        return [task ? [task] : []];
-      }
-      if (sql.includes("INSERT INTO workflow_tasks")) {
-        const existing = state.tasks.get(params[0]);
-        state.tasks.set(params[0], { id: existing?.id ?? state.nextTaskId++, status: params[3], attempts: params[9] });
-        return [{ insertId: state.tasks.get(params[0]).id }];
-      }
-      if (sql.includes("SELECT id FROM workflow_tasks") && sql.includes("task_uid")) {
-        const task = state.tasks.get(params.at(-1));
-        return [task ? [{ id: task.id }] : []];
-      }
-      if (sql.includes("SELECT id FROM generation_scripts") && sql.includes("script_uid")) {
-        const script = state.scripts.get(params.at(-1));
-        return [script ? [{ id: script.id }] : []];
-      }
-      if (sql.includes("INSERT INTO generation_scripts")) {
-        const scriptUid = params[0];
-        const existing = state.scripts.get(scriptUid);
-        state.scripts.set(scriptUid, { id: existing?.id ?? state.nextScriptId++, scriptUid });
-        return [{ insertId: state.scripts.get(scriptUid).id }];
-      }
-      if (sql.includes("SELECT id FROM workflow_outputs") && sql.includes("output_uid")) {
-        const output = state.outputs.get(params.at(-1));
-        return [output ? [{ id: output.id }] : []];
-      }
-      if (sql.includes("INSERT INTO workflow_outputs")) {
-        const outputUid = params[0];
-        const existing = state.outputs.get(outputUid);
-        state.outputs.set(outputUid, { id: existing?.id ?? state.nextOutputId++, outputUid });
-        return [{ insertId: state.outputs.get(outputUid).id }];
-      }
-      if (sql.includes("SELECT id FROM product_templates") && sql.includes("template_uid")) {
-        const template = state.templates.get(params.at(-1));
-        return [template ? [{ id: template.id }] : []];
-      }
-      if (sql.includes("INSERT INTO product_templates")) {
-        const templateId = params[0];
-        const existing = state.templates.get(templateId);
-        state.templates.set(templateId, {
-          id: existing?.id ?? state.nextTemplateId++,
-          templateId,
-          displayName: params[2],
-          status: params[3]
-        });
-        return [{ insertId: state.templates.get(templateId).id }];
-      }
-      if (sql.includes("INSERT INTO product_template_versions")) {
-        const versionId = params[0];
-        const existing = state.templateVersions.get(versionId);
-        state.templateVersions.set(versionId, {
-          id: existing?.id ?? state.nextTemplateVersionId++,
-          versionId,
-          templateId: params[1],
-          versionNumber: params[2],
-          status: params[3]
-        });
-        return [{ insertId: state.templateVersions.get(versionId).id }];
-      }
-      if (sql.includes("SELECT id FROM product_template_versions") && sql.includes("template_version_uid")) {
-        const version = state.templateVersions.get(params.at(-1));
-        return [version ? [{ id: version.id }] : []];
-      }
-      if (sql.includes("FROM product_templates pt") && sql.includes("product_template_versions pv")) {
-        return [state.templateRows];
-      }
-      if (sql.includes("FROM channel_rules")) {
-        return [state.channelRows];
-      }
-      if (sql.includes("INSERT INTO channel_rules")) {
-        state.channelRows.push({
-          rule_uid: params[1],
-          channel: params[2],
-          promise_level: params[3],
-          rule_version: params[4],
-          cta_strength: params[5],
-          forbidden_terms_json: params[6],
-          required_disclaimers_json: params[7],
-          status: params[8]
-        });
-        return [{ insertId: state.channelRows.length }];
-      }
-      if (sql.includes("SELECT id FROM asset_files") && sql.includes("asset_uid")) {
-        const asset = state.assets.get(params.at(-1));
-        return [asset ? [{ id: asset.id }] : []];
-      }
-      if (sql.includes("INSERT INTO asset_files")) {
-        const assetUid = params[0];
-        const existing = state.assets.get(assetUid);
-        state.assets.set(assetUid, {
-          id: existing?.id ?? state.nextAssetId++,
-          assetUid,
-          relativePath: params[8],
-          storageKey: params[14] ?? null,
-          storageUrl: params[15] ?? null
-        });
-        return [{ insertId: state.assets.get(assetUid).id }];
-      }
-      if (sql.includes("SELECT id FROM reference_videos") && sql.includes("reference_video_uid")) {
-        const reference = state.referenceVideos.get(params.at(-1));
-        return [reference ? [{ id: reference.id }] : []];
-      }
-      if (sql.includes("INSERT INTO reference_videos")) {
-        const referenceVideoId = params[0];
-        const existing = state.referenceVideos.get(referenceVideoId);
-        state.referenceVideos.set(referenceVideoId, {
-          id: existing?.id ?? state.nextReferenceVideoId++,
-          referenceVideoId,
-          status: params[4],
-          probe: params[11]
-        });
-        return [{ insertId: state.referenceVideos.get(referenceVideoId).id }];
-      }
-      if (sql.includes("FROM reference_videos rv")) {
-        const reference = state.referenceVideos.get(params[0]);
-        if (!reference) return [[]];
-        const asset = state.assets.get(`asset_${reference.referenceVideoId}`) || {};
-        return [[{
-          reference_video_uid: reference.referenceVideoId,
-          status: reference.status,
-          duration_sec: 15,
-          width: 720,
-          height: 1280,
-          ratio: "9:16",
-          can_extract_frame: 1,
-          issues_json: JSON.stringify([]),
-          probe_json: reference.probe,
-          file_name: "demo.mp4",
-          mime_type: "video/mp4",
-          size_bytes: 5,
-          storage_relative_path: asset.relativePath || "批处理记录/网赚管线/reference-videos/ref_20260618_001/original.mp4",
-          storage_key: asset.storageKey,
-          storage_url: asset.storageUrl
-        }]];
-      }
-      if (sql.includes("INSERT INTO video_decompositions")) {
-        const reference = [...state.referenceVideos.values()].find((item) => item.id === params[0]);
-        const referenceVideoId = reference?.referenceVideoId || params[0];
-        state.decompositions.set(referenceVideoId, {
-          id: state.nextDecompositionId++,
-          referenceVideoId,
-          schemaVersion: params[1],
-          status: params[2],
-          decomposition: params[3],
-          missingFields: params[4]
-        });
-        return [{ insertId: state.decompositions.get(referenceVideoId).id }];
-      }
-      if (sql.includes("FROM video_decompositions vd")) {
-        const decomposition = state.decompositions.get(params[0]);
-        return [decomposition ? [{
-          schema_version: decomposition.schemaVersion,
-          status: decomposition.status,
-          decomposition_json: decomposition.decomposition,
-          missing_fields_json: decomposition.missingFields
-        }] : []];
-      }
-      if (sql.includes("INSERT INTO work_estimates")) {
-        const estimateUid = params[0];
-        const existing = state.estimates.get(estimateUid);
-        state.estimates.set(estimateUid, {
-          id: existing?.id ?? state.nextEstimateId++,
-          estimateUid,
-          estimateType: params[1],
-          requestHash: params[7],
-          request: params[8],
-          estimate: params[9],
-          tokenHash: params[10],
-          expiresAt: params[11],
-          status: params[12]
-        });
-        return [{ insertId: state.estimates.get(estimateUid).id }];
-      }
-      if (sql.includes("FROM work_estimates we")) {
-        const estimate = state.estimates.get(params[0]);
-        return [estimate ? [{
-          estimate_uid: estimate.estimateUid,
-          estimate_type: estimate.estimateType,
-          request_hash: estimate.requestHash,
-          request_json: estimate.request,
-          estimate_json: estimate.estimate,
-          confirmation_expires_at: estimate.expiresAt,
-          token_hash_available: Boolean(estimate.tokenHash),
-          status: estimate.status,
-          template_uid: "tpl_cash_reward_us_en_001",
-          template_version_uid: "tplv_cash_reward_us_en_001_0001",
-          template_version_number: 1,
-          template_status: "active",
-          template_draft_json: JSON.stringify({
-            displayName: "Cash Reward US EN",
-            productName: "Lucky Cash",
-            cta: "Install today",
-            ending: "Claim your bonus today",
-            currencySymbol: "$",
-            language: "en-US",
-            regions: ["US"],
-            targetChannels: ["meta_ads"],
-            defaultOutputRatio: "9:16",
-            defaultDurationSec: 15,
-            promiseLevel: "strong_conversion"
-          }),
-          reference_video_uid: "ref_20260618_001",
-          reference_status: "pass",
-          reference_probe_json: JSON.stringify({
-            referenceVideoId: "ref_20260618_001",
-            status: "pass"
-          }),
-          decomposition_json: JSON.stringify({
-            referenceVideoId: "ref_20260618_001",
-            schemaVersion: "video_decomposition.v1",
-            scene: "Phone reward app",
-            subject: "Phone",
-            action: "Tap",
-            camera: "Close-up",
-            lighting: "Bright",
-            style: "UGC",
-            quality: "HD",
-            hook: "Earn rewards",
-            missingFields: []
-          })
-        }] : []];
-      }
-      if (sql.includes("SELECT id FROM download_packages") && sql.includes("package_uid")) {
-        return [[{ id: 1301 }]];
-      }
-      if (sql.includes("INSERT INTO scheduler_jobs")) {
-        const jobUid = params[0];
-        const existing = state.schedulerJobs.get(jobUid);
-        state.schedulerJobs.set(jobUid, {
-          id: existing?.id ?? state.nextSchedulerJobId++,
-          jobUid,
-          jobType: "task_retry",
-          status: "pending",
-          runUid: [...state.runs.entries()].find(([, id]) => id === params[1])?.[0] || "",
-          taskUid: [...state.tasks.entries()].find(([, task]) => task.id === params[2])?.[0] || "",
-          payload: JSON.parse(params[3]),
-          priority: 0,
-          attempts: 0,
-          maxAttempts: 3,
-          lockedBy: null
-        });
-        return [{ affectedRows: 1 }];
-      }
-      return [{ affectedRows: 1 }];
-    }
-  };
-
-  return {
-    calls,
-    state,
-    async getConnection() {
-      return conn;
-    },
-    async end() {
-      calls.push({ sql: "END", params: [] });
-    }
-  };
-}
-
-export function context() {
-  return {
-    userProjectRoot: "C:/project/users/alice/current",
-    sharedProjectRoot: "C:/project/current",
-    userId: "alice",
-    user: { userId: "alice", username: "alice", role: "user", isAdmin: false }
-  };
-}
-
+import { context, fakePool } from "./mysql-facts-fixture.mjs";
 test("mysql facts sync workflow runs, tasks, telemetry, audit, and idempotency through parameterized queries", async () => {
   const pool = fakePool();
   setWangzhuanFactsPoolForTest(pool);
@@ -480,9 +57,11 @@ test("mysql facts sync workflow runs, tasks, telemetry, audit, and idempotency t
           status: "waiting_upstream",
           attempts: 1,
           modelImage: "gpt-image-2",
-          modelVideo: "dreamina-seedance-2-0-260128",
+          modelVideo: "doubao-seedance-2-0-260128",
           seedanceTaskId: "mock_seedance_001",
           promptPath: "批处理记录/网赚管线/batches/x/prompts/a.txt",
+          promptStorageKey: "uploads/project/users/alice/batches/x/prompts/a.txt",
+          promptStorageUrl: "https://cdn.example.com/prompts/a.txt",
           startedAt: "2026-06-18T00:00:00.000Z"
         },
         {
@@ -521,9 +100,13 @@ test("mysql facts sync workflow runs, tasks, telemetry, audit, and idempotency t
           durationSec: 15,
           kind: "segment_video",
           filePath: "批处理记录/网赚管线/batches/x/segments/out_abcd_001.mp4",
+          storageKey: "uploads/project/users/alice/batches/x/segments/out_abcd_001.mp4",
+          storageUrl: "https://cdn.example.com/segments/out_abcd_001.mp4",
           qcStatus: "pass",
           downloadEligible: true,
-          qcReportPath: "批处理记录/网赚管线/batches/x/qc/out_abcd_001.json"
+          qcReportPath: "批处理记录/网赚管线/batches/x/qc/out_abcd_001.json",
+          qcReportStorageKey: "uploads/project/users/alice/batches/x/qc/out_abcd_001.json",
+          qcReportStorageUrl: "https://cdn.example.com/qc/out_abcd_001.json"
         }
       ],
       stitchReports: [
@@ -566,6 +149,8 @@ test("mysql facts sync workflow runs, tasks, telemetry, audit, and idempotency t
       type: "batch",
       response: { batchId: batch.batchId }
     });
+    const idempotent = await loadIdempotencyFactFromMysql(context(), "batches_start", "idem-key", "a".repeat(64));
+    assert.equal(idempotent.batchId, batch.batchId);
 
     assert.ok(pool.calls.some((call) => call.sql.includes("INSERT INTO workflow_runs")));
     assert.ok(pool.calls.some((call) => call.sql.includes("INSERT INTO generation_scripts")));
@@ -588,14 +173,36 @@ test("mysql facts sync workflow runs, tasks, telemetry, audit, and idempotency t
     assert.equal(runInsert.params[0], batch.batchId);
     assert.equal(runInsert.params[2], "running");
 
-    const taskInsert = pool.calls.find((call) => call.sql.includes("INSERT INTO workflow_tasks") && call.params[3] === "waiting_upstream");
+    const taskInsert = pool.calls.find((call) => call.sql.includes("INSERT INTO workflow_tasks") && call.params[4] === "waiting_upstream");
     assert.equal(taskInsert.params[0], batch.tasks[0].generationTaskId);
-    assert.equal(taskInsert.params[3], "waiting_upstream");
-    assert.equal(JSON.parse(taskInsert.params[15]).scriptId, "scr_001");
+    assert.equal(taskInsert.params[4], "waiting_upstream");
+    assert.equal(JSON.parse(taskInsert.params[19]).scriptId, "scr_001");
+    assert.equal(JSON.parse(taskInsert.params[19]).promptStorageKey, batch.tasks[0].promptStorageKey);
+    assert.equal(JSON.parse(taskInsert.params[20]).outputStorageKey, batch.outputs[0].storageKey);
+    assert.equal(pool.state.assets.get(`asset_prompt_${batch.tasks[0].generationTaskId}`).storageKey, batch.tasks[0].promptStorageKey);
+    assert.equal(pool.state.assets.get(`asset_${batch.outputs[0].outputId}`).storageKey, batch.outputs[0].storageKey);
+    assert.equal(pool.state.assets.get(`asset_qc_${batch.outputs[0].outputId}`).storageKey, batch.outputs[0].qcReportStorageKey);
 
     const activeLock = await findActiveResourceLock(context());
     assert.equal(activeLock.runId, batch.batchId);
     assert.equal(activeLock.runType, "pipeline");
+    const activePipeline = await loadActivePipelineRunFromMysql(context());
+    assert.equal(activePipeline.batchId, batch.batchId);
+    assert.equal(activePipeline.status, "running");
+    assert.ok(pool.calls.some((call) => call.sql.includes("run_type = 'pipeline'")));
+
+    const detail = await loadBatchDetailFromMysql(context(), batch.batchId);
+    assert.equal(detail.batch.batchId, batch.batchId);
+    assert.equal(detail.batch.status, "running");
+    assert.equal(detail.batch.tasks.length, 2);
+    assert.equal(detail.batch.tasks[0].generationTaskId, batch.tasks[0].generationTaskId);
+    assert.equal(detail.batch.tasks[0].promptStorageKey, batch.tasks[0].promptStorageKey);
+    assert.equal(detail.batch.outputs.length, 1);
+    assert.equal(detail.batch.outputs[0].outputId, batch.outputs[0].outputId);
+    assert.equal(detail.batch.outputs[0].storageKey, batch.outputs[0].storageKey);
+    assert.equal(detail.batch.outputs[0].qcReportStorageUrl, batch.outputs[0].qcReportStorageUrl);
+    assert.equal(detail.downloadSummary.packageReady, true);
+    assert.ok(detail.events.some((event) => event.entityUid === batch.batchId && event.toStatus === "running"));
 
     const stopped = await syncBatchFacts(context(), { ...batch, status: "stopped", stoppedAt: "2026-06-18T00:03:00.000Z" }, "user_stop");
     assert.equal(stopped.skipped, false);
@@ -1002,6 +609,154 @@ test("mysql facts sync remix regions and download packages", async () => {
     assert.equal((await syncDownloadPackageFact(context(), manifest)).skipped, false);
     assert.ok(pool.calls.some((call) => call.sql.includes("INSERT INTO download_packages")));
     assert.ok(pool.calls.some((call) => call.sql.includes("INSERT INTO download_package_items")));
+  } finally {
+    setWangzhuanFactsPoolForTest(null);
+    await closeWangzhuanFactsPool();
+  }
+});
+
+test("mysql facts drive remix source, active detail, and gallery from stored S3 metadata", async () => {
+  const pool = fakePool();
+  setWangzhuanFactsPoolForTest(pool);
+  try {
+    const ctx = context();
+    const source = {
+      sourceId: "rsrc_20260618_001",
+      fileName: "competitor.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 12345,
+      durationSec: 15,
+      width: 720,
+      height: 1280,
+      ratio: "9:16",
+      kind: "video",
+      status: "pass",
+      issues: [],
+      storedPath: "批处理记录/网赚管线/remix-sources/rsrc_20260618_001/original.mp4",
+      storageKey: "uploads/project/users/alice/remix-sources/rsrc_20260618_001/original.mp4",
+      storageUrl: "https://cdn.example.com/remix/source.mp4",
+      userId: "alice",
+      createdAt: "2026-06-18T00:00:00.000Z"
+    };
+
+    assert.equal((await syncRemixSourceFact(ctx, source)).skipped, false);
+    const loadedSource = await loadRemixSourceFromMysql(ctx, source.sourceId);
+    assert.equal(loadedSource.sourceId, source.sourceId);
+    assert.equal(loadedSource.storageKey, source.storageKey);
+    assert.equal(loadedSource.storageUrl, source.storageUrl);
+
+    const remix = {
+      remixId: "rmx_20260618000000_abcd",
+      type: "remix",
+      status: "preview_required",
+      userId: "alice",
+      sourceId: source.sourceId,
+      source,
+      request: {
+        sourceId: source.sourceId,
+        operationType: "watermark_cover",
+        targetChannel: "tiktok_ads",
+        regions: [{
+          regionId: "reg_001",
+          type: "bbox",
+          label: "watermark",
+          bbox: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
+        }]
+      },
+      operationType: "watermark_cover",
+      targetChannel: "tiktok_ads",
+      regions: [{
+        regionId: "reg_001",
+        type: "bbox",
+        label: "watermark",
+        bbox: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
+      }],
+      templateSnapshot: {
+        templateId: "tpl_cash_reward_us_en_001",
+        versionId: "tplv_cash_reward_us_en_001_0001",
+        versionNumber: 1,
+        status: "active",
+        draft: { productName: "Lucky Cash", targetChannels: ["tiktok_ads"] }
+      },
+      capability: { provider: "video_aigc", status: "supported" },
+      providerJob: { jobId: "job_remix_001", status: "succeeded", provider: "video_aigc" },
+      tasks: [{
+        generationTaskId: "gen_abcd_001",
+        status: "qc",
+        modelImage: "not_required",
+        modelVideo: "video_aigc",
+        providerJobId: "job_remix_001",
+        seedanceTaskId: "job_remix_001",
+        promptPath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/prompts/gen_abcd_001_remix.txt",
+        attempts: 1
+      }],
+      outputs: [{
+        outputId: "out_abcd_001",
+        sourceType: "remix",
+        remixId: "rmx_20260618000000_abcd",
+        generationTaskIds: ["gen_abcd_001"],
+        durationSec: 15,
+        kind: "remix_video",
+        filePath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/outputs/out_abcd_001.mp4",
+        storageKey: "uploads/project/users/alice/remix/rmx_20260618000000_abcd/out_abcd_001.mp4",
+        storageUrl: "https://cdn.example.com/remix/out.mp4",
+        previewUrl: "https://cdn.example.com/remix/out.mp4",
+        promptPath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/prompts/gen_abcd_001_remix.txt",
+        qcStatus: "manual_required",
+        visualPreviewRequired: true,
+        previewConfirmed: false,
+        downloadEligible: false,
+        qcReportPath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/qc/out_abcd_001.json"
+      }, {
+        outputId: "out_abcd_002",
+        sourceType: "remix",
+        remixId: "rmx_20260618000000_abcd",
+        generationTaskIds: ["gen_abcd_001"],
+        durationSec: 15,
+        kind: "remix_video",
+        filePath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/outputs/out_abcd_002.mp4",
+        storageKey: "uploads/project/users/alice/remix/rmx_20260618000000_abcd/out_abcd_002.mp4",
+        storageUrl: "https://cdn.example.com/remix/out-2.mp4",
+        previewUrl: "https://cdn.example.com/remix/out-2.mp4",
+        promptPath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/prompts/gen_abcd_001_remix.txt",
+        qcStatus: "pass",
+        visualPreviewRequired: false,
+        previewConfirmed: true,
+        downloadEligible: true,
+        qcReportPath: "批处理记录/网赚管线/remix/rmx_20260618000000_abcd/qc/out_abcd_002.json"
+      }],
+      qcSummary: { total: 2, passed: 1, failed: 1 },
+      createdAt: "2026-06-18T00:01:00.000Z",
+      updatedAt: "2026-06-18T00:02:00.000Z"
+    };
+
+    assert.equal((await syncRemixFacts(ctx, remix, "remix_write")).skipped, false);
+
+    const detail = await loadRemixDetailFromMysql(ctx, remix.remixId);
+    assert.equal(detail.remix.remixId, remix.remixId);
+    assert.equal(detail.remix.source.storageUrl, source.storageUrl);
+    assert.equal(detail.remix.providerJob.jobId, "job_remix_001");
+    assert.equal(detail.remix.outputs[0].storageUrl, "https://cdn.example.com/remix/out.mp4");
+    assert.equal(detail.downloadSummary.packageReady, true);
+
+    const active = await loadActiveRemixFromMysql(ctx);
+    assert.equal(active.remix.remixId, remix.remixId);
+
+    const gallery = await loadGalleryItemsFromMysql(ctx, { remixId: remix.remixId, page: "1", pageSize: "1" });
+    assert.equal(gallery.items.length, 1);
+    assert.equal(gallery.items[0].previewUrl, "https://cdn.example.com/remix/out-2.mp4");
+    assert.equal(gallery.items[0].remixStatus, "preview_required");
+    assert.equal(gallery.counts.total, 2);
+    assert.equal(gallery.counts.downloadEligible, 1);
+    assert.equal(gallery.counts.byQcStatus.pass, 1);
+    assert.deepEqual(gallery.pagination, {
+      page: 1,
+      pageSize: 1,
+      total: 2,
+      totalPages: 2,
+      hasPrev: false,
+      hasNext: true
+    });
   } finally {
     setWangzhuanFactsPoolForTest(null);
     await closeWangzhuanFactsPool();
