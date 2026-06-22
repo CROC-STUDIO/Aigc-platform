@@ -261,13 +261,9 @@ test("wangzhuan confirmation keeps saved decomposition state clear", async () =>
   const script = await readPublic("wangzhuan.js");
 
   assert.match(script, /function isDecompositionConfirmed/);
-  assert.match(script, /function focusRewriteStep/);
-  assert.match(script, /function rewriteDraftFromDecomposition/);
-  assert.match(script, /function applyDecompositionToRewriteStep/);
   assert.match(script, /脚本拆解已确认，下一步点击“重新估算”生成批次预估/);
   assert.match(script, /function focusBatchStep/);
-  assert.match(script, /applyDecompositionToRewriteStep\(state\.decomposition\)/);
-  assert.match(script, /focusRewriteStep\(\)/);
+  assert.match(script, /focusBatchStep\(\)/);
   assert.match(script, /els\.decomposeBtn\.disabled = isDecompositionConfirmed\(\) \|\| !els\.decompositionText\.value\.trim\(\)/);
 });
 
