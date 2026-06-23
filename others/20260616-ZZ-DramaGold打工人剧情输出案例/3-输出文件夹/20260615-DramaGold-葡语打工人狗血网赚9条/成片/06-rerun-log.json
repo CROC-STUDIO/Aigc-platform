@@ -1,0 +1,30 @@
+[
+  {
+    "id": "factory-01-B-rerun-01",
+    "replacement_for": "factory-01-B",
+    "task_id": "aigc_ac13cd565fbf46c4b70257e3",
+    "submitted_at": "2026-06-15T10:32:36.550Z",
+    "submit_exit_code": 0,
+    "prompt_file": "D:/文件枢纽/视频/AI批量/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+    "submit_output_tail": "Submitting seedance video (dreamina-seedance-2-0-260128, mode=text_to_video)...\nTask: aigc_ac13cd565fbf46c4b70257e3\nModel: dreamina-seedance-2-0-260128\nMode: text_to_video\nStatus: queued\nCheck: tai aigc seedance-status aigc_ac13cd565fbf46c4b70257e3\n[exit:0 | 1849ms]\n"
+  },
+  {
+    "id": "factory-01-B-rerun-02",
+    "replacement_for": "factory-01-B",
+    "task_id": "aigc_fdb165d0c89e42099e242468",
+    "mode": "text_to_video",
+    "submitted_at": "2026-06-15T10:33:23.560Z",
+    "submit_exit_code": 0,
+    "submit_output_tail": "Submitting seedance video (dreamina-seedance-2-0-260128, mode=text_to_video)...\nTask: aigc_fdb165d0c89e42099e242468\nModel: dreamina-seedance-2-0-260128\nMode: text_to_video\nStatus: queued\nCheck: tai aigc seedance-status aigc_fdb165d0c89e42099e242468\n[exit:0 | 1912ms]\n"
+  },
+  {
+    "id": "factory-01-B-rerun-03",
+    "replacement_for": "factory-01-B",
+    "task_id": "aigc_1b1a1410ee5d47869cf4f1ad",
+    "mode": "omni_reference",
+    "submitted_at": "2026-06-15T10:34:11.220Z",
+    "submit_exit_code": 0,
+    "prompt": "15-second vertical 9:16 720p Brazilian Portuguese live-action ad for Drama Gold, factory lunch break segment B, different female Brazilian factory worker from previous segment, realistic handheld worker drama. She opens Drama Gold on phone, chooses a drama watching task, sees reward balance, shows Pix or Nubank withdrawal option and Brazilian reais cash, ends with clean Drama Gold app end card. Native Brazilian Portuguese voiceover with lip sync only, no visible subtitles. Voiceover: Eu sou outra funcionaria daqui e tambem duvidei. Abri o Drama Gold, escolhi um drama, fiz tarefas simples e vi meu saldo mexer. Para sacar, escolhi Pix ou Nubank, conforme as regras do app. Baixe e teste hoje. STRICT: absolutely no subtitles, no captions, no bottom text, no lower-third, no transcript words on screen. Phone UI minimal, readable Portuguese only: Drama Gold, Pix, Nubank, Sacar. Accurate orange DG icon, Pix and Nubank only, Brazilian reais, no other brands, no guaranteed income, clean BGM and app sound effects.",
+    "submit_output_tail": "Submitting seedance video (dreamina-seedance-2-0-260128, mode=omni_reference)...\nTask: aigc_1b1a1410ee5d47869cf4f1ad\nModel: dreamina-seedance-2-0-260128\nMode: omni_reference\nStatus: queued\nCheck: tai aigc seedance-status aigc_1b1a1410ee5d47869cf4f1ad\n[exit:0 | 1872ms]\n"
+  }
+]

@@ -243,6 +243,58 @@ test("confirm-plan promotes preview tasks and submits Seedance only after confir
   }
 });
 
+test("confirm-plan persists edited Seedance prompts before submitting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-plan-edit-confirm-"));
+  try {
+    const { ctx, estimated } = await fixture(root, { durationSec: 30, variantCount: 1 });
+    const planned = await prepareBatchPlanFromEstimate(ctx, {
+      idempotencyKey: "idem_plan_edit_confirm",
+      estimateId: estimated.estimate.estimateId
+    });
+    assert.equal(planned.plans.length, 2);
+    assert.deepEqual(planned.plans.map((plan) => plan.segmentIndex), [1, 2]);
+
+    const editedPlans = planned.plans.map((plan) => ({
+      ...plan,
+      hook: `Edited hook segment ${plan.segmentIndex}`,
+      body: `Edited body segment ${plan.segmentIndex}`,
+      imagePrompt: `Edited image prompt segment ${plan.segmentIndex}`,
+      seedancePrompt: `Edited Seedance prompt segment ${plan.segmentIndex}`,
+      negativePrompt: `Edited negative segment ${plan.segmentIndex}`
+    }));
+    const confirmed = await confirmBatchPlan(ctx, planned.batch.batchId, {
+      idempotencyKey: "idem_confirm_edited_plan",
+      plans: editedPlans,
+      confirmedPlanIds: editedPlans.map((plan) => plan.planId)
+    });
+
+    assert.equal(confirmed.batch.status, "queued");
+    assert.deepEqual(confirmed.batch.plans.map((plan) => plan.seedancePrompt), [
+      "Edited Seedance prompt segment 1",
+      "Edited Seedance prompt segment 2"
+    ]);
+    assert.deepEqual(confirmed.batch.scripts.map((script) => script.seedancePrompt), [
+      "Edited Seedance prompt segment 1",
+      "Edited Seedance prompt segment 2"
+    ]);
+
+    const submitted = await submitPendingGenerationTasks(ctx, planned.batch.batchId);
+    assert.equal(submitted.submittedCount, 2);
+    assert.equal(ctx.seedanceCallCount, 2);
+
+    const prompts = await Promise.all(submitted.batch.tasks.map((task) =>
+      readFile(join(ctx.userProjectRoot, task.promptPath), "utf8")
+    ));
+    assert.deepEqual(prompts, [
+      "Edited Seedance prompt segment 1",
+      "Edited Seedance prompt segment 2"
+    ]);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("plan blocks strong commitment branches missing truth rules", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-plan-strong-"));
   try {

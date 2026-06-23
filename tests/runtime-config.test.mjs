@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -118,6 +118,31 @@ test("runtime config overrides defaults without dropping nested capability defau
     assert.equal(loaded.config.wangzhuan.remixProvider.endpoint, "https://runtime.example/api/v1");
     assert.equal(loaded.config.wangzhuan.remixProvider.apiKeyEnv, "VIDEO_AIGC_API_KEY");
     assert.equal(loaded.config.wangzhuan.remixProvider.timeoutMs, 1000);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime project paths can be stored as config-relative values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aigc-config-relative-"));
+  try {
+    const defaultPath = join(root, "config.default.json");
+    const runtimePath = join(root, "app", "config.json");
+    await writeFile(defaultPath, JSON.stringify({}), "utf8");
+    await mkdir(join(root, "app"), { recursive: true });
+    await writeFile(runtimePath, JSON.stringify({
+      projectRoot: "../project-data/PROJECT_ROOT_P",
+      projects: [
+        { name: "default", path: "../project-data/PROJECT_ROOT_P" }
+      ]
+    }), "utf8");
+
+    const loaded = await loadRuntimeConfig({ runtimePath, defaultPath });
+
+    assert.equal(loaded.config.projectRoot, "../project-data/PROJECT_ROOT_P");
+    assert.deepEqual(loaded.config.projects, [
+      { name: "default", path: "../project-data/PROJECT_ROOT_P" }
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

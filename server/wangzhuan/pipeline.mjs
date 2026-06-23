@@ -25,7 +25,8 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
   generateSeedancePlan,
-  validateBranchTruthRulesForPlan
+  validateBranchTruthRulesForPlan,
+  validateSeedancePlan
 } from "./plan-preview.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
@@ -776,6 +777,77 @@ function currentPlanIds(batch, request = {}) {
   return new Set((Array.isArray(batch.plans) ? batch.plans : []).map((plan) => plan.planId));
 }
 
+function editablePlanById(request = {}) {
+  const map = new Map();
+  if (!Array.isArray(request.plans)) return map;
+  for (const plan of request.plans) {
+    if (plan?.planId) map.set(plan.planId, plan);
+  }
+  return map;
+}
+
+async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request = {}) {
+  const edits = editablePlanById(request);
+  const now = new Date().toISOString();
+  const nextPlans = [];
+  const nextScripts = [];
+
+  for (const plan of plans) {
+    const isConfirmed = confirmedPlanIds.has(plan.planId);
+    const editedPlan = edits.get(plan.planId);
+    const payload = validateSeedancePlan(isConfirmed && editedPlan ? { ...plan, ...editedPlan } : plan, {
+      branchId: plan.branchId,
+      branchVariantIndex: plan.branchVariantIndex,
+      segmentIndex: plan.segmentIndex
+    });
+    nextPlans.push({
+      ...plan,
+      ...payload,
+      status: isConfirmed ? "confirmed" : plan.status,
+      ...(isConfirmed ? { confirmedAt: now } : {})
+    });
+  }
+
+  const planMap = new Map(nextPlans.map((plan) => [plan.planId, plan]));
+  for (const script of Array.isArray(batch.scripts) ? batch.scripts : []) {
+    const plan = script.planId ? planMap.get(script.planId) : null;
+    if (!plan || !confirmedPlanIds.has(plan.planId)) {
+      nextScripts.push(script);
+      continue;
+    }
+    const nextScript = {
+      ...script,
+      hook: plan.hook,
+      body: plan.body,
+      voiceover: plan.voiceover,
+      subtitles: plan.subtitles,
+      cta: plan.cta,
+      ending: plan.ending,
+      imagePrompt: plan.imagePrompt,
+      seedancePrompt: plan.seedancePrompt,
+      negativePrompt: plan.negativePrompt,
+      mediaRefs: plan.mediaRefs,
+      complianceNotes: plan.complianceNotes
+    };
+    nextScripts.push(nextScript);
+    if (script.scriptPath) {
+      await writeAtomicJson(join(context.userProjectRoot, script.scriptPath), nextScript);
+    }
+    if (script.promptPath) {
+      await writePlainPrompt(join(context.userProjectRoot, script.promptPath), plan.seedancePrompt);
+    }
+    const task = (Array.isArray(batch.tasks) ? batch.tasks : []).find((item) => item.scriptId === script.scriptId);
+    if (task?.generationTaskId && script.promptPath) {
+      await writePlainPrompt(
+        join(dirname(join(context.userProjectRoot, script.promptPath)), `${task.generationTaskId}_image.txt`),
+        plan.imagePrompt
+      );
+    }
+  }
+
+  return { nextPlans, nextScripts, confirmedAt: now };
+}
+
 export async function confirmBatchPlan(context, batchId, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
@@ -802,10 +874,7 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
   if (unknownPlanIds.length) {
     throw new WangzhuanError("validation_error", "存在未知预案编号", { batchId, unknownPlanIds });
   }
-  const now = new Date().toISOString();
-  const nextPlans = plans.map((plan) => confirmedPlanIds.has(plan.planId)
-    ? { ...plan, status: "confirmed", confirmedAt: now }
-    : plan);
+  const { nextPlans, nextScripts, confirmedAt } = await applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request);
   const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
     if (task.status !== "pending_preview") return task;
     if (!task.planId || !confirmedPlanIds.has(task.planId)) return task;
@@ -822,8 +891,9 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     ...batch,
     status: "queued",
     plans: nextPlans,
+    scripts: nextScripts,
     tasks: nextTasks,
-    previewConfirmedAt: now,
+    previewConfirmedAt: confirmedAt,
     previewConfirmedBy: currentUserId(context),
     previewConfirmationNotes: cleanConfirmationNotes(request.confirmationNotes)
   }, "plan_confirmed");

@@ -1,0 +1,5482 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "louvain",
+  "totalFiles": 185,
+  "totalBatches": 18,
+  "exportsByPath": {
+    ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw": [],
+    ".tmp-live-p0/current-login.headers": [],
+    ".tmp-live-p0/health-login.headers": [],
+    ".tmp-live-p0/live-p0-validate.mjs": [],
+    ".tmp-live-p0/rerun-login.headers": [],
+    ".tmp-wallet-tai-F9GA9U/tai-stub.mjs": [],
+    ".tmp-wallet-tai-fIXST9/tai-stub.mjs": [],
+    ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs": [],
+    ".tmp-wallet-tai-ndxZuY/tai-stub.mjs": [],
+    ".tmp-wallet-tai-pvN9lb/tai-stub.mjs": [],
+    ".tmp-wallet-tai-sh4pOX/tai-stub.mjs": [],
+    ".tmp-wallet-tai-TuyABD/tai-stub.mjs": [],
+    ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs": [],
+    ".understand-anything/.understandignore": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav": [],
+    "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx": [],
+    "others/网赚产品 AI 素材管线需求拆解.docx": [],
+    "public/app.js": [],
+    "public/comic.js": [],
+    "public/competitor-remix.js": [],
+    "public/remix-canvas.js": [],
+    "public/wangzhuan-common.js": [
+      "WangzhuanApiError",
+      "channelLabels",
+      "promiseLabels",
+      "operationLabels",
+      "batchStatusLabels",
+      "batchGenerationTaskStatusLabels",
+      "batchStatusDisplayLabel",
+      "batchGenerationProgress",
+      "isBatchQcRunnable",
+      "workflowTriggerLabels",
+      "formatWorkflowEvent",
+      "isBatchGenerationActive",
+      "generationTaskUpstreamLabel",
+      "summarizeGenerationRequest",
+      "renderGenerationTaskCards",
+      "remixStatusLabels",
+      "strongTruthFields",
+      "$",
+      "$all",
+      "escapeHtml",
+      "idempotencyKey",
+      "dataUrlFromFile",
+      "tinyVideoDataUrl",
+      "apiEnvelope",
+      "apiLegacy",
+      "downloadZip",
+      "showLogin",
+      "hideLogin",
+      "bindLogin",
+      "renderError",
+      "clearError",
+      "showErrorModal",
+      "hideErrorModal",
+      "badge",
+      "renderKeyValues",
+      "flattenDecompositionFieldValue",
+      "setBusy",
+      "terminalBatchStatus",
+      "terminalRemixStatus",
+      "activeLockLabel",
+      "activeLockFromBatchError",
+      "taskSpaceHref",
+      "workbenchHref",
+      "activeLockActionsHtml",
+      "stopWorkflowTask",
+      "confirmBatchPlanRequest",
+      "schedulePoll",
+      "showToast",
+      "hideToast",
+      "syncActionHint",
+      "taskProgressHtml",
+      "inlineRetryHtml"
+    ],
+    "public/wangzhuan-task-nav.js": [
+      "activeLockFromBatchError",
+      "renderActiveLockBanner",
+      "showActiveLockFromError",
+      "clearActiveLockBanner",
+      "goToTaskManagement"
+    ],
+    "public/wangzhuan-tasks.js": [],
+    "public/wangzhuan.js": [],
+    "public/wz-canvas.js": [],
+    "public/wz-stepper.js": [],
+    "server.mjs": [],
+    "server/auth-store.mjs": [
+      "sanitizeSegment",
+      "publicUser",
+      "normalizeUsers",
+      "hashPassword",
+      "verifyPassword",
+      "createAuthStore"
+    ],
+    "server/object-storage.mjs": [
+      "objectStorageSettings",
+      "objectStorageEnabled",
+      "createObjectStorageClient",
+      "normalizeFilename",
+      "normalizeContentType",
+      "buildAssetId",
+      "buildPublicUrl",
+      "buildStorageKey",
+      "projectStorageDescriptor",
+      "uploadObjectBuffer",
+      "uploadObjectFile",
+      "openObjectStream",
+      "deleteObject",
+      "recordAssetMetadata",
+      "getRecordedAssetMetadata",
+      "deleteRecordedAssetMetadata",
+      "uploadProjectAsset"
+    ],
+    "server/project-file-paths.mjs": [
+      "resolveProjectFilePath"
+    ],
+    "server/runtime-config.mjs": [
+      "parseEnvFileContent",
+      "loadEnvFile",
+      "parseJsonFileContent",
+      "mergeConfigDefaults",
+      "loadRuntimeConfig"
+    ],
+    "server/wangzhuan/branches.mjs": [
+      "normalizeBranchDrafts",
+      "branchSummaries"
+    ],
+    "server/wangzhuan/channel-rules.mjs": [
+      "loadChannelRuleStore",
+      "getChannelRules"
+    ],
+    "server/wangzhuan/config.mjs": [
+      "effectiveLimits"
+    ],
+    "server/wangzhuan/constants.mjs": [
+      "TARGET_CHANNELS",
+      "PROMISE_LEVELS",
+      "DEFAULT_RULE_PROMISE_LEVELS",
+      "TEMPLATE_STATUSES",
+      "TEMPLATE_SAVE_MODES",
+      "TEMPLATE_ADMIN_ACTIONS",
+      "DEFAULT_LIMITS",
+      "REQUIRED_DRAFT_FIELDS",
+      "REQUIRED_STRONG_TRUTH_FIELDS",
+      "DEFAULT_CHANNEL_RULES"
+    ],
+    "server/wangzhuan/decomposition-text.mjs": [
+      "flattenDecompositionFieldValue"
+    ],
+    "server/wangzhuan/estimates.mjs": [
+      "estimateBatch",
+      "loadEstimate",
+      "startBatchFromEstimate",
+      "prepareBatchPlanFromEstimate"
+    ],
+    "server/wangzhuan/gallery.mjs": [
+      "getGallery"
+    ],
+    "server/wangzhuan/http.mjs": [
+      "WangzhuanError",
+      "ERROR_HTTP_STATUS",
+      "ERROR_MESSAGES",
+      "statusForCode",
+      "okEnvelope",
+      "errorEnvelope",
+      "sendEnvelope",
+      "sendOk",
+      "sendErrorEnvelope",
+      "requirePermission"
+    ],
+    "server/wangzhuan/ids.mjs": [
+      "compactTimestamp",
+      "dateStamp",
+      "shortHex",
+      "normalizeSlug",
+      "makeRequestId",
+      "makeTimestampId",
+      "makeDatedSequenceId",
+      "makeReferenceVideoId",
+      "makeRemixSourceId",
+      "makeEstimateId",
+      "makeRemixEstimateId",
+      "makeBatchId",
+      "makeRemixId",
+      "batchShortId",
+      "makeScriptId",
+      "makeGenerationTaskId",
+      "makePlanId",
+      "makeOutputId",
+      "makeTemplateId",
+      "makeTemplateVersionId",
+      "makeAuditEventId",
+      "makePackageId"
+    ],
+    "server/wangzhuan/llm-config.mjs": [
+      "DEFAULT_LLM_CONFIG",
+      "configuredApiKey",
+      "configuredApiKeyEnv",
+      "resolveLlmConfig",
+      "publicLlmConfig"
+    ],
+    "server/wangzhuan/mysql-facts.mjs": [
+      "closeWangzhuanFactsPool",
+      "setWangzhuanFactsPoolForTest",
+      "hasWangzhuanFactsStore",
+      "syncTemplateStoreFacts",
+      "loadTemplateStoreFromMysql",
+      "syncChannelRuleStoreFacts",
+      "loadChannelRuleStoreFromMysql",
+      "nextRemixSourceIdFromMysql",
+      "nextRemixEstimateIdFromMysql",
+      "nextPipelineEstimateIdFromMysql",
+      "syncRemixSourceFact",
+      "loadRemixSourceFromMysql",
+      "nextReferenceVideoIdFromMysql",
+      "syncReferenceVideoFact",
+      "loadReferenceVideoProbeFromMysql",
+      "syncVideoDecompositionFact",
+      "loadVideoDecompositionFromMysql",
+      "syncEstimateFact",
+      "loadEstimateFromMysql",
+      "verifyEstimateConfirmationTokenFromMysql",
+      "syncRemixFacts",
+      "loadRemixDetailFromMysql",
+      "loadBatchDetailFromMysql",
+      "loadActiveRemixFromMysql",
+      "loadBlockingRemixForSourceFromMysql",
+      "loadGalleryItemsFromMysql",
+      "syncDownloadPackageFact",
+      "findActiveResourceLock",
+      "loadActivePipelineRunFromMysql",
+      "loadWorkflowTasksFromMysql",
+      "claimSchedulerJob",
+      "completeSchedulerJob",
+      "rescheduleSchedulerJob",
+      "failSchedulerJob",
+      "syncBatchFacts",
+      "recordMysqlTelemetryEvent",
+      "loadIdempotencyFactFromMysql",
+      "recordIdempotencyFact"
+    ],
+    "server/wangzhuan/package.mjs": [
+      "buildZip",
+      "buildDownloadPackage"
+    ],
+    "server/wangzhuan/pagination.mjs": [
+      "normalizePagination",
+      "paginationMeta"
+    ],
+    "server/wangzhuan/pipeline.mjs": [
+      "prepareBatchForPipeline",
+      "getBatchDetail",
+      "stopBatch",
+      "submitPendingGenerationTasks",
+      "retryFailedGenerationTask",
+      "confirmBatchPlan",
+      "getActiveBatch",
+      "readBatch",
+      "writeBatch",
+      "writeTaskMaps"
+    ],
+    "server/wangzhuan/plan-preview.mjs": [
+      "validateBranchTruthRulesForPlan",
+      "validateSeedancePlan",
+      "buildSeedancePlanMessages",
+      "generateSeedancePlan",
+      "buildGenerationPlanRecord"
+    ],
+    "server/wangzhuan/product-assets.mjs": [
+      "uploadProductAsset"
+    ],
+    "server/wangzhuan/qc.mjs": [
+      "runBatchQc"
+    ],
+    "server/wangzhuan/reference-videos.mjs": [
+      "ffprobeMediaFile",
+      "ffprobeReferenceVideo",
+      "checkReferenceVideo",
+      "loadReferenceVideoProbe",
+      "validateVideoDecomposition",
+      "draftReferenceVideoDecomposition",
+      "getReferenceVideoWorkflowState",
+      "decomposeReferenceVideo",
+      "callOpenAiCompatibleLlm",
+      "parseLlmJsonContent"
+    ],
+    "server/wangzhuan/remix-provider.mjs": [
+      "hasRemoteRemixProvider",
+      "createRemixProviderClient"
+    ],
+    "server/wangzhuan/remix.mjs": [
+      "preflightRemixProvider",
+      "uploadRemixSource",
+      "startDirectMaskEdit",
+      "estimateRemix",
+      "loadRemixEstimate",
+      "startRemix",
+      "getRemixDetail",
+      "getActiveRemix",
+      "stopRemix",
+      "confirmRemixPreview"
+    ],
+    "server/wangzhuan/router.mjs": [
+      "handleWangzhuanRequest"
+    ],
+    "server/wangzhuan/scheduler.mjs": [
+      "runDueSchedulerJob",
+      "runDueSchedulerJobs"
+    ],
+    "server/wangzhuan/seedance-provider.mjs": [
+      "DEFAULT_SEEDANCE_MODEL",
+      "collectSeedanceMedia",
+      "resolveSeedanceModel",
+      "buildSeedanceGenerationPayload",
+      "seedanceSubmitUrl",
+      "parseSeedanceSubmitResponse",
+      "normalizeSeedanceTaskStatus",
+      "seedanceTaskUrl",
+      "extractSeedanceVideoUrl",
+      "parseSeedancePollResponse",
+      "summarizeSeedancePollResponse",
+      "isTerminalSeedanceStatus",
+      "hasRemoteSeedanceProvider",
+      "createSeedanceProviderClient",
+      "summarizeSeedanceRequest",
+      "summarizeSeedanceResponse"
+    ],
+    "server/wangzhuan/stitch.mjs": [
+      "preflightStitcher",
+      "materializeBatchSegmentOutputs",
+      "finalizeFifteenSecondBatch",
+      "stitchBatchSegments",
+      "retryStitch"
+    ],
+    "server/wangzhuan/storage.mjs": [
+      "wangzhuanPaths",
+      "toProjectRelative",
+      "syncWangzhuanAsset",
+      "openWangzhuanObjectStream",
+      "getWangzhuanAssetMetadata",
+      "previewUrlForWangzhuanAsset",
+      "removeWangzhuanAssetFromObjectStorage",
+      "ensureParent",
+      "writeAtomicJson",
+      "readJsonOrDefault",
+      "appendJsonl",
+      "repairJsonlTail"
+    ],
+    "server/wangzhuan/tasks.mjs": [
+      "listTasks"
+    ],
+    "server/wangzhuan/telemetry.mjs": [
+      "sanitizeTelemetryPayload",
+      "recordTelemetryEvent"
+    ],
+    "server/wangzhuan/templates.mjs": [
+      "validateTemplateDraft",
+      "listTemplates",
+      "saveTemplate",
+      "adminTemplateAction"
+    ],
+    "server/wangzhuan/upstream-poll.mjs": [
+      "shouldPollUpstreamBatch",
+      "pollUpstreamBatch"
+    ],
+    "tests/auth-store.test.mjs": [],
+    "tests/docker-local.test.mjs": [],
+    "tests/object-storage.test.mjs": [],
+    "tests/project-file-paths.test.mjs": [],
+    "tests/runtime-config.test.mjs": [],
+    "tests/wangzhuan/decomposition-text.test.mjs": [],
+    "tests/wangzhuan/estimates.test.mjs": [],
+    "tests/wangzhuan/frontend-static.test.mjs": [],
+    "tests/wangzhuan/ids.test.mjs": [],
+    "tests/wangzhuan/llm-config.test.mjs": [],
+    "tests/wangzhuan/mysql-facts-fixture.mjs": [
+      "fakePool",
+      "context"
+    ],
+    "tests/wangzhuan/mysql-facts.test.mjs": [],
+    "tests/wangzhuan/object-storage-fixture.mjs": [
+      "attachMockObjectStorage"
+    ],
+    "tests/wangzhuan/orchestration.test.mjs": [],
+    "tests/wangzhuan/pipeline.test.mjs": [],
+    "tests/wangzhuan/plan-preview.test.mjs": [],
+    "tests/wangzhuan/qc-gallery-package.test.mjs": [],
+    "tests/wangzhuan/reference-videos.test.mjs": [],
+    "tests/wangzhuan/remix.test.mjs": [],
+    "tests/wangzhuan/router.test.mjs": [],
+    "tests/wangzhuan/scheduler.test.mjs": [],
+    "tests/wangzhuan/seedance-provider.test.mjs": [],
+    "tests/wangzhuan/stitch.test.mjs": [],
+    "tests/wangzhuan/storage.test.mjs": [],
+    "tests/wangzhuan/tasks.test.mjs": [],
+    "tests/wangzhuan/telemetry.test.mjs": [],
+    "tests/wangzhuan/templates-channel-rules.test.mjs": [],
+    "tests/wangzhuan/test-providers.mjs": [
+      "writeMinimalMp4",
+      "minimalMp4Buffer",
+      "testSeedanceProviderClient",
+      "prepareDownloadedSegmentsWithoutStitch"
+    ]
+  },
+  "batches": [
+    {
+      "batchIndex": 1,
+      "files": [
+        {
+          "path": "server/wangzhuan/channel-rules.mjs",
+          "language": "javascript",
+          "sizeLines": 67,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/config.mjs",
+          "language": "javascript",
+          "sizeLines": 8,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/constants.mjs",
+          "language": "javascript",
+          "sizeLines": 79,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/gallery.mjs",
+          "language": "javascript",
+          "sizeLines": 8,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/http.mjs",
+          "language": "javascript",
+          "sizeLines": 114,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/ids.mjs",
+          "language": "javascript",
+          "sizeLines": 110,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/package.mjs",
+          "language": "javascript",
+          "sizeLines": 504,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/product-assets.mjs",
+          "language": "javascript",
+          "sizeLines": 98,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/qc.mjs",
+          "language": "javascript",
+          "sizeLines": 1005,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/remix-provider.mjs",
+          "language": "javascript",
+          "sizeLines": 167,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/remix.mjs",
+          "language": "javascript",
+          "sizeLines": 1236,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/router.mjs",
+          "language": "javascript",
+          "sizeLines": 185,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/templates.mjs",
+          "language": "javascript",
+          "sizeLines": 258,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/ids.test.mjs",
+          "language": "javascript",
+          "sizeLines": 25,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+          "language": "javascript",
+          "sizeLines": 536,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/remix.test.mjs",
+          "language": "javascript",
+          "sizeLines": 1208,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/templates-channel-rules.test.mjs",
+          "language": "javascript",
+          "sizeLines": 151,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "server/wangzhuan/channel-rules.mjs": [
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/mysql-facts.mjs"
+        ],
+        "server/wangzhuan/config.mjs": [
+          "server/wangzhuan/constants.mjs"
+        ],
+        "server/wangzhuan/constants.mjs": [],
+        "server/wangzhuan/gallery.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/mysql-facts.mjs"
+        ],
+        "server/wangzhuan/http.mjs": [
+          "server/wangzhuan/ids.mjs"
+        ],
+        "server/wangzhuan/ids.mjs": [],
+        "server/wangzhuan/package.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/product-assets.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/storage.mjs"
+        ],
+        "server/wangzhuan/qc.mjs": [
+          "server/object-storage.mjs",
+          "server/wangzhuan/channel-rules.mjs",
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/llm-config.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/remix-provider.mjs": [
+          "server/wangzhuan/http.mjs"
+        ],
+        "server/wangzhuan/remix.mjs": [
+          "server/wangzhuan/config.mjs",
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/remix-provider.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/router.mjs": [
+          "server/wangzhuan/channel-rules.mjs",
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/gallery.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/llm-config.mjs",
+          "server/wangzhuan/package.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/product-assets.mjs",
+          "server/wangzhuan/qc.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/remix.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/tasks.mjs",
+          "server/wangzhuan/templates.mjs",
+          "server/wangzhuan/upstream-poll.mjs"
+        ],
+        "server/wangzhuan/templates.mjs": [
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "tests/wangzhuan/ids.test.mjs": [
+          "server/wangzhuan/ids.mjs"
+        ],
+        "tests/wangzhuan/qc-gallery-package.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/gallery.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/package.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/qc.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/router.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ],
+        "tests/wangzhuan/remix.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/gallery.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/package.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/remix.mjs",
+          "server/wangzhuan/router.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs"
+        ],
+        "tests/wangzhuan/templates-channel-rules.test.mjs": [
+          "server/wangzhuan/channel-rules.mjs",
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs"
+        ]
+      },
+      "neighborMap": {
+        "server/wangzhuan/channel-rules.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          }
+        ],
+        "server/wangzhuan/config.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          }
+        ],
+        "server/wangzhuan/constants.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/plan-preview.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "validateBranchTruthRulesForPlan",
+              "validateSeedancePlan",
+              "buildSeedancePlanMessages",
+              "generateSeedancePlan",
+              "buildGenerationPlanRecord"
+            ]
+          }
+        ],
+        "server/wangzhuan/gallery.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          }
+        ],
+        "server/wangzhuan/http.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/plan-preview.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "validateBranchTruthRulesForPlan",
+              "validateSeedancePlan",
+              "buildSeedancePlanMessages",
+              "generateSeedancePlan",
+              "buildGenerationPlanRecord"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/seedance-provider.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "DEFAULT_SEEDANCE_MODEL",
+              "collectSeedanceMedia",
+              "resolveSeedanceModel",
+              "buildSeedanceGenerationPayload",
+              "seedanceSubmitUrl",
+              "parseSeedanceSubmitResponse",
+              "normalizeSeedanceTaskStatus",
+              "seedanceTaskUrl",
+              "extractSeedanceVideoUrl",
+              "parseSeedancePollResponse",
+              "summarizeSeedancePollResponse",
+              "isTerminalSeedanceStatus",
+              "hasRemoteSeedanceProvider",
+              "createSeedanceProviderClient",
+              "summarizeSeedanceRequest",
+              "summarizeSeedanceResponse"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/tasks.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "listTasks"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/upstream-poll.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "shouldPollUpstreamBatch",
+              "pollUpstreamBatch"
+            ]
+          }
+        ],
+        "server/wangzhuan/ids.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/plan-preview.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "validateBranchTruthRulesForPlan",
+              "validateSeedancePlan",
+              "buildSeedancePlanMessages",
+              "generateSeedancePlan",
+              "buildGenerationPlanRecord"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          }
+        ],
+        "server/wangzhuan/package.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/product-assets.mjs": [
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          }
+        ],
+        "server/wangzhuan/qc.mjs": [
+          {
+            "path": "server/object-storage.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "objectStorageSettings",
+              "objectStorageEnabled",
+              "createObjectStorageClient",
+              "normalizeFilename",
+              "normalizeContentType",
+              "buildAssetId",
+              "buildPublicUrl",
+              "buildStorageKey",
+              "projectStorageDescriptor",
+              "uploadObjectBuffer",
+              "uploadObjectFile",
+              "openObjectStream",
+              "deleteObject",
+              "recordAssetMetadata",
+              "getRecordedAssetMetadata",
+              "deleteRecordedAssetMetadata",
+              "uploadProjectAsset"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/llm-config.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "DEFAULT_LLM_CONFIG",
+              "configuredApiKey",
+              "configuredApiKeyEnv",
+              "resolveLlmConfig",
+              "publicLlmConfig"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/remix.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/router.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/llm-config.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "DEFAULT_LLM_CONFIG",
+              "configuredApiKey",
+              "configuredApiKeyEnv",
+              "resolveLlmConfig",
+              "publicLlmConfig"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/tasks.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "listTasks"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/upstream-poll.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "shouldPollUpstreamBatch",
+              "pollUpstreamBatch"
+            ]
+          },
+          {
+            "path": "server.mjs",
+            "batchIndex": 4,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/templates.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/estimates.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/orchestration.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/pipeline.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/plan-preview.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ],
+        "tests/wangzhuan/qc-gallery-package.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/test-providers.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "writeMinimalMp4",
+              "minimalMp4Buffer",
+              "testSeedanceProviderClient",
+              "prepareDownloadedSegmentsWithoutStitch"
+            ]
+          }
+        ],
+        "tests/wangzhuan/remix.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          }
+        ],
+        "tests/wangzhuan/templates-channel-rules.test.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "batchIndex": 2,
+      "files": [
+        {
+          "path": "server/wangzhuan/branches.mjs",
+          "language": "javascript",
+          "sizeLines": 94,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/estimates.mjs",
+          "language": "javascript",
+          "sizeLines": 547,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/pipeline.mjs",
+          "language": "javascript",
+          "sizeLines": 866,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/seedance-provider.mjs",
+          "language": "javascript",
+          "sizeLines": 406,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/stitch.mjs",
+          "language": "javascript",
+          "sizeLines": 584,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/storage.mjs",
+          "language": "javascript",
+          "sizeLines": 243,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/telemetry.mjs",
+          "language": "javascript",
+          "sizeLines": 110,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/upstream-poll.mjs",
+          "language": "javascript",
+          "sizeLines": 196,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/plan-preview.test.mjs",
+          "language": "javascript",
+          "sizeLines": 296,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/seedance-provider.test.mjs",
+          "language": "javascript",
+          "sizeLines": 117,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/stitch.test.mjs",
+          "language": "javascript",
+          "sizeLines": 228,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/storage.test.mjs",
+          "language": "javascript",
+          "sizeLines": 60,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/telemetry.test.mjs",
+          "language": "javascript",
+          "sizeLines": 394,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "server/wangzhuan/branches.mjs": [],
+        "server/wangzhuan/estimates.mjs": [
+          "server/wangzhuan/branches.mjs",
+          "server/wangzhuan/config.mjs",
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/seedance-provider.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/pipeline.mjs": [
+          "server/wangzhuan/branches.mjs",
+          "server/wangzhuan/channel-rules.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/plan-preview.mjs",
+          "server/wangzhuan/seedance-provider.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/seedance-provider.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/llm-config.mjs"
+        ],
+        "server/wangzhuan/stitch.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "server/wangzhuan/storage.mjs": [
+          "server/object-storage.mjs",
+          "server/wangzhuan/http.mjs"
+        ],
+        "server/wangzhuan/telemetry.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/mysql-facts.mjs"
+        ],
+        "server/wangzhuan/upstream-poll.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/seedance-provider.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/storage.mjs"
+        ],
+        "tests/wangzhuan/plan-preview.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs"
+        ],
+        "tests/wangzhuan/seedance-provider.test.mjs": [
+          "server/wangzhuan/seedance-provider.mjs"
+        ],
+        "tests/wangzhuan/stitch.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/templates.mjs",
+          "server/wangzhuan/upstream-poll.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ],
+        "tests/wangzhuan/storage.test.mjs": [
+          "server/wangzhuan/storage.mjs"
+        ],
+        "tests/wangzhuan/telemetry.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/package.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/qc.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/remix.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/telemetry.mjs",
+          "server/wangzhuan/templates.mjs",
+          "server/wangzhuan/upstream-poll.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ]
+      },
+      "neighborMap": {
+        "server/wangzhuan/estimates.mjs": [
+          {
+            "path": "server/wangzhuan/config.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "effectiveLimits"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/constants.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "TARGET_CHANNELS",
+              "PROMISE_LEVELS",
+              "DEFAULT_RULE_PROMISE_LEVELS",
+              "TEMPLATE_STATUSES",
+              "TEMPLATE_SAVE_MODES",
+              "TEMPLATE_ADMIN_ACTIONS",
+              "DEFAULT_LIMITS",
+              "REQUIRED_DRAFT_FIELDS",
+              "REQUIRED_STRONG_TRUTH_FIELDS",
+              "DEFAULT_CHANNEL_RULES"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/estimates.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/orchestration.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/pipeline.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/pipeline.mjs": [
+          {
+            "path": "server/wangzhuan/channel-rules.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "loadChannelRuleStore",
+              "getChannelRules"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/plan-preview.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "validateBranchTruthRulesForPlan",
+              "validateSeedancePlan",
+              "buildSeedancePlanMessages",
+              "generateSeedancePlan",
+              "buildGenerationPlanRecord"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/scheduler.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "runDueSchedulerJob",
+              "runDueSchedulerJobs"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/orchestration.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/pipeline.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/seedance-provider.mjs": [
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/llm-config.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "DEFAULT_LLM_CONFIG",
+              "configuredApiKey",
+              "configuredApiKeyEnv",
+              "resolveLlmConfig",
+              "publicLlmConfig"
+            ]
+          }
+        ],
+        "server/wangzhuan/stitch.mjs": [
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/storage.mjs": [
+          {
+            "path": "server/object-storage.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "objectStorageSettings",
+              "objectStorageEnabled",
+              "createObjectStorageClient",
+              "normalizeFilename",
+              "normalizeContentType",
+              "buildAssetId",
+              "buildPublicUrl",
+              "buildStorageKey",
+              "projectStorageDescriptor",
+              "uploadObjectBuffer",
+              "uploadObjectFile",
+              "openObjectStream",
+              "deleteObject",
+              "recordAssetMetadata",
+              "getRecordedAssetMetadata",
+              "deleteRecordedAssetMetadata",
+              "uploadProjectAsset"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/package.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "buildZip",
+              "buildDownloadPackage"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/product-assets.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "uploadProductAsset"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/pipeline.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/telemetry.mjs": [
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/package.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "buildZip",
+              "buildDownloadPackage"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          }
+        ],
+        "server/wangzhuan/upstream-poll.mjs": [
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/scheduler.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "runDueSchedulerJob",
+              "runDueSchedulerJobs"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/orchestration.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          }
+        ],
+        "tests/wangzhuan/plan-preview.test.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          }
+        ],
+        "tests/wangzhuan/stitch.test.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/test-providers.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "writeMinimalMp4",
+              "minimalMp4Buffer",
+              "testSeedanceProviderClient",
+              "prepareDownloadedSegmentsWithoutStitch"
+            ]
+          }
+        ],
+        "tests/wangzhuan/telemetry.test.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/package.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "buildZip",
+              "buildDownloadPackage"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/test-providers.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "writeMinimalMp4",
+              "minimalMp4Buffer",
+              "testSeedanceProviderClient",
+              "prepareDownloadedSegmentsWithoutStitch"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "batchIndex": 3,
+      "files": [
+        {
+          "path": "server/wangzhuan/mysql-facts.mjs",
+          "language": "javascript",
+          "sizeLines": 3759,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/pagination.mjs",
+          "language": "javascript",
+          "sizeLines": 32,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/tasks.mjs",
+          "language": "javascript",
+          "sizeLines": 10,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/estimates.test.mjs",
+          "language": "javascript",
+          "sizeLines": 362,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "language": "javascript",
+          "sizeLines": 1156,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/mysql-facts.test.mjs",
+          "language": "javascript",
+          "sizeLines": 801,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/object-storage-fixture.mjs",
+          "language": "javascript",
+          "sizeLines": 35,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/orchestration.test.mjs",
+          "language": "javascript",
+          "sizeLines": 204,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/pipeline.test.mjs",
+          "language": "javascript",
+          "sizeLines": 482,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/reference-videos.test.mjs",
+          "language": "javascript",
+          "sizeLines": 843,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/router.test.mjs",
+          "language": "javascript",
+          "sizeLines": 924,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/tasks.test.mjs",
+          "language": "javascript",
+          "sizeLines": 54,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/test-providers.mjs",
+          "language": "javascript",
+          "sizeLines": 83,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "server/wangzhuan/mysql-facts.mjs": [
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/pagination.mjs"
+        ],
+        "server/wangzhuan/pagination.mjs": [],
+        "server/wangzhuan/tasks.mjs": [
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/mysql-facts.mjs"
+        ],
+        "tests/wangzhuan/estimates.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs"
+        ],
+        "tests/wangzhuan/mysql-facts-fixture.mjs": [],
+        "tests/wangzhuan/mysql-facts.test.mjs": [
+          "server/wangzhuan/mysql-facts.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs"
+        ],
+        "tests/wangzhuan/object-storage-fixture.mjs": [],
+        "tests/wangzhuan/orchestration.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/templates.mjs",
+          "server/wangzhuan/upstream-poll.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ],
+        "tests/wangzhuan/pipeline.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ],
+        "tests/wangzhuan/reference-videos.test.mjs": [
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs"
+        ],
+        "tests/wangzhuan/router.test.mjs": [
+          "server/wangzhuan/estimates.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/reference-videos.mjs",
+          "server/wangzhuan/remix.mjs",
+          "server/wangzhuan/router.mjs",
+          "server/wangzhuan/stitch.mjs",
+          "server/wangzhuan/templates.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ],
+        "tests/wangzhuan/tasks.test.mjs": [
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/tasks.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs"
+        ],
+        "tests/wangzhuan/test-providers.mjs": []
+      },
+      "neighborMap": {
+        "server/wangzhuan/mysql-facts.mjs": [
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/channel-rules.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "loadChannelRuleStore",
+              "getChannelRules"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/gallery.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "getGallery"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/package.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "buildZip",
+              "buildDownloadPackage"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/scheduler.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "runDueSchedulerJob",
+              "runDueSchedulerJobs"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/plan-preview.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/scheduler.test.mjs",
+            "batchIndex": 4,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/templates-channel-rules.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          }
+        ],
+        "server/wangzhuan/tasks.mjs": [
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          }
+        ],
+        "tests/wangzhuan/estimates.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          }
+        ],
+        "tests/wangzhuan/mysql-facts-fixture.mjs": [
+          {
+            "path": "tests/wangzhuan/plan-preview.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/scheduler.test.mjs",
+            "batchIndex": 4,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/templates-channel-rules.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          }
+        ],
+        "tests/wangzhuan/object-storage-fixture.mjs": [
+          {
+            "path": "tests/wangzhuan/plan-preview.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/scheduler.test.mjs",
+            "batchIndex": 4,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ],
+        "tests/wangzhuan/orchestration.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/upstream-poll.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "shouldPollUpstreamBatch",
+              "pollUpstreamBatch"
+            ]
+          }
+        ],
+        "tests/wangzhuan/pipeline.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          }
+        ],
+        "tests/wangzhuan/reference-videos.test.mjs": [
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          }
+        ],
+        "tests/wangzhuan/router.test.mjs": [
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/stitch.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "preflightStitcher",
+              "materializeBatchSegmentOutputs",
+              "finalizeFifteenSecondBatch",
+              "stitchBatchSegments",
+              "retryStitch"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/templates.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "validateTemplateDraft",
+              "listTemplates",
+              "saveTemplate",
+              "adminTemplateAction"
+            ]
+          }
+        ],
+        "tests/wangzhuan/test-providers.mjs": [
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/scheduler.test.mjs",
+            "batchIndex": 4,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ]
+      }
+    },
+    {
+      "batchIndex": 4,
+      "files": [
+        {
+          "path": ".tmp-live-p0/live-p0-validate.mjs",
+          "language": "javascript",
+          "sizeLines": 332,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server.mjs",
+          "language": "javascript",
+          "sizeLines": 3068,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/auth-store.mjs",
+          "language": "javascript",
+          "sizeLines": 665,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/object-storage.mjs",
+          "language": "javascript",
+          "sizeLines": 335,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/project-file-paths.mjs",
+          "language": "javascript",
+          "sizeLines": 18,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/runtime-config.mjs",
+          "language": "javascript",
+          "sizeLines": 102,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/scheduler.mjs",
+          "language": "javascript",
+          "sizeLines": 74,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/auth-store.test.mjs",
+          "language": "javascript",
+          "sizeLines": 103,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/object-storage.test.mjs",
+          "language": "javascript",
+          "sizeLines": 145,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/project-file-paths.test.mjs",
+          "language": "javascript",
+          "sizeLines": 45,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/runtime-config.test.mjs",
+          "language": "javascript",
+          "sizeLines": 124,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/scheduler.test.mjs",
+          "language": "javascript",
+          "sizeLines": 88,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        ".tmp-live-p0/live-p0-validate.mjs": [
+          "server.mjs"
+        ],
+        "server.mjs": [
+          "server/auth-store.mjs",
+          "server/object-storage.mjs",
+          "server/project-file-paths.mjs",
+          "server/runtime-config.mjs",
+          "server/wangzhuan/router.mjs",
+          "server/wangzhuan/scheduler.mjs"
+        ],
+        "server/auth-store.mjs": [
+          "server/runtime-config.mjs"
+        ],
+        "server/object-storage.mjs": [],
+        "server/project-file-paths.mjs": [],
+        "server/runtime-config.mjs": [],
+        "server/wangzhuan/scheduler.mjs": [
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/pipeline.mjs",
+          "server/wangzhuan/upstream-poll.mjs"
+        ],
+        "tests/auth-store.test.mjs": [
+          "server/auth-store.mjs"
+        ],
+        "tests/object-storage.test.mjs": [
+          "server/object-storage.mjs"
+        ],
+        "tests/project-file-paths.test.mjs": [
+          "server/project-file-paths.mjs"
+        ],
+        "tests/runtime-config.test.mjs": [
+          "server/runtime-config.mjs"
+        ],
+        "tests/wangzhuan/scheduler.test.mjs": [
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/scheduler.mjs",
+          "tests/wangzhuan/mysql-facts-fixture.mjs",
+          "tests/wangzhuan/object-storage-fixture.mjs",
+          "tests/wangzhuan/test-providers.mjs"
+        ]
+      },
+      "neighborMap": {
+        "server.mjs": [
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          }
+        ],
+        "server/object-storage.mjs": [
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/reference-videos.mjs",
+            "batchIndex": 5,
+            "symbols": [
+              "ffprobeMediaFile",
+              "ffprobeReferenceVideo",
+              "checkReferenceVideo",
+              "loadReferenceVideoProbe",
+              "validateVideoDecomposition",
+              "draftReferenceVideoDecomposition",
+              "getReferenceVideoWorkflowState",
+              "decomposeReferenceVideo",
+              "callOpenAiCompatibleLlm",
+              "parseLlmJsonContent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          }
+        ],
+        "server/wangzhuan/scheduler.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/upstream-poll.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "shouldPollUpstreamBatch",
+              "pollUpstreamBatch"
+            ]
+          }
+        ],
+        "tests/wangzhuan/scheduler.test.mjs": [
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "fakePool",
+              "context"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/object-storage-fixture.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "attachMockObjectStorage"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/test-providers.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "writeMinimalMp4",
+              "minimalMp4Buffer",
+              "testSeedanceProviderClient",
+              "prepareDownloadedSegmentsWithoutStitch"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "batchIndex": 5,
+      "files": [
+        {
+          "path": "server/wangzhuan/decomposition-text.mjs",
+          "language": "javascript",
+          "sizeLines": 66,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/llm-config.mjs",
+          "language": "javascript",
+          "sizeLines": 84,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/plan-preview.mjs",
+          "language": "javascript",
+          "sizeLines": 223,
+          "fileCategory": "code"
+        },
+        {
+          "path": "server/wangzhuan/reference-videos.mjs",
+          "language": "javascript",
+          "sizeLines": 928,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/decomposition-text.test.mjs",
+          "language": "javascript",
+          "sizeLines": 39,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/llm-config.test.mjs",
+          "language": "javascript",
+          "sizeLines": 36,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "server/wangzhuan/decomposition-text.mjs": [],
+        "server/wangzhuan/llm-config.mjs": [],
+        "server/wangzhuan/plan-preview.mjs": [
+          "server/wangzhuan/constants.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/ids.mjs",
+          "server/wangzhuan/llm-config.mjs",
+          "server/wangzhuan/reference-videos.mjs"
+        ],
+        "server/wangzhuan/reference-videos.mjs": [
+          "server/object-storage.mjs",
+          "server/wangzhuan/config.mjs",
+          "server/wangzhuan/decomposition-text.mjs",
+          "server/wangzhuan/http.mjs",
+          "server/wangzhuan/llm-config.mjs",
+          "server/wangzhuan/mysql-facts.mjs",
+          "server/wangzhuan/storage.mjs",
+          "server/wangzhuan/telemetry.mjs"
+        ],
+        "tests/wangzhuan/decomposition-text.test.mjs": [
+          "server/wangzhuan/decomposition-text.mjs"
+        ],
+        "tests/wangzhuan/llm-config.test.mjs": [
+          "server/wangzhuan/llm-config.mjs"
+        ]
+      },
+      "neighborMap": {
+        "server/wangzhuan/llm-config.mjs": [
+          {
+            "path": "server/wangzhuan/qc.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "runBatchQc"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/seedance-provider.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "DEFAULT_SEEDANCE_MODEL",
+              "collectSeedanceMedia",
+              "resolveSeedanceModel",
+              "buildSeedanceGenerationPayload",
+              "seedanceSubmitUrl",
+              "parseSeedanceSubmitResponse",
+              "normalizeSeedanceTaskStatus",
+              "seedanceTaskUrl",
+              "extractSeedanceVideoUrl",
+              "parseSeedancePollResponse",
+              "summarizeSeedancePollResponse",
+              "isTerminalSeedanceStatus",
+              "hasRemoteSeedanceProvider",
+              "createSeedanceProviderClient",
+              "summarizeSeedanceRequest",
+              "summarizeSeedanceResponse"
+            ]
+          }
+        ],
+        "server/wangzhuan/plan-preview.mjs": [
+          {
+            "path": "server/wangzhuan/constants.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "TARGET_CHANNELS",
+              "PROMISE_LEVELS",
+              "DEFAULT_RULE_PROMISE_LEVELS",
+              "TEMPLATE_STATUSES",
+              "TEMPLATE_SAVE_MODES",
+              "TEMPLATE_ADMIN_ACTIONS",
+              "DEFAULT_LIMITS",
+              "REQUIRED_DRAFT_FIELDS",
+              "REQUIRED_STRONG_TRUTH_FIELDS",
+              "DEFAULT_CHANNEL_RULES"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/ids.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "compactTimestamp",
+              "dateStamp",
+              "shortHex",
+              "normalizeSlug",
+              "makeRequestId",
+              "makeTimestampId",
+              "makeDatedSequenceId",
+              "makeReferenceVideoId",
+              "makeRemixSourceId",
+              "makeEstimateId",
+              "makeRemixEstimateId",
+              "makeBatchId",
+              "makeRemixId",
+              "batchShortId",
+              "makeScriptId",
+              "makeGenerationTaskId",
+              "makePlanId",
+              "makeOutputId",
+              "makeTemplateId",
+              "makeTemplateVersionId",
+              "makeAuditEventId",
+              "makePackageId"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/pipeline.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "prepareBatchForPipeline",
+              "getBatchDetail",
+              "stopBatch",
+              "submitPendingGenerationTasks",
+              "retryFailedGenerationTask",
+              "confirmBatchPlan",
+              "getActiveBatch",
+              "readBatch",
+              "writeBatch",
+              "writeTaskMaps"
+            ]
+          }
+        ],
+        "server/wangzhuan/reference-videos.mjs": [
+          {
+            "path": "server/object-storage.mjs",
+            "batchIndex": 4,
+            "symbols": [
+              "objectStorageSettings",
+              "objectStorageEnabled",
+              "createObjectStorageClient",
+              "normalizeFilename",
+              "normalizeContentType",
+              "buildAssetId",
+              "buildPublicUrl",
+              "buildStorageKey",
+              "projectStorageDescriptor",
+              "uploadObjectBuffer",
+              "uploadObjectFile",
+              "openObjectStream",
+              "deleteObject",
+              "recordAssetMetadata",
+              "getRecordedAssetMetadata",
+              "deleteRecordedAssetMetadata",
+              "uploadProjectAsset"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/config.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "effectiveLimits"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/http.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "WangzhuanError",
+              "ERROR_HTTP_STATUS",
+              "ERROR_MESSAGES",
+              "statusForCode",
+              "okEnvelope",
+              "errorEnvelope",
+              "sendEnvelope",
+              "sendOk",
+              "sendErrorEnvelope",
+              "requirePermission"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/mysql-facts.mjs",
+            "batchIndex": 3,
+            "symbols": [
+              "closeWangzhuanFactsPool",
+              "setWangzhuanFactsPoolForTest",
+              "hasWangzhuanFactsStore",
+              "syncTemplateStoreFacts",
+              "loadTemplateStoreFromMysql",
+              "syncChannelRuleStoreFacts",
+              "loadChannelRuleStoreFromMysql",
+              "nextRemixSourceIdFromMysql",
+              "nextRemixEstimateIdFromMysql",
+              "nextPipelineEstimateIdFromMysql",
+              "syncRemixSourceFact",
+              "loadRemixSourceFromMysql",
+              "nextReferenceVideoIdFromMysql",
+              "syncReferenceVideoFact",
+              "loadReferenceVideoProbeFromMysql",
+              "syncVideoDecompositionFact",
+              "loadVideoDecompositionFromMysql",
+              "syncEstimateFact",
+              "loadEstimateFromMysql",
+              "verifyEstimateConfirmationTokenFromMysql",
+              "syncRemixFacts",
+              "loadRemixDetailFromMysql",
+              "loadBatchDetailFromMysql",
+              "loadActiveRemixFromMysql",
+              "loadBlockingRemixForSourceFromMysql",
+              "loadGalleryItemsFromMysql",
+              "syncDownloadPackageFact",
+              "findActiveResourceLock",
+              "loadActivePipelineRunFromMysql",
+              "loadWorkflowTasksFromMysql",
+              "claimSchedulerJob",
+              "completeSchedulerJob",
+              "rescheduleSchedulerJob",
+              "failSchedulerJob",
+              "syncBatchFacts",
+              "recordMysqlTelemetryEvent",
+              "loadIdempotencyFactFromMysql",
+              "recordIdempotencyFact"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/storage.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "wangzhuanPaths",
+              "toProjectRelative",
+              "syncWangzhuanAsset",
+              "openWangzhuanObjectStream",
+              "getWangzhuanAssetMetadata",
+              "previewUrlForWangzhuanAsset",
+              "removeWangzhuanAssetFromObjectStorage",
+              "ensureParent",
+              "writeAtomicJson",
+              "readJsonOrDefault",
+              "appendJsonl",
+              "repairJsonlTail"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/telemetry.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "sanitizeTelemetryPayload",
+              "recordTelemetryEvent"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/estimates.mjs",
+            "batchIndex": 2,
+            "symbols": [
+              "estimateBatch",
+              "loadEstimate",
+              "startBatchFromEstimate",
+              "prepareBatchPlanFromEstimate"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/remix.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "preflightRemixProvider",
+              "uploadRemixSource",
+              "startDirectMaskEdit",
+              "estimateRemix",
+              "loadRemixEstimate",
+              "startRemix",
+              "getRemixDetail",
+              "getActiveRemix",
+              "stopRemix",
+              "confirmRemixPreview"
+            ]
+          },
+          {
+            "path": "server/wangzhuan/router.mjs",
+            "batchIndex": 1,
+            "symbols": [
+              "handleWangzhuanRequest"
+            ]
+          },
+          {
+            "path": "tests/wangzhuan/estimates.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/orchestration.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/pipeline.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/plan-preview.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/reference-videos.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/remix.test.mjs",
+            "batchIndex": 1,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/router.test.mjs",
+            "batchIndex": 3,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/stitch.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          },
+          {
+            "path": "tests/wangzhuan/telemetry.test.mjs",
+            "batchIndex": 2,
+            "symbols": []
+          }
+        ]
+      }
+    },
+    {
+      "batchIndex": 6,
+      "files": [
+        {
+          "path": "public/competitor-remix.js",
+          "language": "javascript",
+          "sizeLines": 1062,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/wangzhuan-common.js",
+          "language": "javascript",
+          "sizeLines": 744,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/wangzhuan-task-nav.js",
+          "language": "javascript",
+          "sizeLines": 35,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/wangzhuan-tasks.js",
+          "language": "javascript",
+          "sizeLines": 608,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/wangzhuan.js",
+          "language": "javascript",
+          "sizeLines": 2144,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "public/competitor-remix.js": [
+          "public/wangzhuan-common.js",
+          "public/wangzhuan-task-nav.js"
+        ],
+        "public/wangzhuan-common.js": [],
+        "public/wangzhuan-task-nav.js": [
+          "public/wangzhuan-common.js"
+        ],
+        "public/wangzhuan-tasks.js": [
+          "public/wangzhuan-common.js"
+        ],
+        "public/wangzhuan.js": [
+          "public/wangzhuan-common.js",
+          "public/wangzhuan-task-nav.js"
+        ]
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 7,
+      "files": [
+        {
+          "path": ".dockerignore",
+          "language": "unknown",
+          "sizeLines": 16,
+          "fileCategory": "infra"
+        },
+        {
+          "path": "docker-compose.yml",
+          "language": "yaml",
+          "sizeLines": 71,
+          "fileCategory": "infra"
+        },
+        {
+          "path": "Dockerfile",
+          "language": "dockerfile",
+          "sizeLines": 23,
+          "fileCategory": "infra"
+        }
+      ],
+      "batchImportData": {
+        ".dockerignore": [],
+        "docker-compose.yml": [],
+        "Dockerfile": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 8,
+      "files": [
+        {
+          "path": "database/migrations/0001_mysql_foundation.down.sql",
+          "language": "sql",
+          "sizeLines": 38,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0001_mysql_foundation.sql",
+          "language": "sql",
+          "sizeLines": 906,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0001_mysql_foundation.verify.sql",
+          "language": "sql",
+          "sizeLines": 79,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0002_asset_object_storage.sql",
+          "language": "sql",
+          "sizeLines": 16,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0002_scope_runtime_unique_keys.down.sql",
+          "language": "sql",
+          "sizeLines": 43,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0002_scope_runtime_unique_keys.sql",
+          "language": "sql",
+          "sizeLines": 47,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0002_scope_runtime_unique_keys.verify.sql",
+          "language": "sql",
+          "sizeLines": 26,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0003_scheduler_state_machine_rules.down.sql",
+          "language": "sql",
+          "sizeLines": 4,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0003_scheduler_state_machine_rules.sql",
+          "language": "sql",
+          "sizeLines": 88,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0003_scheduler_state_machine_rules.verify.sql",
+          "language": "sql",
+          "sizeLines": 22,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0004_remix_task_qc_state_rules.down.sql",
+          "language": "sql",
+          "sizeLines": 10,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0004_remix_task_qc_state_rules.sql",
+          "language": "sql",
+          "sizeLines": 17,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0004_remix_task_qc_state_rules.verify.sql",
+          "language": "sql",
+          "sizeLines": 13,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0005_stitch_completed_task_rules.down.sql",
+          "language": "sql",
+          "sizeLines": 8,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0005_stitch_completed_task_rules.sql",
+          "language": "sql",
+          "sizeLines": 8,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0005_stitch_completed_task_rules.verify.sql",
+          "language": "sql",
+          "sizeLines": 10,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0006_db_driven_pipeline_state_rules.down.sql",
+          "language": "sql",
+          "sizeLines": 7,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0006_db_driven_pipeline_state_rules.sql",
+          "language": "sql",
+          "sizeLines": 9,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql",
+          "language": "sql",
+          "sizeLines": 11,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0007_stitch_failed_output_kind.down.sql",
+          "language": "sql",
+          "sizeLines": 9,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0007_stitch_failed_output_kind.sql",
+          "language": "sql",
+          "sizeLines": 10,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0007_stitch_failed_output_kind.verify.sql",
+          "language": "sql",
+          "sizeLines": 5,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+          "language": "sql",
+          "sizeLines": 5,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0008_pipeline_seedance_plan_preview.sql",
+          "language": "sql",
+          "sizeLines": 12,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+          "language": "sql",
+          "sizeLines": 3,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0009_remix_poll_running_state_rules.down.sql",
+          "language": "sql",
+          "sizeLines": 8,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0009_remix_poll_running_state_rules.sql",
+          "language": "sql",
+          "sizeLines": 10,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+          "language": "sql",
+          "sizeLines": 6,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0010_workflow_task_pending_preview.down.sql",
+          "language": "sql",
+          "sizeLines": 20,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0010_workflow_task_pending_preview.sql",
+          "language": "sql",
+          "sizeLines": 23,
+          "fileCategory": "data"
+        },
+        {
+          "path": "database/migrations/0010_workflow_task_pending_preview.verify.sql",
+          "language": "sql",
+          "sizeLines": 7,
+          "fileCategory": "data"
+        }
+      ],
+      "batchImportData": {
+        "database/migrations/0001_mysql_foundation.down.sql": [],
+        "database/migrations/0001_mysql_foundation.sql": [],
+        "database/migrations/0001_mysql_foundation.verify.sql": [],
+        "database/migrations/0002_asset_object_storage.sql": [],
+        "database/migrations/0002_scope_runtime_unique_keys.down.sql": [],
+        "database/migrations/0002_scope_runtime_unique_keys.sql": [],
+        "database/migrations/0002_scope_runtime_unique_keys.verify.sql": [],
+        "database/migrations/0003_scheduler_state_machine_rules.down.sql": [],
+        "database/migrations/0003_scheduler_state_machine_rules.sql": [],
+        "database/migrations/0003_scheduler_state_machine_rules.verify.sql": [],
+        "database/migrations/0004_remix_task_qc_state_rules.down.sql": [],
+        "database/migrations/0004_remix_task_qc_state_rules.sql": [],
+        "database/migrations/0004_remix_task_qc_state_rules.verify.sql": [],
+        "database/migrations/0005_stitch_completed_task_rules.down.sql": [],
+        "database/migrations/0005_stitch_completed_task_rules.sql": [],
+        "database/migrations/0005_stitch_completed_task_rules.verify.sql": [],
+        "database/migrations/0006_db_driven_pipeline_state_rules.down.sql": [],
+        "database/migrations/0006_db_driven_pipeline_state_rules.sql": [],
+        "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql": [],
+        "database/migrations/0007_stitch_failed_output_kind.down.sql": [],
+        "database/migrations/0007_stitch_failed_output_kind.sql": [],
+        "database/migrations/0007_stitch_failed_output_kind.verify.sql": [],
+        "database/migrations/0008_pipeline_seedance_plan_preview.down.sql": [],
+        "database/migrations/0008_pipeline_seedance_plan_preview.sql": [],
+        "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql": [],
+        "database/migrations/0009_remix_poll_running_state_rules.down.sql": [],
+        "database/migrations/0009_remix_poll_running_state_rules.sql": [],
+        "database/migrations/0009_remix_poll_running_state_rules.verify.sql": [],
+        "database/migrations/0010_workflow_task_pending_preview.down.sql": [],
+        "database/migrations/0010_workflow_task_pending_preview.sql": [],
+        "database/migrations/0010_workflow_task_pending_preview.verify.sql": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 9,
+      "files": [
+        {
+          "path": ".learnings/ERRORS.md",
+          "language": "markdown",
+          "sizeLines": 33,
+          "fileCategory": "docs"
+        },
+        {
+          "path": ".learnings/FEATURE_REQUESTS.md",
+          "language": "markdown",
+          "sizeLines": 5,
+          "fileCategory": "docs"
+        },
+        {
+          "path": ".learnings/LEARNINGS.md",
+          "language": "markdown",
+          "sizeLines": 7,
+          "fileCategory": "docs"
+        }
+      ],
+      "batchImportData": {
+        ".learnings/ERRORS.md": [],
+        ".learnings/FEATURE_REQUESTS.md": [],
+        ".learnings/LEARNINGS.md": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 10,
+      "files": [
+        {
+          "path": ".tmp-live-p0/current-login.json",
+          "language": "json",
+          "sizeLines": 0,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".tmp-live-p0/health-login.json",
+          "language": "json",
+          "sizeLines": 0,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".tmp-live-p0/rerun-login.json",
+          "language": "json",
+          "sizeLines": 0,
+          "fileCategory": "config"
+        }
+      ],
+      "batchImportData": {
+        ".tmp-live-p0/current-login.json": [],
+        ".tmp-live-p0/health-login.json": [],
+        ".tmp-live-p0/rerun-login.json": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 11,
+      "files": [
+        {
+          "path": ".understand-anything/config.json",
+          "language": "json",
+          "sizeLines": 2,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/fingerprints.json",
+          "language": "json",
+          "sizeLines": 12383,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/knowledge-graph.json",
+          "language": "json",
+          "sizeLines": 42847,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/meta.json",
+          "language": "json",
+          "sizeLines": 5,
+          "fileCategory": "config"
+        }
+      ],
+      "batchImportData": {
+        ".understand-anything/config.json": [],
+        ".understand-anything/fingerprints.json": [],
+        ".understand-anything/knowledge-graph.json": [],
+        ".understand-anything/meta.json": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 12,
+      "files": [
+        {
+          "path": ".understand-anything/intermediate/assembled-graph.json",
+          "language": "json",
+          "sizeLines": 42847,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/intermediate/fingerprint-input.json",
+          "language": "json",
+          "sizeLines": 115,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/intermediate/review.json",
+          "language": "json",
+          "sizeLines": 29,
+          "fileCategory": "config"
+        },
+        {
+          "path": ".understand-anything/intermediate/scan-result.json",
+          "language": "json",
+          "sizeLines": 692,
+          "fileCategory": "config"
+        }
+      ],
+      "batchImportData": {
+        ".understand-anything/intermediate/assembled-graph.json": [],
+        ".understand-anything/intermediate/fingerprint-input.json": [],
+        ".understand-anything/intermediate/review.json": [],
+        ".understand-anything/intermediate/scan-result.json": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 13,
+      "files": [
+        {
+          "path": "PRODUCT.md",
+          "language": "markdown",
+          "sizeLines": 33,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "README.md",
+          "language": "markdown",
+          "sizeLines": 252,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "config.default.json",
+          "language": "json",
+          "sizeLines": 45,
+          "fileCategory": "config"
+        },
+        {
+          "path": "config.json",
+          "language": "json",
+          "sizeLines": 56,
+          "fileCategory": "config"
+        },
+        {
+          "path": "package-release.ps1",
+          "language": "powershell",
+          "sizeLines": 89,
+          "fileCategory": "script"
+        },
+        {
+          "path": "package.json",
+          "language": "json",
+          "sizeLines": 17,
+          "fileCategory": "config"
+        },
+        {
+          "path": "start-windows.bat",
+          "language": "batch",
+          "sizeLines": 14,
+          "fileCategory": "script"
+        },
+        {
+          "path": "start-windows.ps1",
+          "language": "powershell",
+          "sizeLines": 11,
+          "fileCategory": "script"
+        },
+        {
+          "path": "test-out.txt",
+          "language": "txt",
+          "sizeLines": 424,
+          "fileCategory": "docs"
+        }
+      ],
+      "batchImportData": {
+        "PRODUCT.md": [],
+        "README.md": [],
+        "config.default.json": [],
+        "config.json": [],
+        "package-release.ps1": [],
+        "package.json": [],
+        "start-windows.bat": [],
+        "start-windows.ps1": [],
+        "test-out.txt": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 14,
+      "files": [
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+          "language": "json",
+          "sizeLines": 49,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+          "language": "json",
+          "sizeLines": 23,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+          "language": "json",
+          "sizeLines": 161,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+          "language": "json",
+          "sizeLines": 907,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+          "language": "json",
+          "sizeLines": 29,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+          "language": "json",
+          "sizeLines": 82,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+          "language": "json",
+          "sizeLines": 47,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+          "language": "json",
+          "sizeLines": 104,
+          "fileCategory": "config"
+        }
+      ],
+      "batchImportData": {
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 15,
+      "files": [
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+          "language": "json",
+          "sizeLines": 49,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+          "language": "json",
+          "sizeLines": 63,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+          "language": "json",
+          "sizeLines": 238,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+          "language": "json",
+          "sizeLines": 23,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+          "language": "json",
+          "sizeLines": 161,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+          "language": "json",
+          "sizeLines": 907,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+          "language": "json",
+          "sizeLines": 29,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+          "language": "json",
+          "sizeLines": 82,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+          "language": "json",
+          "sizeLines": 47,
+          "fileCategory": "config"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+          "language": "txt",
+          "sizeLines": 1,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+          "language": "txt",
+          "sizeLines": 2,
+          "fileCategory": "docs"
+        }
+      ],
+      "batchImportData": {
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 16,
+      "files": [
+        {
+          "path": "public/comic.html",
+          "language": "html",
+          "sizeLines": 323,
+          "fileCategory": "markup"
+        },
+        {
+          "path": "public/competitor-remix.html",
+          "language": "html",
+          "sizeLines": 187,
+          "fileCategory": "markup"
+        },
+        {
+          "path": "public/index.html",
+          "language": "html",
+          "sizeLines": 321,
+          "fileCategory": "markup"
+        },
+        {
+          "path": "public/styles.css",
+          "language": "css",
+          "sizeLines": 6586,
+          "fileCategory": "markup"
+        },
+        {
+          "path": "public/wangzhuan-tasks.html",
+          "language": "html",
+          "sizeLines": 102,
+          "fileCategory": "markup"
+        },
+        {
+          "path": "public/wangzhuan.html",
+          "language": "html",
+          "sizeLines": 419,
+          "fileCategory": "markup"
+        }
+      ],
+      "batchImportData": {
+        "public/comic.html": [],
+        "public/competitor-remix.html": [],
+        "public/index.html": [],
+        "public/styles.css": [],
+        "public/wangzhuan-tasks.html": [],
+        "public/wangzhuan.html": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 17,
+      "files": [
+        {
+          "path": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+          "language": "raw",
+          "sizeLines": 0,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-live-p0/current-login.headers",
+          "language": "headers",
+          "sizeLines": 8,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-live-p0/health-login.headers",
+          "language": "headers",
+          "sizeLines": 8,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-live-p0/rerun-login.headers",
+          "language": "headers",
+          "sizeLines": 8,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-fIXST9/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-TuyABD/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+          "language": "javascript",
+          "sizeLines": 1,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".understand-anything/.understandignore",
+          "language": "unknown",
+          "sizeLines": 36,
+          "fileCategory": "code"
+        },
+        {
+          "path": ".understand-anything/tmp/current-scan.json",
+          "language": "json",
+          "sizeLines": 1142,
+          "fileCategory": "config"
+        },
+        {
+          "path": "database/README.md",
+          "language": "markdown",
+          "sizeLines": 221,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+          "language": "webp",
+          "sizeLines": 55,
+          "fileCategory": "code"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+          "language": "wav",
+          "sizeLines": 5786,
+          "fileCategory": "code"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+          "language": "wav",
+          "sizeLines": 11489,
+          "fileCategory": "code"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+          "language": "markdown",
+          "sizeLines": 336,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+          "language": "markdown",
+          "sizeLines": 31,
+          "fileCategory": "docs"
+        },
+        {
+          "path": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+          "language": "docx",
+          "sizeLines": 4323,
+          "fileCategory": "code"
+        },
+        {
+          "path": "others/网赚产品 AI 素材管线需求拆解.docx",
+          "language": "docx",
+          "sizeLines": 7554,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/app.js",
+          "language": "javascript",
+          "sizeLines": 1597,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/comic.js",
+          "language": "javascript",
+          "sizeLines": 680,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/remix-canvas.js",
+          "language": "javascript",
+          "sizeLines": 508,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw": [],
+        ".tmp-live-p0/current-login.headers": [],
+        ".tmp-live-p0/health-login.headers": [],
+        ".tmp-live-p0/rerun-login.headers": [],
+        ".tmp-wallet-tai-F9GA9U/tai-stub.mjs": [],
+        ".tmp-wallet-tai-fIXST9/tai-stub.mjs": [],
+        ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs": [],
+        ".tmp-wallet-tai-ndxZuY/tai-stub.mjs": [],
+        ".tmp-wallet-tai-pvN9lb/tai-stub.mjs": [],
+        ".tmp-wallet-tai-sh4pOX/tai-stub.mjs": [],
+        ".tmp-wallet-tai-TuyABD/tai-stub.mjs": [],
+        ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs": [],
+        ".understand-anything/.understandignore": [],
+        ".understand-anything/tmp/current-scan.json": [],
+        "database/README.md": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md": [],
+        "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md": [],
+        "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx": [],
+        "others/网赚产品 AI 素材管线需求拆解.docx": [],
+        "public/app.js": [],
+        "public/comic.js": [],
+        "public/remix-canvas.js": []
+      },
+      "neighborMap": {}
+    },
+    {
+      "batchIndex": 18,
+      "files": [
+        {
+          "path": "public/wz-canvas.js",
+          "language": "javascript",
+          "sizeLines": 805,
+          "fileCategory": "code"
+        },
+        {
+          "path": "public/wz-stepper.js",
+          "language": "javascript",
+          "sizeLines": 59,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/docker-local.test.mjs",
+          "language": "javascript",
+          "sizeLines": 52,
+          "fileCategory": "code"
+        },
+        {
+          "path": "tests/wangzhuan/frontend-static.test.mjs",
+          "language": "javascript",
+          "sizeLines": 427,
+          "fileCategory": "code"
+        }
+      ],
+      "batchImportData": {
+        "public/wz-canvas.js": [],
+        "public/wz-stepper.js": [],
+        "tests/docker-local.test.mjs": [],
+        "tests/wangzhuan/frontend-static.test.mjs": []
+      },
+      "neighborMap": {}
+    }
+  ]
+}

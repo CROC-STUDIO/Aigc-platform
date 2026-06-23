@@ -39,16 +39,13 @@ DEFAULT_VIDEO_URL = (
     "users/admin/%E6%89%B9%E5%A4%84%E7%90%86%E8%AE%B0%E5%BD%95/"
     "%E7%BD%91%E8%B5%9A%E7%AE%A1%E7%BA%BF/reference-videos/ref_20260622_027/original.mp4"
 )
-DEFAULT_DUMP = (
-    r"C:\Users\hutin\Desktop\project\ai-gc\project-data\PROJECT_ROOT_P"
-    r"\用户数据\admin\PROJECT_ROOT_P\批处理记录\网赚管线\reference-videos"
-    r"\ref_20260622_027\llm-request-req_20260622110707_1483.json"
-)
-DEFAULT_LOCAL_VIDEO = (
-    r"C:\Users\hutin\Desktop\project\ai-gc\project-data\PROJECT_ROOT_P"
-    r"\用户数据\admin\PROJECT_ROOT_P\批处理记录\网赚管线\reference-videos"
-    r"\ref_20260622_027\original.mp4"
-)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_REFERENCE_DIR = (
+    REPO_ROOT
+    / "../project-data/PROJECT_ROOT_P/用户数据/admin/PROJECT_ROOT_P/批处理记录/网赚管线/reference-videos/ref_20260622_027"
+).resolve()
+DEFAULT_DUMP = str(DEFAULT_REFERENCE_DIR / "llm-request-req_20260622110707_1483.json")
+DEFAULT_LOCAL_VIDEO = str(DEFAULT_REFERENCE_DIR / "original.mp4")
 
 SYSTEM_PROMPT = (
     "你是网赚广告素材拆解专家，只做结构化拆解，不生成侵权复刻内容。\n"

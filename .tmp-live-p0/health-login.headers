@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Set-Cookie: ad_session=8c39149e46e476a1f34a68f8648022a853f0e96101728f57f6d00f739b000459; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly
+Content-Type: application/json; charset=utf-8
+Content-Length: 123
+Date: Thu, 18 Jun 2026 02:40:01 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+

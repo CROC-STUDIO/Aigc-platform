@@ -1240,6 +1240,12 @@ function missingStrongFields(draft) {
     .map(([key, label]) => label || key);
 }
 
+function selectedTemplateNameChanged(draft = {}) {
+  if (!state.selectedTemplate?.draft) return false;
+  return String(draft.displayName || "").trim()
+    && String(draft.displayName || "").trim() !== String(state.selectedTemplate.draft.displayName || "").trim();
+}
+
 function applyTemplate(template) {
   state.suppressTemplateUnlock = true;
   state.selectedTemplate = template || null;
@@ -1586,27 +1592,52 @@ function renderPlanPreview(batch) {
   }
   els.planBox.className = "wz-list";
   els.planBox.innerHTML = plans.map((plan) => `
-    <article class="wz-row">
+    <article class="wz-row wz-plan-editor" data-plan-id="${escapeHtml(plan.planId || "")}">
       <div>
         <strong>${escapeHtml(plan.branchLabel || plan.branchId || "分支")} / 变体 ${escapeHtml(plan.branchVariantIndex || plan.variantIndex || "-")} / 分段 ${escapeHtml(plan.segmentIndex || "-")}</strong>
         <small>${escapeHtml(plan.planId || "")}</small>
       </div>
       ${badge(plan.status || "drafted", { drafted: "待确认", confirmed: "已确认" })}
     </article>
-    <div class="wz-kv-grid">
-      ${renderKeyValues([
-        ["Hook", plan.hook],
-        ["口播", plan.voiceover || "-"],
-        ["Seedance Prompt", plan.seedancePrompt],
-        ["Negative Prompt", plan.negativePrompt || "-"],
-        ["素材引用", Object.values(plan.mediaRefs || {}).filter(Boolean).join(", ") || "-"],
-        ["合规提示", Array.isArray(plan.complianceNotes) ? plan.complianceNotes.join(" · ") : "-"]
-      ])}
+    <div class="wz-plan-edit-grid" data-plan-id="${escapeHtml(plan.planId || "")}">
+      <label>Hook
+        <textarea data-plan-field="hook" rows="2" ${plan.status === "confirmed" ? "disabled" : ""}>${escapeHtml(plan.hook || "")}</textarea>
+      </label>
+      <label>口播
+        <textarea data-plan-field="voiceover" rows="2" ${plan.status === "confirmed" ? "disabled" : ""}>${escapeHtml(plan.voiceover || "")}</textarea>
+      </label>
+      <label>Seedance Prompt
+        <textarea data-plan-field="seedancePrompt" rows="5" ${plan.status === "confirmed" ? "disabled" : ""}>${escapeHtml(plan.seedancePrompt || "")}</textarea>
+      </label>
+      <label>Negative Prompt
+        <textarea data-plan-field="negativePrompt" rows="3" ${plan.status === "confirmed" ? "disabled" : ""}>${escapeHtml(plan.negativePrompt || "")}</textarea>
+      </label>
+      <div class="wz-kv-grid">
+        ${renderKeyValues([
+          ["素材引用", Object.values(plan.mediaRefs || {}).filter(Boolean).join(", ") || "-"],
+          ["合规提示", Array.isArray(plan.complianceNotes) ? plan.complianceNotes.join(" · ") : "-"]
+        ])}
+      </div>
     </div>
   `).join("");
   syncBatchActionButtons();
   renderBatchStepProgress();
   syncFlowHints();
+}
+
+function collectEditablePlans() {
+  const batchPlans = state.batchDetail?.batch?.plans || [];
+  return batchPlans.map((plan) => {
+    const editor = els.planBox?.querySelector(`[data-plan-id="${CSS.escape(plan.planId)}"].wz-plan-edit-grid`);
+    const readField = (field) => editor?.querySelector(`[data-plan-field="${field}"]`)?.value.trim();
+    return {
+      ...plan,
+      hook: readField("hook") ?? plan.hook,
+      voiceover: readField("voiceover") ?? plan.voiceover,
+      seedancePrompt: readField("seedancePrompt") ?? plan.seedancePrompt,
+      negativePrompt: readField("negativePrompt") ?? plan.negativePrompt
+    };
+  });
 }
 
 function syncBatchNodeStatus(status = "") {
@@ -1731,13 +1762,28 @@ function renderGallery() {
         <small>${escapeHtml(item.kind)} · ${escapeHtml(item.qcStatus)} · ${escapeHtml(item.durationSec || "-")}s</small>
       </div>
       ${badge(item.qcStatus, { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" })}
-      ${item.previewUrl ? `<a href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noreferrer">预览文件</a>` : ""}
+      ${renderOutputPreview(item)}
       ${item.modelQcSummary ? `<small>模型质检 ${escapeHtml(item.modelQcSummary.score ?? "-")} · ${escapeHtml(item.modelQcSummary.summary || "")}</small>` : ""}
     </article>
   `).join("")}
     ${galleryPaginationHtml(gallery)}
   `;
   syncMetrics();
+}
+
+function isVideoPreviewItem(item = {}) {
+  const kind = String(item.kind || "").toLowerCase();
+  const url = String(item.previewUrl || item.storageUrl || "").toLowerCase();
+  return kind.includes("video") || /\.(mp4|webm|mov)(\?|#|$)/.test(url);
+}
+
+function renderOutputPreview(item = {}) {
+  const safeUrl = escapeHtml(item.previewUrl || item.storageUrl || "");
+  if (!safeUrl) return "";
+  if (isVideoPreviewItem(item)) {
+    return `<div class="wz-output-preview"><video src="${safeUrl}" controls preload="metadata" playsinline></video></div>`;
+  }
+  return `<a href="${safeUrl}" target="_blank" rel="noreferrer">预览文件</a>`;
 }
 
 function renderStartError(error) {
@@ -1808,7 +1854,9 @@ async function saveTemplate() {
   setBusy(els.createTemplateBtn, true, "保存中");
   try {
     const body = state.selectedTemplate
-      ? { mode: "edit_new_version", templateId: state.selectedTemplate.templateId, draft }
+      ? selectedTemplateNameChanged(draft)
+        ? { mode: "copy", copyFromVersionId: state.selectedTemplate.versionId, draft }
+        : { mode: "edit_new_version", templateId: state.selectedTemplate.templateId, draft }
       : { mode: "create", draft };
     const data = await apiEnvelope("/api/wangzhuan/templates", { method: "POST", body: JSON.stringify(body) });
     state.selectedTemplate = data.template;
@@ -2081,7 +2129,7 @@ async function confirmPlanBatch() {
   clearError(els.globalError);
   setBusy(els.confirmPlanBtn, true, "确认中");
   try {
-    const data = await confirmBatchPlanRequest(batchId, plans);
+    const data = await confirmBatchPlanRequest(batchId, collectEditablePlans());
     if (data.batch?.batchId) {
       state.batchDetail = await loadBatchDetail();
     } else {

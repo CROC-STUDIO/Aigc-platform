@@ -3,29 +3,35 @@
   "project": {
     "name": "Touka AI素材中台",
     "languages": [
-      "json",
-      "sql",
-      "markdown",
-      "yaml",
-      "dockerfile",
-      "powershell",
-      "javascript",
-      "html",
+      "batch",
       "css",
-      "batch"
+      "dockerfile",
+      "docx",
+      "headers",
+      "html",
+      "javascript",
+      "json",
+      "markdown",
+      "powershell",
+      "raw",
+      "sql",
+      "txt",
+      "unknown",
+      "wav",
+      "webp",
+      "yaml"
     ],
     "frameworks": [
-      "Node.js http",
-      "Vanilla JavaScript",
       "MySQL",
+      "AWS S3 compatible storage",
       "Docker",
-      "Tai CLI",
-      "Seedance 2.0",
-      "AWS S3 compatible storage"
+      "Docker Compose",
+      "Node.js http",
+      "Vanilla JavaScript"
     ],
-    "description": "本地 Node Web 工具，用于按项目和用户管理 AIGC 广告素材，上传或导入竞品参考图和视频，反推提示词，并通过 Tai CLI、gpt-image-2 与 Seedance 2.0 批量生成图片和视频；当前版本增加 MySQL 持久化、对象存储、调度状态机、QC 和下载包能力。",
-    "analyzedAt": "2026-06-22T07:02:32.028Z",
-    "gitCommitHash": "04fac9dd0f988b61234994e24b3ff76dae111bd3"
+    "description": "Touka AI素材中台是一个 Node.js Web 工具，用于按项目和用户管理 AIGC 广告素材，支持网赚素材参考视频拆解、脚本裂变、Seedance 视频生成、竞品素材修改、MySQL 持久化、对象存储、调度、QC 和下载交付。 Note: this project has over 100 source files; consider scoping analysis to a subdirectory for faster results.",
+    "analyzedAt": "2026-06-23T01:26:50.263Z",
+    "gitCommitHash": "aa0cd22fdba1d4c4ce0d086f6f96dcf50d44b0a9"
   },
   "nodes": [
     {
@@ -20521,6 +20527,918 @@
         "function",
         "javascript",
         "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:.learnings/ERRORS.md",
+      "type": "document",
+      "name": "ERRORS.md",
+      "filePath": ".learnings/ERRORS.md",
+      "summary": ".learnings/ERRORS.md 是 文档，语言/格式为 markdown，约 33 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "markdown"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:.learnings/FEATURE_REQUESTS.md",
+      "type": "document",
+      "name": "FEATURE_REQUESTS.md",
+      "filePath": ".learnings/FEATURE_REQUESTS.md",
+      "summary": ".learnings/FEATURE_REQUESTS.md 是 文档，语言/格式为 markdown，约 5 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "markdown"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:.learnings/LEARNINGS.md",
+      "type": "document",
+      "name": "LEARNINGS.md",
+      "filePath": ".learnings/LEARNINGS.md",
+      "summary": ".learnings/LEARNINGS.md 是 文档，语言/格式为 markdown，约 7 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "markdown"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+      "type": "file",
+      "name": "reference-breakdown-confirm.raw",
+      "filePath": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+      "summary": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw 是 源代码文件，语言/格式为 raw，约 0 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "raw"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-live-p0/current-login.headers",
+      "type": "file",
+      "name": "current-login.headers",
+      "filePath": ".tmp-live-p0/current-login.headers",
+      "summary": ".tmp-live-p0/current-login.headers 是 源代码文件，语言/格式为 headers，约 8 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "headers"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.tmp-live-p0/current-login.json",
+      "type": "config",
+      "name": "current-login.json",
+      "filePath": ".tmp-live-p0/current-login.json",
+      "summary": ".tmp-live-p0/current-login.json 是 配置文件，语言/格式为 json，约 0 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-live-p0/health-login.headers",
+      "type": "file",
+      "name": "health-login.headers",
+      "filePath": ".tmp-live-p0/health-login.headers",
+      "summary": ".tmp-live-p0/health-login.headers 是 源代码文件，语言/格式为 headers，约 8 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "headers"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.tmp-live-p0/health-login.json",
+      "type": "config",
+      "name": "health-login.json",
+      "filePath": ".tmp-live-p0/health-login.json",
+      "summary": ".tmp-live-p0/health-login.json 是 配置文件，语言/格式为 json，约 0 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-live-p0/live-p0-validate.mjs",
+      "type": "file",
+      "name": "live-p0-validate.mjs",
+      "filePath": ".tmp-live-p0/live-p0-validate.mjs",
+      "summary": ".tmp-live-p0/live-p0-validate.mjs 是 源代码文件，语言/格式为 javascript，约 332 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:.tmp-live-p0/rerun-login.headers",
+      "type": "file",
+      "name": "rerun-login.headers",
+      "filePath": ".tmp-live-p0/rerun-login.headers",
+      "summary": ".tmp-live-p0/rerun-login.headers 是 源代码文件，语言/格式为 headers，约 8 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "headers"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.tmp-live-p0/rerun-login.json",
+      "type": "config",
+      "name": "rerun-login.json",
+      "filePath": ".tmp-live-p0/rerun-login.json",
+      "summary": ".tmp-live-p0/rerun-login.json 是 配置文件，语言/格式为 json，约 0 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-fIXST9/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-fIXST9/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-fIXST9/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-TuyABD/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-TuyABD/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-TuyABD/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+      "type": "file",
+      "name": "tai-stub.mjs",
+      "filePath": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+      "summary": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs 是 源代码文件，语言/格式为 javascript，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.understand-anything/.understandignore",
+      "type": "file",
+      "name": ".understandignore",
+      "filePath": ".understand-anything/.understandignore",
+      "summary": ".understand-anything/.understandignore 是 源代码文件，语言/格式为 unknown，约 36 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "unknown"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.understand-anything/tmp/current-scan.json",
+      "type": "config",
+      "name": "current-scan.json",
+      "filePath": ".understand-anything/tmp/current-scan.json",
+      "summary": ".understand-anything/tmp/current-scan.json 是 配置文件，语言/格式为 json，约 1142 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "schema:database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+      "type": "schema",
+      "name": "0008_pipeline_seedance_plan_preview.down.sql",
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+      "summary": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql 是 数据或迁移文件，语言/格式为 sql，约 5 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0008_pipeline_seedance_plan_preview.sql",
+      "type": "schema",
+      "name": "0008_pipeline_seedance_plan_preview.sql",
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.sql",
+      "summary": "database/migrations/0008_pipeline_seedance_plan_preview.sql 是 数据或迁移文件，语言/格式为 sql，约 12 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+      "type": "schema",
+      "name": "0008_pipeline_seedance_plan_preview.verify.sql",
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+      "summary": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql 是 数据或迁移文件，语言/格式为 sql，约 3 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0009_remix_poll_running_state_rules.down.sql",
+      "type": "schema",
+      "name": "0009_remix_poll_running_state_rules.down.sql",
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.down.sql",
+      "summary": "database/migrations/0009_remix_poll_running_state_rules.down.sql 是 数据或迁移文件，语言/格式为 sql，约 8 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0009_remix_poll_running_state_rules.sql",
+      "type": "schema",
+      "name": "0009_remix_poll_running_state_rules.sql",
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.sql",
+      "summary": "database/migrations/0009_remix_poll_running_state_rules.sql 是 数据或迁移文件，语言/格式为 sql，约 10 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+      "type": "schema",
+      "name": "0009_remix_poll_running_state_rules.verify.sql",
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+      "summary": "database/migrations/0009_remix_poll_running_state_rules.verify.sql 是 数据或迁移文件，语言/格式为 sql，约 6 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0010_workflow_task_pending_preview.down.sql",
+      "type": "schema",
+      "name": "0010_workflow_task_pending_preview.down.sql",
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.down.sql",
+      "summary": "database/migrations/0010_workflow_task_pending_preview.down.sql 是 数据或迁移文件，语言/格式为 sql，约 20 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0010_workflow_task_pending_preview.sql",
+      "type": "schema",
+      "name": "0010_workflow_task_pending_preview.sql",
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.sql",
+      "summary": "database/migrations/0010_workflow_task_pending_preview.sql 是 数据或迁移文件，语言/格式为 sql，约 23 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "schema:database/migrations/0010_workflow_task_pending_preview.verify.sql",
+      "type": "schema",
+      "name": "0010_workflow_task_pending_preview.verify.sql",
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.verify.sql",
+      "summary": "database/migrations/0010_workflow_task_pending_preview.verify.sql 是 数据或迁移文件，语言/格式为 sql，约 7 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "data",
+        "sql"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+      "type": "file",
+      "name": "DramaGold.webp",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp 是 源代码文件，语言/格式为 webp，约 55 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "webp"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+      "type": "config",
+      "name": "00-brief.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json 是 配置文件，语言/格式为 json，约 49 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+      "type": "config",
+      "name": "04-assets.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json 是 配置文件，语言/格式为 json，约 23 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+      "type": "config",
+      "name": "04-seedance-prompts.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json 是 配置文件，语言/格式为 json，约 161 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+      "type": "config",
+      "name": "05-video-tasks.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json 是 配置文件，语言/格式为 json，约 907 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+      "type": "config",
+      "name": "06-rerun-log.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json 是 配置文件，语言/格式为 json，约 29 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+      "type": "config",
+      "name": "07-final-ffprobe.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json 是 配置文件，语言/格式为 json，约 82 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+      "type": "config",
+      "name": "08-final-audio-check.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json 是 配置文件，语言/格式为 json，约 47 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+      "type": "config",
+      "name": "delivery-manifest.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json 是 配置文件，语言/格式为 json，约 104 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+      "type": "config",
+      "name": "00-brief.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json 是 配置文件，语言/格式为 json，约 49 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+      "type": "config",
+      "name": "01-reference-breakdown.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json 是 配置文件，语言/格式为 json，约 63 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+      "type": "config",
+      "name": "03-localized-variants.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json 是 配置文件，语言/格式为 json，约 238 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+      "type": "config",
+      "name": "04-assets.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json 是 配置文件，语言/格式为 json，约 23 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+      "type": "config",
+      "name": "04-seedance-prompts.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json 是 配置文件，语言/格式为 json，约 161 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+      "type": "config",
+      "name": "05-video-tasks.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json 是 配置文件，语言/格式为 json，约 907 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+      "type": "config",
+      "name": "06-rerun-log.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json 是 配置文件，语言/格式为 json，约 29 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+      "type": "config",
+      "name": "07-final-ffprobe.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json 是 配置文件，语言/格式为 json，约 82 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+      "type": "config",
+      "name": "08-final-audio-check.json",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json 是 配置文件，语言/格式为 json，约 47 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "config",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+      "type": "document",
+      "name": "bus-01-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+      "type": "document",
+      "name": "bus-02-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+      "type": "document",
+      "name": "bus-03-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+      "type": "document",
+      "name": "delivery-01-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+      "type": "document",
+      "name": "delivery-02-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+      "type": "document",
+      "name": "delivery-03-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+      "type": "document",
+      "name": "factory-01-B-rerun-prompt.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt 是 文档，语言/格式为 txt，约 1 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+      "type": "document",
+      "name": "factory-01-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+      "type": "document",
+      "name": "factory-02-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+      "type": "document",
+      "name": "factory-03-concat.txt",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt 是 文档，语言/格式为 txt，约 2 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+      "type": "file",
+      "name": "ref1.wav",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav 是 源代码文件，语言/格式为 wav，约 5786 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "wav"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+      "type": "file",
+      "name": "ref2.wav",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav 是 源代码文件，语言/格式为 wav，约 11489 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "wav"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+      "type": "document",
+      "name": "general-reference-video-to-localized-ads-使用说明.md",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md 是 文档，语言/格式为 markdown，约 336 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "markdown"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+      "type": "document",
+      "name": "案例说明.md",
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+      "summary": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md 是 文档，语言/格式为 markdown，约 31 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "markdown"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "type": "file",
+      "name": "智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "filePath": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "summary": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx 是 源代码文件，语言/格式为 docx，约 4323 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "docx"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:others/网赚产品 AI 素材管线需求拆解.docx",
+      "type": "file",
+      "name": "网赚产品 AI 素材管线需求拆解.docx",
+      "filePath": "others/网赚产品 AI 素材管线需求拆解.docx",
+      "summary": "others/网赚产品 AI 素材管线需求拆解.docx 是 源代码文件，语言/格式为 docx，约 7554 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "docx"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:public/wangzhuan-task-nav.js",
+      "type": "file",
+      "name": "wangzhuan-task-nav.js",
+      "filePath": "public/wangzhuan-task-nav.js",
+      "summary": "public/wangzhuan-task-nav.js 是 源代码文件，语言/格式为 javascript，约 35 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:public/wangzhuan-tasks.html",
+      "type": "file",
+      "name": "wangzhuan-tasks.html",
+      "filePath": "public/wangzhuan-tasks.html",
+      "summary": "public/wangzhuan-tasks.html 是 前端页面或样式文件，语言/格式为 html，约 102 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "markup",
+        "html"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:public/wangzhuan-tasks.js",
+      "type": "file",
+      "name": "wangzhuan-tasks.js",
+      "filePath": "public/wangzhuan-tasks.js",
+      "summary": "public/wangzhuan-tasks.js 是 源代码文件，语言/格式为 javascript，约 608 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/wangzhuan/decomposition-text.mjs",
+      "type": "file",
+      "name": "decomposition-text.mjs",
+      "filePath": "server/wangzhuan/decomposition-text.mjs",
+      "summary": "server/wangzhuan/decomposition-text.mjs 是 源代码文件，语言/格式为 javascript，约 66 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/wangzhuan/plan-preview.mjs",
+      "type": "file",
+      "name": "plan-preview.mjs",
+      "filePath": "server/wangzhuan/plan-preview.mjs",
+      "summary": "server/wangzhuan/plan-preview.mjs 是 源代码文件，语言/格式为 javascript，约 223 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/wangzhuan/tasks.mjs",
+      "type": "file",
+      "name": "tasks.mjs",
+      "filePath": "server/wangzhuan/tasks.mjs",
+      "summary": "server/wangzhuan/tasks.mjs 是 源代码文件，语言/格式为 javascript，约 10 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:test-out.txt",
+      "type": "document",
+      "name": "test-out.txt",
+      "filePath": "test-out.txt",
+      "summary": "test-out.txt 是 文档，语言/格式为 txt，约 424 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "docs",
+        "txt"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:tests/wangzhuan/decomposition-text.test.mjs",
+      "type": "file",
+      "name": "decomposition-text.test.mjs",
+      "filePath": "tests/wangzhuan/decomposition-text.test.mjs",
+      "summary": "tests/wangzhuan/decomposition-text.test.mjs 是 源代码文件，语言/格式为 javascript，约 39 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "file",
+      "name": "object-storage-fixture.mjs",
+      "filePath": "tests/wangzhuan/object-storage-fixture.mjs",
+      "summary": "tests/wangzhuan/object-storage-fixture.mjs 是 源代码文件，语言/格式为 javascript，约 35 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "type": "file",
+      "name": "plan-preview.test.mjs",
+      "filePath": "tests/wangzhuan/plan-preview.test.mjs",
+      "summary": "tests/wangzhuan/plan-preview.test.mjs 是 源代码文件，语言/格式为 javascript，约 296 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/wangzhuan/tasks.test.mjs",
+      "type": "file",
+      "name": "tasks.test.mjs",
+      "filePath": "tests/wangzhuan/tasks.test.mjs",
+      "summary": "tests/wangzhuan/tasks.test.mjs 是 源代码文件，语言/格式为 javascript，约 54 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "file",
+      "name": "test-providers.mjs",
+      "filePath": "tests/wangzhuan/test-providers.mjs",
+      "summary": "tests/wangzhuan/test-providers.mjs 是 源代码文件，语言/格式为 javascript，约 83 行。该节点由当前分支的 Understand 确定性扫描补齐。",
+      "tags": [
+        "code",
+        "javascript"
       ],
       "complexity": "simple"
     }
@@ -42525,131 +43443,1781 @@
       "direction": "forward",
       "description": "database/README.md documents database/migrations/0001_mysql_foundation.sql.",
       "weight": 0.5
+    },
+    {
+      "source": "file:.tmp-live-p0/live-p0-validate.mjs",
+      "target": "file:server.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": ".tmp-live-p0/live-p0-validate.mjs imports server.mjs"
+    },
+    {
+      "source": "file:public/competitor-remix.js",
+      "target": "file:public/wangzhuan-common.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/competitor-remix.js imports public/wangzhuan-common.js"
+    },
+    {
+      "source": "file:public/competitor-remix.js",
+      "target": "file:public/wangzhuan-task-nav.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/competitor-remix.js imports public/wangzhuan-task-nav.js"
+    },
+    {
+      "source": "file:public/wangzhuan-task-nav.js",
+      "target": "file:public/wangzhuan-common.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/wangzhuan-task-nav.js imports public/wangzhuan-common.js"
+    },
+    {
+      "source": "file:public/wangzhuan-tasks.js",
+      "target": "file:public/wangzhuan-common.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/wangzhuan-tasks.js imports public/wangzhuan-common.js"
+    },
+    {
+      "source": "file:public/wangzhuan.js",
+      "target": "file:public/wangzhuan-common.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/wangzhuan.js imports public/wangzhuan-common.js"
+    },
+    {
+      "source": "file:public/wangzhuan.js",
+      "target": "file:public/wangzhuan-task-nav.js",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "public/wangzhuan.js imports public/wangzhuan-task-nav.js"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/auth-store.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/auth-store.mjs"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/object-storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/object-storage.mjs"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/project-file-paths.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/project-file-paths.mjs"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/runtime-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/runtime-config.mjs"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/wangzhuan/router.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/wangzhuan/router.mjs"
+    },
+    {
+      "source": "file:server.mjs",
+      "target": "file:server/wangzhuan/scheduler.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server.mjs imports server/wangzhuan/scheduler.mjs"
+    },
+    {
+      "source": "file:server/auth-store.mjs",
+      "target": "file:server/runtime-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/auth-store.mjs imports server/runtime-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/channel-rules.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/channel-rules.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/channel-rules.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/channel-rules.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/channel-rules.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/channel-rules.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/config.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/config.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/branches.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/branches.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/seedance-provider.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/seedance-provider.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/estimates.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/estimates.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/gallery.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/gallery.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/gallery.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/gallery.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/http.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/http.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/mysql-facts.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/mysql-facts.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/mysql-facts.mjs",
+      "target": "file:server/wangzhuan/pagination.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/mysql-facts.mjs imports server/wangzhuan/pagination.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/package.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/package.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/package.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/package.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/package.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/package.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/package.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/package.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/package.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/package.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/branches.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/branches.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/channel-rules.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/channel-rules.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/plan-preview.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/plan-preview.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/seedance-provider.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/seedance-provider.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/pipeline.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/pipeline.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/plan-preview.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/plan-preview.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/plan-preview.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/plan-preview.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/plan-preview.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/plan-preview.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/plan-preview.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/plan-preview.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/plan-preview.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/plan-preview.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/product-assets.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/product-assets.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/product-assets.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/product-assets.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/object-storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/object-storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/channel-rules.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/channel-rules.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/qc.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/qc.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/object-storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/object-storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/decomposition-text.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/decomposition-text.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/reference-videos.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/reference-videos.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix-provider.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix-provider.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/remix-provider.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/remix-provider.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/remix.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/remix.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/channel-rules.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/channel-rules.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/gallery.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/gallery.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/package.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/package.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/product-assets.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/product-assets.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/qc.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/qc.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/remix.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/remix.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/tasks.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/tasks.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/router.mjs",
+      "target": "file:server/wangzhuan/upstream-poll.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/router.mjs imports server/wangzhuan/upstream-poll.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/scheduler.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/scheduler.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/scheduler.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/scheduler.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/scheduler.mjs",
+      "target": "file:server/wangzhuan/upstream-poll.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/scheduler.mjs imports server/wangzhuan/upstream-poll.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/seedance-provider.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/seedance-provider.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/seedance-provider.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/seedance-provider.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/stitch.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/stitch.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/stitch.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/stitch.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/stitch.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/stitch.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/stitch.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/stitch.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/stitch.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/stitch.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/storage.mjs",
+      "target": "file:server/object-storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/storage.mjs imports server/object-storage.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/storage.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/storage.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/tasks.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/tasks.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/tasks.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/tasks.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/telemetry.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/telemetry.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/telemetry.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/telemetry.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/telemetry.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/telemetry.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/templates.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/templates.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/templates.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/templates.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/templates.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/templates.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/templates.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/templates.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/templates.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/templates.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/upstream-poll.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/upstream-poll.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/upstream-poll.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/upstream-poll.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/upstream-poll.mjs",
+      "target": "file:server/wangzhuan/seedance-provider.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/upstream-poll.mjs imports server/wangzhuan/seedance-provider.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/upstream-poll.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/upstream-poll.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:server/wangzhuan/upstream-poll.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "server/wangzhuan/upstream-poll.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/auth-store.test.mjs",
+      "target": "file:server/auth-store.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/auth-store.test.mjs imports server/auth-store.mjs"
+    },
+    {
+      "source": "file:tests/object-storage.test.mjs",
+      "target": "file:server/object-storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/object-storage.test.mjs imports server/object-storage.mjs"
+    },
+    {
+      "source": "file:tests/project-file-paths.test.mjs",
+      "target": "file:server/project-file-paths.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/project-file-paths.test.mjs imports server/project-file-paths.mjs"
+    },
+    {
+      "source": "file:tests/runtime-config.test.mjs",
+      "target": "file:server/runtime-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/runtime-config.test.mjs imports server/runtime-config.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/decomposition-text.test.mjs",
+      "target": "file:server/wangzhuan/decomposition-text.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/decomposition-text.test.mjs imports server/wangzhuan/decomposition-text.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/estimates.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/estimates.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/ids.test.mjs",
+      "target": "file:server/wangzhuan/ids.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/ids.test.mjs imports server/wangzhuan/ids.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/llm-config.test.mjs",
+      "target": "file:server/wangzhuan/llm-config.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/llm-config.test.mjs imports server/wangzhuan/llm-config.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/mysql-facts.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/mysql-facts.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/mysql-facts.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/mysql-facts.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:server/wangzhuan/upstream-poll.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports server/wangzhuan/upstream-poll.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/orchestration.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/orchestration.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/pipeline.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/pipeline.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/plan-preview.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/plan-preview.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/gallery.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/gallery.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/package.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/package.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/qc.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/qc.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/router.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/router.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/qc-gallery-package.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/qc-gallery-package.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/reference-videos.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/reference-videos.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/reference-videos.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/reference-videos.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/reference-videos.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/reference-videos.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/reference-videos.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/reference-videos.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/gallery.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/gallery.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/http.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/http.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/package.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/package.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/remix.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/remix.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/router.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/router.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/remix.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/remix.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/remix.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/remix.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/router.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/router.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/router.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/router.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/scheduler.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/scheduler.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/scheduler.test.mjs",
+      "target": "file:server/wangzhuan/scheduler.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/scheduler.test.mjs imports server/wangzhuan/scheduler.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/scheduler.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/scheduler.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/scheduler.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/scheduler.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/scheduler.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/scheduler.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/seedance-provider.test.mjs",
+      "target": "file:server/wangzhuan/seedance-provider.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/seedance-provider.test.mjs imports server/wangzhuan/seedance-provider.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:server/wangzhuan/upstream-poll.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports server/wangzhuan/upstream-poll.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/stitch.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/stitch.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/storage.test.mjs",
+      "target": "file:server/wangzhuan/storage.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/storage.test.mjs imports server/wangzhuan/storage.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/tasks.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/tasks.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/tasks.test.mjs",
+      "target": "file:server/wangzhuan/tasks.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/tasks.test.mjs imports server/wangzhuan/tasks.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/tasks.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/tasks.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/estimates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/estimates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/package.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/package.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/pipeline.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/pipeline.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/qc.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/qc.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/reference-videos.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/reference-videos.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/remix.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/remix.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/stitch.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/stitch.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/telemetry.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/telemetry.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:server/wangzhuan/upstream-poll.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports server/wangzhuan/upstream-poll.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:tests/wangzhuan/object-storage-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports tests/wangzhuan/object-storage-fixture.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/telemetry.test.mjs",
+      "target": "file:tests/wangzhuan/test-providers.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/telemetry.test.mjs imports tests/wangzhuan/test-providers.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+      "target": "file:server/wangzhuan/channel-rules.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/templates-channel-rules.test.mjs imports server/wangzhuan/channel-rules.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+      "target": "file:server/wangzhuan/constants.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/templates-channel-rules.test.mjs imports server/wangzhuan/constants.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+      "target": "file:server/wangzhuan/mysql-facts.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/templates-channel-rules.test.mjs imports server/wangzhuan/mysql-facts.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+      "target": "file:server/wangzhuan/templates.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/templates-channel-rules.test.mjs imports server/wangzhuan/templates.mjs"
+    },
+    {
+      "source": "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+      "target": "file:tests/wangzhuan/mysql-facts-fixture.mjs",
+      "type": "imports",
+      "weight": 0.7,
+      "description": "tests/wangzhuan/templates-channel-rules.test.mjs imports tests/wangzhuan/mysql-facts-fixture.mjs"
     }
   ],
   "layers": [
     {
-      "id": "layer:docs",
+      "id": "layer:docs-product",
       "name": "文档与产品说明",
-      "description": "README、产品说明和运维说明，解释业务目标、运行方式和交付边界。",
+      "description": "文档与产品说明相关文件，按当前分支文件清单自动归层。",
       "nodeIds": [
+        "document:.learnings/ERRORS.md",
+        "document:.learnings/FEATURE_REQUESTS.md",
+        "document:.learnings/LEARNINGS.md",
+        "document:database/README.md",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+        "document:others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
         "document:PRODUCT.md",
-        "document:README.md"
+        "document:README.md",
+        "document:test-out.txt"
       ]
     },
     {
-      "id": "layer:deployment",
+      "id": "layer:deploy-runtime",
       "name": "部署与启动",
-      "description": "Docker、本地启动脚本和包管理清单，定义服务如何安装、启动和部署。",
+      "description": "部署与启动相关文件，按当前分支文件清单自动归层。",
       "nodeIds": [
         "config:.dockerignore",
         "service:docker-compose.yml",
         "service:Dockerfile",
-        "config:package.json",
         "file:start-windows.bat",
-        "file:start-windows.ps1",
-        "service:Dockerfile:node",
-        "pipeline:Dockerfile:FROM node:22.11.0-bookworm-slim",
-        "pipeline:Dockerfile:ENV NODE_ENV=production",
-        "pipeline:Dockerfile:WORKDIR /app",
-        "pipeline:Dockerfile:RUN apt-get update \\",
-        "pipeline:Dockerfile:COPY --chown=node:node package*.json ./",
-        "pipeline:Dockerfile:RUN npm ci --omit=dev",
-        "pipeline:Dockerfile:COPY --chown=node:node . .",
-        "pipeline:Dockerfile:USER node",
-        "pipeline:Dockerfile:EXPOSE 5182",
-        "pipeline:Dockerfile:HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\",
-        "pipeline:Dockerfile:CMD [\"node\", \"server.mjs\"]"
+        "file:start-windows.ps1"
       ]
     },
     {
-      "id": "layer:configuration",
-      "name": "配置与分析元数据",
-      "description": "运行配置、默认参数和 understand 分析配置。",
+      "id": "layer:config-data",
+      "name": "配置与数据结构",
+      "description": "配置与数据结构相关文件，按当前分支文件清单自动归层。",
       "nodeIds": [
+        "config:.tmp-live-p0/current-login.json",
+        "config:.tmp-live-p0/health-login.json",
+        "config:.tmp-live-p0/rerun-login.json",
         "config:.understand-anything/config.json",
         "config:.understand-anything/fingerprints.json",
-        "config:.understand-anything/knowledge-graph.json",
-        "config:.understand-anything/meta.json",
         "config:.understand-anything/intermediate/assembled-graph.json",
         "config:.understand-anything/intermediate/fingerprint-input.json",
         "config:.understand-anything/intermediate/review.json",
         "config:.understand-anything/intermediate/scan-result.json",
+        "config:.understand-anything/knowledge-graph.json",
+        "config:.understand-anything/meta.json",
+        "config:.understand-anything/tmp/current-scan.json",
         "config:config.default.json",
         "config:config.json",
-        "config:.understand-anything/.understandignore"
-      ]
-    },
-    {
-      "id": "layer:backend",
-      "name": "后端 HTTP 与基础服务",
-      "description": "Node HTTP 入口、认证、对象存储、运行时配置和项目路径基础能力。",
-      "nodeIds": [
-        "file:server.mjs",
-        "file:server/auth-store.mjs",
-        "file:server/object-storage.mjs",
-        "file:server/project-file-paths.mjs",
-        "file:server/runtime-config.mjs"
-      ]
-    },
-    {
-      "id": "layer:wangzhuan-domain",
-      "name": "网赚素材业务域",
-      "description": "素材管线、调度、上游模型、质检、下载包、分页、模板和渠道规则。",
-      "nodeIds": [
-        "file:server/wangzhuan/branches.mjs",
-        "file:server/wangzhuan/channel-rules.mjs",
-        "file:server/wangzhuan/config.mjs",
-        "file:server/wangzhuan/constants.mjs",
-        "file:server/wangzhuan/estimates.mjs",
-        "file:server/wangzhuan/gallery.mjs",
-        "file:server/wangzhuan/http.mjs",
-        "file:server/wangzhuan/ids.mjs",
-        "file:server/wangzhuan/llm-config.mjs",
-        "file:server/wangzhuan/mysql-facts.mjs",
-        "file:server/wangzhuan/package.mjs",
-        "file:server/wangzhuan/pagination.mjs",
-        "file:server/wangzhuan/pipeline.mjs",
-        "file:server/wangzhuan/product-assets.mjs",
-        "file:server/wangzhuan/qc.mjs",
-        "file:server/wangzhuan/reference-videos.mjs",
-        "file:server/wangzhuan/remix-provider.mjs",
-        "file:server/wangzhuan/remix.mjs",
-        "file:server/wangzhuan/router.mjs",
-        "file:server/wangzhuan/scheduler.mjs",
-        "file:server/wangzhuan/seedance-provider.mjs",
-        "file:server/wangzhuan/stitch.mjs",
-        "file:server/wangzhuan/storage.mjs",
-        "file:server/wangzhuan/telemetry.mjs",
-        "file:server/wangzhuan/templates.mjs",
-        "file:server/wangzhuan/upstream-poll.mjs"
-      ]
-    },
-    {
-      "id": "layer:frontend",
-      "name": "前端素材工作台",
-      "description": "HTML、CSS 和浏览器脚本，承载素材选择、画布、批次运行和结果展示。",
-      "nodeIds": [
-        "file:public/comic.html",
-        "file:public/competitor-remix.html",
-        "file:public/index.html",
-        "file:public/styles.css",
-        "file:public/wangzhuan.html",
-        "file:public/app.js",
-        "file:public/comic.js",
-        "file:public/competitor-remix.js",
-        "file:public/remix-canvas.js",
-        "file:public/wangzhuan-common.js",
-        "file:public/wangzhuan.js",
-        "file:public/wz-canvas.js",
-        "file:public/wz-stepper.js"
-      ]
-    },
-    {
-      "id": "layer:database",
-      "name": "数据库与迁移",
-      "description": "MySQL schema、迁移、回滚和验证脚本，支撑账号、素材、任务和审计数据。",
-      "nodeIds": [
         "schema:database/migrations/0001_mysql_foundation.down.sql",
         "schema:database/migrations/0001_mysql_foundation.sql",
         "schema:database/migrations/0001_mysql_foundation.verify.sql",
@@ -42672,63 +45240,92 @@
         "schema:database/migrations/0007_stitch_failed_output_kind.down.sql",
         "schema:database/migrations/0007_stitch_failed_output_kind.sql",
         "schema:database/migrations/0007_stitch_failed_output_kind.verify.sql",
-        "document:database/README.md",
-        "table:database/migrations/0001_mysql_foundation.sql:app_schema_migrations",
-        "table:database/migrations/0001_mysql_foundation.sql:app_users",
-        "table:database/migrations/0001_mysql_foundation.sql:auth_sessions",
-        "table:database/migrations/0001_mysql_foundation.sql:auth_login_attempts",
-        "table:database/migrations/0001_mysql_foundation.sql:rbac_roles",
-        "table:database/migrations/0001_mysql_foundation.sql:rbac_permissions",
-        "table:database/migrations/0001_mysql_foundation.sql:rbac_role_permissions",
-        "table:database/migrations/0001_mysql_foundation.sql:user_roles",
-        "table:database/migrations/0001_mysql_foundation.sql:projects",
-        "table:database/migrations/0001_mysql_foundation.sql:project_members",
-        "table:database/migrations/0001_mysql_foundation.sql:asset_files",
-        "table:database/migrations/0001_mysql_foundation.sql:product_templates",
-        "table:database/migrations/0001_mysql_foundation.sql:product_template_versions",
-        "table:database/migrations/0001_mysql_foundation.sql:project_default_template_versions",
-        "table:database/migrations/0001_mysql_foundation.sql:channel_rules",
-        "table:database/migrations/0001_mysql_foundation.sql:reference_videos",
-        "table:database/migrations/0001_mysql_foundation.sql:video_decompositions",
-        "table:database/migrations/0001_mysql_foundation.sql:work_estimates",
-        "table:database/migrations/0001_mysql_foundation.sql:workflow_runs",
-        "table:database/migrations/0001_mysql_foundation.sql:generation_scripts",
-        "table:database/migrations/0001_mysql_foundation.sql:workflow_tasks",
-        "table:database/migrations/0001_mysql_foundation.sql:task_attempts",
-        "table:database/migrations/0001_mysql_foundation.sql:scheduler_jobs",
-        "table:database/migrations/0001_mysql_foundation.sql:workflow_outputs",
-        "table:database/migrations/0001_mysql_foundation.sql:qc_reports",
-        "table:database/migrations/0001_mysql_foundation.sql:stitch_reports",
-        "table:database/migrations/0001_mysql_foundation.sql:remix_regions",
-        "table:database/migrations/0001_mysql_foundation.sql:download_packages",
-        "table:database/migrations/0001_mysql_foundation.sql:download_package_items",
-        "table:database/migrations/0001_mysql_foundation.sql:idempotency_keys",
-        "table:database/migrations/0001_mysql_foundation.sql:state_transition_rules",
-        "table:database/migrations/0001_mysql_foundation.sql:state_transition_events",
-        "table:database/migrations/0001_mysql_foundation.sql:resource_locks",
-        "table:database/migrations/0001_mysql_foundation.sql:audit_events",
-        "table:database/migrations/0001_mysql_foundation.sql:telemetry_events",
-        "table:database/migrations/0002_asset_object_storage.sql:idx_asset_files_storage_key"
+        "schema:database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+        "schema:database/migrations/0008_pipeline_seedance_plan_preview.sql",
+        "schema:database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+        "schema:database/migrations/0009_remix_poll_running_state_rules.down.sql",
+        "schema:database/migrations/0009_remix_poll_running_state_rules.sql",
+        "schema:database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+        "schema:database/migrations/0010_workflow_task_pending_preview.down.sql",
+        "schema:database/migrations/0010_workflow_task_pending_preview.sql",
+        "schema:database/migrations/0010_workflow_task_pending_preview.verify.sql",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+        "config:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+        "config:package.json"
       ]
     },
     {
-      "id": "layer:tests",
-      "name": "测试保障",
-      "description": "Node 测试集合，覆盖后端模块、业务编排、配置、存储和前端静态规则。",
+      "id": "layer:backend-core",
+      "name": "后端 HTTP 与基础服务",
+      "description": "后端 HTTP 与基础服务相关文件，按当前分支文件清单自动归层。",
       "nodeIds": [
-        "file:tests/auth-store.test.mjs",
-        "file:tests/docker-local.test.mjs",
-        "file:tests/object-storage.test.mjs",
-        "file:tests/project-file-paths.test.mjs",
-        "file:tests/runtime-config.test.mjs",
+        "file:server.mjs",
+        "file:server/auth-store.mjs",
+        "file:server/object-storage.mjs",
+        "file:server/project-file-paths.mjs",
+        "file:server/runtime-config.mjs"
+      ]
+    },
+    {
+      "id": "layer:wangzhuan-domain",
+      "name": "网赚素材业务域",
+      "description": "网赚素材业务域相关文件，按当前分支文件清单自动归层。",
+      "nodeIds": [
+        "file:server/wangzhuan/branches.mjs",
+        "file:server/wangzhuan/channel-rules.mjs",
+        "file:server/wangzhuan/config.mjs",
+        "file:server/wangzhuan/constants.mjs",
+        "file:server/wangzhuan/decomposition-text.mjs",
+        "file:server/wangzhuan/estimates.mjs",
+        "file:server/wangzhuan/gallery.mjs",
+        "file:server/wangzhuan/http.mjs",
+        "file:server/wangzhuan/ids.mjs",
+        "file:server/wangzhuan/llm-config.mjs",
+        "file:server/wangzhuan/mysql-facts.mjs",
+        "file:server/wangzhuan/package.mjs",
+        "file:server/wangzhuan/pagination.mjs",
+        "file:server/wangzhuan/pipeline.mjs",
+        "file:server/wangzhuan/plan-preview.mjs",
+        "file:server/wangzhuan/product-assets.mjs",
+        "file:server/wangzhuan/qc.mjs",
+        "file:server/wangzhuan/reference-videos.mjs",
+        "file:server/wangzhuan/remix-provider.mjs",
+        "file:server/wangzhuan/remix.mjs",
+        "file:server/wangzhuan/router.mjs",
+        "file:server/wangzhuan/scheduler.mjs",
+        "file:server/wangzhuan/seedance-provider.mjs",
+        "file:server/wangzhuan/stitch.mjs",
+        "file:server/wangzhuan/storage.mjs",
+        "file:server/wangzhuan/tasks.mjs",
+        "file:server/wangzhuan/telemetry.mjs",
+        "file:server/wangzhuan/templates.mjs",
+        "file:server/wangzhuan/upstream-poll.mjs",
+        "file:tests/wangzhuan/decomposition-text.test.mjs",
         "file:tests/wangzhuan/estimates.test.mjs",
         "file:tests/wangzhuan/frontend-static.test.mjs",
         "file:tests/wangzhuan/ids.test.mjs",
         "file:tests/wangzhuan/llm-config.test.mjs",
         "file:tests/wangzhuan/mysql-facts-fixture.mjs",
         "file:tests/wangzhuan/mysql-facts.test.mjs",
+        "file:tests/wangzhuan/object-storage-fixture.mjs",
         "file:tests/wangzhuan/orchestration.test.mjs",
         "file:tests/wangzhuan/pipeline.test.mjs",
+        "file:tests/wangzhuan/plan-preview.test.mjs",
         "file:tests/wangzhuan/qc-gallery-package.test.mjs",
         "file:tests/wangzhuan/reference-videos.test.mjs",
         "file:tests/wangzhuan/remix.test.mjs",
@@ -42737,15 +45334,71 @@
         "file:tests/wangzhuan/seedance-provider.test.mjs",
         "file:tests/wangzhuan/stitch.test.mjs",
         "file:tests/wangzhuan/storage.test.mjs",
+        "file:tests/wangzhuan/tasks.test.mjs",
         "file:tests/wangzhuan/telemetry.test.mjs",
-        "file:tests/wangzhuan/templates-channel-rules.test.mjs"
+        "file:tests/wangzhuan/templates-channel-rules.test.mjs",
+        "file:tests/wangzhuan/test-providers.mjs"
       ]
     },
     {
-      "id": "layer:core",
-      "name": "其他支撑文件",
-      "description": "无法归入专门层的项目支撑文件。",
+      "id": "layer:frontend-workbench",
+      "name": "前端素材工作台",
+      "description": "前端素材工作台相关文件，按当前分支文件清单自动归层。",
       "nodeIds": [
+        "file:public/app.js",
+        "file:public/comic.html",
+        "file:public/comic.js",
+        "file:public/competitor-remix.html",
+        "file:public/competitor-remix.js",
+        "file:public/index.html",
+        "file:public/remix-canvas.js",
+        "file:public/styles.css",
+        "file:public/wangzhuan-common.js",
+        "file:public/wangzhuan-task-nav.js",
+        "file:public/wangzhuan-tasks.html",
+        "file:public/wangzhuan-tasks.js",
+        "file:public/wangzhuan.html",
+        "file:public/wangzhuan.js",
+        "file:public/wz-canvas.js",
+        "file:public/wz-stepper.js"
+      ]
+    },
+    {
+      "id": "layer:test-safety",
+      "name": "测试保障",
+      "description": "测试保障相关文件，按当前分支文件清单自动归层。",
+      "nodeIds": [
+        "file:tests/auth-store.test.mjs",
+        "file:tests/docker-local.test.mjs",
+        "file:tests/object-storage.test.mjs",
+        "file:tests/project-file-paths.test.mjs",
+        "file:tests/runtime-config.test.mjs"
+      ]
+    },
+    {
+      "id": "layer:misc-support",
+      "name": "其他支撑文件",
+      "description": "其他支撑文件相关文件，按当前分支文件清单自动归层。",
+      "nodeIds": [
+        "file:.tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+        "file:.tmp-live-p0/current-login.headers",
+        "file:.tmp-live-p0/health-login.headers",
+        "file:.tmp-live-p0/live-p0-validate.mjs",
+        "file:.tmp-live-p0/rerun-login.headers",
+        "file:.tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+        "file:.tmp-wallet-tai-fIXST9/tai-stub.mjs",
+        "file:.tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+        "file:.tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+        "file:.tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+        "file:.tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+        "file:.tmp-wallet-tai-TuyABD/tai-stub.mjs",
+        "file:.tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+        "file:.understand-anything/.understandignore",
+        "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+        "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+        "file:others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+        "file:others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+        "file:others/网赚产品 AI 素材管线需求拆解.docx",
         "file:package-release.ps1"
       ]
     }
@@ -42753,95 +45406,77 @@
   "tour": [
     {
       "order": 1,
-      "title": "项目概览",
-      "description": "从 README、产品说明和 package.json 开始，先建立 Touka AI素材中台的目标、运行方式和依赖边界。",
+      "title": "项目概览与启动",
+      "description": "从 README、package.json、server.mjs 理解服务定位、启动方式和运行配置。",
       "nodeIds": [
         "document:README.md",
-        "document:PRODUCT.md",
-        "config:package.json"
+        "config:package.json",
+        "file:server.mjs"
       ]
     },
     {
       "order": 2,
-      "title": "启动与部署",
-      "description": "查看 Dockerfile、docker-compose 和 Windows 启动脚本，理解本地服务、MySQL、ffmpeg/ffprobe 和端口配置如何组合起来。",
+      "title": "后端路由入口",
+      "description": "查看 server.mjs 如何挂载通用素材接口、账号权限和网赚素材模块。",
       "nodeIds": [
-        "service:Dockerfile",
-        "service:docker-compose.yml",
-        "file:start-windows.ps1",
-        "file:start-windows.bat"
+        "file:server.mjs",
+        "file:server/wangzhuan/router.mjs"
       ]
     },
     {
       "order": 3,
-      "title": "后端入口",
-      "description": "从 server.mjs 进入后端，理解 HTTP 服务如何挂载静态资源、认证、项目隔离、素材接口和业务路由。",
+      "title": "网赚素材主流程",
+      "description": "理解参考视频、脚本拆解、裂变、调度、Seedance 生成和交付 manifest 的业务链路。",
       "nodeIds": [
-        "file:server.mjs",
-        "file:server/wangzhuan/router.mjs",
-        "file:server/wangzhuan/http.mjs"
+        "file:server/wangzhuan/pipeline.mjs",
+        "file:server/wangzhuan/reference-videos.mjs",
+        "file:server/wangzhuan/scheduler.mjs",
+        "file:server/wangzhuan/seedance-provider.mjs"
       ]
     },
     {
       "order": 4,
-      "title": "运行时与存储基础",
-      "description": "阅读认证、运行配置、对象存储和项目路径模块，理解用户隔离、S3 兼容存储和本地兼容层。",
+      "title": "竞品素材修改",
+      "description": "查看竞品素材遮挡/无痕处理、K 帧替换和 remix provider 的调用边界。",
       "nodeIds": [
-        "file:server/auth-store.mjs",
-        "file:server/runtime-config.mjs",
-        "file:server/object-storage.mjs",
-        "file:server/project-file-paths.mjs"
+        "file:server/wangzhuan/remix.mjs",
+        "file:server/wangzhuan/remix-provider.mjs",
+        "file:public/competitor-remix.html",
+        "file:public/competitor-remix.js"
       ]
     },
     {
       "order": 5,
-      "title": "素材生成业务管线",
-      "description": "沿 pipeline、scheduler、remix、stitch、qc 和 package 模块理解从素材输入到任务调度、生成、质检和打包下载的完整链路。",
+      "title": "前端工作台",
+      "description": "从 wangzhuan 页面和任务页理解用户上传、步骤确认、进度展示、局部重跑和批量下载体验。",
       "nodeIds": [
-        "file:server/wangzhuan/pipeline.mjs",
-        "file:server/wangzhuan/scheduler.mjs",
-        "file:server/wangzhuan/remix.mjs",
-        "file:server/wangzhuan/stitch.mjs",
-        "file:server/wangzhuan/qc.mjs",
-        "file:server/wangzhuan/package.mjs"
+        "file:public/wangzhuan.html",
+        "file:public/wangzhuan.js",
+        "file:public/wangzhuan-tasks.html",
+        "file:public/wangzhuan-tasks.js"
       ]
     },
     {
       "order": 6,
-      "title": "前端工作台",
-      "description": "查看 wangzhuan 页面和公共前端脚本，理解素材选择、竞品导入、画布交互、任务状态和结果图库如何呈现给用户。",
+      "title": "数据库与持久化",
+      "description": "查看 MySQL schema、迁移、事实写入和对象存储字段如何支撑可恢复、可审计的批处理。",
       "nodeIds": [
-        "file:public/wangzhuan.html",
-        "file:public/wangzhuan.js",
-        "file:public/wangzhuan-common.js",
-        "file:public/wz-canvas.js",
-        "file:public/wz-stepper.js",
-        "file:public/styles.css"
+        "document:database/README.md",
+        "file:server/wangzhuan/mysql-facts.mjs",
+        "schema:database/migrations/0001_mysql_foundation.sql"
       ]
     },
     {
       "order": 7,
-      "title": "数据库演进",
-      "description": "通过 database/README 和迁移脚本理解 MySQL schema 如何覆盖账号、素材、任务、调度状态、QC、下载包和审计数据。",
+      "title": "验证与测试",
+      "description": "查看测试目录和 P0 acceptance 相关检查，确认功能回归边界。",
       "nodeIds": [
-        "document:database/README.md",
-        "schema:database/migrations/0001_mysql_foundation.sql",
-        "schema:database/migrations/0002_asset_object_storage.sql",
-        "schema:database/migrations/0003_scheduler_state_machine_rules.sql",
-        "schema:database/migrations/0004_remix_task_qc_state_rules.sql",
-        "schema:database/migrations/0005_stitch_completed_task_rules.sql"
-      ]
-    },
-    {
-      "order": 8,
-      "title": "测试保障",
-      "description": "最后浏览 tests 目录，按模块确认业务管线、调度、存储、配置、路由和前端静态行为的回归保护。",
-      "nodeIds": [
-        "file:tests/wangzhuan/pipeline.test.mjs",
-        "file:tests/wangzhuan/scheduler.test.mjs",
-        "file:tests/wangzhuan/storage.test.mjs",
-        "file:tests/wangzhuan/router.test.mjs",
-        "file:tests/wangzhuan/frontend-static.test.mjs"
+        "file:tests/auth-store.test.mjs",
+        "file:tests/docker-local.test.mjs",
+        "file:tests/object-storage.test.mjs",
+        "file:tests/project-file-paths.test.mjs",
+        "file:tests/runtime-config.test.mjs",
+        "file:tests/wangzhuan/decomposition-text.test.mjs"
       ]
     }
   ]

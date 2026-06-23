@@ -658,6 +658,20 @@ export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes 
     body: JSON.stringify({
       idempotencyKey: idempotencyKey("batch_confirm_plan"),
       confirmedPlanIds: plans.map((plan) => plan.planId),
+      plans: plans.map((plan) => ({
+        planId: plan.planId,
+        hook: plan.hook,
+        body: plan.body,
+        voiceover: plan.voiceover,
+        subtitles: plan.subtitles,
+        cta: plan.cta,
+        ending: plan.ending,
+        imagePrompt: plan.imagePrompt,
+        seedancePrompt: plan.seedancePrompt,
+        negativePrompt: plan.negativePrompt,
+        mediaRefs: plan.mediaRefs,
+        complianceNotes: plan.complianceNotes
+      })),
       confirmationNotes
     })
   });

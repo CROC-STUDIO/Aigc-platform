@@ -1,17 +1,17 @@
 {
-  "projectRoot": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P",
+  "projectRoot": "../project-data/PROJECT_ROOT_P",
   "projects": [
     {
       "name": "三国",
-      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P 三国"
+      "path": "../project-data/PROJECT_ROOT_P 三国"
     },
     {
       "name": "包包4",
-      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\PROJECT_ROOT_P"
+      "path": "../project-data/PROJECT_ROOT_P"
     },
     {
       "name": "puzzle",
-      "path": "C:\\Users\\hutin\\Desktop\\project\\ai-gc\\project-data\\puzzle"
+      "path": "../project-data/puzzle"
     }
   ],
   "wangzhuan": {

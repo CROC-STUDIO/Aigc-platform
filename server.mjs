@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, parse, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { networkInterfaces } from "node:os";
@@ -29,10 +29,16 @@ const execFileAsync = promisify(execFile);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 loadEnvFile({ envPath: join(__dirname, ".env") });
 
-const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolve(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
+function resolveAppPath(value, baseDir = __dirname) {
+  const raw = String(value ?? "").trim();
+  return resolve(isAbsolute(raw) ? raw : join(baseDir, raw || "."));
+}
+
+const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
-const USERS_PATH = process.env.AIGC_USERS_PATH ? resolve(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
-let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolve(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
+const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
+const CONFIG_DIR = dirname(CONFIG_PATH);
+let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolveAppPath(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
 let savedProjects = [];
 let authStore;
 let appConfig = {};
@@ -244,20 +250,32 @@ async function loadConfig() {
       defaultPath: DEFAULT_CONFIG_PATH
     });
     appConfig = config;
-    if (runtimeConfigExists && config.projectRoot && !process.env.AIGC_PROJECT_ROOT) projectRoot = resolve(config.projectRoot);
+    if (runtimeConfigExists && config.projectRoot && !process.env.AIGC_PROJECT_ROOT) projectRoot = resolveConfiguredProjectPath(config.projectRoot);
     savedProjects = normalizeProjects(config.projects ?? [{ name: basename(projectRoot), path: projectRoot }]);
   } catch {
     appConfig = {};
-    projectRoot = process.env.AIGC_PROJECT_ROOT ? resolve(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
+    projectRoot = process.env.AIGC_PROJECT_ROOT ? resolveAppPath(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
     savedProjects = normalizeProjects([{ name: basename(projectRoot), path: projectRoot }]);
   }
+}
+
+function resolveConfiguredProjectPath(value) {
+  const raw = String(value ?? "").trim();
+  return resolveAppPath(raw, CONFIG_DIR);
+}
+
+function projectPathForConfig(value) {
+  const fullPath = resolve(String(value ?? "").trim());
+  const relPath = relative(CONFIG_DIR, fullPath).replace(/\\/g, "/");
+  if (!relPath || relPath.startsWith("../..") || isAbsolute(relPath)) return fullPath;
+  return relPath.startsWith(".") ? relPath : `./${relPath}`;
 }
 
 function normalizeProjects(items) {
   const seen = new Set();
   const normalized = [];
   for (const item of items ?? []) {
-    const path = resolve(String(item.path ?? item.projectRoot ?? "").trim());
+    const path = resolveConfiguredProjectPath(item.path ?? item.projectRoot);
     if (!path || seen.has(path)) continue;
     seen.add(path);
     normalized.push({ name: String(item.name ?? basename(path) ?? path).trim() || basename(path), path });
@@ -303,7 +321,14 @@ async function ensureProjectStructure(root = projectRoot) {
 
 async function saveConfig() {
   savedProjects = normalizeProjects(savedProjects);
-  appConfig = { ...appConfig, projectRoot, projects: savedProjects };
+  appConfig = {
+    ...appConfig,
+    projectRoot: projectPathForConfig(projectRoot),
+    projects: savedProjects.map((item) => ({
+      ...item,
+      path: projectPathForConfig(item.path)
+    }))
+  };
   await writeFile(CONFIG_PATH, JSON.stringify(appConfig, null, 2), "utf8");
 }
 
@@ -3065,4 +3090,3 @@ function localNetworkUrls(port) {
   }
   return urls;
 }
-

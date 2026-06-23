@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "04fac9dd0f988b61234994e24b3ff76dae111bd3",
-  "generatedAt": "2026-06-22T07:02:36.131Z",
+  "gitCommitHash": "aa0cd22fdba1d4c4ce0d086f6f96dcf50d44b0a9",
+  "generatedAt": "2026-06-23T01:26:51.015Z",
   "files": {
     ".dockerignore": {
       "filePath": ".dockerignore",
@@ -12,6 +12,387 @@
       "exports": [],
       "totalLines": 17,
       "hasStructuralAnalysis": false
+    },
+    ".learnings/ERRORS.md": {
+      "filePath": ".learnings/ERRORS.md",
+      "contentHash": "f43e36172df704e73528bcebb0041220fa547b42b07f6db5bbd39e7bb86e2abf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 34,
+      "hasStructuralAnalysis": true
+    },
+    ".learnings/FEATURE_REQUESTS.md": {
+      "filePath": ".learnings/FEATURE_REQUESTS.md",
+      "contentHash": "a4b19d48e3773ae3f44f336efe83131cb1bb133a359d62bd84a601e9b88048a7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": true
+    },
+    ".learnings/LEARNINGS.md": {
+      "filePath": ".learnings/LEARNINGS.md",
+      "contentHash": "a9c6c54e277dc9877b0dedd3d70bde29d4f1eebcbaf541ab6117bbd5ea616517",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw": {
+      "filePath": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": false
+    },
+    ".tmp-live-p0/current-login.headers": {
+      "filePath": ".tmp-live-p0/current-login.headers",
+      "contentHash": "8070366f1ff752438a40860fdd54958662c823b55ba05f58d0a5547f80da8154",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": false
+    },
+    ".tmp-live-p0/current-login.json": {
+      "filePath": ".tmp-live-p0/current-login.json",
+      "contentHash": "b0229fe31e81e9b82f0a88a0f99abc55ea9aec874bfd7a70655e7e14ab3cb5f8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-live-p0/health-login.headers": {
+      "filePath": ".tmp-live-p0/health-login.headers",
+      "contentHash": "c24f1c4cb5b15a2a8b9d73fd0e12c546fa15b901d500eb0973352e66016344ef",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": false
+    },
+    ".tmp-live-p0/health-login.json": {
+      "filePath": ".tmp-live-p0/health-login.json",
+      "contentHash": "b0229fe31e81e9b82f0a88a0f99abc55ea9aec874bfd7a70655e7e14ab3cb5f8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-live-p0/live-p0-validate.mjs": {
+      "filePath": ".tmp-live-p0/live-p0-validate.mjs",
+      "contentHash": "3b9cfc708bf7eadb09053bd6ca411e44c92b1a64d40592c23d23d315c32f44db",
+      "functions": [
+        {
+          "name": "ensureDir",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "saveJson",
+          "params": [
+            "path",
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "redactLargeValues",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "requestJson",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "assertNoStopLoss",
+          "params": [
+            "value",
+            "context"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "dataUrlFor",
+          "params": [
+            "filePath",
+            "mime"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "login",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "uploadAsset",
+          "params": [
+            "cookie",
+            "kind",
+            "filePath",
+            "mime"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "liveTemplate",
+          "params": [],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "startBatch",
+          "params": [
+            "cookie",
+            "request",
+            "outDir"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "pollState",
+          "params": [
+            "cookie",
+            "outDir"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "ffprobe",
+          "params": [
+            "filePath"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "readJsonFile",
+          "params": [
+            "path"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "collectBatchEvidence",
+          "params": [
+            "batchTag",
+            "outDir"
+          ],
+          "exported": false,
+          "lineCount": 30
+        },
+        {
+          "name": "waitForNoRunning",
+          "params": [
+            "cookie"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "runSeedance15",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "runSeedance30",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "runVideoOps",
+          "params": [
+            "kind"
+          ],
+          "exported": false,
+          "lineCount": 53
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:fs/promises",
+          "specifiers": [
+            "readFile",
+            "writeFile",
+            "mkdir",
+            "readdir",
+            "stat"
+          ]
+        },
+        {
+          "source": "node:fs",
+          "specifiers": [
+            "existsSync"
+          ]
+        },
+        {
+          "source": "node:path",
+          "specifiers": [
+            "basename",
+            "dirname",
+            "join"
+          ]
+        },
+        {
+          "source": "node:child_process",
+          "specifiers": [
+            "spawn"
+          ]
+        },
+        {
+          "source": "../server.mjs",
+          "specifiers": [
+            "buildWalletVideoOpsRequest",
+            "executeWalletVideoOpsJobs"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 333,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-live-p0/rerun-login.headers": {
+      "filePath": ".tmp-live-p0/rerun-login.headers",
+      "contentHash": "7494188c8928109bb30f0e7e89c7088a8554e4789647811015a792061252fba3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": false
+    },
+    ".tmp-live-p0/rerun-login.json": {
+      "filePath": ".tmp-live-p0/rerun-login.json",
+      "contentHash": "b0229fe31e81e9b82f0a88a0f99abc55ea9aec874bfd7a70655e7e14ab3cb5f8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-F9GA9U/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-fIXST9/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-fIXST9/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-ndxZuY/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-pvN9lb/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-sh4pOX/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-TuyABD/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-TuyABD/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs": {
+      "filePath": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+      "contentHash": "1756be50c93b51d1b9102f4904c7d109f946185106dc7b8cc1e7583004b43a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
     },
     ".understand-anything/.understandignore": {
       "filePath": ".understand-anything/.understandignore",
@@ -35,32 +416,32 @@
     },
     ".understand-anything/fingerprints.json": {
       "filePath": ".understand-anything/fingerprints.json",
-      "contentHash": "fe69b18df1ec8d8d3263c0405f18ffc96985b719a01388da08325910b8962f49",
+      "contentHash": "234e2fd8804431bfb55dd0ca1fb79aa2022831b3e805e701adfab6c08a91d88a",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 2150,
+      "totalLines": 12384,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/intermediate/assembled-graph.json": {
       "filePath": ".understand-anything/intermediate/assembled-graph.json",
-      "contentHash": "5b55be0c49e6048c0d7466a0c02d383644368c866a24645cdde6201162ff734a",
+      "contentHash": "c9c91ce766d07a4dde150e0c5ff75953a2e2ee8dae370efc0263087a91b5d9d6",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 42848,
+      "totalLines": 45483,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/intermediate/fingerprint-input.json": {
       "filePath": ".understand-anything/intermediate/fingerprint-input.json",
-      "contentHash": "b7ba474ac02fd6a2a2ba2d65ef24e247f0c8072768187b0b36c95234452b8edc",
+      "contentHash": "424ef1741f629a7720e88104468981feeab5ed468b1285dba67f503d42bc02ef",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 116,
+      "totalLines": 191,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/intermediate/review.json": {
@@ -75,27 +456,27 @@
     },
     ".understand-anything/intermediate/scan-result.json": {
       "filePath": ".understand-anything/intermediate/scan-result.json",
-      "contentHash": "8e6a0a25ad3ff4e605114e283d89992e26bef9c8a8cf8798de1c3e64cdd8f4dc",
+      "contentHash": "acab262a91f49994f9f0460fa328f5e4b182ebb6eeeafdec932e36643a1c2c62",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 693,
+      "totalLines": 1631,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/knowledge-graph.json": {
       "filePath": ".understand-anything/knowledge-graph.json",
-      "contentHash": "d11b65a5fc2000a5a9f7bbc5f2aa518ef4c37864a8ba6a69e14150187430300d",
+      "contentHash": "c9c91ce766d07a4dde150e0c5ff75953a2e2ee8dae370efc0263087a91b5d9d6",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 42848,
+      "totalLines": 45483,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/meta.json": {
       "filePath": ".understand-anything/meta.json",
-      "contentHash": "984f3631f5eef18cbae4378cc3e2b34d6579490a035d863bb79d2e29dbd8b287",
+      "contentHash": "96121ca6a018b558a2e6045c36dea001746009f7216d3f7058f1ad6eb4d9547f",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -103,24 +484,34 @@
       "totalLines": 6,
       "hasStructuralAnalysis": true
     },
-    "config.default.json": {
-      "filePath": "config.default.json",
-      "contentHash": "2d32a211437beaac8f94cb729fbb353adacd0f1bda2154be435fed75f5485ee6",
+    ".understand-anything/tmp/current-scan.json": {
+      "filePath": ".understand-anything/tmp/current-scan.json",
+      "contentHash": "7d96f55743fb14379a584457b86e90241a602c76f9bb57cacf678254010d5b75",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 41,
+      "totalLines": 1143,
+      "hasStructuralAnalysis": true
+    },
+    "config.default.json": {
+      "filePath": "config.default.json",
+      "contentHash": "06adb5b938fd5b42a99d1482a5111eacdbb1bf5341f96bd974da5f3f354cdf1d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 46,
       "hasStructuralAnalysis": true
     },
     "config.json": {
       "filePath": "config.json",
-      "contentHash": "1403148ad7732b1c498c6396e89ffe58de3cc4970b2ed18070bcdca2ade4efae",
+      "contentHash": "64b4210ea068828615e27f8699cd3bd0b92211137159df1ee7bea8217194b58e",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 44,
+      "totalLines": 57,
       "hasStructuralAnalysis": true
     },
     "database/migrations/0001_mysql_foundation.down.sql": {
@@ -343,6 +734,96 @@
       "totalLines": 6,
       "hasStructuralAnalysis": true
     },
+    "database/migrations/0008_pipeline_seedance_plan_preview.down.sql": {
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+      "contentHash": "207fedbcb953d8b489f0de9d6dd4ec1de23b46165b900d2169959c075add22fb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0008_pipeline_seedance_plan_preview.sql": {
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.sql",
+      "contentHash": "30fb12f87889f439e14c53e63bcae9e917c5ef36ad09caec5a55e63957efdd9a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 13,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql": {
+      "filePath": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+      "contentHash": "29af79ac319a32488c4a19d445ec339698917400eb33700afd1157d8ffdf2e45",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 4,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0009_remix_poll_running_state_rules.down.sql": {
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.down.sql",
+      "contentHash": "7f4ba4dc91258b456ddcdf5c48984f138e0daad702c1ae67e4539ee5dc41174f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0009_remix_poll_running_state_rules.sql": {
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.sql",
+      "contentHash": "f06cf1e06f9c27416fe4975ecd5a84778f2a4bfca80ad82c66a9ae4e48e6494e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 11,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0009_remix_poll_running_state_rules.verify.sql": {
+      "filePath": "database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+      "contentHash": "25a6126cf8f98ff47e80c75d4c379ae80e5aec9cc5ee2c4a5019a8e8d02afe2a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0010_workflow_task_pending_preview.down.sql": {
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.down.sql",
+      "contentHash": "acb06b37f29db5141b9098579851cd3f8c766a2221025950780bb250ceb3de31",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 21,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0010_workflow_task_pending_preview.sql": {
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.sql",
+      "contentHash": "cf06582cfd9884c1a1d167c31df42c210821a17c5d736722f9da3f45c363459f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "database/migrations/0010_workflow_task_pending_preview.verify.sql": {
+      "filePath": "database/migrations/0010_workflow_task_pending_preview.verify.sql",
+      "contentHash": "5a4cb8ec2ea8f484f0dedc529d2a9197df512124b27f8c972cbed9669da3ab37",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
     "database/README.md": {
       "filePath": "database/README.md",
       "contentHash": "2621bda65532621c1c43f7bb10731e18677db800476b0892e47c50b1cee4cf62",
@@ -355,12 +836,12 @@
     },
     "docker-compose.yml": {
       "filePath": "docker-compose.yml",
-      "contentHash": "96f41791b62cc4f96c94388c4cc6e12c19995a9b93c391f9cb7335ef2d01a879",
+      "contentHash": "5c5b92927519eb01c246bec6eef425adb5574ba45b95a7695f12f3af5215c484",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 69,
+      "totalLines": 72,
       "hasStructuralAnalysis": true
     },
     "Dockerfile": {
@@ -373,9 +854,349 @@
       "totalLines": 24,
       "hasStructuralAnalysis": true
     },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+      "contentHash": "3ec2ddecbe5980d451ed82b8fc3a73afc7d4c6858304fedd7b6a89bf16cf62c6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 56,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+      "contentHash": "d1de69fc7726667341956145f02512d15315c574da0194224aecee4396eefedb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 50,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+      "contentHash": "2011b72fa3b83f79192d742d66feb3dd00a2d0f6aec6dbc7b2280f790af105e7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+      "contentHash": "e1a206d4e7cfbc15a356031985ff89fc6512bf7fc67cb688d2a71514fba89f7b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 162,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+      "contentHash": "c29c102676672057fa9f415dce6f1035c49fa291fb895c80345decfbefb6ab18",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 908,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+      "contentHash": "f20c6e01d00029e744ec0f99057f0a5796b28a9278558fa49d89dd3baf256046",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 30,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+      "contentHash": "adba1eefdbd202c9ade8a6533cf8cd21dd0f873fe77529125c1c5b229b81b7ba",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 83,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+      "contentHash": "e4eff4f37e25394976ddafd30231b8f5d5ba2a307c0d54d984e61922c9cf049c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 48,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+      "contentHash": "385b54b389bee4fac2b8bea2053e1b9dbadb81cae12af73b5a6090e524d2d648",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 105,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+      "contentHash": "d1de69fc7726667341956145f02512d15315c574da0194224aecee4396eefedb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 50,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+      "contentHash": "fd99096a25c1b1e7503919385f3121ff9896d299af9562a40ec243705ad74783",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 64,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+      "contentHash": "cd1bad9f96634f0302648f6d839b7f07c29ef5e6c0adcdb007d598466582cd7d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 239,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+      "contentHash": "2011b72fa3b83f79192d742d66feb3dd00a2d0f6aec6dbc7b2280f790af105e7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+      "contentHash": "e1a206d4e7cfbc15a356031985ff89fc6512bf7fc67cb688d2a71514fba89f7b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 162,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+      "contentHash": "c29c102676672057fa9f415dce6f1035c49fa291fb895c80345decfbefb6ab18",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 908,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+      "contentHash": "f20c6e01d00029e744ec0f99057f0a5796b28a9278558fa49d89dd3baf256046",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 30,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+      "contentHash": "adba1eefdbd202c9ade8a6533cf8cd21dd0f873fe77529125c1c5b229b81b7ba",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 83,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+      "contentHash": "e4eff4f37e25394976ddafd30231b8f5d5ba2a307c0d54d984e61922c9cf049c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 48,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+      "contentHash": "7686f10e77bae8f9106dd6fc1ef2e8a4524f914dece3e9011867bea0d9d01b00",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+      "contentHash": "802ae9ed05008ba8a4e542188b57ef0374992fca993824f5bd9b25a26163e885",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+      "contentHash": "914843b861077a010e7fe2d6a6057f37b9972034f71585a587c08644e266fa93",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+      "contentHash": "993a8526f36bd2cc0a42291b510017a1b078714006101e125c51927debf6e9ac",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+      "contentHash": "cc109d39492c4a300671da976ede3b75c64c0c326615b0bde9c0942fa7732550",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+      "contentHash": "d22e97fec4f3715b0786d6ca5be9a9e31e8e0e6b0fb709c3670a847524ef818e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+      "contentHash": "046931336d6ad3a19a39cd2a5191350298147636978fd383ef661beb0c4c0a9c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+      "contentHash": "f835b60462c45c89e550f0c198a76bd400236a05fcffcce69a1780b6fdafdfcd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+      "contentHash": "e6ab1eb15a8075ae946080671c4723ed4457da94c85737d0237c3948a446f57e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+      "contentHash": "dffe3c93304a78d9f8a02faa252de53c6264500a233c78c472029133648924dd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+      "contentHash": "55b13dc3fa6081a6be8b718804796916df2c3accb7ebfe86dd1ddfd1b89c7fde",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 5787,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+      "contentHash": "680d88047cd19f4eccdc5b07f3b0f77b2adfa641e452d0d65482e34357d1f6db",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 11490,
+      "hasStructuralAnalysis": false
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+      "contentHash": "770312429e94cfad5ba8811bbf37c992bf0ea37bd09afe7e5d8335678d0df5ab",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 337,
+      "hasStructuralAnalysis": true
+    },
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md": {
+      "filePath": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+      "contentHash": "e370443e4fa20f74e52790ca87aeaf45644980c6641e2136d6ef83737ad8f2fa",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 32,
+      "hasStructuralAnalysis": true
+    },
+    "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx": {
+      "filePath": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "contentHash": "cbee4051026ac0d1863aaa0b4889da903562274716fe194462699224e0d3df51",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 4324,
+      "hasStructuralAnalysis": false
+    },
+    "others/网赚产品 AI 素材管线需求拆解.docx": {
+      "filePath": "others/网赚产品 AI 素材管线需求拆解.docx",
+      "contentHash": "110a7d1efd2c33e7f5b80449b395b6b9ca03a1f220bb12d8340557bb1257b3f9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7555,
+      "hasStructuralAnalysis": false
+    },
     "package-release.ps1": {
       "filePath": "package-release.ps1",
-      "contentHash": "3b4019767352a5655125117bc177a76e30818f7d5056b3d0a6ea6a387d8f9ba0",
+      "contentHash": "333fe13580a02fda2b2cf542cfbefccdd0f10411984f324b1971a75179c6afe4",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -405,7 +1226,7 @@
     },
     "public/app.js": {
       "filePath": "public/app.js",
-      "contentHash": "ebeaea5611faab9a91e4e09cb0e0eb6e7115dc6542dace1055a21e8e8cf47ef4",
+      "contentHash": "aa409adbda77e1dfbcc17560b69459cf70fa1cc9f57facc48c2d4803d92f99a6",
       "functions": [
         {
           "name": "defaultBatchTag",
@@ -846,17 +1667,17 @@
     },
     "public/comic.html": {
       "filePath": "public/comic.html",
-      "contentHash": "447e5d53a75ef437e8c1501f068d5652b40258cb378fac8c55a1af5c47b62823",
+      "contentHash": "9bce773ce579d161f3a8ad89254748949bed9779e10c7ff52ea23e02dfd44adf",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 323,
+      "totalLines": 324,
       "hasStructuralAnalysis": false
     },
     "public/comic.js": {
       "filePath": "public/comic.js",
-      "contentHash": "01218d5e86471ce382f64bc359b14c9b7defc5a02dedd686435e5a275e04be34",
+      "contentHash": "d5970564d65afeb15242d7ff5b7dc3a75fae0fb65eb1063f54825aacdb8273ee",
       "functions": [
         {
           "name": "escapeHtml",
@@ -1074,18 +1895,30 @@
     },
     "public/competitor-remix.html": {
       "filePath": "public/competitor-remix.html",
-      "contentHash": "a4d2fde5652515c2b9c993787eb7613684a802c02c0b78479daf356d9184b7d9",
+      "contentHash": "d7a1537891f19083205753d03bd582045ceebeffe4ea7faf232f0ad94ce3f93c",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 202,
+      "totalLines": 188,
       "hasStructuralAnalysis": false
     },
     "public/competitor-remix.js": {
       "filePath": "public/competitor-remix.js",
-      "contentHash": "47d12f304d3375c3d5b3c927fef1b23cebc04c793a07ef3fd1cbf216c506907f",
+      "contentHash": "20798b76ebbd323e50da68ef9a363a6f6a2f277f2c13ca64ca4f73295de0c8d1",
       "functions": [
+        {
+          "name": "lockHost",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "resetWorkshopState",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
         {
           "name": "isActiveRemixStatus",
           "params": [
@@ -1095,30 +1928,32 @@
           "lineCount": 3
         },
         {
-          "name": "selectedOperationType",
-          "params": [],
+          "name": "remixSourceId",
+          "params": [
+            "remix"
+          ],
           "exported": false,
           "lineCount": 3
         },
         {
-          "name": "activeLockFromError",
+          "name": "isProviderJobRunning",
           "params": [
-            "error"
+            "remix"
           ],
           "exported": false,
-          "lineCount": 21
+          "lineCount": 4
         },
         {
-          "name": "renderActiveLock",
+          "name": "isSourceSubmitLocked",
           "params": [],
           "exported": false,
-          "lineCount": 13
+          "lineCount": 7
         },
         {
-          "name": "stopActiveLock",
+          "name": "selectedOperationType",
           "params": [],
           "exported": false,
-          "lineCount": 21
+          "lineCount": 3
         },
         {
           "name": "activeRemixNotice",
@@ -1126,13 +1961,27 @@
             "status"
           ],
           "exported": false,
-          "lineCount": 4
+          "lineCount": 5
         },
         {
           "name": "syncMetrics",
           "params": [],
           "exported": false,
-          "lineCount": 15
+          "lineCount": 17
+        },
+        {
+          "name": "syncFlowHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 42
+        },
+        {
+          "name": "remixProgressSection",
+          "params": [
+            "remix"
+          ],
+          "exported": false,
+          "lineCount": 13
         },
         {
           "name": "galleryPaginationHtml",
@@ -1314,7 +2163,7 @@
           "name": "renderDetail",
           "params": [],
           "exported": false,
-          "lineCount": 50
+          "lineCount": 67
         },
         {
           "name": "renderGallery",
@@ -1326,13 +2175,13 @@
           "name": "uploadSource",
           "params": [],
           "exported": false,
-          "lineCount": 42
+          "lineCount": 43
         },
         {
           "name": "startMaskEdit",
           "params": [],
           "exported": false,
-          "lineCount": 54
+          "lineCount": 53
         },
         {
           "name": "loadRemixDetail",
@@ -1344,7 +2193,7 @@
           "name": "startPolling",
           "params": [],
           "exported": false,
-          "lineCount": 15
+          "lineCount": 26
         },
         {
           "name": "stopRemix",
@@ -1356,19 +2205,19 @@
           "name": "confirmPreview",
           "params": [],
           "exported": false,
-          "lineCount": 23
+          "lineCount": 24
         },
         {
           "name": "loadGallery",
           "params": [],
           "exported": false,
-          "lineCount": 15
+          "lineCount": 13
         },
         {
           "name": "loadActiveRemix",
           "params": [],
           "exported": false,
-          "lineCount": 21
+          "lineCount": 17
         },
         {
           "name": "downloadRemixPackage",
@@ -1380,19 +2229,25 @@
           "name": "bindEvents",
           "params": [],
           "exported": false,
-          "lineCount": 22
-        },
-        {
-          "name": "init",
-          "params": [],
-          "exported": false,
-          "lineCount": 16
+          "lineCount": 26
         },
         {
           "name": "loadInitialData",
           "params": [],
           "exported": false,
           "lineCount": 7
+        },
+        {
+          "name": "bindPageLifecycle",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "init",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
         }
       ],
       "classes": [],
@@ -1410,54 +2265,113 @@
             "downloadZip",
             "escapeHtml",
             "idempotencyKey",
+            "inlineRetryHtml",
             "operationLabels",
             "remixStatusLabels",
             "renderError",
             "renderKeyValues",
             "setBusy",
             "showLogin",
+            "showToast",
+            "syncActionHint",
+            "taskProgressHtml",
             "terminalRemixStatus"
+          ]
+        },
+        {
+          "source": "./wangzhuan-task-nav.js",
+          "specifiers": [
+            "clearActiveLockBanner",
+            "showActiveLockFromError"
           ]
         }
       ],
       "exports": [],
-      "totalLines": 972,
+      "totalLines": 1063,
       "hasStructuralAnalysis": true
     },
     "public/index.html": {
       "filePath": "public/index.html",
-      "contentHash": "838bb8fd91c595a1075a56f8f66b16d95d0e55293a22837421bf3a45a844d6be",
+      "contentHash": "fbf75bfa8358afa84014eb81a6121b95c77b0676e81c3ec7f5ff3c7b93e18356",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 321,
+      "totalLines": 322,
       "hasStructuralAnalysis": false
     },
     "public/remix-canvas.js": {
       "filePath": "public/remix-canvas.js",
-      "contentHash": "7e7a3aa59d10aaf61bf04e463efd0a1c0220c9c461a8e22b54e1b28e27c730fa",
+      "contentHash": "b10f80631adc52887e2065484c05bc3814bff630fc37f7e26ed9203b7433a397",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 376,
+      "totalLines": 509,
       "hasStructuralAnalysis": true
     },
     "public/styles.css": {
       "filePath": "public/styles.css",
-      "contentHash": "d353b3206fb8621d2e354bcf1ae12550a9953ba58b34e14a0f54765ecc891bc0",
+      "contentHash": "649fb9ead92839b0eac069c7e0e508baf1a8b47444f112b7b6c32da5a947c340",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 5413,
+      "totalLines": 6587,
       "hasStructuralAnalysis": false
     },
     "public/wangzhuan-common.js": {
       "filePath": "public/wangzhuan-common.js",
-      "contentHash": "eb9d7fe0787a70ab70dd7593b7d568ae1c099199424b451201896bac19ceef7c",
+      "contentHash": "b92b46edcdaa756816e8d8d0e1fb4000976ecabde63618dbe5c1ecabf35f4132",
       "functions": [
+        {
+          "name": "batchStatusDisplayLabel",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "batchGenerationProgress",
+          "params": [],
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "isBatchQcRunnable",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "formatWorkflowEvent",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "isBatchGenerationActive",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "generationTaskUpstreamLabel",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "summarizeGenerationRequest",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "renderGenerationTaskCards",
+          "params": [],
+          "exported": true,
+          "lineCount": 19
+        },
         {
           "name": "$",
           "params": [
@@ -1553,11 +2467,11 @@
         {
           "name": "renderError",
           "params": [
-            "target",
+            "_target",
             "error"
           ],
           "exported": true,
-          "lineCount": 26
+          "lineCount": 3
         },
         {
           "name": "clearError",
@@ -1565,7 +2479,35 @@
             "target"
           ],
           "exported": true,
-          "lineCount": 5
+          "lineCount": 7
+        },
+        {
+          "name": "buildErrorDetails",
+          "params": [
+            "error"
+          ],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "ensureErrorModal",
+          "params": [],
+          "exported": false,
+          "lineCount": 34
+        },
+        {
+          "name": "showErrorModal",
+          "params": [
+            "error"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "hideErrorModal",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
         },
         {
           "name": "badge",
@@ -1584,6 +2526,22 @@
           "lineCount": 8
         },
         {
+          "name": "humanizeDecompositionKey",
+          "params": [
+            "key"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "flattenDecompositionFieldValue",
+          "params": [
+            "value"
+          ],
+          "exported": true,
+          "lineCount": 39
+        },
+        {
           "name": "setBusy",
           "params": [
             "button",
@@ -1591,7 +2549,7 @@
             "label"
           ],
           "exported": true,
-          "lineCount": 11
+          "lineCount": 14
         },
         {
           "name": "terminalBatchStatus",
@@ -1610,10 +2568,104 @@
           "lineCount": 3
         },
         {
+          "name": "activeLockLabel",
+          "params": [
+            "type",
+            "id"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "activeLockFromBatchError",
+          "params": [
+            "error"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "taskSpaceHref",
+          "params": [
+            "type"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "workbenchHref",
+          "params": [
+            "type"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "activeLockActionsHtml",
+          "params": [
+            "lock"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "stopWorkflowTask",
+          "params": [
+            "type",
+            "id"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "confirmBatchPlanRequest",
+          "params": [
+            "batchId",
+            "plans"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
           "name": "schedulePoll",
           "params": [],
           "exported": true,
           "lineCount": 10
+        },
+        {
+          "name": "showToast",
+          "params": [
+            "message"
+          ],
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "hideToast",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "syncActionHint",
+          "params": [
+            "button",
+            "hint"
+          ],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "taskProgressHtml",
+          "params": [],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "inlineRetryHtml",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
         }
       ],
       "classes": [
@@ -1634,6 +2686,16 @@
         "promiseLabels",
         "operationLabels",
         "batchStatusLabels",
+        "batchGenerationTaskStatusLabels",
+        "batchStatusDisplayLabel",
+        "batchGenerationProgress",
+        "isBatchQcRunnable",
+        "workflowTriggerLabels",
+        "formatWorkflowEvent",
+        "isBatchGenerationActive",
+        "generationTaskUpstreamLabel",
+        "summarizeGenerationRequest",
+        "renderGenerationTaskCards",
         "remixStatusLabels",
         "strongTruthFields",
         "$",
@@ -1650,30 +2712,382 @@
         "bindLogin",
         "renderError",
         "clearError",
+        "showErrorModal",
+        "hideErrorModal",
         "badge",
         "renderKeyValues",
+        "flattenDecompositionFieldValue",
         "setBusy",
         "terminalBatchStatus",
         "terminalRemixStatus",
-        "schedulePoll"
+        "activeLockLabel",
+        "activeLockFromBatchError",
+        "taskSpaceHref",
+        "workbenchHref",
+        "activeLockActionsHtml",
+        "stopWorkflowTask",
+        "confirmBatchPlanRequest",
+        "schedulePoll",
+        "showToast",
+        "hideToast",
+        "syncActionHint",
+        "taskProgressHtml",
+        "inlineRetryHtml"
       ],
-      "totalLines": 311,
+      "totalLines": 745,
       "hasStructuralAnalysis": true
     },
-    "public/wangzhuan.html": {
-      "filePath": "public/wangzhuan.html",
-      "contentHash": "90f9bba8ad38be6c1b72db83a7a8299ff41aeb8b4fec0ebf41d095b1729fb851",
+    "public/wangzhuan-task-nav.js": {
+      "filePath": "public/wangzhuan-task-nav.js",
+      "contentHash": "ce9db983cad468fdfd323b87ec0345f1559aeefcdcee10c61fccdfecd9c9affe",
+      "functions": [
+        {
+          "name": "renderActiveLockBanner",
+          "params": [
+            "host",
+            "lock"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "showActiveLockFromError",
+          "params": [
+            "host",
+            "error"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "clearActiveLockBanner",
+          "params": [
+            "host"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "goToTaskManagement",
+          "params": [
+            "lock"
+          ],
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "./wangzhuan-common.js",
+          "specifiers": [
+            "activeLockActionsHtml",
+            "activeLockFromBatchError",
+            "taskSpaceHref"
+          ]
+        }
+      ],
+      "exports": [
+        "activeLockFromBatchError",
+        "renderActiveLockBanner",
+        "showActiveLockFromError",
+        "clearActiveLockBanner",
+        "goToTaskManagement"
+      ],
+      "totalLines": 36,
+      "hasStructuralAnalysis": true
+    },
+    "public/wangzhuan-tasks.html": {
+      "filePath": "public/wangzhuan-tasks.html",
+      "contentHash": "451ec5c6b3f45d27654e009ff3fe884894e619f3523ee2b1f8a498afea377cea",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 408,
+      "totalLines": 103,
+      "hasStructuralAnalysis": false
+    },
+    "public/wangzhuan-tasks.js": {
+      "filePath": "public/wangzhuan-tasks.js",
+      "contentHash": "957863ef7f57e280a106b2de4bb72ff1dd2fa7447dc8b5037b31c6566faa7280",
+      "functions": [
+        {
+          "name": "readInitialSelection",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "syncSelectionUrl",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "taskLabels",
+          "params": [
+            "type"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "taskTypeLabel",
+          "params": [
+            "type"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "taskPrimaryId",
+          "params": [
+            "item"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "assetPreviewUrl",
+          "params": [
+            "asset"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "mediaDimensions",
+          "params": [
+            "asset"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "mediaAspectRatioValue",
+          "params": [
+            "dimensions"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "isVideoAsset",
+          "params": [
+            "asset"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "formatMediaMeta",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "pickPrimaryOutput",
+          "params": [
+            "outputs"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "renderMediaPlayer",
+          "params": [
+            "asset",
+            "emptyText"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "renderTaskMediaCompare",
+          "params": [],
+          "exported": false,
+          "lineCount": 31
+        },
+        {
+          "name": "renderScopeFilters",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "renderTypeFilters",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "renderPager",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "renderTaskList",
+          "params": [],
+          "exported": false,
+          "lineCount": 31
+        },
+        {
+          "name": "detailNotice",
+          "params": [
+            "type",
+            "status"
+          ],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "renderBatchDetail",
+          "params": [
+            "detail"
+          ],
+          "exported": false,
+          "lineCount": 51
+        },
+        {
+          "name": "renderRemixDetail",
+          "params": [
+            "detail"
+          ],
+          "exported": false,
+          "lineCount": 38
+        },
+        {
+          "name": "shouldPollDetail",
+          "params": [
+            "detail"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "renderDetailPanel",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "loadTasks",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "loadSelectedDetail",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "selectTask",
+          "params": [
+            "type",
+            "id"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "confirmBatchPlan",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "confirmRemixPreview",
+          "params": [],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "stopSelectedTask",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "downloadSelectedTask",
+          "params": [],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "bindEvents",
+          "params": [],
+          "exported": false,
+          "lineCount": 48
+        },
+        {
+          "name": "loadInitialData",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "init",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "./wangzhuan-common.js",
+          "specifiers": [
+            "$",
+            "apiEnvelope",
+            "badge",
+            "batchStatusLabels",
+            "bindLogin",
+            "channelLabels",
+            "clearError",
+            "confirmBatchPlanRequest",
+            "downloadZip",
+            "escapeHtml",
+            "idempotencyKey",
+            "operationLabels",
+            "remixStatusLabels",
+            "renderError",
+            "renderKeyValues",
+            "schedulePoll",
+            "setBusy",
+            "showToast",
+            "stopWorkflowTask",
+            "terminalBatchStatus",
+            "workbenchHref"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 609,
+      "hasStructuralAnalysis": true
+    },
+    "public/wangzhuan.html": {
+      "filePath": "public/wangzhuan.html",
+      "contentHash": "1ce192a2080f03a80655ea9bd330c347756452756f8a82a479e1b947df054cf1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 420,
       "hasStructuralAnalysis": false
     },
     "public/wangzhuan.js": {
       "filePath": "public/wangzhuan.js",
-      "contentHash": "572b58494e3f374b8fac9e9d26edf4154a163167b79eb2021cd9a468e08d53d3",
+      "contentHash": "736a8e25f395a8447095907307e8425185a9a694998caf5ca4041f4d5adb09ff",
       "functions": [
+        {
+          "name": "lockHost",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
         {
           "name": "isDecompositionConfirmed",
           "params": [],
@@ -1681,10 +3095,228 @@
           "lineCount": 3
         },
         {
+          "name": "readWorkflowSession",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "writeWorkflowSession",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "clearWorkflowSession",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "persistWorkflowSession",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "syncDecompositionDomState",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "applyRestoredTemplate",
+          "params": [
+            "versionId"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "restoreWorkflowFromBatch",
+          "params": [
+            "detail"
+          ],
+          "exported": false,
+          "lineCount": 28
+        },
+        {
+          "name": "restoreWorkflowSession",
+          "params": [],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "renderBatchReadiness",
+          "params": [],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "ensureDecompositionForm",
+          "params": [],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "fitDecompositionTextareas",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "wzFocusNodeId",
+          "params": [
+            "id",
+            "step"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "focusDecomposeStep",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "decompositionFieldInput",
+          "params": [
+            "key"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "collectDecompositionFromForm",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "hasDecompositionDraft",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "isDecompositionDraftComplete",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "setDecompositionFormLocked",
+          "params": [
+            "locked"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "renderDecompositionForm",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "onDecompositionFormInput",
+          "params": [
+            "event"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "syncDecompositionControls",
+          "params": [],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "syncReferenceHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "syncDecompositionHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 20
+        },
+        {
+          "name": "syncTemplateHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "syncBatchActionHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "syncFlowHints",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "batchProgressSection",
+          "params": [
+            "batch",
+            "tasks"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "clearDecompositionDraft",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
           "name": "focusBatchStep",
           "params": [],
           "exported": false,
-          "lineCount": 14
+          "lineCount": 6
+        },
+        {
+          "name": "focusLogStep",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "primaryBranchNode",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "focusRewriteStep",
+          "params": [],
+          "exported": false,
+          "lineCount": 23
+        },
+        {
+          "name": "parseRegions",
+          "params": [
+            "node"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "missingRequiredDraftFields",
+          "params": [
+            "draft"
+          ],
+          "exported": false,
+          "lineCount": 12
         },
         {
           "name": "syncMetrics",
@@ -1772,10 +3404,62 @@
           "lineCount": 7
         },
         {
-          "name": "collectBranchDrafts",
+          "name": "collectAllBranchDrafts",
           "params": [],
           "exported": false,
           "lineCount": 35
+        },
+        {
+          "name": "collectBranchDrafts",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "branchDraftToTemplateShape",
+          "params": [
+            "branch"
+          ],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "findIncompleteBranchDraft",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "isTemplateCommitted",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "setTemplateFormLocked",
+          "params": [
+            "locked"
+          ],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "renderTemplateStatus",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "unlockTemplateEditing",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "markTemplateDirtyFromEdit",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
         },
         {
           "name": "fillBranchDraft",
@@ -1801,7 +3485,7 @@
           "name": "draftFromForm",
           "params": [],
           "exported": false,
-          "lineCount": 40
+          "lineCount": 47
         },
         {
           "name": "missingStrongFields",
@@ -1817,7 +3501,7 @@
             "template"
           ],
           "exported": false,
-          "lineCount": 34
+          "lineCount": 39
         },
         {
           "name": "renderTemplates",
@@ -1826,10 +3510,16 @@
           "lineCount": 21
         },
         {
+          "name": "renderLlmServiceStatus",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
           "name": "applyLlmConfigDefaults",
           "params": [],
           "exported": false,
-          "lineCount": 11
+          "lineCount": 9
         },
         {
           "name": "loadLlmConfig",
@@ -1847,45 +3537,57 @@
           "name": "renderReference",
           "params": [],
           "exported": false,
-          "lineCount": 45
+          "lineCount": 51
         },
         {
           "name": "draftReferenceVideoDecomposition",
           "params": [],
           "exported": false,
-          "lineCount": 41
+          "lineCount": 42
+        },
+        {
+          "name": "syncEstimateButtonLabel",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "renderBatchStepProgress",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
         },
         {
           "name": "renderEstimate",
           "params": [],
           "exported": false,
-          "lineCount": 37
+          "lineCount": 65
+        },
+        {
+          "name": "renderPlanPreview",
+          "params": [
+            "batch"
+          ],
+          "exported": false,
+          "lineCount": 46
+        },
+        {
+          "name": "syncBatchNodeStatus",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
         },
         {
           "name": "renderBatch",
           "params": [],
           "exported": false,
-          "lineCount": 54
+          "lineCount": 87
         },
         {
           "name": "renderGallery",
           "params": [],
           "exported": false,
           "lineCount": 28
-        },
-        {
-          "name": "activeLockFromError",
-          "params": [
-            "error"
-          ],
-          "exported": false,
-          "lineCount": 21
-        },
-        {
-          "name": "renderActiveLock",
-          "params": [],
-          "exported": false,
-          "lineCount": 15
         },
         {
           "name": "renderStartError",
@@ -1899,7 +3601,7 @@
           "name": "loadTemplates",
           "params": [],
           "exported": false,
-          "lineCount": 7
+          "lineCount": 6
         },
         {
           "name": "loadRules",
@@ -1911,19 +3613,19 @@
           "name": "saveTemplate",
           "params": [],
           "exported": false,
-          "lineCount": 39
+          "lineCount": 74
         },
         {
           "name": "checkReferenceVideo",
           "params": [],
           "exported": false,
-          "lineCount": 33
+          "lineCount": 34
         },
         {
           "name": "decomposeReferenceVideo",
           "params": [],
           "exported": false,
-          "lineCount": 28
+          "lineCount": 41
         },
         {
           "name": "estimateRequest",
@@ -1935,7 +3637,7 @@
           "name": "estimateBatch",
           "params": [],
           "exported": false,
-          "lineCount": 28
+          "lineCount": 32
         },
         {
           "name": "loadBatchDetail",
@@ -1947,13 +3649,19 @@
           "name": "startPolling",
           "params": [],
           "exported": false,
-          "lineCount": 15
+          "lineCount": 26
         },
         {
-          "name": "startBatch",
+          "name": "planBatch",
           "params": [],
           "exported": false,
-          "lineCount": 40
+          "lineCount": 48
+        },
+        {
+          "name": "confirmPlanBatch",
+          "params": [],
+          "exported": false,
+          "lineCount": 28
         },
         {
           "name": "stopBatch",
@@ -1980,16 +3688,10 @@
           "lineCount": 19
         },
         {
-          "name": "stopActiveLock",
-          "params": [],
-          "exported": false,
-          "lineCount": 26
-        },
-        {
           "name": "loadGallery",
           "params": [],
           "exported": false,
-          "lineCount": 14
+          "lineCount": 13
         },
         {
           "name": "downloadPackage",
@@ -2001,19 +3703,19 @@
           "name": "bindEvents",
           "params": [],
           "exported": false,
-          "lineCount": 66
+          "lineCount": 69
         },
         {
           "name": "loadInitialData",
           "params": [],
           "exported": false,
-          "lineCount": 11
+          "lineCount": 16
         },
         {
           "name": "init",
           "params": [],
           "exported": false,
-          "lineCount": 17
+          "lineCount": 20
         }
       ],
       "classes": [],
@@ -2024,36 +3726,56 @@
             "$",
             "apiEnvelope",
             "badge",
+            "batchGenerationProgress",
+            "batchGenerationTaskStatusLabels",
+            "batchStatusDisplayLabel",
             "batchStatusLabels",
+            "formatWorkflowEvent",
+            "isBatchGenerationActive",
+            "isBatchQcRunnable",
+            "renderGenerationTaskCards",
             "bindLogin",
             "channelLabels",
             "clearError",
+            "confirmBatchPlanRequest",
             "dataUrlFromFile",
             "downloadZip",
             "escapeHtml",
+            "flattenDecompositionFieldValue",
             "idempotencyKey",
+            "inlineRetryHtml",
             "promiseLabels",
             "renderError",
             "renderKeyValues",
             "setBusy",
             "showLogin",
+            "showToast",
+            "syncActionHint",
+            "taskProgressHtml",
             "strongTruthFields",
             "terminalBatchStatus"
+          ]
+        },
+        {
+          "source": "./wangzhuan-task-nav.js",
+          "specifiers": [
+            "clearActiveLockBanner",
+            "showActiveLockFromError"
           ]
         }
       ],
       "exports": [],
-      "totalLines": 1297,
+      "totalLines": 2145,
       "hasStructuralAnalysis": true
     },
     "public/wz-canvas.js": {
       "filePath": "public/wz-canvas.js",
-      "contentHash": "5886330091ccbb9f5db3e6e808879817b0baa1db5aa73c3935c15388a7930ff2",
+      "contentHash": "3df8eedb977d7e5fd47aa238df37adf58c6ab3d3a22b2985e0f99122fc7ca9e8",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 625,
+      "totalLines": 806,
       "hasStructuralAnalysis": true
     },
     "public/wz-stepper.js": {
@@ -2068,7 +3790,7 @@
     },
     "README.md": {
       "filePath": "README.md",
-      "contentHash": "cabac0574b2d3238a6d5dca439efd5c1aed3ccd5700406ec31787e8a9e8f3785",
+      "contentHash": "0c7b2d754de5657fc6439a111cd89082eb8c1636d91452e76609131dfe71c000",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -2078,7 +3800,7 @@
     },
     "server.mjs": {
       "filePath": "server.mjs",
-      "contentHash": "582a16eed6ba0e3f8d44780b1ad3a322cacc3034b6b8080be435a14b096c0ee8",
+      "contentHash": "b6bc77ffcd54f411455e5466295a60b42a210be861e49fee70f5b3c621b57101",
       "functions": [
         {
           "name": "defaultRunState",
@@ -4361,9 +6083,38 @@
       "totalLines": 80,
       "hasStructuralAnalysis": true
     },
+    "server/wangzhuan/decomposition-text.mjs": {
+      "filePath": "server/wangzhuan/decomposition-text.mjs",
+      "contentHash": "febea01ba1071f40605bd0163cf4d05ada50f889950cca7956333c6090cf613e",
+      "functions": [
+        {
+          "name": "humanizeDecompositionKey",
+          "params": [
+            "key"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "flattenDecompositionFieldValue",
+          "params": [
+            "value"
+          ],
+          "exported": true,
+          "lineCount": 39
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [
+        "flattenDecompositionFieldValue"
+      ],
+      "totalLines": 67,
+      "hasStructuralAnalysis": true
+    },
     "server/wangzhuan/estimates.mjs": {
       "filePath": "server/wangzhuan/estimates.mjs",
-      "contentHash": "a7f2ad70f267f37f63c99490a4e03265335bbddc16b8034841c1c30155499658",
+      "contentHash": "ec64133e94de2a1d7beb661f811ea7310dcbe0ec49715360b02a2881b5bde1ae",
       "functions": [
         {
           "name": "currentUserId",
@@ -4502,7 +6253,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 126
+          "lineCount": 128
         },
         {
           "name": "loadEstimate",
@@ -4536,7 +6287,7 @@
             "batch"
           ],
           "exported": false,
-          "lineCount": 6
+          "lineCount": 15
         },
         {
           "name": "assertCanStartFromEstimate",
@@ -4555,6 +6306,14 @@
           ],
           "exported": true,
           "lineCount": 75
+        },
+        {
+          "name": "prepareBatchPlanFromEstimate",
+          "params": [
+            "context"
+          ],
+          "exported": true,
+          "lineCount": 80
         }
       ],
       "classes": [],
@@ -4632,7 +6391,8 @@
         {
           "source": "./seedance-provider.mjs",
           "specifiers": [
-            "DEFAULT_SEEDANCE_MODEL"
+            "DEFAULT_SEEDANCE_MODEL",
+            "resolveSeedanceModel"
           ]
         },
         {
@@ -4651,9 +6411,10 @@
       "exports": [
         "estimateBatch",
         "loadEstimate",
-        "startBatchFromEstimate"
+        "startBatchFromEstimate",
+        "prepareBatchPlanFromEstimate"
       ],
-      "totalLines": 456,
+      "totalLines": 548,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/gallery.mjs": {
@@ -4692,7 +6453,7 @@
     },
     "server/wangzhuan/http.mjs": {
       "filePath": "server/wangzhuan/http.mjs",
-      "contentHash": "cc954ce94674768756566d7b4140da4767b9fcee3be62f1e61a24e86968b7ef2",
+      "contentHash": "1edf242f6d4354be4710b104ece2a81fb7aa286136dd0d271c130cfc5d85162b",
       "functions": [
         {
           "name": "statusForCode",
@@ -4743,7 +6504,7 @@
             "requestId"
           ],
           "exported": true,
-          "lineCount": 6
+          "lineCount": 16
         },
         {
           "name": "requirePermission",
@@ -4786,12 +6547,12 @@
         "sendErrorEnvelope",
         "requirePermission"
       ],
-      "totalLines": 105,
+      "totalLines": 115,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/ids.mjs": {
       "filePath": "server/wangzhuan/ids.mjs",
-      "contentHash": "98aa651efeeff8b00c18d7380ea0f321faad20c22ad4d6343e531024b5091ef9",
+      "contentHash": "0b73c2d1b0051cac61efe7f1024624258e2fb37017057ddd010e5e34108830c6",
       "functions": [
         {
           "name": "pad",
@@ -4922,6 +6683,15 @@
           "lineCount": 3
         },
         {
+          "name": "makePlanId",
+          "params": [
+            "batchId",
+            "seq"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
           "name": "makeOutputId",
           "params": [
             "batchId",
@@ -4987,13 +6757,14 @@
         "batchShortId",
         "makeScriptId",
         "makeGenerationTaskId",
+        "makePlanId",
         "makeOutputId",
         "makeTemplateId",
         "makeTemplateVersionId",
         "makeAuditEventId",
         "makePackageId"
       ],
-      "totalLines": 107,
+      "totalLines": 111,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/llm-config.mjs": {
@@ -5072,7 +6843,7 @@
     },
     "server/wangzhuan/mysql-facts.mjs": {
       "filePath": "server/wangzhuan/mysql-facts.mjs",
-      "contentHash": "7ee6a3f4cc01dbe33c01c921c4fc1388272f72e199f21497e5d5e3f6e66b5fc5",
+      "contentHash": "25f21b436e10ab38b719f79f27db458b1841ea81c78b7659aa3d9d521e5c20f7",
       "functions": [
         {
           "name": "mysqlConfigFromEnv",
@@ -5520,6 +7291,14 @@
           "lineCount": 20
         },
         {
+          "name": "withAssetPreviewUrl",
+          "params": [
+            "asset"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
           "name": "loadReferenceVideoProbeFromMysql",
           "params": [
             "context",
@@ -5669,7 +7448,7 @@
             "row"
           ],
           "exported": false,
-          "lineCount": 37
+          "lineCount": 40
         },
         {
           "name": "outputRowToOutput",
@@ -5733,7 +7512,7 @@
             "run"
           ],
           "exported": false,
-          "lineCount": 180
+          "lineCount": 186
         },
         {
           "name": "loadRemixByRunRow",
@@ -5772,6 +7551,15 @@
           "lineCount": 27
         },
         {
+          "name": "loadBlockingRemixForSourceFromMysql",
+          "params": [
+            "context",
+            "sourceId"
+          ],
+          "exported": true,
+          "lineCount": 30
+        },
+        {
           "name": "countsForGalleryRows",
           "params": [
             "rows",
@@ -5789,12 +7577,18 @@
           "lineCount": 3
         },
         {
+          "name": "normalizeGallerySourceType",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
           "name": "loadGalleryItemsFromMysql",
           "params": [
             "context"
           ],
           "exported": true,
-          "lineCount": 128
+          "lineCount": 135
         },
         {
           "name": "syncDownloadPackageFact",
@@ -5899,12 +7693,48 @@
           "lineCount": 26
         },
         {
+          "name": "taskSummaryFromRunRow",
+          "params": [
+            "row"
+          ],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "normalizeTaskScope",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "normalizeTaskRunType",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "loadWorkflowTasksFromMysql",
+          "params": [
+            "context"
+          ],
+          "exported": true,
+          "lineCount": 65
+        },
+        {
           "name": "runType",
           "params": [
             "batch"
           ],
           "exported": false,
           "lineCount": 3
+        },
+        {
+          "name": "capabilitySnapshotForBatch",
+          "params": [
+            "batch"
+          ],
+          "exported": false,
+          "lineCount": 11
         },
         {
           "name": "requestSnapshot",
@@ -6157,7 +7987,7 @@
             "batch"
           ],
           "exported": true,
-          "lineCount": 220
+          "lineCount": 224
         },
         {
           "name": "recordMysqlTelemetryEvent",
@@ -6240,10 +8070,12 @@
         "loadRemixDetailFromMysql",
         "loadBatchDetailFromMysql",
         "loadActiveRemixFromMysql",
+        "loadBlockingRemixForSourceFromMysql",
         "loadGalleryItemsFromMysql",
         "syncDownloadPackageFact",
         "findActiveResourceLock",
         "loadActivePipelineRunFromMysql",
+        "loadWorkflowTasksFromMysql",
         "claimSchedulerJob",
         "completeSchedulerJob",
         "rescheduleSchedulerJob",
@@ -6253,7 +8085,7 @@
         "loadIdempotencyFactFromMysql",
         "recordIdempotencyFact"
       ],
-      "totalLines": 3560,
+      "totalLines": 3760,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/package.mjs": {
@@ -6613,7 +8445,7 @@
     },
     "server/wangzhuan/pipeline.mjs": {
       "filePath": "server/wangzhuan/pipeline.mjs",
-      "contentHash": "b61fff73e7c5276386d6891dc14ddb3c1aa2b3656c433656c3957746f5f8adc3",
+      "contentHash": "846aecaa2a85d4a14a2da127150d28d5f045ffd159d1ee7f315ee61741e8679f",
       "functions": [
         {
           "name": "currentUserId",
@@ -6671,7 +8503,7 @@
             "batch"
           ],
           "exported": false,
-          "lineCount": 9
+          "lineCount": 19
         },
         {
           "name": "writeBatch",
@@ -6747,15 +8579,6 @@
           "lineCount": 40
         },
         {
-          "name": "mockSubmittedTask",
-          "params": [
-            "task",
-            "now"
-          ],
-          "exported": false,
-          "lineCount": 17
-        },
-        {
           "name": "buildSeedanceTaskPayload",
           "params": [
             "context",
@@ -6764,7 +8587,7 @@
             "provider"
           ],
           "exported": false,
-          "lineCount": 25
+          "lineCount": 37
         },
         {
           "name": "submitTaskToSeedance",
@@ -6776,7 +8599,7 @@
             "now"
           ],
           "exported": false,
-          "lineCount": 71
+          "lineCount": 77
         },
         {
           "name": "ensureEventFile",
@@ -6803,7 +8626,7 @@
             "batch"
           ],
           "exported": true,
-          "lineCount": 83
+          "lineCount": 168
         },
         {
           "name": "getBatchDetail",
@@ -6830,7 +8653,7 @@
             "batchId"
           ],
           "exported": true,
-          "lineCount": 41
+          "lineCount": 48
         },
         {
           "name": "retryFailedGenerationTask",
@@ -6840,7 +8663,32 @@
             "generationTaskId"
           ],
           "exported": true,
-          "lineCount": 58
+          "lineCount": 66
+        },
+        {
+          "name": "currentPlanIds",
+          "params": [
+            "batch"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "confirmBatchPlan",
+          "params": [
+            "context",
+            "batchId"
+          ],
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "cleanConfirmationNotes",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 4
         },
         {
           "name": "getActiveBatch",
@@ -6909,6 +8757,7 @@
             "collectSeedanceMedia",
             "createSeedanceProviderClient",
             "DEFAULT_SEEDANCE_MODEL",
+            "resolveSeedanceModel",
             "summarizeSeedanceRequest",
             "summarizeSeedanceResponse"
           ]
@@ -6926,6 +8775,14 @@
           "specifiers": [
             "recordTelemetryEvent"
           ]
+        },
+        {
+          "source": "./plan-preview.mjs",
+          "specifiers": [
+            "buildGenerationPlanRecord",
+            "generateSeedancePlan",
+            "validateBranchTruthRulesForPlan"
+          ]
         }
       ],
       "exports": [
@@ -6934,17 +8791,133 @@
         "stopBatch",
         "submitPendingGenerationTasks",
         "retryFailedGenerationTask",
+        "confirmBatchPlan",
         "getActiveBatch",
         "readBatch",
         "writeBatch",
         "writeTaskMaps"
       ],
-      "totalLines": 678,
+      "totalLines": 867,
+      "hasStructuralAnalysis": true
+    },
+    "server/wangzhuan/plan-preview.mjs": {
+      "filePath": "server/wangzhuan/plan-preview.mjs",
+      "contentHash": "56ee3f3aa55e64699e231e6ac2c3e860cfcb1965b71c591103b0c32a0912664a",
+      "functions": [
+        {
+          "name": "isNonEmptyString",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "cleanString",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "normalizeStringList",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "validateBranchTruthRulesForPlan",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "validateSeedancePlan",
+          "params": [],
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "buildSeedancePlanMessages",
+          "params": [],
+          "exported": true,
+          "lineCount": 71
+        },
+        {
+          "name": "callPlanLlm",
+          "params": [
+            "context",
+            "messages",
+            "llmConfig"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "generateSeedancePlan",
+          "params": [
+            "context"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "buildGenerationPlanRecord",
+          "params": [],
+          "exported": true,
+          "lineCount": 28
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "./constants.mjs",
+          "specifiers": [
+            "REQUIRED_STRONG_TRUTH_FIELDS"
+          ]
+        },
+        {
+          "source": "./http.mjs",
+          "specifiers": [
+            "WangzhuanError"
+          ]
+        },
+        {
+          "source": "./ids.mjs",
+          "specifiers": [
+            "makePlanId"
+          ]
+        },
+        {
+          "source": "./llm-config.mjs",
+          "specifiers": [
+            "resolveLlmConfig"
+          ]
+        },
+        {
+          "source": "./reference-videos.mjs",
+          "specifiers": [
+            "callOpenAiCompatibleLlm",
+            "parseLlmJsonContent"
+          ]
+        }
+      ],
+      "exports": [
+        "validateBranchTruthRulesForPlan",
+        "validateSeedancePlan",
+        "buildSeedancePlanMessages",
+        "generateSeedancePlan",
+        "buildGenerationPlanRecord"
+      ],
+      "totalLines": 224,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/product-assets.mjs": {
       "filePath": "server/wangzhuan/product-assets.mjs",
-      "contentHash": "e648c9e982bd0d4669ea5ee0db5b42087d7a60864899da6ab1450424d7965835",
+      "contentHash": "999f79ecaea00a487008166c9eaeced7ebbcd7c094e019a5f4ba420c4d6a1e61",
       "functions": [
         {
           "name": "sanitizeSegment",
@@ -6984,7 +8957,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 43
+          "lineCount": 44
         }
       ],
       "classes": [],
@@ -7014,7 +8987,6 @@
         {
           "source": "./storage.mjs",
           "specifiers": [
-            "previewUrlForWangzhuanAsset",
             "syncWangzhuanAsset",
             "toProjectRelative",
             "wangzhuanPaths"
@@ -7024,12 +8996,12 @@
       "exports": [
         "uploadProductAsset"
       ],
-      "totalLines": 98,
+      "totalLines": 99,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/qc.mjs": {
       "filePath": "server/wangzhuan/qc.mjs",
-      "contentHash": "adf9eb4e1dc4d267e77503a976b5a7378577f643a56f0647cfdd5609af2f28cd",
+      "contentHash": "a706ba0f4c9599a8916bb52751a75ce792509dbaeab77a9c2beefb01da4da045",
       "functions": [
         {
           "name": "currentUserId",
@@ -7610,7 +9582,7 @@
     },
     "server/wangzhuan/reference-videos.mjs": {
       "filePath": "server/wangzhuan/reference-videos.mjs",
-      "contentHash": "c063fb1187248f4afd77083ecd5ec76315068f02772c50eeb092e9a96623d844",
+      "contentHash": "6c92a06ec86146ea257c506ccc0ea10f07996558ad7be8cffc41da39b1667210",
       "functions": [
         {
           "name": "sanitizeFileName",
@@ -7724,7 +9696,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 88
+          "lineCount": 89
         },
         {
           "name": "mimeForExt",
@@ -7855,7 +9827,7 @@
           "params": [
             "content"
           ],
-          "exported": false,
+          "exported": true,
           "lineCount": 20
         },
         {
@@ -7926,7 +9898,7 @@
             "llmConfig",
             "messages"
           ],
-          "exported": false,
+          "exported": true,
           "lineCount": 87
         },
         {
@@ -7936,6 +9908,24 @@
           ],
           "exported": true,
           "lineCount": 55
+        },
+        {
+          "name": "loadConfirmedDecomposition",
+          "params": [
+            "context",
+            "referenceVideoId"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "getReferenceVideoWorkflowState",
+          "params": [
+            "context",
+            "referenceVideoId"
+          ],
+          "exported": true,
+          "lineCount": 9
         },
         {
           "name": "decomposeReferenceVideo",
@@ -8001,6 +9991,7 @@
           "specifiers": [
             "hasWangzhuanFactsStore",
             "loadReferenceVideoProbeFromMysql",
+            "loadVideoDecompositionFromMysql",
             "nextReferenceVideoIdFromMysql",
             "syncReferenceVideoFact",
             "syncVideoDecompositionFact"
@@ -8009,7 +10000,6 @@
         {
           "source": "./storage.mjs",
           "specifiers": [
-            "previewUrlForWangzhuanAsset",
             "syncWangzhuanAsset",
             "toProjectRelative",
             "wangzhuanPaths",
@@ -8027,6 +10017,12 @@
           "specifiers": [
             "buildPublicUrl"
           ]
+        },
+        {
+          "source": "./decomposition-text.mjs",
+          "specifiers": [
+            "flattenDecompositionFieldValue"
+          ]
         }
       ],
       "exports": [
@@ -8036,14 +10032,17 @@
         "loadReferenceVideoProbe",
         "validateVideoDecomposition",
         "draftReferenceVideoDecomposition",
-        "decomposeReferenceVideo"
+        "getReferenceVideoWorkflowState",
+        "decomposeReferenceVideo",
+        "callOpenAiCompatibleLlm",
+        "parseLlmJsonContent"
       ],
-      "totalLines": 898,
+      "totalLines": 929,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/remix-provider.mjs": {
       "filePath": "server/wangzhuan/remix-provider.mjs",
-      "contentHash": "dc843a29787a238983acb6345d6b1d42ebf38d8bc00373f17b564432e3955baa",
+      "contentHash": "e63ce0054bde894fb7ba76821f49e1226a24fdb8baec2062f63739bcf8c3c194",
       "functions": [
         {
           "name": "cleanString",
@@ -8106,7 +10105,7 @@
           "name": "createRemixProviderClient",
           "params": [],
           "exported": true,
-          "lineCount": 53
+          "lineCount": 85
         }
       ],
       "classes": [],
@@ -8122,12 +10121,12 @@
         "hasRemoteRemixProvider",
         "createRemixProviderClient"
       ],
-      "totalLines": 136,
+      "totalLines": 168,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/remix.mjs": {
       "filePath": "server/wangzhuan/remix.mjs",
-      "contentHash": "c90eaab01aa541b889ad1cb4f8928fc140b431da90369b56cecc759eee399792",
+      "contentHash": "90343aa38a948e3e15f266d4dbbef3d4d090efef67403625e47054a18625b229",
       "functions": [
         {
           "name": "currentUserId",
@@ -8418,7 +10417,7 @@
             "assetKind"
           ],
           "exported": false,
-          "lineCount": 7
+          "lineCount": 8
         },
         {
           "name": "remixShortId",
@@ -8484,7 +10483,7 @@
             "capability"
           ],
           "exported": false,
-          "lineCount": 12
+          "lineCount": 13
         },
         {
           "name": "remixStatusFromProvider",
@@ -8493,6 +10492,14 @@
           ],
           "exported": false,
           "lineCount": 7
+        },
+        {
+          "name": "remixFailureFromError",
+          "params": [
+            "error"
+          ],
+          "exported": false,
+          "lineCount": 12
         },
         {
           "name": "providerPayload",
@@ -8531,6 +10538,15 @@
           "lineCount": 47
         },
         {
+          "name": "assertRemoteRemixProvider",
+          "params": [
+            "context",
+            "capability"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
           "name": "writeQcReport",
           "params": [
             "context",
@@ -8542,16 +10558,6 @@
           "lineCount": 47
         },
         {
-          "name": "materializeMockRemix",
-          "params": [
-            "context",
-            "record",
-            "remixId"
-          ],
-          "exported": false,
-          "lineCount": 52
-        },
-        {
           "name": "materializeProviderOutput",
           "params": [
             "context",
@@ -8560,7 +10566,7 @@
             "outputBuffer"
           ],
           "exported": false,
-          "lineCount": 56
+          "lineCount": 57
         },
         {
           "name": "findActiveRemix",
@@ -8579,12 +10585,21 @@
           "lineCount": 3
         },
         {
+          "name": "assertSourceSubmitUnlocked",
+          "params": [
+            "context",
+            "sourceId"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
           "name": "uploadRemixSource",
           "params": [
             "context"
           ],
           "exported": true,
-          "lineCount": 66
+          "lineCount": 67
         },
         {
           "name": "startDirectMaskEdit",
@@ -8592,7 +10607,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 122
+          "lineCount": 95
         },
         {
           "name": "estimateRemix",
@@ -8617,7 +10632,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 97
+          "lineCount": 70
         },
         {
           "name": "getRemixDetail",
@@ -8626,7 +10641,7 @@
             "remixId"
           ],
           "exported": true,
-          "lineCount": 45
+          "lineCount": 74
         },
         {
           "name": "getActiveRemix",
@@ -8731,7 +10746,6 @@
           "source": "./storage.mjs",
           "specifiers": [
             "openWangzhuanObjectStream",
-            "previewUrlForWangzhuanAsset",
             "syncWangzhuanAsset",
             "toProjectRelative",
             "wangzhuanPaths",
@@ -8744,6 +10758,7 @@
             "findActiveResourceLock",
             "loadActivePipelineRunFromMysql",
             "loadActiveRemixFromMysql",
+            "loadBlockingRemixForSourceFromMysql",
             "loadEstimateFromMysql",
             "loadIdempotencyFactFromMysql",
             "loadRemixDetailFromMysql",
@@ -8776,12 +10791,12 @@
         "stopRemix",
         "confirmRemixPreview"
       ],
-      "totalLines": 1276,
+      "totalLines": 1237,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/router.mjs": {
       "filePath": "server/wangzhuan/router.mjs",
-      "contentHash": "f2a4e9c068244d2d497c1d98b81d47e0585cdd2a7137837f1f22233a5920c13d",
+      "contentHash": "d64b1c6760ac9d11142991abfdb0854a3b26565f6379705ec843ac3af60f0431",
       "functions": [
         {
           "name": "buildContext",
@@ -8816,6 +10831,14 @@
           "lineCount": 5
         },
         {
+          "name": "referenceVideoRoute",
+          "params": [
+            "pathname"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
           "name": "sendZip",
           "params": [
             "res",
@@ -8834,7 +10857,7 @@
             "context"
           ],
           "exported": true,
-          "lineCount": 97
+          "lineCount": 111
         }
       ],
       "classes": [],
@@ -8849,6 +10872,7 @@
           "source": "./estimates.mjs",
           "specifiers": [
             "estimateBatch",
+            "prepareBatchPlanFromEstimate",
             "startBatchFromEstimate"
           ]
         },
@@ -8856,6 +10880,12 @@
           "source": "./gallery.mjs",
           "specifiers": [
             "getGallery"
+          ]
+        },
+        {
+          "source": "./tasks.mjs",
+          "specifiers": [
+            "listTasks"
           ]
         },
         {
@@ -8888,6 +10918,7 @@
         {
           "source": "./pipeline.mjs",
           "specifiers": [
+            "confirmBatchPlan",
             "getBatchDetail",
             "getActiveBatch",
             "stopBatch",
@@ -8911,7 +10942,8 @@
           "specifiers": [
             "checkReferenceVideo",
             "decomposeReferenceVideo",
-            "draftReferenceVideoDecomposition"
+            "draftReferenceVideoDecomposition",
+            "getReferenceVideoWorkflowState"
           ]
         },
         {
@@ -8951,7 +10983,7 @@
       "exports": [
         "handleWangzhuanRequest"
       ],
-      "totalLines": 160,
+      "totalLines": 186,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/scheduler.mjs": {
@@ -9034,7 +11066,7 @@
     },
     "server/wangzhuan/seedance-provider.mjs": {
       "filePath": "server/wangzhuan/seedance-provider.mjs",
-      "contentHash": "fb48edfde886d362183bc1eb6d74cad5837277bc9e0d65594e7d3386d7fa696f",
+      "contentHash": "d2f20fcccfceae87671d733982901cdd2017f36c84886148284ccb7b0f3ffbdd",
       "functions": [
         {
           "name": "cleanString",
@@ -9086,25 +11118,34 @@
           "lineCount": 17
         },
         {
-          "name": "appendMediaContent",
-          "params": [
-            "content",
-            "media"
-          ],
+          "name": "referenceTypeFromMediaItem",
+          "params": [],
           "exported": false,
-          "lineCount": 14
+          "lineCount": 5
+        },
+        {
+          "name": "buildReferenceItems",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "resolveSeedanceModel",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
         },
         {
           "name": "buildSeedanceGenerationPayload",
           "params": [],
           "exported": true,
-          "lineCount": 40
+          "lineCount": 39
         },
         {
           "name": "configuredProvider",
           "params": [],
           "exported": false,
-          "lineCount": 24
+          "lineCount": 25
         },
         {
           "name": "authHeaders",
@@ -9153,10 +11194,16 @@
           "lineCount": 26
         },
         {
+          "name": "unwrapUpstreamPayload",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
           "name": "parseSeedanceSubmitResponse",
           "params": [],
           "exported": true,
-          "lineCount": 8
+          "lineCount": 9
         },
         {
           "name": "normalizeSeedanceTaskStatus",
@@ -9185,13 +11232,13 @@
           "name": "extractSeedanceVideoUrl",
           "params": [],
           "exported": true,
-          "lineCount": 3
+          "lineCount": 7
         },
         {
           "name": "parseSeedancePollResponse",
           "params": [],
           "exported": true,
-          "lineCount": 10
+          "lineCount": 11
         },
         {
           "name": "summarizeSeedancePollResponse",
@@ -9215,7 +11262,7 @@
           "name": "createSeedanceProviderClient",
           "params": [],
           "exported": true,
-          "lineCount": 58
+          "lineCount": 60
         },
         {
           "name": "summarizeSeedanceRequest",
@@ -9223,7 +11270,7 @@
             "payload"
           ],
           "exported": true,
-          "lineCount": 14
+          "lineCount": 16
         },
         {
           "name": "summarizeSeedanceResponse",
@@ -9235,6 +11282,12 @@
       "classes": [],
       "imports": [
         {
+          "source": "./llm-config.mjs",
+          "specifiers": [
+            "configuredApiKey"
+          ]
+        },
+        {
           "source": "./http.mjs",
           "specifiers": [
             "WangzhuanError"
@@ -9244,6 +11297,7 @@
       "exports": [
         "DEFAULT_SEEDANCE_MODEL",
         "collectSeedanceMedia",
+        "resolveSeedanceModel",
         "buildSeedanceGenerationPayload",
         "seedanceSubmitUrl",
         "parseSeedanceSubmitResponse",
@@ -9258,13 +11312,27 @@
         "summarizeSeedanceRequest",
         "summarizeSeedanceResponse"
       ],
-      "totalLines": 366,
+      "totalLines": 407,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/stitch.mjs": {
       "filePath": "server/wangzhuan/stitch.mjs",
-      "contentHash": "840a1b5072978d9f8129d4612b66d77155ccb1d7c7201b73d6838bfaecc764bd",
+      "contentHash": "3463391f5657bd3fb0ecc74741d4e76371cccdcdab4815d25e6924a69cbc3ba4",
       "functions": [
+        {
+          "name": "ffmpegAvailableSync",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "toConcatListPath",
+          "params": [
+            "filePath"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
         {
           "name": "currentUserId",
           "params": [
@@ -9347,7 +11415,7 @@
           "name": "preflightStitcher",
           "params": [],
           "exported": true,
-          "lineCount": 18
+          "lineCount": 34
         },
         {
           "name": "groupTasksByVariant",
@@ -9421,7 +11489,7 @@
             "sequenceState"
           ],
           "exported": false,
-          "lineCount": 54
+          "lineCount": 51
         },
         {
           "name": "hasTwoSubmittedSegments",
@@ -9462,6 +11530,15 @@
           "lineCount": 20
         },
         {
+          "name": "concatSegmentVideos",
+          "params": [
+            "outputPath",
+            "segmentPaths"
+          ],
+          "exported": false,
+          "lineCount": 31
+        },
+        {
           "name": "createSucceededStitchOutput",
           "params": [
             "context",
@@ -9472,7 +11549,7 @@
             "sequenceState"
           ],
           "exported": false,
-          "lineCount": 49
+          "lineCount": 52
         },
         {
           "name": "materializeBatchSegmentOutputs",
@@ -9532,7 +11609,9 @@
           "specifiers": [
             "copyFile",
             "mkdir",
+            "mkdtemp",
             "readFile",
+            "rm",
             "writeFile"
           ]
         },
@@ -9543,10 +11622,34 @@
           ]
         },
         {
+          "source": "node:child_process",
+          "specifiers": [
+            "execFileSync"
+          ]
+        },
+        {
+          "source": "node:util",
+          "specifiers": [
+            "promisify"
+          ]
+        },
+        {
+          "source": "node:child_process",
+          "specifiers": [
+            "execFile"
+          ]
+        },
+        {
           "source": "node:path",
           "specifiers": [
             "dirname",
             "join"
+          ]
+        },
+        {
+          "source": "node:os",
+          "specifiers": [
+            "tmpdir"
           ]
         },
         {
@@ -9574,7 +11677,6 @@
         {
           "source": "./storage.mjs",
           "specifiers": [
-            "previewUrlForWangzhuanAsset",
             "syncWangzhuanAsset",
             "toProjectRelative",
             "wangzhuanPaths",
@@ -9595,12 +11697,12 @@
         "stitchBatchSegments",
         "retryStitch"
       ],
-      "totalLines": 518,
+      "totalLines": 585,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/storage.mjs": {
       "filePath": "server/wangzhuan/storage.mjs",
-      "contentHash": "d6c88613cf090004a4210b9daec5de6a64a060d69ecb15df8fa3ef74c73c7dba",
+      "contentHash": "a81ee235276da9f074723bff3955b0a09510fca2d805c7c36d5c504d1cc7eb68",
       "functions": [
         {
           "name": "wangzhuanPaths",
@@ -9636,13 +11738,22 @@
           "lineCount": 3
         },
         {
+          "name": "assertSyncedObjectStorage",
+          "params": [
+            "storage",
+            "assetKind"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
           "name": "syncWangzhuanAsset",
           "params": [
             "context",
             "fullPath"
           ],
           "exported": true,
-          "lineCount": 18
+          "lineCount": 33
         },
         {
           "name": "openWangzhuanObjectStream",
@@ -9759,6 +11870,12 @@
             "projectStorageDescriptor",
             "uploadProjectAsset"
           ]
+        },
+        {
+          "source": "./http.mjs",
+          "specifiers": [
+            "WangzhuanError"
+          ]
         }
       ],
       "exports": [
@@ -9775,7 +11892,41 @@
         "appendJsonl",
         "repairJsonlTail"
       ],
-      "totalLines": 210,
+      "totalLines": 244,
+      "hasStructuralAnalysis": true
+    },
+    "server/wangzhuan/tasks.mjs": {
+      "filePath": "server/wangzhuan/tasks.mjs",
+      "contentHash": "9929d052ffa26234421989f8a5eecd32db4a772e8eb12c206521ae8ace905775",
+      "functions": [
+        {
+          "name": "listTasks",
+          "params": [
+            "context"
+          ],
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "./http.mjs",
+          "specifiers": [
+            "WangzhuanError"
+          ]
+        },
+        {
+          "source": "./mysql-facts.mjs",
+          "specifiers": [
+            "loadWorkflowTasksFromMysql"
+          ]
+        }
+      ],
+      "exports": [
+        "listTasks"
+      ],
+      "totalLines": 11,
       "hasStructuralAnalysis": true
     },
     "server/wangzhuan/telemetry.mjs": {
@@ -10089,7 +12240,7 @@
     },
     "server/wangzhuan/upstream-poll.mjs": {
       "filePath": "server/wangzhuan/upstream-poll.mjs",
-      "contentHash": "ff554da6eea21b5c90087d00d91f87f33f45ecb65c1daf1c84b65ad623b115da",
+      "contentHash": "9ff6d93f7393ac96ebafed96af6b01df3368986368a9928b5d5c0a3d669348b4",
       "functions": [
         {
           "name": "userRelative",
@@ -10111,7 +12262,7 @@
           "lineCount": 3
         },
         {
-          "name": "isMockGenerationTask",
+          "name": "isLegacyMockGenerationTask",
           "params": [],
           "exported": false,
           "lineCount": 5
@@ -10143,7 +12294,7 @@
             "now"
           ],
           "exported": false,
-          "lineCount": 85
+          "lineCount": 80
         },
         {
           "name": "advanceThirtySecondBatch",
@@ -10215,18 +12366,24 @@
             "toProjectRelative",
             "wangzhuanPaths"
           ]
+        },
+        {
+          "source": "./http.mjs",
+          "specifiers": [
+            "WangzhuanError"
+          ]
         }
       ],
       "exports": [
         "shouldPollUpstreamBatch",
         "pollUpstreamBatch"
       ],
-      "totalLines": 205,
+      "totalLines": 197,
       "hasStructuralAnalysis": true
     },
     "start-windows.bat": {
       "filePath": "start-windows.bat",
-      "contentHash": "949d4eba22c16131e72107fa5b89b4a047f1ec2a4fac773bf0d0025d424dd36e",
+      "contentHash": "b0608b51eada2c99c6ce8b925d1f21512742a095b5000268231a103b472e63db",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -10236,12 +12393,22 @@
     },
     "start-windows.ps1": {
       "filePath": "start-windows.ps1",
-      "contentHash": "96cd9e93472a77b10657930e66c3e886d717caa385084ece297e28fbc9dc4344",
+      "contentHash": "508073a9135893a0201211033a88a11b4d083781ce78d4e51ffc2d018afb2538",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
       "totalLines": 12,
+      "hasStructuralAnalysis": false
+    },
+    "test-out.txt": {
+      "filePath": "test-out.txt",
+      "contentHash": "470b0e8475267b7cc30e0b3891374c144d907a523839ccb51872009e736b3e17",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 425,
       "hasStructuralAnalysis": false
     },
     "tests/auth-store.test.mjs": {
@@ -10300,7 +12467,7 @@
     },
     "tests/docker-local.test.mjs": {
       "filePath": "tests/docker-local.test.mjs",
-      "contentHash": "5043eba8da4b1b7fd941b07392d9148b94a0d92081c7207776cefe8674f47af2",
+      "contentHash": "971812e5a2a483358c9ed2813925292f6c0758c2d5dedce4e9e0344498434af5",
       "functions": [],
       "classes": [],
       "imports": [
@@ -10324,7 +12491,7 @@
         }
       ],
       "exports": [],
-      "totalLines": 51,
+      "totalLines": 53,
       "hasStructuralAnalysis": true
     },
     "tests/object-storage.test.mjs": {
@@ -10473,9 +12640,38 @@
       "totalLines": 125,
       "hasStructuralAnalysis": true
     },
+    "tests/wangzhuan/decomposition-text.test.mjs": {
+      "filePath": "tests/wangzhuan/decomposition-text.test.mjs",
+      "contentHash": "58fb4939ebbb623cc9e5d3578a9778c4ce5fcf4b59a5dee06992fe20eecae03c",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/decomposition-text.mjs",
+          "specifiers": [
+            "flattenDecompositionFieldValue"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 40,
+      "hasStructuralAnalysis": true
+    },
     "tests/wangzhuan/estimates.test.mjs": {
       "filePath": "tests/wangzhuan/estimates.test.mjs",
-      "contentHash": "5c6a8681f8c10837ef514cce2ea909dce379cfd4b044190e8da47009a3bdfd61",
+      "contentHash": "0d4db73125b079bcb5d474307974256eb6b732bcd17a82e209276fefe4517d50",
       "functions": [
         {
           "name": "ensureFactsPool",
@@ -10489,7 +12685,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 11
+          "lineCount": 13
         },
         {
           "name": "validUpload",
@@ -10594,15 +12790,21 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 357,
+      "totalLines": 363,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/frontend-static.test.mjs": {
       "filePath": "tests/wangzhuan/frontend-static.test.mjs",
-      "contentHash": "a995e2984be3cc275a73ef1df1615b4f3e93cbf674b773cbe5aed41ee9d8c54d",
+      "contentHash": "92d7264617fa1f2b1367114f65a008f222df18173a0395c27e8238558fef62b7",
       "functions": [
         {
           "name": "readPublic",
@@ -10647,7 +12849,7 @@
         }
       ],
       "exports": [],
-      "totalLines": 301,
+      "totalLines": 428,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/ids.test.mjs": {
@@ -10715,13 +12917,13 @@
     },
     "tests/wangzhuan/mysql-facts-fixture.mjs": {
       "filePath": "tests/wangzhuan/mysql-facts-fixture.mjs",
-      "contentHash": "d75e20b06777db729f01cc07c98f2358623d58abb97cf212a81a382dbd9dce05",
+      "contentHash": "6d7cd38e4e9a0e29f5a6d823510815023620b9feb6906e8aa29de43fd2bd5959",
       "functions": [
         {
           "name": "fakePool",
           "params": [],
           "exported": true,
-          "lineCount": 1079
+          "lineCount": 1147
         },
         {
           "name": "context",
@@ -10736,12 +12938,12 @@
         "fakePool",
         "context"
       ],
-      "totalLines": 1089,
+      "totalLines": 1157,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/mysql-facts.test.mjs": {
       "filePath": "tests/wangzhuan/mysql-facts.test.mjs",
-      "contentHash": "1508bd3e2b5a8a160329f5a679996f781c4dd8c77b543865b80caa076822a126",
+      "contentHash": "c81aad202828ecf4e9317eb9f0945e50070d97389e51cf0ed4e067bda553317a",
       "functions": [],
       "classes": [],
       "imports": [
@@ -10800,12 +13002,52 @@
         }
       ],
       "exports": [],
-      "totalLines": 765,
+      "totalLines": 802,
+      "hasStructuralAnalysis": true
+    },
+    "tests/wangzhuan/object-storage-fixture.mjs": {
+      "filePath": "tests/wangzhuan/object-storage-fixture.mjs",
+      "contentHash": "097e088548a5d85f34a20d8f02eff4296be02ab94fb7d08d22b606bcc8884ccc",
+      "functions": [
+        {
+          "name": "attachMockObjectStorage",
+          "params": [
+            "ctx"
+          ],
+          "exported": true,
+          "lineCount": 29
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:fs/promises",
+          "specifiers": [
+            "readFile"
+          ]
+        },
+        {
+          "source": "node:path",
+          "specifiers": [
+            "basename"
+          ]
+        },
+        {
+          "source": "node:stream",
+          "specifiers": [
+            "Readable"
+          ]
+        }
+      ],
+      "exports": [
+        "attachMockObjectStorage"
+      ],
+      "totalLines": 36,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/orchestration.test.mjs": {
       "filePath": "tests/wangzhuan/orchestration.test.mjs",
-      "contentHash": "0a723353f368906b9e44f169cc4e618b5366325f08e974f6fe7dcc15ad8a3b37",
+      "contentHash": "6bda8b2a6d60f985b96b0187c0b17fefb91c95e9ca8a8283d7dc041766f42a07",
       "functions": [
         {
           "name": "ensureFactsPool",
@@ -10825,7 +13067,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 13
+          "lineCount": 16
         },
         {
           "name": "validUpload",
@@ -10934,15 +13176,27 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 200,
+      "totalLines": 205,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/pipeline.test.mjs": {
       "filePath": "tests/wangzhuan/pipeline.test.mjs",
-      "contentHash": "79945af8e67b4b49d1565ccc358e544b99d2f4a88e31ba02b94659dbdaabc267",
+      "contentHash": "2972f018c848f474cf3a94e81719a013aee87868416fb1c6253b6501c02e2593",
       "functions": [
         {
           "name": "context",
@@ -10950,7 +13204,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 11
+          "lineCount": 14
         },
         {
           "name": "validUpload",
@@ -11069,15 +13323,158 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 486,
+      "totalLines": 483,
+      "hasStructuralAnalysis": true
+    },
+    "tests/wangzhuan/plan-preview.test.mjs": {
+      "filePath": "tests/wangzhuan/plan-preview.test.mjs",
+      "contentHash": "b7ec8ba087724eac7886f6d0684b3ee186169c892361464fcc3f19fd60c3e322",
+      "functions": [
+        {
+          "name": "mockPlanPayload",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "context",
+          "params": [
+            "root"
+          ],
+          "exported": false,
+          "lineCount": 40
+        },
+        {
+          "name": "validUpload",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "decomposition",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "resetFactsPool",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "fixture",
+          "params": [
+            "root"
+          ],
+          "exported": false,
+          "lineCount": 26
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "node:fs/promises",
+          "specifiers": [
+            "mkdtemp",
+            "readFile",
+            "rm"
+          ]
+        },
+        {
+          "source": "node:os",
+          "specifiers": [
+            "tmpdir"
+          ]
+        },
+        {
+          "source": "node:path",
+          "specifiers": [
+            "join"
+          ]
+        },
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/estimates.mjs",
+          "specifiers": [
+            "estimateBatch",
+            "prepareBatchPlanFromEstimate"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/pipeline.mjs",
+          "specifiers": [
+            "confirmBatchPlan",
+            "getBatchDetail",
+            "submitPendingGenerationTasks"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/reference-videos.mjs",
+          "specifiers": [
+            "checkReferenceVideo",
+            "decomposeReferenceVideo"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/templates.mjs",
+          "specifiers": [
+            "saveTemplate"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/mysql-facts.mjs",
+          "specifiers": [
+            "closeWangzhuanFactsPool",
+            "setWangzhuanFactsPoolForTest"
+          ]
+        },
+        {
+          "source": "./mysql-facts-fixture.mjs",
+          "specifiers": [
+            "fakePool"
+          ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 297,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/qc-gallery-package.test.mjs": {
       "filePath": "tests/wangzhuan/qc-gallery-package.test.mjs",
-      "contentHash": "51c770266a2f55d9a84cc1f6ca5c755562295641c096bb3b78e460c85960eed3",
+      "contentHash": "abcfdffee7c97ebda3f9d7a139be76da36dc6c8d83f416eb893164dc26f9cdcb",
       "functions": [
         {
           "name": "ensureFactsPool",
@@ -11091,7 +13488,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 12
+          "lineCount": 15
         },
         {
           "name": "validUpload",
@@ -11267,7 +13664,8 @@
             "closeWangzhuanFactsPool",
             "loadBatchDetailFromMysql",
             "setWangzhuanFactsPoolForTest",
-            "syncBatchFacts"
+            "syncBatchFacts",
+            "syncRemixFacts"
           ]
         },
         {
@@ -11275,15 +13673,28 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "prepareDownloadedSegmentsWithoutStitch",
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 485,
+      "totalLines": 537,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/reference-videos.test.mjs": {
       "filePath": "tests/wangzhuan/reference-videos.test.mjs",
-      "contentHash": "92b46a94ebc1bfeb904ef9d4b64dd382e8ac0071eb605e719577da75d6913dc1",
+      "contentHash": "09827825de32c6aee52d0bea87b2eb214a6c1b49d93403feeec06bae181906ab",
       "functions": [
         {
           "name": "ensureFactsPool",
@@ -11309,7 +13720,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 12
+          "lineCount": 14
         },
         {
           "name": "persistPatchedProbe",
@@ -11376,6 +13787,7 @@
             "checkReferenceVideo",
             "draftReferenceVideoDecomposition",
             "decomposeReferenceVideo",
+            "getReferenceVideoWorkflowState",
             "loadReferenceVideoProbe",
             "validateVideoDecomposition"
           ]
@@ -11393,23 +13805,35 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 819,
+      "totalLines": 844,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/remix.test.mjs": {
       "filePath": "tests/wangzhuan/remix.test.mjs",
-      "contentHash": "de8651b4a2a053cd9faba628ae645bb996baeac87905d38272797787cd6b679c",
+      "contentHash": "0b39e7f01da64e97f8a76c9db151ffc5b0f8dd6d522e075fd58709298ff8dd6e",
       "functions": [
+        {
+          "name": "defaultRemixProviderClient",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        },
         {
           "name": "context",
           "params": [
             "root"
           ],
           "exported": false,
-          "lineCount": 11
+          "lineCount": 16
         },
         {
           "name": "objectStorageContext",
@@ -11417,7 +13841,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 26
+          "lineCount": 4
         },
         {
           "name": "attachMysqlFacts",
@@ -11596,6 +14020,12 @@
           ]
         },
         {
+          "source": "../../server/wangzhuan/http.mjs",
+          "specifiers": [
+            "WangzhuanError"
+          ]
+        },
+        {
           "source": "../../server/wangzhuan/router.mjs",
           "specifiers": [
             "handleWangzhuanRequest"
@@ -11618,15 +14048,21 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 1090,
+      "totalLines": 1209,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/router.test.mjs": {
       "filePath": "tests/wangzhuan/router.test.mjs",
-      "contentHash": "182dab57d1ee749b4648813974c8eec409877386e282fce4177a51e8ec193214",
+      "contentHash": "d7df8a75f54f063cd01308a3d880efc989c2ff775ec675a7f61ab9feed7faaaa",
       "functions": [
         {
           "name": "ensureFactsPool",
@@ -11661,12 +14097,20 @@
           "lineCount": 13
         },
         {
+          "name": "wangzhuanModuleContext",
+          "params": [
+            "root"
+          ],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
           "name": "tempContext",
           "params": [
             "root"
           ],
           "exported": false,
-          "lineCount": 8
+          "lineCount": 11
         },
         {
           "name": "anonymousContext",
@@ -11680,7 +14124,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 70
+          "lineCount": 64
         },
         {
           "name": "failedThirtySecondStitchFixture",
@@ -11688,7 +14132,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 71
+          "lineCount": 68
         }
       ],
       "classes": [],
@@ -11778,15 +14222,28 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "prepareDownloadedSegmentsWithoutStitch",
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 941,
+      "totalLines": 925,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/scheduler.test.mjs": {
       "filePath": "tests/wangzhuan/scheduler.test.mjs",
-      "contentHash": "ab3e1c59028271354662efc5646fa058ec71800bb83f294c3eda0afd3f399f73",
+      "contentHash": "8f9b2d9cff6f82c011caadb9edfc6ad8760e2a938edf5613359b8fe0e77deeb5",
       "functions": [
         {
           "name": "schedulerContext",
@@ -11794,7 +14251,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 7
+          "lineCount": 10
         }
       ],
       "classes": [],
@@ -11809,7 +14266,9 @@
           "source": "node:fs/promises",
           "specifiers": [
             "mkdtemp",
-            "rm"
+            "mkdir",
+            "rm",
+            "writeFile"
           ]
         },
         {
@@ -11851,15 +14310,27 @@
             "mysqlContext",
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 81,
+      "totalLines": 89,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/seedance-provider.test.mjs": {
       "filePath": "tests/wangzhuan/seedance-provider.test.mjs",
-      "contentHash": "3ce65a753f2391d2c8bbb3f007e608ecf637e40bc61ec82d155e680b330992b3",
+      "contentHash": "0eefd683f0eb182384035347eaa8b57a83b793b9dab4c92bdfa18d2bef40314a",
       "functions": [],
       "classes": [],
       "imports": [
@@ -11879,17 +14350,23 @@
           "source": "../../server/wangzhuan/seedance-provider.mjs",
           "specifiers": [
             "buildSeedanceGenerationPayload",
-            "seedanceSubmitUrl"
+            "createSeedanceProviderClient",
+            "extractSeedanceVideoUrl",
+            "parseSeedancePollResponse",
+            "parseSeedanceSubmitResponse",
+            "resolveSeedanceModel",
+            "seedanceSubmitUrl",
+            "seedanceTaskUrl"
           ]
         }
       ],
       "exports": [],
-      "totalLines": 53,
+      "totalLines": 118,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/stitch.test.mjs": {
       "filePath": "tests/wangzhuan/stitch.test.mjs",
-      "contentHash": "e4b47e7378f072c8abe9f94eaf20c97f65e73a96b18b77f97ecbdfa427eb4f0d",
+      "contentHash": "83fda7de04753c2f12a003fc6b7464678e269e55b0f79b958ac146c763c1b6dd",
       "functions": [
         {
           "name": "context",
@@ -11897,7 +14374,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 12
+          "lineCount": 15
         },
         {
           "name": "validUpload",
@@ -12003,6 +14480,12 @@
           ]
         },
         {
+          "source": "../../server/wangzhuan/upstream-poll.mjs",
+          "specifiers": [
+            "pollUpstreamBatch"
+          ]
+        },
+        {
           "source": "../../server/wangzhuan/storage.mjs",
           "specifiers": [
             "wangzhuanPaths"
@@ -12019,10 +14502,23 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "prepareDownloadedSegmentsWithoutStitch",
+            "testSeedanceProviderClient"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 224,
+      "totalLines": 229,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/storage.test.mjs": {
@@ -12078,9 +14574,65 @@
       "totalLines": 61,
       "hasStructuralAnalysis": true
     },
+    "tests/wangzhuan/tasks.test.mjs": {
+      "filePath": "tests/wangzhuan/tasks.test.mjs",
+      "contentHash": "01c86a95a6b8f206813f52c797908069f71b4df45bdf0543514ac0c790636cf8",
+      "functions": [
+        {
+          "name": "ensureFactsPool",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "scopedContext",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/tasks.mjs",
+          "specifiers": [
+            "listTasks"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/mysql-facts.mjs",
+          "specifiers": [
+            "closeWangzhuanFactsPool",
+            "setWangzhuanFactsPoolForTest",
+            "syncBatchFacts"
+          ]
+        },
+        {
+          "source": "./mysql-facts-fixture.mjs",
+          "specifiers": [
+            "fakePool"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 55,
+      "hasStructuralAnalysis": true
+    },
     "tests/wangzhuan/telemetry.test.mjs": {
       "filePath": "tests/wangzhuan/telemetry.test.mjs",
-      "contentHash": "0b5ef4846775cdae34e55ce39104cb89019c35948f7eb411ebe92aa9a65b3a5d",
+      "contentHash": "aa5c7f11029469f2ac7a8ba451f118cb375059da10b64d6b7e47e99dfb24010a",
       "functions": [
         {
           "name": "context",
@@ -12088,7 +14640,7 @@
             "root"
           ],
           "exported": false,
-          "lineCount": 19
+          "lineCount": 43
         },
         {
           "name": "adminContext",
@@ -12221,7 +14773,14 @@
           "specifiers": [
             "closeWangzhuanFactsPool",
             "setWangzhuanFactsPoolForTest",
+            "syncBatchFacts",
             "syncTemplateStoreFacts"
+          ]
+        },
+        {
+          "source": "../../server/wangzhuan/upstream-poll.mjs",
+          "specifiers": [
+            "pollUpstreamBatch"
           ]
         },
         {
@@ -12249,6 +14808,7 @@
           "specifiers": [
             "confirmRemixPreview",
             "estimateRemix",
+            "getRemixDetail",
             "startRemix",
             "uploadRemixSource"
           ]
@@ -12277,10 +14837,23 @@
           "specifiers": [
             "fakePool"
           ]
+        },
+        {
+          "source": "./object-storage-fixture.mjs",
+          "specifiers": [
+            "attachMockObjectStorage"
+          ]
+        },
+        {
+          "source": "./test-providers.mjs",
+          "specifiers": [
+            "testSeedanceProviderClient",
+            "prepareDownloadedSegmentsWithoutStitch"
+          ]
         }
       ],
       "exports": [],
-      "totalLines": 366,
+      "totalLines": 395,
       "hasStructuralAnalysis": true
     },
     "tests/wangzhuan/templates-channel-rules.test.mjs": {
@@ -12378,6 +14951,87 @@
       ],
       "exports": [],
       "totalLines": 152,
+      "hasStructuralAnalysis": true
+    },
+    "tests/wangzhuan/test-providers.mjs": {
+      "filePath": "tests/wangzhuan/test-providers.mjs",
+      "contentHash": "90013968f3896b79ef32666736c332bc4fe3a8f2537a9e9d771281b0bb110fff",
+      "functions": [
+        {
+          "name": "writeMinimalMp4",
+          "params": [
+            "target"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "minimalMp4Buffer",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "testSeedanceProviderClient",
+          "params": [],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "prepareDownloadedSegmentsWithoutStitch",
+          "params": [
+            "ctx",
+            "batchId"
+          ],
+          "exported": true,
+          "lineCount": 25
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:child_process",
+          "specifiers": [
+            "execFile"
+          ]
+        },
+        {
+          "source": "node:fs/promises",
+          "specifiers": [
+            "mkdir",
+            "mkdtemp",
+            "readFile",
+            "rm",
+            "writeFile"
+          ]
+        },
+        {
+          "source": "node:os",
+          "specifiers": [
+            "tmpdir"
+          ]
+        },
+        {
+          "source": "node:path",
+          "specifiers": [
+            "dirname",
+            "join"
+          ]
+        },
+        {
+          "source": "node:util",
+          "specifiers": [
+            "promisify"
+          ]
+        }
+      ],
+      "exports": [
+        "writeMinimalMp4",
+        "minimalMp4Buffer",
+        "testSeedanceProviderClient",
+        "prepareDownloadedSegmentsWithoutStitch"
+      ],
+      "totalLines": 84,
       "hasStructuralAnalysis": true
     }
   }

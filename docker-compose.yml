@@ -11,6 +11,8 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --default-time-zone=+00:00
+    ports:
+      - "${AIGC_MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - aigc_mysql_data:/var/lib/mysql
       - ./database/migrations:/docker-entrypoint-initdb.d:ro

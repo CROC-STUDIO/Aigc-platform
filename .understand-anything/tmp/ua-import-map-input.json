@@ -1,0 +1,930 @@
+{
+  "projectRoot": "/Users/lucy/Desktop/project/Aigc-platform",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "language": "unknown",
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".learnings/ERRORS.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".learnings/FEATURE_REQUESTS.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".learnings/LEARNINGS.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+      "language": "raw",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/current-login.headers",
+      "language": "headers",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/current-login.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-live-p0/health-login.headers",
+      "language": "headers",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/health-login.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-live-p0/live-p0-validate.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/rerun-login.headers",
+      "language": "headers",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/rerun-login.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-fIXST9/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-TuyABD/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "fileCategory": "code"
+    },
+    {
+      "path": ".understand-anything/config.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/fingerprints.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/assembled-graph.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/fingerprint-input.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/review.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/intermediate/scan-result.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/knowledge-graph.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/meta.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/tmp/current-scan.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "config.default.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "config.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0001_mysql_foundation.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_asset_object_storage.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0002_scope_runtime_unique_keys.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0003_scheduler_state_machine_rules.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0004_remix_task_qc_state_rules.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0005_stitch_completed_task_rules.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0007_stitch_failed_output_kind.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.down.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.verify.sql",
+      "language": "sql",
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/README.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docker-compose.yml",
+      "language": "yaml",
+      "fileCategory": "infra"
+    },
+    {
+      "path": "Dockerfile",
+      "language": "dockerfile",
+      "fileCategory": "infra"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+      "language": "webp",
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+      "language": "wav",
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+      "language": "wav",
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "language": "docx",
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/网赚产品 AI 素材管线需求拆解.docx",
+      "language": "docx",
+      "fileCategory": "code"
+    },
+    {
+      "path": "package-release.ps1",
+      "language": "powershell",
+      "fileCategory": "script"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "fileCategory": "config"
+    },
+    {
+      "path": "PRODUCT.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "public/app.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/comic.html",
+      "language": "html",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/comic.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/competitor-remix.html",
+      "language": "html",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/competitor-remix.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/index.html",
+      "language": "html",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/remix-canvas.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/styles.css",
+      "language": "css",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan-common.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan-task-nav.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan-tasks.html",
+      "language": "html",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan-tasks.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan.html",
+      "language": "html",
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wz-canvas.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wz-stepper.js",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "server.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/auth-store.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/object-storage.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/project-file-paths.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/runtime-config.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/branches.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/channel-rules.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/config.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/constants.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/decomposition-text.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/estimates.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/gallery.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/http.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/ids.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/llm-config.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/mysql-facts.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/package.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/pagination.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/pipeline.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/plan-preview.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/product-assets.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/qc.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/reference-videos.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/remix-provider.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/remix.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/router.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/scheduler.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/seedance-provider.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/stitch.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/storage.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/tasks.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/telemetry.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/templates.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/upstream-poll.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "start-windows.bat",
+      "language": "batch",
+      "fileCategory": "script"
+    },
+    {
+      "path": "start-windows.ps1",
+      "language": "powershell",
+      "fileCategory": "script"
+    },
+    {
+      "path": "test-out.txt",
+      "language": "txt",
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tests/auth-store.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/docker-local.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/object-storage.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/project-file-paths.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/runtime-config.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/decomposition-text.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/estimates.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/frontend-static.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/ids.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/llm-config.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/mysql-facts.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/object-storage-fixture.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/orchestration.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/pipeline.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/plan-preview.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/reference-videos.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/remix.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/router.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/scheduler.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/seedance-provider.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/stitch.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/storage.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/tasks.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/telemetry.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/templates-channel-rules.test.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/test-providers.mjs",
+      "language": "javascript",
+      "fileCategory": "code"
+    }
+  ]
+}

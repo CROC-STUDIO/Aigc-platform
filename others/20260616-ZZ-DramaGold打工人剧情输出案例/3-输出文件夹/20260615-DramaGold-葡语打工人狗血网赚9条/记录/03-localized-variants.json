@@ -1,0 +1,238 @@
+﻿{
+    "variants":  [
+                     {
+                         "id":  "factory-01",
+                         "theme":  "工人工厂午休版",
+                         "strategy":  "午休被扣奖金的反差钩子",
+                         "market_notes":  "巴西工厂工人午休，压力来自加班、账单、工资不够",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：工厂午休突发冲突",
+                                            "subject":  "巴西工厂男工人A、同事、班组长",
+                                            "action":  "午休时班组长突然通知奖金延后，同事起哄，男工人对镜头爆出想在短休息里找额外奖励",
+                                            "camera":  "手持近景、工厂桌面、饭盒和安全帽",
+                                            "lighting":  "厂房自然光",
+                                            "style":  "真人口播+狗血冲突",
+                                            "quality":  "葡语口播，无字幕，真实工厂感"
+                                        },
+                                        {
+                                            "scene":  "B段：不同女工人演示Drama Gold",
+                                            "subject":  "巴西女工人B、手机、Drama Gold、Pix/Nubank",
+                                            "action":  "她打开Drama Gold看短剧任务，余额增长，Pix或Nubank提现界面，BR纸币道具出现",
+                                            "camera":  "手机近景和人物反应切换",
+                                            "lighting":  "午休区明亮光",
+                                            "style":  "网赚任务链路+真人证言",
+                                            "quality":  "不同角色不同声音，无保证收益"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "factory-02",
+                         "theme":  "工人工厂午休版",
+                         "strategy":  "饭钱不够被同事嘲笑",
+                         "market_notes":  "工厂午餐、饭盒、临时账单，巴西普通工人语境",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：午餐被尴尬打断",
+                                            "subject":  "年轻工人A和嘲笑他的同事",
+                                            "action":  "他刷卡买午餐失败，同事开玩笑，他对镜头说短剧任务救了他的午休",
+                                            "camera":  "食堂/休息区近景，尴尬反应",
+                                            "lighting":  "明亮室内",
+                                            "style":  "狗血反转口播",
+                                            "quality":  "葡语原生口播，无字幕"
+                                        },
+                                        {
+                                            "scene":  "B段：保安大叔展示提现",
+                                            "subject":  "不同角色保安B、Drama Gold app、Pix通知",
+                                            "action":  "保安边巡逻边展示看剧任务和Pix/Nubank提现选择，出现巴西纸币和金币动效",
+                                            "camera":  "手机特写、人物半身口播",
+                                            "lighting":  "工厂走廊光",
+                                            "style":  "网赚证明+CTA",
+                                            "quality":  "不同角色，UI词简短"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "factory-03",
+                         "theme":  "工人工厂午休版",
+                         "strategy":  "工资日前一天账单压顶",
+                         "market_notes":  "工资日前、账单、同事提醒下载Drama Gold",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：账单压顶",
+                                            "subject":  "女包装工A、账单、同事",
+                                            "action":  "工资日前账单掉在桌上，她崩溃，同事说午休看短剧也能攒奖励，她半信半疑对镜头口播",
+                                            "camera":  "桌面账单特写到表情近景",
+                                            "lighting":  "工厂包装区自然光",
+                                            "style":  "真人短剧情绪钩子",
+                                            "quality":  "无字幕，口播强"
+                                        },
+                                        {
+                                            "scene":  "B段：不同叉车工验证",
+                                            "subject":  "叉车工B、手机、Drama Gold、Nubank",
+                                            "action":  "叉车工在休息区展示app任务、余额进度、选择Nubank或Pix，BR纸币在桌上",
+                                            "camera":  "手持手机近景和人物竖屏口播",
+                                            "lighting":  "工业暖光",
+                                            "style":  "奖励链路+下载CTA",
+                                            "quality":  "无固定金额承诺"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "bus-01",
+                         "theme":  "公交通勤版",
+                         "strategy":  "公交上差点没钱下车",
+                         "market_notes":  "巴西公交通勤、拥挤车厢、路费压力",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：公交尴尬冲突",
+                                            "subject":  "通勤男A、售票员/司机、乘客",
+                                            "action":  "公交上余额不足引发尴尬，他对镜头说通勤时间不能再浪费",
+                                            "camera":  "车厢手持近景、窗外城市移动",
+                                            "lighting":  "白天车窗光",
+                                            "style":  "狗血通勤口播",
+                                            "quality":  "葡语口播，无字幕"
+                                        },
+                                        {
+                                            "scene":  "B段：不同女乘客演示app",
+                                            "subject":  "女乘客B、手机、Drama Gold、Pix",
+                                            "action":  "她坐在后排看Drama Gold短剧任务，奖励进度和Pix提现界面，BR纸币样式动效",
+                                            "camera":  "手机屏幕近景、乘客反应",
+                                            "lighting":  "公交自然光",
+                                            "style":  "移动场景网赚链路",
+                                            "quality":  "不同角色不同声音"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "bus-02",
+                         "theme":  "公交通勤版",
+                         "strategy":  "被老板电话追问迟到",
+                         "market_notes":  "通勤迟到、老板电话、碎片时间",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：老板电话催促",
+                                            "subject":  "女通勤者A、拥挤公交、手机电话",
+                                            "action":  "老板电话质问迟到，她挂断后对镜头说路上也能用Drama Gold打发时间攒奖励",
+                                            "camera":  "近景口播、公交晃动",
+                                            "lighting":  "早高峰车厢光",
+                                            "style":  "真人压力钩子",
+                                            "quality":  "无字幕，原生巴葡口播"
+                                        },
+                                        {
+                                            "scene":  "B段：不同男乘客提现",
+                                            "subject":  "男乘客B、Drama Gold、Nubank/Pix",
+                                            "action":  "男乘客展示看短剧、完成任务、余额增长、Nubank或Pix收款提醒",
+                                            "camera":  "手机和人物交替",
+                                            "lighting":  "车窗光",
+                                            "style":  "任务奖励+CTA",
+                                            "quality":  "避免保证到账，显示按规则"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "bus-03",
+                         "theme":  "公交通勤版",
+                         "strategy":  "雨天公交挤不上去",
+                         "market_notes":  "雨天通勤、焦虑、碎片时间",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：雨天挤车冲突",
+                                            "subject":  "年轻打工人A、雨伞、公交站人群",
+                                            "action":  "公交满员开走，他淋雨崩溃，突然发现等车时间可以看短剧任务",
+                                            "camera":  "雨中手持近景、公交驶离",
+                                            "lighting":  "阴雨自然光",
+                                            "style":  "短剧式反转",
+                                            "quality":  "无字幕，口播和环境声"
+                                        },
+                                        {
+                                            "scene":  "B段：不同阿姨乘客证明",
+                                            "subject":  "中年女乘客B、手机、Pix/Nubank",
+                                            "action":  "她在车站长椅展示Drama Gold、BR纸币、Pix/Nubank提现选择，微笑口播CTA",
+                                            "camera":  "手机特写、人物中景",
+                                            "lighting":  "雨后柔光",
+                                            "style":  "生活化证明",
+                                            "quality":  "无固定收益承诺"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "delivery-01",
+                         "theme":  "摩托配送员版",
+                         "strategy":  "配送超时被客户骂",
+                         "market_notes":  "巴西摩托配送、外卖/包裹、街头压力",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：配送员被客户责骂",
+                                            "subject":  "摩托配送员A、客户、外卖箱",
+                                            "action":  "客户抱怨迟到，配送员尴尬对镜头说等单空档不能浪费",
+                                            "camera":  "街头手持近景、头盔特写",
+                                            "lighting":  "白天街头",
+                                            "style":  "狗血冲突开场",
+                                            "quality":  "葡语口播，无字幕"
+                                        },
+                                        {
+                                            "scene":  "B段：不同加油站员工演示",
+                                            "subject":  "加油站员工B、Drama Gold、Pix",
+                                            "action":  "他在加油站展示看剧任务、余额增长、Pix提现、BR纸币道具",
+                                            "camera":  "手机近景、金币动效",
+                                            "lighting":  "户外加油站光",
+                                            "style":  "网赚链路证明",
+                                            "quality":  "不同角色不同声音"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "delivery-02",
+                         "theme":  "摩托配送员版",
+                         "strategy":  "油费不够的反转",
+                         "market_notes":  "油价压力、Nubank余额、配送员",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：油费不够",
+                                            "subject":  "女摩托配送员A、加油泵、收银员",
+                                            "action":  "她发现油费不够，尴尬看镜头，说休息时看短剧任务能帮她攒奖励",
+                                            "camera":  "加油站近景、手机钱包特写",
+                                            "lighting":  "下午自然光",
+                                            "style":  "狗血生活压力口播",
+                                            "quality":  "无字幕，口播自然"
+                                        },
+                                        {
+                                            "scene":  "B段：不同男配送员到账",
+                                            "subject":  "男配送员B、手机、Nubank/Pix",
+                                            "action":  "他在摩托旁演示Drama Gold、短剧选择、任务奖励、选择Nubank或Pix收款",
+                                            "camera":  "手机近景和头盔人物中景",
+                                            "lighting":  "街头金色光",
+                                            "style":  "强转化CTA",
+                                            "quality":  "UI词少，避免保证收益"
+                                        }
+                                    ]
+                     },
+                     {
+                         "id":  "delivery-03",
+                         "theme":  "摩托配送员版",
+                         "strategy":  "包裹丢失被扣钱误会",
+                         "market_notes":  "配送误会、同事帮忙、额外奖励",
+                         "scenes":  [
+                                        {
+                                            "scene":  "A段：被误会扣钱",
+                                            "subject":  "配送员A、仓库主管、包裹",
+                                            "action":  "主管误会包裹丢失要扣钱，他焦急口播自己需要额外奖励",
+                                            "camera":  "配送站手持冲突近景",
+                                            "lighting":  "仓库光",
+                                            "style":  "狗血误会开场",
+                                            "quality":  "葡语口播，无字幕"
+                                        },
+                                        {
+                                            "scene":  "B段：不同同事展示DramaGold",
+                                            "subject":  "女配送同事B、手机、Pix、BR纸币",
+                                            "action":  "她帮他找回包裹后展示Drama Gold任务、Pix提现选择、BR纸币视觉，最后CTA",
+                                            "camera":  "手机近景、两人击掌",
+                                            "lighting":  "仓库门口自然光",
+                                            "style":  "剧情解决+网赚链路",
+                                            "quality":  "不同角色不同声音"
+                                        }
+                                    ]
+                     }
+                 ]
+}

@@ -58,7 +58,9 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(html, /改写 3\.1/);
   assert.match(html, /产品信息/);
   assert.match(html, /本次投放/);
-  assert.match(html, /模板与批次默认值/);
+  assert.match(html, /<span class="wz-subno">3\.1\.1<\/span>[^<]*模板与批次默认值/);
+  assert.match(html, /<span class="wz-subno">3\.1\.2<\/span>[^<]*产品信息/);
+  assert.match(html, /<span class="wz-subno">3\.1\.3<\/span>[^<]*本次投放/);
   assert.match(html, /产品素材资产/);
   assert.match(html, /提示词配置/);
   assert.match(html, /AI 拆解脚本/);
@@ -150,6 +152,8 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(styles, /\.wz-primary-form/);
   assert.match(styles, /\.wz-advanced-settings/);
   assert.match(script, /\/api\/wangzhuan\/templates/);
+  assert.match(script, /copyFromVersionId:\s*state\.selectedTemplate\.versionId/);
+  assert.match(script, /selectedTemplateNameChanged/);
   assert.match(script, /\/api\/wangzhuan\/reference-videos\/check/);
   assert.match(script, /\/api\/wangzhuan\/reference-videos\/draft-decomposition/);
   assert.match(script, /draftReferenceVideoDecomposition/);
@@ -202,6 +206,12 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(common, /打开任务管理/);
   assert.match(common, /confirmBatchPlanRequest/);
   assert.match(script, /confirmBatchPlanRequest/);
+  assert.match(script, /collectEditablePlans/);
+  assert.match(script, /data-plan-field="seedancePrompt"/);
+  assert.match(script, /wz-plan-editor/);
+  assert.match(script, /renderOutputPreview/);
+  assert.match(script, /<video src="\$\{safeUrl\}" controls preload="metadata" playsinline><\/video>/);
+  assert.match(common, /plans:\s*plans\.map/);
   assert.match(script, /galleryPageSize:\s*20/);
   assert.match(script, /pageSize:\s*String\(state\.galleryPageSize\)/);
   assert.match(script, /sourceType:\s*"pipeline"/);

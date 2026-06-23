@@ -1,11 +1,153 @@
 {
-  "scriptCompleted": true,
+  "name": "touka-aigc-platform",
+  "description": "Touka AI素材中台是一个 Node.js Web 工具，用于按项目和用户管理 AIGC 广告素材，支持网赚素材参考视频拆解、脚本裂变、Seedance 视频生成、竞品素材修改、MySQL 持久化、对象存储、调度、QC 和下载交付。 Note: this project has over 100 source files; consider scoping analysis to a subdirectory for faster results.",
+  "languages": [
+    "batch",
+    "css",
+    "dockerfile",
+    "docx",
+    "headers",
+    "html",
+    "javascript",
+    "json",
+    "markdown",
+    "powershell",
+    "raw",
+    "sql",
+    "txt",
+    "unknown",
+    "wav",
+    "webp",
+    "yaml"
+  ],
+  "frameworks": [
+    "MySQL",
+    "AWS S3 compatible storage",
+    "Docker",
+    "Docker Compose",
+    "Node.js http",
+    "Vanilla JavaScript"
+  ],
   "files": [
     {
       "path": ".dockerignore",
       "language": "unknown",
       "sizeLines": 16,
       "fileCategory": "infra"
+    },
+    {
+      "path": ".learnings/ERRORS.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".learnings/FEATURE_REQUESTS.md",
+      "language": "markdown",
+      "sizeLines": 5,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".learnings/LEARNINGS.md",
+      "language": "markdown",
+      "sizeLines": 7,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw",
+      "language": "raw",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/current-login.headers",
+      "language": "headers",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/current-login.json",
+      "language": "json",
+      "sizeLines": 0,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-live-p0/health-login.headers",
+      "language": "headers",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/health-login.json",
+      "language": "json",
+      "sizeLines": 0,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-live-p0/live-p0-validate.mjs",
+      "language": "javascript",
+      "sizeLines": 332,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/rerun-login.headers",
+      "language": "headers",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-live-p0/rerun-login.json",
+      "language": "json",
+      "sizeLines": 0,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".tmp-wallet-tai-F9GA9U/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-fIXST9/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-ndxZuY/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-pvN9lb/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-sh4pOX/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-TuyABD/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs",
+      "language": "javascript",
+      "sizeLines": 1,
+      "fileCategory": "code"
     },
     {
       "path": ".understand-anything/.understandignore",
@@ -22,37 +164,37 @@
     {
       "path": ".understand-anything/fingerprints.json",
       "language": "json",
-      "sizeLines": 2149,
+      "sizeLines": 12383,
       "fileCategory": "config"
     },
     {
       "path": ".understand-anything/intermediate/assembled-graph.json",
       "language": "json",
-      "sizeLines": 1730,
+      "sizeLines": 42847,
       "fileCategory": "config"
     },
     {
       "path": ".understand-anything/intermediate/fingerprint-input.json",
       "language": "json",
-      "sizeLines": 16,
+      "sizeLines": 115,
       "fileCategory": "config"
     },
     {
       "path": ".understand-anything/intermediate/review.json",
       "language": "json",
-      "sizeLines": 33,
+      "sizeLines": 29,
       "fileCategory": "config"
     },
     {
       "path": ".understand-anything/intermediate/scan-result.json",
       "language": "json",
-      "sizeLines": 99,
+      "sizeLines": 692,
       "fileCategory": "config"
     },
     {
       "path": ".understand-anything/knowledge-graph.json",
       "language": "json",
-      "sizeLines": 1730,
+      "sizeLines": 42847,
       "fileCategory": "config"
     },
     {
@@ -62,15 +204,21 @@
       "fileCategory": "config"
     },
     {
+      "path": ".understand-anything/tmp/current-scan.json",
+      "language": "json",
+      "sizeLines": 1142,
+      "fileCategory": "config"
+    },
+    {
       "path": "config.default.json",
       "language": "json",
-      "sizeLines": 40,
+      "sizeLines": 45,
       "fileCategory": "config"
     },
     {
       "path": "config.json",
       "language": "json",
-      "sizeLines": 43,
+      "sizeLines": 56,
       "fileCategory": "config"
     },
     {
@@ -172,19 +320,19 @@
     {
       "path": "database/migrations/0006_db_driven_pipeline_state_rules.down.sql",
       "language": "sql",
-      "sizeLines": 4,
+      "sizeLines": 7,
       "fileCategory": "data"
     },
     {
       "path": "database/migrations/0006_db_driven_pipeline_state_rules.sql",
       "language": "sql",
-      "sizeLines": 5,
+      "sizeLines": 9,
       "fileCategory": "data"
     },
     {
       "path": "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql",
       "language": "sql",
-      "sizeLines": 7,
+      "sizeLines": 11,
       "fileCategory": "data"
     },
     {
@@ -206,6 +354,60 @@
       "fileCategory": "data"
     },
     {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.down.sql",
+      "language": "sql",
+      "sizeLines": 5,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.sql",
+      "language": "sql",
+      "sizeLines": 12,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql",
+      "language": "sql",
+      "sizeLines": 3,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.down.sql",
+      "language": "sql",
+      "sizeLines": 8,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.sql",
+      "language": "sql",
+      "sizeLines": 10,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0009_remix_poll_running_state_rules.verify.sql",
+      "language": "sql",
+      "sizeLines": 6,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.down.sql",
+      "language": "sql",
+      "sizeLines": 20,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.sql",
+      "language": "sql",
+      "sizeLines": 23,
+      "fileCategory": "data"
+    },
+    {
+      "path": "database/migrations/0010_workflow_task_pending_preview.verify.sql",
+      "language": "sql",
+      "sizeLines": 7,
+      "fileCategory": "data"
+    },
+    {
       "path": "database/README.md",
       "language": "markdown",
       "sizeLines": 221,
@@ -214,7 +416,7 @@
     {
       "path": "docker-compose.yml",
       "language": "yaml",
-      "sizeLines": 68,
+      "sizeLines": 71,
       "fileCategory": "infra"
     },
     {
@@ -222,6 +424,210 @@
       "language": "dockerfile",
       "sizeLines": 23,
       "fileCategory": "infra"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp",
+      "language": "webp",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json",
+      "language": "json",
+      "sizeLines": 49,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json",
+      "language": "json",
+      "sizeLines": 23,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json",
+      "language": "json",
+      "sizeLines": 161,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json",
+      "language": "json",
+      "sizeLines": 907,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json",
+      "language": "json",
+      "sizeLines": 29,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json",
+      "language": "json",
+      "sizeLines": 82,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json",
+      "language": "json",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json",
+      "language": "json",
+      "sizeLines": 104,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json",
+      "language": "json",
+      "sizeLines": 49,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json",
+      "language": "json",
+      "sizeLines": 63,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json",
+      "language": "json",
+      "sizeLines": 238,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json",
+      "language": "json",
+      "sizeLines": 23,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json",
+      "language": "json",
+      "sizeLines": 161,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json",
+      "language": "json",
+      "sizeLines": 907,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json",
+      "language": "json",
+      "sizeLines": 29,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json",
+      "language": "json",
+      "sizeLines": 82,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json",
+      "language": "json",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt",
+      "language": "txt",
+      "sizeLines": 1,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt",
+      "language": "txt",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav",
+      "language": "wav",
+      "sizeLines": 5786,
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav",
+      "language": "wav",
+      "sizeLines": 11489,
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md",
+      "language": "markdown",
+      "sizeLines": 336,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md",
+      "language": "markdown",
+      "sizeLines": 31,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx",
+      "language": "docx",
+      "sizeLines": 4323,
+      "fileCategory": "code"
+    },
+    {
+      "path": "others/网赚产品 AI 素材管线需求拆解.docx",
+      "language": "docx",
+      "sizeLines": 7554,
+      "fileCategory": "code"
     },
     {
       "path": "package-release.ps1",
@@ -250,7 +656,7 @@
     {
       "path": "public/comic.html",
       "language": "html",
-      "sizeLines": 322,
+      "sizeLines": 323,
       "fileCategory": "markup"
     },
     {
@@ -262,55 +668,73 @@
     {
       "path": "public/competitor-remix.html",
       "language": "html",
-      "sizeLines": 201,
+      "sizeLines": 187,
       "fileCategory": "markup"
     },
     {
       "path": "public/competitor-remix.js",
       "language": "javascript",
-      "sizeLines": 971,
+      "sizeLines": 1062,
       "fileCategory": "code"
     },
     {
       "path": "public/index.html",
       "language": "html",
-      "sizeLines": 320,
+      "sizeLines": 321,
       "fileCategory": "markup"
     },
     {
       "path": "public/remix-canvas.js",
       "language": "javascript",
-      "sizeLines": 375,
+      "sizeLines": 508,
       "fileCategory": "code"
     },
     {
       "path": "public/styles.css",
       "language": "css",
-      "sizeLines": 5412,
+      "sizeLines": 6586,
       "fileCategory": "markup"
     },
     {
       "path": "public/wangzhuan-common.js",
       "language": "javascript",
-      "sizeLines": 310,
+      "sizeLines": 744,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan-task-nav.js",
+      "language": "javascript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "public/wangzhuan-tasks.html",
+      "language": "html",
+      "sizeLines": 102,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "public/wangzhuan-tasks.js",
+      "language": "javascript",
+      "sizeLines": 608,
       "fileCategory": "code"
     },
     {
       "path": "public/wangzhuan.html",
       "language": "html",
-      "sizeLines": 407,
+      "sizeLines": 419,
       "fileCategory": "markup"
     },
     {
       "path": "public/wangzhuan.js",
       "language": "javascript",
-      "sizeLines": 1296,
+      "sizeLines": 2144,
       "fileCategory": "code"
     },
     {
       "path": "public/wz-canvas.js",
       "language": "javascript",
-      "sizeLines": 624,
+      "sizeLines": 805,
       "fileCategory": "code"
     },
     {
@@ -380,9 +804,15 @@
       "fileCategory": "code"
     },
     {
+      "path": "server/wangzhuan/decomposition-text.mjs",
+      "language": "javascript",
+      "sizeLines": 66,
+      "fileCategory": "code"
+    },
+    {
       "path": "server/wangzhuan/estimates.mjs",
       "language": "javascript",
-      "sizeLines": 455,
+      "sizeLines": 547,
       "fileCategory": "code"
     },
     {
@@ -394,13 +824,13 @@
     {
       "path": "server/wangzhuan/http.mjs",
       "language": "javascript",
-      "sizeLines": 104,
+      "sizeLines": 114,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/ids.mjs",
       "language": "javascript",
-      "sizeLines": 106,
+      "sizeLines": 110,
       "fileCategory": "code"
     },
     {
@@ -412,7 +842,7 @@
     {
       "path": "server/wangzhuan/mysql-facts.mjs",
       "language": "javascript",
-      "sizeLines": 3559,
+      "sizeLines": 3759,
       "fileCategory": "code"
     },
     {
@@ -430,13 +860,19 @@
     {
       "path": "server/wangzhuan/pipeline.mjs",
       "language": "javascript",
-      "sizeLines": 677,
+      "sizeLines": 866,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/plan-preview.mjs",
+      "language": "javascript",
+      "sizeLines": 223,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/product-assets.mjs",
       "language": "javascript",
-      "sizeLines": 97,
+      "sizeLines": 98,
       "fileCategory": "code"
     },
     {
@@ -448,25 +884,25 @@
     {
       "path": "server/wangzhuan/reference-videos.mjs",
       "language": "javascript",
-      "sizeLines": 897,
+      "sizeLines": 928,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/remix-provider.mjs",
       "language": "javascript",
-      "sizeLines": 135,
+      "sizeLines": 167,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/remix.mjs",
       "language": "javascript",
-      "sizeLines": 1275,
+      "sizeLines": 1236,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/router.mjs",
       "language": "javascript",
-      "sizeLines": 159,
+      "sizeLines": 185,
       "fileCategory": "code"
     },
     {
@@ -478,19 +914,25 @@
     {
       "path": "server/wangzhuan/seedance-provider.mjs",
       "language": "javascript",
-      "sizeLines": 365,
+      "sizeLines": 406,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/stitch.mjs",
       "language": "javascript",
-      "sizeLines": 517,
+      "sizeLines": 584,
       "fileCategory": "code"
     },
     {
       "path": "server/wangzhuan/storage.mjs",
       "language": "javascript",
-      "sizeLines": 209,
+      "sizeLines": 243,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/wangzhuan/tasks.mjs",
+      "language": "javascript",
+      "sizeLines": 10,
       "fileCategory": "code"
     },
     {
@@ -508,7 +950,7 @@
     {
       "path": "server/wangzhuan/upstream-poll.mjs",
       "language": "javascript",
-      "sizeLines": 204,
+      "sizeLines": 196,
       "fileCategory": "code"
     },
     {
@@ -524,6 +966,12 @@
       "fileCategory": "script"
     },
     {
+      "path": "test-out.txt",
+      "language": "txt",
+      "sizeLines": 424,
+      "fileCategory": "docs"
+    },
+    {
       "path": "tests/auth-store.test.mjs",
       "language": "javascript",
       "sizeLines": 103,
@@ -532,7 +980,7 @@
     {
       "path": "tests/docker-local.test.mjs",
       "language": "javascript",
-      "sizeLines": 50,
+      "sizeLines": 52,
       "fileCategory": "code"
     },
     {
@@ -554,15 +1002,21 @@
       "fileCategory": "code"
     },
     {
+      "path": "tests/wangzhuan/decomposition-text.test.mjs",
+      "language": "javascript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
       "path": "tests/wangzhuan/estimates.test.mjs",
       "language": "javascript",
-      "sizeLines": 356,
+      "sizeLines": 362,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/frontend-static.test.mjs",
       "language": "javascript",
-      "sizeLines": 300,
+      "sizeLines": 427,
       "fileCategory": "code"
     },
     {
@@ -580,67 +1034,79 @@
     {
       "path": "tests/wangzhuan/mysql-facts-fixture.mjs",
       "language": "javascript",
-      "sizeLines": 1088,
+      "sizeLines": 1156,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/mysql-facts.test.mjs",
       "language": "javascript",
-      "sizeLines": 764,
+      "sizeLines": 801,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/object-storage-fixture.mjs",
+      "language": "javascript",
+      "sizeLines": 35,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/orchestration.test.mjs",
       "language": "javascript",
-      "sizeLines": 199,
+      "sizeLines": 204,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/pipeline.test.mjs",
       "language": "javascript",
-      "sizeLines": 485,
+      "sizeLines": 482,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/plan-preview.test.mjs",
+      "language": "javascript",
+      "sizeLines": 296,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/qc-gallery-package.test.mjs",
       "language": "javascript",
-      "sizeLines": 484,
+      "sizeLines": 536,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/reference-videos.test.mjs",
       "language": "javascript",
-      "sizeLines": 818,
+      "sizeLines": 843,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/remix.test.mjs",
       "language": "javascript",
-      "sizeLines": 1089,
+      "sizeLines": 1208,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/router.test.mjs",
       "language": "javascript",
-      "sizeLines": 940,
+      "sizeLines": 924,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/scheduler.test.mjs",
       "language": "javascript",
-      "sizeLines": 80,
+      "sizeLines": 88,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/seedance-provider.test.mjs",
       "language": "javascript",
-      "sizeLines": 52,
+      "sizeLines": 117,
       "fileCategory": "code"
     },
     {
       "path": "tests/wangzhuan/stitch.test.mjs",
       "language": "javascript",
-      "sizeLines": 223,
+      "sizeLines": 228,
       "fileCategory": "code"
     },
     {
@@ -650,9 +1116,15 @@
       "fileCategory": "code"
     },
     {
+      "path": "tests/wangzhuan/tasks.test.mjs",
+      "language": "javascript",
+      "sizeLines": 54,
+      "fileCategory": "code"
+    },
+    {
       "path": "tests/wangzhuan/telemetry.test.mjs",
       "language": "javascript",
-      "sizeLines": 365,
+      "sizeLines": 394,
       "fileCategory": "code"
     },
     {
@@ -660,34 +1132,500 @@
       "language": "javascript",
       "sizeLines": 151,
       "fileCategory": "code"
+    },
+    {
+      "path": "tests/wangzhuan/test-providers.mjs",
+      "language": "javascript",
+      "sizeLines": 83,
+      "fileCategory": "code"
     }
   ],
-  "totalFiles": 110,
+  "totalFiles": 185,
   "filteredByIgnore": 0,
-  "estimatedComplexity": "moderate",
-  "stats": {
-    "filesScanned": 110,
-    "byCategory": {
-      "infra": 3,
-      "code": 63,
-      "config": 11,
-      "data": 22,
-      "docs": 3,
-      "script": 3,
-      "markup": 5
-    },
-    "byLanguage": {
-      "unknown": 2,
-      "json": 11,
-      "sql": 22,
-      "markdown": 3,
-      "yaml": 1,
-      "dockerfile": 1,
-      "powershell": 2,
-      "javascript": 62,
-      "html": 4,
-      "css": 1,
-      "batch": 1
-    }
+  "estimatedComplexity": "large",
+  "importMap": {
+    ".dockerignore": [],
+    ".learnings/ERRORS.md": [],
+    ".learnings/FEATURE_REQUESTS.md": [],
+    ".learnings/LEARNINGS.md": [],
+    ".tmp-live-ai-smoke/20260622-184902/reference-breakdown-confirm.raw": [],
+    ".tmp-live-p0/current-login.headers": [],
+    ".tmp-live-p0/current-login.json": [],
+    ".tmp-live-p0/health-login.headers": [],
+    ".tmp-live-p0/health-login.json": [],
+    ".tmp-live-p0/live-p0-validate.mjs": [
+      "server.mjs"
+    ],
+    ".tmp-live-p0/rerun-login.headers": [],
+    ".tmp-live-p0/rerun-login.json": [],
+    ".tmp-wallet-tai-F9GA9U/tai-stub.mjs": [],
+    ".tmp-wallet-tai-fIXST9/tai-stub.mjs": [],
+    ".tmp-wallet-tai-kEQ7dE/tai-stub.mjs": [],
+    ".tmp-wallet-tai-ndxZuY/tai-stub.mjs": [],
+    ".tmp-wallet-tai-pvN9lb/tai-stub.mjs": [],
+    ".tmp-wallet-tai-sh4pOX/tai-stub.mjs": [],
+    ".tmp-wallet-tai-TuyABD/tai-stub.mjs": [],
+    ".tmp-wallet-tai-ZGFGWk/tai-stub.mjs": [],
+    ".understand-anything/.understandignore": [],
+    ".understand-anything/config.json": [],
+    ".understand-anything/fingerprints.json": [],
+    ".understand-anything/intermediate/assembled-graph.json": [],
+    ".understand-anything/intermediate/fingerprint-input.json": [],
+    ".understand-anything/intermediate/review.json": [],
+    ".understand-anything/intermediate/scan-result.json": [],
+    ".understand-anything/knowledge-graph.json": [],
+    ".understand-anything/meta.json": [],
+    ".understand-anything/tmp/current-scan.json": [],
+    "config.default.json": [],
+    "config.json": [],
+    "database/migrations/0001_mysql_foundation.down.sql": [],
+    "database/migrations/0001_mysql_foundation.sql": [],
+    "database/migrations/0001_mysql_foundation.verify.sql": [],
+    "database/migrations/0002_asset_object_storage.sql": [],
+    "database/migrations/0002_scope_runtime_unique_keys.down.sql": [],
+    "database/migrations/0002_scope_runtime_unique_keys.sql": [],
+    "database/migrations/0002_scope_runtime_unique_keys.verify.sql": [],
+    "database/migrations/0003_scheduler_state_machine_rules.down.sql": [],
+    "database/migrations/0003_scheduler_state_machine_rules.sql": [],
+    "database/migrations/0003_scheduler_state_machine_rules.verify.sql": [],
+    "database/migrations/0004_remix_task_qc_state_rules.down.sql": [],
+    "database/migrations/0004_remix_task_qc_state_rules.sql": [],
+    "database/migrations/0004_remix_task_qc_state_rules.verify.sql": [],
+    "database/migrations/0005_stitch_completed_task_rules.down.sql": [],
+    "database/migrations/0005_stitch_completed_task_rules.sql": [],
+    "database/migrations/0005_stitch_completed_task_rules.verify.sql": [],
+    "database/migrations/0006_db_driven_pipeline_state_rules.down.sql": [],
+    "database/migrations/0006_db_driven_pipeline_state_rules.sql": [],
+    "database/migrations/0006_db_driven_pipeline_state_rules.verify.sql": [],
+    "database/migrations/0007_stitch_failed_output_kind.down.sql": [],
+    "database/migrations/0007_stitch_failed_output_kind.sql": [],
+    "database/migrations/0007_stitch_failed_output_kind.verify.sql": [],
+    "database/migrations/0008_pipeline_seedance_plan_preview.down.sql": [],
+    "database/migrations/0008_pipeline_seedance_plan_preview.sql": [],
+    "database/migrations/0008_pipeline_seedance_plan_preview.verify.sql": [],
+    "database/migrations/0009_remix_poll_running_state_rules.down.sql": [],
+    "database/migrations/0009_remix_poll_running_state_rules.sql": [],
+    "database/migrations/0009_remix_poll_running_state_rules.verify.sql": [],
+    "database/migrations/0010_workflow_task_pending_preview.down.sql": [],
+    "database/migrations/0010_workflow_task_pending_preview.sql": [],
+    "database/migrations/0010_workflow_task_pending_preview.verify.sql": [],
+    "database/README.md": [],
+    "docker-compose.yml": [],
+    "Dockerfile": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/2-输入文件/参考素材/DramaGold.webp": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/00-brief.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-assets.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/04-seedance-prompts.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/05-video-tasks.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/06-rerun-log.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/07-final-ffprobe.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/08-final-audio-check.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/成片/delivery-manifest.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/00-brief.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/01-reference-breakdown.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/03-localized-variants.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-assets.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/04-seedance-prompts.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/05-video-tasks.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/06-rerun-log.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/07-final-ffprobe.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/08-final-audio-check.json": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-01-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-02-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/bus-03-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-01-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-02-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/delivery-03-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-B-rerun-prompt.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-01-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-02-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/factory-03-concat.txt": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref1.wav": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/3-输出文件夹/20260615-DramaGold-葡语打工人狗血网赚9条/记录/ref2.wav": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/general-reference-video-to-localized-ads-使用说明.md": [],
+    "others/20260616-ZZ-DramaGold打工人剧情输出案例/案例说明.md": [],
+    "others/智能纪要：网赚产品AI素材管线会议 2026年6月16日.docx": [],
+    "others/网赚产品 AI 素材管线需求拆解.docx": [],
+    "package-release.ps1": [],
+    "package.json": [],
+    "PRODUCT.md": [],
+    "public/app.js": [],
+    "public/comic.html": [],
+    "public/comic.js": [],
+    "public/competitor-remix.html": [],
+    "public/competitor-remix.js": [
+      "public/wangzhuan-common.js",
+      "public/wangzhuan-task-nav.js"
+    ],
+    "public/index.html": [],
+    "public/remix-canvas.js": [],
+    "public/styles.css": [],
+    "public/wangzhuan-common.js": [],
+    "public/wangzhuan-task-nav.js": [
+      "public/wangzhuan-common.js"
+    ],
+    "public/wangzhuan-tasks.html": [],
+    "public/wangzhuan-tasks.js": [
+      "public/wangzhuan-common.js"
+    ],
+    "public/wangzhuan.html": [],
+    "public/wangzhuan.js": [
+      "public/wangzhuan-common.js",
+      "public/wangzhuan-task-nav.js"
+    ],
+    "public/wz-canvas.js": [],
+    "public/wz-stepper.js": [],
+    "README.md": [],
+    "server.mjs": [
+      "server/auth-store.mjs",
+      "server/object-storage.mjs",
+      "server/project-file-paths.mjs",
+      "server/runtime-config.mjs",
+      "server/wangzhuan/router.mjs",
+      "server/wangzhuan/scheduler.mjs"
+    ],
+    "server/auth-store.mjs": [
+      "server/runtime-config.mjs"
+    ],
+    "server/object-storage.mjs": [],
+    "server/project-file-paths.mjs": [],
+    "server/runtime-config.mjs": [],
+    "server/wangzhuan/branches.mjs": [],
+    "server/wangzhuan/channel-rules.mjs": [
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/mysql-facts.mjs"
+    ],
+    "server/wangzhuan/config.mjs": [
+      "server/wangzhuan/constants.mjs"
+    ],
+    "server/wangzhuan/constants.mjs": [],
+    "server/wangzhuan/decomposition-text.mjs": [],
+    "server/wangzhuan/estimates.mjs": [
+      "server/wangzhuan/branches.mjs",
+      "server/wangzhuan/config.mjs",
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/seedance-provider.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/gallery.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/mysql-facts.mjs"
+    ],
+    "server/wangzhuan/http.mjs": [
+      "server/wangzhuan/ids.mjs"
+    ],
+    "server/wangzhuan/ids.mjs": [],
+    "server/wangzhuan/llm-config.mjs": [],
+    "server/wangzhuan/mysql-facts.mjs": [
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/pagination.mjs"
+    ],
+    "server/wangzhuan/package.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/pagination.mjs": [],
+    "server/wangzhuan/pipeline.mjs": [
+      "server/wangzhuan/branches.mjs",
+      "server/wangzhuan/channel-rules.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/plan-preview.mjs",
+      "server/wangzhuan/seedance-provider.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/plan-preview.mjs": [
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/llm-config.mjs",
+      "server/wangzhuan/reference-videos.mjs"
+    ],
+    "server/wangzhuan/product-assets.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/storage.mjs"
+    ],
+    "server/wangzhuan/qc.mjs": [
+      "server/object-storage.mjs",
+      "server/wangzhuan/channel-rules.mjs",
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/llm-config.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/reference-videos.mjs": [
+      "server/object-storage.mjs",
+      "server/wangzhuan/config.mjs",
+      "server/wangzhuan/decomposition-text.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/llm-config.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/remix-provider.mjs": [
+      "server/wangzhuan/http.mjs"
+    ],
+    "server/wangzhuan/remix.mjs": [
+      "server/wangzhuan/config.mjs",
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/remix-provider.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/router.mjs": [
+      "server/wangzhuan/channel-rules.mjs",
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/gallery.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/llm-config.mjs",
+      "server/wangzhuan/package.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/product-assets.mjs",
+      "server/wangzhuan/qc.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/remix.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/tasks.mjs",
+      "server/wangzhuan/templates.mjs",
+      "server/wangzhuan/upstream-poll.mjs"
+    ],
+    "server/wangzhuan/scheduler.mjs": [
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/upstream-poll.mjs"
+    ],
+    "server/wangzhuan/seedance-provider.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/llm-config.mjs"
+    ],
+    "server/wangzhuan/stitch.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/storage.mjs": [
+      "server/object-storage.mjs",
+      "server/wangzhuan/http.mjs"
+    ],
+    "server/wangzhuan/tasks.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/mysql-facts.mjs"
+    ],
+    "server/wangzhuan/telemetry.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs"
+    ],
+    "server/wangzhuan/templates.mjs": [
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/ids.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/telemetry.mjs"
+    ],
+    "server/wangzhuan/upstream-poll.mjs": [
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/seedance-provider.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/storage.mjs"
+    ],
+    "start-windows.bat": [],
+    "start-windows.ps1": [],
+    "test-out.txt": [],
+    "tests/auth-store.test.mjs": [
+      "server/auth-store.mjs"
+    ],
+    "tests/docker-local.test.mjs": [],
+    "tests/object-storage.test.mjs": [
+      "server/object-storage.mjs"
+    ],
+    "tests/project-file-paths.test.mjs": [
+      "server/project-file-paths.mjs"
+    ],
+    "tests/runtime-config.test.mjs": [
+      "server/runtime-config.mjs"
+    ],
+    "tests/wangzhuan/decomposition-text.test.mjs": [
+      "server/wangzhuan/decomposition-text.mjs"
+    ],
+    "tests/wangzhuan/estimates.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs"
+    ],
+    "tests/wangzhuan/frontend-static.test.mjs": [],
+    "tests/wangzhuan/ids.test.mjs": [
+      "server/wangzhuan/ids.mjs"
+    ],
+    "tests/wangzhuan/llm-config.test.mjs": [
+      "server/wangzhuan/llm-config.mjs"
+    ],
+    "tests/wangzhuan/mysql-facts-fixture.mjs": [],
+    "tests/wangzhuan/mysql-facts.test.mjs": [
+      "server/wangzhuan/mysql-facts.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs"
+    ],
+    "tests/wangzhuan/object-storage-fixture.mjs": [],
+    "tests/wangzhuan/orchestration.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/templates.mjs",
+      "server/wangzhuan/upstream-poll.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/pipeline.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/plan-preview.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs"
+    ],
+    "tests/wangzhuan/qc-gallery-package.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/gallery.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/package.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/qc.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/router.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/reference-videos.test.mjs": [
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs"
+    ],
+    "tests/wangzhuan/remix.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/gallery.mjs",
+      "server/wangzhuan/http.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/package.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/remix.mjs",
+      "server/wangzhuan/router.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs"
+    ],
+    "tests/wangzhuan/router.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/remix.mjs",
+      "server/wangzhuan/router.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/scheduler.test.mjs": [
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/scheduler.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/seedance-provider.test.mjs": [
+      "server/wangzhuan/seedance-provider.mjs"
+    ],
+    "tests/wangzhuan/stitch.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/storage.mjs",
+      "server/wangzhuan/templates.mjs",
+      "server/wangzhuan/upstream-poll.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/storage.test.mjs": [
+      "server/wangzhuan/storage.mjs"
+    ],
+    "tests/wangzhuan/tasks.test.mjs": [
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/tasks.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs"
+    ],
+    "tests/wangzhuan/telemetry.test.mjs": [
+      "server/wangzhuan/estimates.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/package.mjs",
+      "server/wangzhuan/pipeline.mjs",
+      "server/wangzhuan/qc.mjs",
+      "server/wangzhuan/reference-videos.mjs",
+      "server/wangzhuan/remix.mjs",
+      "server/wangzhuan/stitch.mjs",
+      "server/wangzhuan/telemetry.mjs",
+      "server/wangzhuan/templates.mjs",
+      "server/wangzhuan/upstream-poll.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs",
+      "tests/wangzhuan/object-storage-fixture.mjs",
+      "tests/wangzhuan/test-providers.mjs"
+    ],
+    "tests/wangzhuan/templates-channel-rules.test.mjs": [
+      "server/wangzhuan/channel-rules.mjs",
+      "server/wangzhuan/constants.mjs",
+      "server/wangzhuan/mysql-facts.mjs",
+      "server/wangzhuan/templates.mjs",
+      "tests/wangzhuan/mysql-facts-fixture.mjs"
+    ],
+    "tests/wangzhuan/test-providers.mjs": []
   }
 }
