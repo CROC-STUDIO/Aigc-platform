@@ -9,6 +9,7 @@ import {
   formatWorkflowEvent,
   isBatchGenerationActive,
   isBatchQcRunnable,
+  modelQcStatusLabel,
   renderGenerationTaskCards,
   bindLogin,
   channelLabels,
@@ -29,10 +30,12 @@ import {
   syncActionHint,
   taskProgressHtml,
   strongTruthFields,
-  terminalBatchStatus
+  terminalBatchStatus,
+  activeLockLabel
 } from "./wangzhuan-common.js";
 import {
   clearActiveLockBanner,
+  renderActiveLockBanner,
   showActiveLockFromError
 } from "./wangzhuan-task-nav.js";
 
@@ -95,6 +98,8 @@ const els = {
   loadRulesBtn: $("#wzLoadRulesBtn"),
   rulesBox: $("#wzRulesBox"),
   referenceFile: $("#wzReferenceFile"),
+  referenceUploadPanel: $("#wzReferenceUploadPanel"),
+  referenceUploadStatus: $("#wzReferenceUploadStatus"),
   useSampleVideoBtn: $("#wzUseSampleVideoBtn"),
   checkReferenceBtn: $("#wzCheckReferenceBtn"),
   draftDecompositionBtn: $("#wzDraftDecompositionBtn"),
@@ -150,6 +155,8 @@ const state = {
   pollTimer: 0,
   pollIntervalMs: 2000
 };
+
+let referenceObjectUrl = "";
 
 const assetInputKeys = [
   ["productIcon", "productIconFile"],
@@ -562,13 +569,29 @@ function syncDecompositionControls() {
 function syncReferenceHints() {
   const fileReady = Boolean(els.referenceFile?.files?.[0]);
   const uploaded = Boolean(state.referenceVideo?.referenceVideoId);
+  const checking = Boolean(els.checkReferenceBtn?.dataset.originalText);
+  const file = els.referenceFile?.files?.[0];
+  if (els.referenceUploadPanel) {
+    els.referenceUploadPanel.classList.toggle("has-file", fileReady || uploaded);
+    els.referenceUploadPanel.classList.toggle("is-uploading", checking);
+    els.referenceUploadPanel.classList.toggle("has-upload", uploaded);
+  }
+  if (els.checkReferenceBtn) els.checkReferenceBtn.disabled = checking;
+  if (els.referenceFile) els.referenceFile.disabled = checking;
+  if (els.referenceUploadStatus && !checking) {
+    els.referenceUploadStatus.textContent = uploaded
+      ? `已读取 ${state.referenceVideo.fileName || "参考视频"}，可继续解析脚本。`
+      : fileReady
+        ? `已选择 ${file?.name || "参考视频"}，正在准备上传。`
+        : "选中文件后会自动完成上传、格式检查和视频预览。";
+  }
   if (uploaded) {
     syncActionHint(els.checkReferenceBtn, "");
     return;
   }
   syncActionHint(
     els.checkReferenceBtn,
-    fileReady ? "文件已选择，点击读取视频信息" : "请先选择参考视频文件",
+    fileReady ? "已选择文件，正在等待自动上传" : "点击选择参考视频，选择后自动上传",
     { tone: fileReady ? "muted" : "warn" }
   );
 }
@@ -602,9 +625,43 @@ function syncTemplateHints() {
   );
 }
 
+function hasActivePipelineBatch() {
+  const batch = state.batchDetail?.batch;
+  return Boolean(batch?.batchId && !terminalBatchStatus(batch.status));
+}
+
+function activeLockFromBatch(batch) {
+  if (!batch?.batchId || terminalBatchStatus(batch.status)) return null;
+  return {
+    type: "batch",
+    id: batch.batchId,
+    status: batch.status,
+    label: activeLockLabel("batch", batch.batchId, batch.status)
+  };
+}
+
+function syncBatchActionButtons() {
+  const estimate = state.estimate?.estimate;
+  const batch = state.batchDetail?.batch;
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  const locked = hasActivePipelineBatch();
+
+  if (!estimate) {
+    els.planBatchBtn.disabled = true;
+    els.confirmPlanBtn.disabled = true;
+    return;
+  }
+
+  els.planBatchBtn.disabled = locked
+    || estimate.hardBlocked
+    || (estimate.confirmationRequired && !els.confirmLimits.checked);
+  els.confirmPlanBtn.disabled = batch?.status !== "preview_required" || !plans.length;
+}
+
 function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
+  const locked = hasActivePipelineBatch();
   syncActionHint(
     els.estimateBtn,
     !isDecompositionConfirmed() || !isTemplateCommitted() ? "需先完成脚本确认与模板保存" : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
@@ -612,8 +669,10 @@ function syncBatchActionHints() {
   );
   syncActionHint(
     els.planBatchBtn,
-    !estimate ? "需先完成拆解、模板保存和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
-    { tone: estimate?.hardBlocked ? "error" : "warn" }
+    locked
+      ? `当前批次 ${batch.batchId} 进行中（${batchStatusLabels[batch.status] || batch.status}），请先确认预案、等待完成或停止后再新建`
+      : !estimate ? "需先完成拆解、模板保存和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
+    { tone: locked || estimate?.hardBlocked ? "error" : "warn" }
   );
   syncActionHint(
     els.confirmPlanBtn,
@@ -710,6 +769,48 @@ function syncMetrics() {
   const batch = state.batchDetail?.batch;
   els.taskCount.textContent = batch?.tasks?.length || state.estimate?.estimate?.scriptCount || 0;
   els.downloadCount.textContent = state.batchDetail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
+}
+
+function clearReferenceObjectUrl() {
+  if (!referenceObjectUrl) return;
+  URL.revokeObjectURL(referenceObjectUrl);
+  referenceObjectUrl = "";
+}
+
+function selectedReferencePreviewUrl() {
+  const file = els.referenceFile?.files?.[0];
+  if (!file) return "";
+  clearReferenceObjectUrl();
+  referenceObjectUrl = URL.createObjectURL(file);
+  return referenceObjectUrl;
+}
+
+function referencePreviewUrl(probe) {
+  return probe?.previewUrl || probe?.storageUrl || (probe?.storedPath ? `/file?path=${encodeURIComponent(probe.storedPath)}` : "");
+}
+
+function renderReferenceVideoPreview(url, label = "参考视频预览") {
+  if (!url) return "";
+  return `
+    <div class="wz-source-preview wz-reference-preview" data-source-preview="video">
+      <video src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(label)}"></video>
+    </div>
+  `;
+}
+
+function renderPendingReference(file) {
+  els.referenceBox.className = "wz-list";
+  els.referenceBox.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(file.name)}</strong>
+        <small>待上传 · ${escapeHtml(Math.max(1, Math.round(file.size / 1024 / 1024)))} MB</small>
+      </div>
+      ${badge("checking", { checking: "准备上传" })}
+    </article>
+    ${renderReferenceVideoPreview(selectedReferencePreviewUrl(), "本地参考视频预览")}
+  `;
+  syncReferenceHints();
 }
 
 function galleryPaginationHtml(gallery) {
@@ -1220,6 +1321,7 @@ function renderRules(response = {}) {
 function renderReference() {
   const probe = state.referenceVideo;
   if (!probe) {
+    if (!els.referenceFile?.files?.[0]) clearReferenceObjectUrl();
     els.referenceBox.className = "wz-list empty-line";
     els.referenceBox.textContent = "未上传参考视频";
     els.draftDecompositionBtn.disabled = true;
@@ -1249,6 +1351,8 @@ function renderReference() {
       ])}
     </div>
     ${(probe.issues || []).map((item) => `<div class="wz-warning">${escapeHtml(item.message)}</div>`).join("")}
+    ${renderReferenceVideoPreview(referencePreviewUrl(probe))}
+    ${referencePreviewUrl(probe) ? `<a href="${escapeHtml(referencePreviewUrl(probe))}" target="_blank" rel="noreferrer">打开参考视频</a>` : ""}
     ${isDecompositionConfirmed() ? `<div class="wz-success">${escapeHtml(DECOMPOSITION_CONFIRMED_MESSAGE)}</div>` : ""}
   `;
   if (isDecompositionConfirmed() && state.decomposition) {
@@ -1351,8 +1455,7 @@ function renderEstimate() {
       els.estimateBox.textContent = "完成前两步后，在此估算本批任务规模。";
       if (els.estimateHint) els.estimateHint.textContent = "需先完成拆解与模板";
     }
-    els.planBatchBtn.disabled = true;
-    els.confirmPlanBtn.disabled = true;
+    syncBatchActionButtons();
     if (els.planBox) {
       els.planBox.className = "wz-list empty-line";
       els.planBox.textContent = "尚未生成 Seedance 预案";
@@ -1393,9 +1496,8 @@ function renderEstimate() {
   }
   els.confirmLimits.checked = !estimate.confirmationRequired;
   els.confirmLimits.disabled = !estimate.confirmationRequired;
-  els.planBatchBtn.disabled = estimate.hardBlocked || (estimate.confirmationRequired && !els.confirmLimits.checked);
-  els.confirmPlanBtn.disabled = true;
   renderPlanPreview(state.batchDetail?.batch);
+  syncBatchActionButtons();
   syncEstimateButtonLabel();
   syncMetrics();
   renderBatchReadiness();
@@ -1416,8 +1518,9 @@ function renderPlanPreview(batch) {
         ? "请刷新页面或重新打开批次"
         : state.estimate?.estimate ? "点击「生成 Seedance 预案」" : "需先完成估算";
     }
-    els.confirmPlanBtn.disabled = true;
+    syncBatchActionButtons();
     renderBatchStepProgress();
+    syncFlowHints();
     return;
   }
   if (els.planHint) {
@@ -1445,7 +1548,7 @@ function renderPlanPreview(batch) {
       ])}
     </div>
   `).join("");
-  els.confirmPlanBtn.disabled = batch?.status !== "preview_required";
+  syncBatchActionButtons();
   renderBatchStepProgress();
   syncFlowHints();
 }
@@ -1493,7 +1596,9 @@ function renderBatch() {
   const retryActions = batch.status === "partial_failed"
     ? [{ id: "retry-stitch", label: "重试拼接" }, { id: "re-estimate", label: "重新估算" }]
     : batch.status === "failed"
-      ? [{ id: "re-estimate", label: "重新估算" }]
+      ? qcRunnable
+        ? [{ id: "rerun-qc", label: "重新质检" }, { id: "re-estimate", label: "重新估算" }]
+        : [{ id: "re-estimate", label: "重新估算" }]
       : [];
   els.batchBox.innerHTML = `
     ${batchProgressSection(batch, tasks, outputs)}
@@ -1501,7 +1606,9 @@ function renderBatch() {
     <div class="wz-info">产品素材已在第 3 步上传至对象存储；确认预案后会把素材 URL 作为 <code>omni_reference</code> 引用提交 Seedance（与 OMS 先审后用的 asset_id 链路不同）。过程追踪文件见批次目录 <code>00-brief.json</code> ~ <code>05-video-tasks.json</code>。</div>
     ${inlineRetryHtml({
       message: batch.status === "failed"
-        ? "批次生成失败，可重新估算后再次提交"
+        ? (qcRunnable
+          ? "视频已生成但质检未通过，可点击「运行视频质检」或「重新质检」重试，无需重新提交 Seedance"
+          : "批次生成失败，可重新估算后再次提交")
         : batch.status === "partial_failed"
           ? "部分任务失败，可重试拼接或重新估算"
           : "",
@@ -1524,7 +1631,7 @@ function renderBatch() {
         ["包状态", detail.downloadSummary?.packageReady ? "ready" : "not_ready"],
         ["QC 通过", batch.qcSummary?.passed || 0],
         ["QC 失败", batch.qcSummary?.failed || 0],
-        ["模型视频质检", outputs.some((output) => output.modelQcSummary) ? "已执行" : (qcRunnable ? "待执行（需手动点击）" : "未就绪")]
+        ["模型视频质检", modelQcStatusLabel(outputs, qcRunnable)]
       ])}
     </div>
     <div class="wz-task-list">
@@ -1672,6 +1779,10 @@ async function saveTemplate() {
 async function checkReferenceVideo() {
   clearError(els.globalError);
   setBusy(els.checkReferenceBtn, true, "检查中");
+  if (els.referenceUploadStatus) {
+    els.referenceUploadStatus.textContent = "正在上传并读取视频信息，请稍等。";
+  }
+  syncReferenceHints();
   try {
     const file = els.referenceFile.files?.[0];
     if (!file) {
@@ -1694,13 +1805,18 @@ async function checkReferenceVideo() {
     state.referenceVideo = data.referenceVideo;
     clearDecompositionDraft();
     persistWorkflowSession();
+    clearReferenceObjectUrl();
     renderReference();
     showToast("参考视频信息已读取", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
+    if (els.referenceUploadStatus) {
+      els.referenceUploadStatus.textContent = "上传或检查失败，请重新选择参考视频。";
+    }
     renderError(els.globalError, error, "参考视频检查失败");
   } finally {
     setBusy(els.checkReferenceBtn, false);
+    syncReferenceHints();
   }
 }
 
@@ -1829,7 +1945,7 @@ function startPolling() {
     try {
       const previousStatus = state.batchDetail?.batch?.status;
       const detail = await loadBatchDetail();
-      await loadGallery();
+      await loadGallerySafely();
       const batch = detail?.batch;
       if (!batch || terminalBatchStatus(batch.status)) {
         if (batch && batch.status !== previousStatus) {
@@ -1974,7 +2090,7 @@ async function loadActiveBatch() {
   }
   state.batchDetail = detail;
   renderBatch();
-  await loadGallery();
+  await loadGallerySafely();
   if (!terminalBatchStatus(detail.batch.status)) startPolling();
   return detail;
 }
@@ -1999,6 +2115,15 @@ async function runVideoQc() {
   }
 }
 
+function emptyGalleryState() {
+  return {
+    items: [],
+    filters: { sourceType: "pipeline", page: 1, pageSize: state.galleryPageSize },
+    counts: { total: 0, downloadEligible: 0, byQcStatus: {}, byKind: {} },
+    pagination: { page: 1, pageSize: state.galleryPageSize, total: 0, totalPages: 0 }
+  };
+}
+
 async function loadGallery(options = {}) {
   const requestedPage = Number(options.page || state.galleryPage || 1);
   state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
@@ -2011,6 +2136,16 @@ async function loadGallery(options = {}) {
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
   state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
   renderGallery();
+}
+
+async function loadGallerySafely(options = {}) {
+  try {
+    await loadGallery(options);
+  } catch (error) {
+    state.gallery = emptyGalleryState();
+    renderGallery();
+    renderError(els.globalError, error, "图库加载失败");
+  }
 }
 
 async function downloadPackage() {
@@ -2056,7 +2191,12 @@ function bindEvents() {
     renderTemplateStatus();
   });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
-  els.useSampleVideoBtn.addEventListener("click", () => {
+  els.useSampleVideoBtn?.addEventListener("click", () => {
+    els.referenceFile.value = "";
+    els.referenceFile.click();
+  });
+  els.checkReferenceBtn.addEventListener("click", () => {
+    els.referenceFile.value = "";
     els.referenceFile.click();
   });
   els.referenceFile.addEventListener("change", () => {
@@ -2069,18 +2209,19 @@ function bindEvents() {
     clearError(els.globalError);
     const file = els.referenceFile.files?.[0];
     if (!file) {
+      clearReferenceObjectUrl();
       renderReference();
       return;
     }
-    els.referenceBox.className = "wz-list empty-line";
-    els.referenceBox.textContent = `已选择 ${file.name}，请点击“读取视频信息”继续`;
+    renderPendingReference(file);
+    checkReferenceVideo();
   });
-  els.checkReferenceBtn.addEventListener("click", checkReferenceVideo);
   els.batchBox?.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-inline-retry]");
     if (!btn) return;
     if (btn.dataset.inlineRetry === "retry-stitch") els.retryStitchBtn?.click();
     if (btn.dataset.inlineRetry === "re-estimate") els.estimateBtn?.click();
+    if (btn.dataset.inlineRetry === "rerun-qc") els.runQcBtn?.click();
   });
   els.draftDecompositionBtn.addEventListener("click", draftReferenceVideoDecomposition);
   els.decomposeBtn.addEventListener("click", decomposeReferenceVideo);
@@ -2112,10 +2253,12 @@ async function loadInitialData() {
   await loadActiveBatch();
   if (state.batchDetail?.batch) {
     restoreWorkflowFromBatch(state.batchDetail);
+    const lock = activeLockFromBatch(state.batchDetail.batch);
+    if (lock) renderActiveLockBanner(lockHost(), lock);
   } else {
     await restoreWorkflowSession();
   }
-  if (!state.batchDetail) await loadGallery();
+  if (!state.batchDetail) await loadGallerySafely();
   renderBatchReadiness();
   syncMetrics();
 }

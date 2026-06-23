@@ -44,6 +44,8 @@ const els = {
   regionCount: $("#remixRegionCount"),
   outputCount: $("#remixOutputCount"),
   downloadCount: $("#remixDownloadCount"),
+  sourceUploadPanel: $("#remixSourceUploadPanel"),
+  sourceUploadStatus: $("#remixSourceUploadStatus"),
   sourceFile: $("#remixSourceFile"),
   uploadBtn: $("#remixUploadBtn"),
   sourceBox: $("#remixSourceBox"),
@@ -80,6 +82,7 @@ const state = {
 };
 
 let hasHandledInitialPageShow = false;
+let sourceObjectUrl = "";
 
 function resetWorkshopState() {
   window.clearTimeout(state.pollTimer);
@@ -140,13 +143,26 @@ function activeRemixNotice(status) {
 function syncMetrics() {
   const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
   const submitLocked = isSourceSubmitLocked();
+  const uploading = Boolean(els.uploadBtn?.dataset.originalText);
+  const fileReady = Boolean(els.sourceFile?.files?.[0]);
   els.sourceCount.textContent = state.source ? "1" : "0";
   els.regionCount.textContent = state.regions.length;
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
   els.maskConfirmBtn.disabled = state.submitBlocked || submitLocked || !state.source || !state.regions.length;
   els.uploadBtn.disabled = activeRemix;
-  els.sourceFile.disabled = activeRemix;
+  if (uploading) els.uploadBtn.disabled = true;
+  els.sourceFile.disabled = activeRemix || uploading;
+  els.sourceUploadPanel?.classList.toggle("has-file", fileReady || Boolean(state.source));
+  els.sourceUploadPanel?.classList.toggle("is-uploading", uploading);
+  els.sourceUploadPanel?.classList.toggle("has-upload", Boolean(state.source));
+  if (els.sourceUploadStatus && !uploading) {
+    els.sourceUploadStatus.textContent = state.source
+      ? `已上传 ${state.source.probe?.fileName || "源素材"}，可在下一步框选区域。`
+      : fileReady
+        ? `已选择 ${els.sourceFile.files[0]?.name || "源素材"}，正在准备上传。`
+        : "选中文件后会自动上传、校验并生成可框选预览。";
+  }
   els.clearMaskBtn.disabled = activeRemix;
   els.operationType.disabled = activeRemix;
   els.stopBtn.hidden = !activeRemix;
@@ -164,9 +180,9 @@ function syncFlowHints() {
     activeRemix
       ? "当前有改造任务处理中，请等待完成"
       : !fileReady && !state.source
-        ? "请先选择需要改造的视频或图片"
+        ? "点击选择需要改造的视频或图片，选择后自动上传"
         : fileReady && !state.source
-          ? "文件已选择，点击上传并检查"
+          ? "已选择文件，正在等待自动上传"
           : "",
     { tone: activeRemix ? "warn" : "muted" }
   );
@@ -394,6 +410,20 @@ function renderMaskMedia(force = false) {
   media?.addEventListener("loadeddata", syncFromMedia, { once: true });
 }
 
+function clearSourceObjectUrl() {
+  if (!sourceObjectUrl) return;
+  URL.revokeObjectURL(sourceObjectUrl);
+  sourceObjectUrl = "";
+}
+
+function selectedSourcePreviewUrl() {
+  const file = els.sourceFile?.files?.[0];
+  if (!file) return "";
+  clearSourceObjectUrl();
+  sourceObjectUrl = URL.createObjectURL(file);
+  return sourceObjectUrl;
+}
+
 function renderMaskPreview() {
   const canvas = els.maskPreviewCanvas;
   if (!canvas) return;
@@ -475,8 +505,36 @@ function renderSourcePreview(source) {
   `;
 }
 
+function renderSelectedSource(file) {
+  if (!file) {
+    renderSource();
+    return;
+  }
+  const isVideo = String(file.type || "").startsWith("video/");
+  const previewUrl = selectedSourcePreviewUrl();
+  els.sourceBox.className = "wz-list";
+  els.sourceBox.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(file.name)}</strong>
+        <small>待上传 · ${escapeHtml(isVideo ? "video" : "image")} · ${escapeHtml(Math.max(1, Math.round(file.size / 1024 / 1024)))} MB</small>
+      </div>
+      ${badge("checking", { checking: "准备上传" })}
+    </article>
+    ${previewUrl ? `
+      <div class="remix-source-preview" data-source-preview="${isVideo ? "video" : "image"}">
+        ${isVideo
+          ? `<video src="${escapeHtml(previewUrl)}" controls preload="metadata" playsinline></video>`
+          : `<img src="${escapeHtml(previewUrl)}" alt="源素材本地预览" />`}
+      </div>
+    ` : ""}
+  `;
+  syncMetrics();
+}
+
 function renderSource() {
   if (!state.source) {
+    if (!els.sourceFile?.files?.[0]) clearSourceObjectUrl();
     els.sourceBox.className = "wz-list empty-line";
     els.sourceBox.textContent = "未上传源素材";
     renderMaskEditor(true);
@@ -783,6 +841,10 @@ async function uploadSource() {
     return;
   }
   setBusy(els.uploadBtn, true, "上传中");
+  if (els.sourceUploadStatus) {
+    els.sourceUploadStatus.textContent = "正在上传并检查素材，请稍等。";
+  }
+  syncMetrics();
   try {
     const content = await dataUrlFromFile(file);
     const data = await apiEnvelope("/api/wangzhuan/remix/upload", {
@@ -798,10 +860,14 @@ async function uploadSource() {
     state.selectedRegionId = "";
     state.actualMediaCache = null;
     state.submitBlocked = false;
+    clearSourceObjectUrl();
     renderSource();
     showToast("源素材上传成功，请框选改造区域", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
+    if (els.sourceUploadStatus) {
+      els.sourceUploadStatus.textContent = "上传或检查失败，请重新选择源素材。";
+    }
     renderError(els.globalError, error, "源素材上传失败");
   } finally {
     setBusy(els.uploadBtn, false);
@@ -994,7 +1060,27 @@ async function downloadRemixPackage() {
 }
 
 function bindEvents() {
-  els.uploadBtn.addEventListener("click", uploadSource);
+  els.uploadBtn.addEventListener("click", () => {
+    if (isActiveRemixStatus(state.detail?.remix?.status)) return;
+    els.sourceFile.value = "";
+    els.sourceFile.click();
+  });
+  els.sourceFile.addEventListener("change", () => {
+    if (isActiveRemixStatus(state.detail?.remix?.status)) return;
+    clearError(els.globalError);
+    state.source = null;
+    state.regions = [];
+    state.selectedRegionId = "";
+    state.actualMediaCache = null;
+    const file = els.sourceFile.files?.[0];
+    if (!file) {
+      clearSourceObjectUrl();
+      renderSource();
+      return;
+    }
+    renderSelectedSource(file);
+    uploadSource();
+  });
   els.clearMaskBtn.addEventListener("click", () => {
     if (isActiveRemixStatus(state.detail?.remix?.status)) return;
     state.regions = [];

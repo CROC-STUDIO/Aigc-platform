@@ -74,13 +74,37 @@ test("parses Skylink submit and poll responses", () => {
     data: {
       task_id: "task_123",
       status: "succeeded",
-      preview_url: "https://cdn.example.com/output.mp4"
+      preview_url: "https://cdn.example.com/preview.jpg",
+      result: "https://cdn.example.com/output.mp4"
     }
   });
   assert.equal(polled.taskId, "task_123");
   assert.equal(polled.status, "succeeded");
   assert.equal(polled.videoUrl, "https://cdn.example.com/output.mp4");
+  assert.equal(extractSeedanceVideoUrl({
+    status: "succeeded",
+    content: { video_url: "https://cdn.example.com/seedance2-output.mp4?X-Tos-Expires=86400" }
+  }), "https://cdn.example.com/seedance2-output.mp4?X-Tos-Expires=86400");
+  assert.equal(extractSeedanceVideoUrl({
+    status: "succeeded",
+    content: { file_url: "https://cdn.example.com/output-from-file-url.mp4" }
+  }), "https://cdn.example.com/output-from-file-url.mp4");
+  assert.equal(extractSeedanceVideoUrl({
+    status: "succeeded",
+    data: { content: { video_url: "https://cdn.example.com/nested-task.mp4" } }
+  }), "https://cdn.example.com/nested-task.mp4");
   assert.equal(extractSeedanceVideoUrl({ result: "https://cdn.example.com/result.mp4" }), "https://cdn.example.com/result.mp4");
+  assert.equal(extractSeedanceVideoUrl({ preview_url: "https://cdn.example.com/output.mp4" }), "https://cdn.example.com/output.mp4");
+  assert.equal(extractSeedanceVideoUrl({ preview_url: "https://cdn.example.com/preview.jpg" }), "");
+  assert.equal(extractSeedanceVideoUrl({
+    status: "succeeded",
+    preview_url: "https://cdn.example.com/preview.jpg",
+    output_assets: [{
+      type: "video",
+      url: "https://static.skylink-gateway.com/seedance/generated/seedance/aigc_demo/00-video.mp4",
+      mime_type: "video/mp4"
+    }]
+  }), "https://static.skylink-gateway.com/seedance/generated/seedance/aigc_demo/00-video.mp4");
 });
 
 test("resolveSeedanceModel prefers estimate and template overrides", () => {

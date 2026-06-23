@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { resolveLlmConfig } from "./llm-config.mjs";
+import { llmSupportsVideoUrl, resolveQcLlmConfig } from "./llm-config.mjs";
 import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
@@ -178,7 +178,14 @@ function generatedFrameTimestamps(durationSec, frameCount) {
   });
 }
 
+function usableVisionFrames(frames = []) {
+  return frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/"));
+}
+
 async function ffmpegExtractGeneratedFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
+  if (!existsSync(filePath)) {
+    throw new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+  }
   const frames = [];
   const frameDir = join(parse(filePath).dir, "qc-llm-frames");
   await rm(frameDir, { recursive: true, force: true }).catch(() => {});
@@ -187,37 +194,44 @@ async function ffmpegExtractGeneratedFrames(filePath, timestampsSec, { timeoutMs
     for (let index = 0; index < timestampsSec.length; index += 1) {
       const timestampSec = timestampsSec[index];
       const framePath = join(frameDir, `frame-${String(index + 1).padStart(2, "0")}.jpg`);
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-ss",
-        String(timestampSec),
-        "-i",
-        filePath,
-        "-frames:v",
-        "1",
-        "-vf",
-        "scale='min(720,iw)':-2",
-        "-q:v",
-        "3",
-        framePath
-      ], {
-        encoding: "utf8",
-        maxBuffer: 1024 * 1024,
-        timeout: timeoutMs,
-        windowsHide: true
-      });
-      const buffer = await readFile(framePath);
-      if (buffer.length) {
-        frames.push({
-          index,
-          timestampSec,
-          mimeType: "image/jpeg",
-          dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`
+      try {
+        await execFileAsync("ffmpeg", [
+          "-y",
+          "-i",
+          filePath,
+          "-ss",
+          String(timestampSec),
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale='min(720,iw)':-2",
+          "-q:v",
+          "3",
+          framePath
+        ], {
+          encoding: "utf8",
+          maxBuffer: 1024 * 1024,
+          timeout: timeoutMs,
+          windowsHide: true
         });
+        const buffer = await readFile(framePath);
+        if (buffer.length) {
+          frames.push({
+            index,
+            timestampSec,
+            mimeType: "image/jpeg",
+            dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`
+          });
+        }
+      } catch {
+        // Skip individual frame samples; caller can fall back to inline video input.
       }
     }
   } finally {
     await rm(frameDir, { recursive: true, force: true }).catch(() => {});
+  }
+  if (!frames.length && timestampsSec.length) {
+    throw new Error(`generated frame samples missing for '${filePath}'`);
   }
   return frames;
 }
@@ -231,7 +245,41 @@ async function extractGeneratedFrames(context, filePath, timestampsSec, output) 
   return ffmpegExtractGeneratedFrames(filePath, timestampsSec, { timeoutMs });
 }
 
-async function collectGeneratedVideoVisionInputs(context, output) {
+async function readLocalVideoDataUrl(videoPath, mimeType, maxBytes) {
+  const info = await stat(videoPath);
+  if (info.size > maxBytes) {
+    throw new WangzhuanError("model_failed", "本地生成视频过大，无法进行模型质检", {
+      inputMode: "file_data",
+      reason: `size=${info.size};max=${maxBytes}`
+    });
+  }
+  const videoBuffer = await readFile(videoPath);
+  return `data:${mimeType};base64,${videoBuffer.toString("base64")}`;
+}
+
+async function fetchRemoteVideoDataUrl(url, mimeType, maxBytes) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxBytes) {
+      throw new Error(`remote video too large: ${buffer.length}`);
+    }
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function collectGeneratedVideoVisionInputs(context, output, options = {}) {
+  const qcLlmConfig = resolveQcLlmConfig(context.config || {});
+  const preferVideoUrl = llmSupportsVideoUrl(qcLlmConfig);
+  const forceInlineVideo = options.forceInlineVideo === true;
+  const skipRemoteVideoUrl = forceInlineVideo;
   const videoPath = resolveUserPath(context, output.filePath);
   const mimeType = output.mimeType || mimeForExt(extname(videoPath).toLowerCase());
   const fileUrl = resolveModelFileUrl(output);
@@ -253,6 +301,7 @@ async function collectGeneratedVideoVisionInputs(context, output) {
       reason: String(error?.message || error?.code || "unknown").slice(0, 160)
     });
   }
+  const usableFrames = usableVisionFrames(frames);
   if (output.storageUrl && !fileUrl) {
     warnings.push({
       code: "generated_video_storage_url_not_external",
@@ -260,38 +309,136 @@ async function collectGeneratedVideoVisionInputs(context, output) {
       reason: "storage_url_not_http"
     });
   }
-  if (fileUrl) {
+  if (fileUrl && !skipRemoteVideoUrl && (preferVideoUrl || usableFrames.length)) {
+    if (preferVideoUrl && !usableFrames.length && warnings.some((warning) => warning.code === "generated_frame_extract_failed")) {
+      warnings.push({
+        code: "generated_video_url_primary",
+        message: "抽帧失败，已改为使用远程视频 URL 给质检模型",
+        reason: "prefer_video_url"
+      });
+    }
     return {
       fileName: basename(videoPath),
       mimeType,
       fileUrl,
-      frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+      frames: usableFrames,
       timestampsSec,
       warnings
     };
   }
-  const info = await stat(videoPath);
+  let info;
   const maxBytes = numberOrZero(context.config?.wangzhuan?.llm?.maxLocalVideoBytes) || DEFAULT_MAX_LOCAL_VIDEO_BYTES;
+  try {
+    info = await stat(videoPath);
+  } catch {
+    if (fileUrl) {
+      if (skipRemoteVideoUrl) {
+        try {
+          const fileDataUrl = await fetchRemoteVideoDataUrl(fileUrl, mimeType, maxBytes);
+          warnings.push({
+            code: "generated_video_remote_inline_fallback",
+            message: "本地生成视频不存在，已下载远程视频并以内联方式传给质检模型",
+            reason: "chat_completions_requires_file_data"
+          });
+          return {
+            fileName: basename(videoPath),
+            mimeType,
+            fileDataUrl,
+            frames: usableFrames,
+            timestampsSec,
+            warnings
+          };
+        } catch (error) {
+          if (usableFrames.length) {
+            warnings.push({
+              code: "generated_video_remote_download_failed",
+              message: "远程视频下载失败，模型质检仅使用抽帧画面",
+              reason: String(error?.message || error).slice(0, 160)
+            });
+            return {
+              fileName: basename(videoPath),
+              mimeType,
+              frames: usableFrames,
+              timestampsSec,
+              warnings
+            };
+          }
+          throw new WangzhuanError("model_failed", "远程视频下载失败，无法进行模型质检", {
+            inputMode: "file_data",
+            reason: String(error?.message || error).slice(0, 160)
+          });
+        }
+      }
+      if (!usableFrames.length) {
+        warnings.push({
+          code: "generated_video_local_missing",
+          message: "本地生成视频不存在，已回退为远程视频地址",
+          reason: "local_file_missing"
+        });
+      }
+      return {
+        fileName: basename(videoPath),
+        mimeType,
+        fileUrl,
+        frames: usableFrames,
+        timestampsSec,
+        warnings
+      };
+    }
+    throw new WangzhuanError("missing_required_file", "生成视频文件不存在，无法进行模型质检", {
+      filePath: output.filePath
+    });
+  }
   if (info.size > maxBytes) {
     warnings.push({
       code: "generated_video_too_large_for_inline_input",
       message: "本地生成视频过大，模型质检仅使用抽帧画面",
       reason: `size=${info.size};max=${maxBytes}`
     });
+    if (fileUrl && !skipRemoteVideoUrl) {
+      if (!usableFrames.length) {
+        warnings.push({
+          code: "generated_video_inline_fallback_unavailable",
+          message: "抽帧失败且本地视频过大，已改为仅传远程视频地址",
+          reason: "frames_missing_and_video_too_large"
+        });
+      }
+      return {
+        fileName: basename(videoPath),
+        mimeType,
+        fileUrl,
+        frames: usableFrames,
+        timestampsSec,
+        warnings
+      };
+    }
     return {
       fileName: basename(videoPath),
       mimeType,
-      frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+      frames: usableFrames,
       timestampsSec,
       warnings
     };
   }
-  const videoBuffer = await readFile(videoPath);
+  if (skipRemoteVideoUrl && fileUrl && !usableFrames.length) {
+    warnings.push({
+      code: "generated_video_inline_fallback",
+      message: "当前质检模型不支持远程视频 URL，已改为内联本地视频给模型",
+      reason: "chat_completions_requires_file_data"
+    });
+  } else if (fileUrl && !usableFrames.length) {
+    warnings.push({
+      code: "generated_video_inline_fallback",
+      message: "抽帧或远程视频不可用，已改为内联本地视频给模型",
+      reason: "prefer_local_inline_over_remote_only"
+    });
+  }
+  const fileDataUrl = await readLocalVideoDataUrl(videoPath, mimeType, maxBytes);
   return {
     fileName: basename(videoPath),
     mimeType,
-    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
-    frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
+    fileDataUrl,
+    frames: usableFrames,
     timestampsSec,
     warnings
   };
@@ -392,12 +539,25 @@ async function stitchReportPresenceCheck(context, batch, output) {
   return check("stitch_report_presence", "pass", "30s stitch report 存在且成功");
 }
 
+function scriptPolicyText(script = {}) {
+  return [
+    script.hook,
+    script.body,
+    script.cta,
+    script.ending,
+    script.rewardExpression,
+    script.voiceover,
+    ...(Array.isArray(script.subtitles) ? script.subtitles : []),
+    ...(Array.isArray(script.complianceNotes) ? script.complianceNotes : [])
+  ].filter(Boolean).join("\n");
+}
+
 function textForPolicy(batch, tasks) {
   const scriptsById = new Map((Array.isArray(batch.scripts) ? batch.scripts : []).map((script) => [script.scriptId, script]));
   return tasks
     .map((task) => scriptsById.get(task.scriptId))
     .filter(Boolean)
-    .map((script) => [script.hook, script.body, script.cta, script.ending, script.rewardExpression].filter(Boolean).join("\n"))
+    .map((script) => scriptPolicyText(script))
     .join("\n")
     .toLowerCase();
 }
@@ -753,12 +913,15 @@ function shouldRunModelVideoQc(context, batch, output) {
   const isFinalSingleSegmentOutput = Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15;
   if (!isFinalStitchedOutput && !isFinalSingleSegmentOutput) return false;
   if (typeof context.callWangzhuanLlm === "function" || typeof context.callWangzhuanQcLlm === "function") return true;
-  return Boolean(context.config?.wangzhuan?.llm && typeof context.config.wangzhuan.llm === "object");
+  const qcLlm = context.config?.wangzhuan?.qcLlm;
+  const llm = context.config?.wangzhuan?.llm;
+  if (qcLlm && typeof qcLlm === "object") return true;
+  return Boolean(llm && typeof llm === "object");
 }
 
-async function runModelVideoQc(context, batch, output, tasks, scripts) {
-  const llmConfig = resolveLlmConfig(context.config || {});
-  const visionInputs = await collectGeneratedVideoVisionInputs(context, output);
+async function runModelVideoQc(context, batch, output, tasks, scripts, options = {}) {
+  const llmConfig = resolveQcLlmConfig(context.config || {});
+  const visionInputs = await collectGeneratedVideoVisionInputs(context, output, options);
   if (!visionInputs.fileUrl && !visionInputs.fileDataUrl && !(visionInputs.frames || []).length) {
     throw new WangzhuanError("model_failed", "视频质检缺少可供模型分析的视频或抽帧输入", {
       provider: llmConfig.provider,
@@ -894,25 +1057,38 @@ async function qcReportForOutput(context, batch, output) {
       const modelCheck = modelReviewCheck(modelReview);
       if (modelCheck) checks.push(modelCheck);
     } catch (error) {
-      modelReview = {
-        provider: error?.data?.provider || resolveLlmConfig(context.config || {}).provider,
-        model: error?.data?.model || resolveLlmConfig(context.config || {}).model,
-        passed: false,
-        score: 0,
-        threshold: DEFAULT_MODEL_QC_THRESHOLD,
-        summary: cleanText(error?.message || "视频质检模型请求失败", 600),
-        matched: [],
-        issues: [{
-          code: error?.code || "model_failed",
-          severity: "critical",
-          message: cleanText(error?.data?.upstreamMessage || error?.message || "视频质检模型请求失败", 600)
-        }],
-        recommendedAction: "manual_review",
-        inputMode: error?.data?.inputMode || "",
-        frameCount: 0,
-        warnings: []
-      };
-      checks.push(check("model_video_qc", "fail", `模型视频质检失败：${modelReview.summary}`, "modelReview"));
+      const shouldRetryInline = error?.data?.inputMode === "file_url"
+        || String(error?.data?.upstreamMessage || error?.message || "").includes("file_data");
+      if (shouldRetryInline) {
+        try {
+          modelReview = await runModelVideoQc(context, batch, output, tasks, scripts, { forceInlineVideo: true });
+          const modelCheck = modelReviewCheck(modelReview);
+          if (modelCheck) checks.push(modelCheck);
+        } catch (retryError) {
+          error = retryError;
+        }
+      }
+      if (!modelReview) {
+        modelReview = {
+          provider: error?.data?.provider || resolveQcLlmConfig(context.config || {}).provider,
+          model: error?.data?.model || resolveQcLlmConfig(context.config || {}).model,
+          passed: false,
+          score: 0,
+          threshold: DEFAULT_MODEL_QC_THRESHOLD,
+          summary: cleanText(error?.message || "视频质检模型请求失败", 600),
+          matched: [],
+          issues: [{
+            code: error?.code || "model_failed",
+            severity: "critical",
+            message: cleanText(error?.data?.upstreamMessage || error?.message || "视频质检模型请求失败", 600)
+          }],
+          recommendedAction: "manual_review",
+          inputMode: error?.data?.inputMode || "",
+          frameCount: 0,
+          warnings: []
+        };
+        checks.push(check("model_video_qc", "fail", `模型视频质检失败：${modelReview.summary}`, "modelReview"));
+      }
     }
   }
   const qcStatus = qcStatusFromChecks(checks);

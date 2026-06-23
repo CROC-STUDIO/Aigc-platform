@@ -256,8 +256,54 @@ export function seedanceTaskUrl(endpoint, taskId, taskPollPath = DEFAULT_TASK_PO
   return `${base.replace(/\/+$/, "")}/${encodeURIComponent(cleanString(taskId))}`;
 }
 
+function firstHttpUrl(...values) {
+  for (const value of values) {
+    const text = cleanString(value);
+    if (/^https?:\/\//i.test(text)) return text;
+  }
+  return "";
+}
+
+function directVideoUrl(value = {}) {
+  if (!value || typeof value !== "object") return "";
+  const direct = firstHttpUrl(
+    value.video_url,
+    value.file_url,
+    value.url,
+    value.download_url,
+    value.output_url,
+    value.media_url,
+    value.videoUrl
+  );
+  if (/^https?:\/\//i.test(direct)) return direct;
+  if (value.video_url && typeof value.video_url === "object") {
+    const nested = cleanString(value.video_url.url);
+    if (/^https?:\/\//i.test(nested)) return nested;
+  }
+  if (typeof value.video === "string" && /^https?:\/\//i.test(value.video)) return value.video;
+  if (value.video && typeof value.video === "object") {
+    const nested = directVideoUrl(value.video);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+function extractContentBlockVideoUrl(content) {
+  if (!content) return "";
+  if (typeof content === "string" && /^https?:\/\//i.test(content)) return content;
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      const found = extractContentBlockVideoUrl(item);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof content !== "object") return "";
+  return directVideoUrl(content);
+}
+
 function nestedVideoUrl(value, depth = 0) {
-  if (!value || depth > 4) return "";
+  if (!value || depth > 5) return "";
   if (typeof value === "string" && /^https?:\/\//i.test(value)) return value;
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -267,25 +313,84 @@ function nestedVideoUrl(value, depth = 0) {
     return "";
   }
   if (typeof value !== "object") return "";
-  const direct = cleanString(value.video_url, cleanString(value.url, cleanString(value.download_url)));
-  if (/^https?:\/\//i.test(direct)) return direct;
-  if (value.video_url && typeof value.video_url === "object") {
-    const nested = cleanString(value.video_url.url);
-    if (/^https?:\/\//i.test(nested)) return nested;
-  }
-  for (const key of ["content", "output", "result", "data", "outputs", "artifacts"]) {
+  const direct = directVideoUrl(value);
+  if (direct) return direct;
+  for (const key of ["content", "output", "output_assets", "result", "data", "outputs", "artifacts", "task", "response", "generation", "media"]) {
     const found = nestedVideoUrl(value[key], depth + 1);
     if (found) return found;
   }
   return "";
 }
 
+function extractResultsVideoUrl(payload = {}) {
+  const results = payload.results;
+  if (!Array.isArray(results)) return "";
+  for (const item of results) {
+    if (typeof item === "string" && /^https?:\/\//i.test(item)) return item;
+    const found = nestedVideoUrl(item, 0);
+    if (found) return found;
+  }
+  return "";
+}
+
+function extractOutputAssetsVideoUrl(payload = {}) {
+  const assets = payload.output_assets;
+  if (!Array.isArray(assets)) return "";
+  for (const item of assets) {
+    if (!item || typeof item !== "object") continue;
+    const type = cleanString(item.type).toLowerCase();
+    const url = directVideoUrl(item);
+    if (!url) continue;
+    if (type === "video" || !type || isLikelyVideoUrl(url)) return url;
+  }
+  return "";
+}
+
+function isLikelyVideoUrl(value = "") {
+  const url = cleanString(value);
+  if (!/^https?:\/\//i.test(url)) return false;
+  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+}
+
+function isLikelyImageUrl(value = "") {
+  const url = cleanString(value);
+  if (!/^https?:\/\//i.test(url)) return false;
+  return /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(url);
+}
+
+function isJpegBuffer(buffer) {
+  return Buffer.isBuffer(buffer)
+    && buffer.length >= 3
+    && buffer[0] === 0xff
+    && buffer[1] === 0xd8
+    && buffer[2] === 0xff;
+}
+
 export function extractSeedanceVideoUrl(payload = {}) {
+  const body = unwrapUpstreamPayload(payload);
+  const candidates = [body, payload].filter((item, index, list) => item && list.indexOf(item) === index);
+  for (const candidate of candidates) {
+    const result = candidate.result;
+    if (typeof result === "string" && /^https?:\/\//i.test(result)) return result;
+    const contentUrl = extractContentBlockVideoUrl(candidate.content);
+    if (contentUrl) return contentUrl;
+    const resultsUrl = extractResultsVideoUrl(candidate);
+    if (resultsUrl) return resultsUrl;
+    const outputAssetsUrl = extractOutputAssetsVideoUrl(candidate);
+    if (outputAssetsUrl) return outputAssetsUrl;
+    const nested = nestedVideoUrl(candidate);
+    if (nested) return nested;
+    const previewUrl = cleanString(candidate.preview_url);
+    if (/^https?:\/\//i.test(previewUrl) && isLikelyVideoUrl(previewUrl) && !isLikelyImageUrl(previewUrl)) {
+      return previewUrl;
+    }
+  }
+  return "";
+}
+
+export function extractSeedancePreviewUrl(payload = {}) {
   const previewUrl = cleanString(payload.preview_url);
-  if (/^https?:\/\//i.test(previewUrl)) return previewUrl;
-  const result = payload.result;
-  if (typeof result === "string" && /^https?:\/\//i.test(result)) return result;
-  return nestedVideoUrl(payload);
+  return /^https?:\/\//i.test(previewUrl) ? previewUrl : "";
 }
 
 export function parseSeedancePollResponse(payload = {}) {
@@ -295,18 +400,19 @@ export function parseSeedancePollResponse(payload = {}) {
   return {
     taskId,
     status,
-    videoUrl: extractSeedanceVideoUrl(body),
+    videoUrl: extractSeedanceVideoUrl(payload),
     responsePayload: payload
   };
 }
 
 export function summarizeSeedancePollResponse(result = {}) {
+  const body = unwrapUpstreamPayload(result.responsePayload || {});
   return {
     taskId: result.taskId || "",
     status: result.status || "",
-    upstreamStatus: result.responsePayload?.status || "",
+    upstreamStatus: cleanString(body.status, cleanString(body.state, cleanString(body.task_status, result.status || ""))),
     videoUrlStored: Boolean(result.videoUrl),
-    upstreamRequestId: result.responsePayload?.upstream_request_id || result.responsePayload?.request_id || ""
+    upstreamRequestId: result.responsePayload?.upstream_request_id || result.responsePayload?.request_id || body.request_id || ""
   };
 }
 
@@ -374,7 +480,16 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
           status: response.status
         });
       }
-      return Buffer.from(await response.arrayBuffer());
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (isJpegBuffer(buffer)) {
+        throw upstreamError("Seedance 下载内容是 JPEG 预览图而非视频文件", {
+          provider: config.provider,
+          operation: "download_seedance_video",
+          contentKind: "image/jpeg",
+          bytes: buffer.length
+        });
+      }
+      return buffer;
     }
   };
 }

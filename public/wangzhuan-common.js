@@ -98,11 +98,30 @@ export function batchGenerationProgress(batch = {}, tasks = []) {
   };
 }
 
+export function modelQcStatusLabel(outputs = [], qcRunnable = false) {
+  if (!outputs.length) return qcRunnable ? "待执行（需手动点击）" : "未就绪";
+  const modelChecked = outputs.filter((output) =>
+    output.modelQcSummary
+    || (Array.isArray(output.qcChecks) && output.qcChecks.some((check) => check.checkId === "model_video_qc"))
+  );
+  if (modelChecked.length === outputs.length) return "已执行";
+  if (modelChecked.length > 0) return `部分执行（${modelChecked.length}/${outputs.length}）`;
+  const ruleQcDone = outputs.every((output) => output.qcStatus && output.qcStatus !== "not_started");
+  if (ruleQcDone) return "已执行（规则质检，模型未跑）";
+  return qcRunnable ? "待执行（需手动点击）" : "未就绪";
+}
+
 export function isBatchQcRunnable(batch = {}, tasks = [], outputs = []) {
-  if (batch.status !== "qc" || !outputs.length || !tasks.length) return false;
+  if (!outputs.length || !tasks.length) return false;
   const generationDoneStatuses = new Set(["downloaded", "qc", "succeeded"]);
   if (!tasks.every((task) => generationDoneStatuses.has(task.status))) return false;
-  return outputs.some((output) => output.qcStatus === "not_started");
+  if (batch.status === "qc") {
+    return outputs.some((output) => output.qcStatus === "not_started");
+  }
+  if (batch.status === "failed" || batch.status === "partial_failed") {
+    return outputs.some((output) => ["fail", "warn", "manual_required"].includes(output.qcStatus));
+  }
+  return false;
 }
 
 export const workflowTriggerLabels = {

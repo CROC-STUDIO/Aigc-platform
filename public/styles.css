@@ -3077,6 +3077,104 @@ button.mini {
   font-size: 12px;
 }
 
+.wz-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wz-upload-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid rgba(234, 234, 234, 0.14);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(12, 14, 18, 0.66);
+}
+
+.wz-upload-panel.has-file {
+  border-color: rgba(141, 230, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(141, 230, 255, 0.075), rgba(255, 255, 255, 0.018)),
+    rgba(12, 14, 18, 0.74);
+}
+
+.wz-upload-panel.has-upload {
+  border-color: rgba(72, 245, 138, 0.28);
+}
+
+.wz-upload-panel.is-uploading {
+  cursor: progress;
+}
+
+.wz-upload-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wz-upload-kicker {
+  color: #8f98aa;
+  font-family: "SF Mono", "Consolas", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.05em;
+}
+
+.wz-upload-copy strong {
+  color: #f5f7fb;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.wz-upload-copy small {
+  max-width: 42ch;
+  color: #aeb6c6;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wz-upload-button {
+  min-width: 112px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 6px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.wz-source-preview {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: var(--wz-source-aspect-ratio, 9 / 16);
+  min-height: 260px;
+  max-height: 54vh;
+  overflow: hidden;
+  border: 1px solid rgba(234, 234, 234, 0.14);
+  border-radius: 8px;
+  background: #06080a;
+}
+
+.wz-source-preview video,
+.wz-source-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .remix-source-preview {
   display: grid;
   place-items: center;
@@ -5476,6 +5574,15 @@ button.mini {
 }
 
 @media (max-width: 760px) {
+  .wz-upload-panel {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .wz-upload-button {
+    width: 100%;
+  }
+
   .wz-node-body .wz-primary-form,
   .wz-node-body .wz-inline-form {
     grid-template-columns: 1fr;

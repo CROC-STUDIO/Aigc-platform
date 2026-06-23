@@ -22,6 +22,14 @@
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 180000
     },
+    "qcLlm": {
+      "provider": "skylink",
+      "endpoint": "https://skylink-gateway.com/api/v1",
+      "model": "doubao-seed-2-0-lite-260428",
+      "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
+      "timeoutMs": 180000,
+      "preferVideoUrl": true
+    },
     "capabilities": {
       "remix": {
         "provider": "video_aigc",

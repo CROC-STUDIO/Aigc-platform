@@ -195,6 +195,8 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "running", "partial_failed", "qc_completed", null, 1],
   ["workflow_run", "running", "failed", "qc_completed", null, 1],
   ["workflow_run", "queued", "failed", "batch_write", null, 1],
+  ["workflow_run", "failed", "running", "scheduler_retry", null, 0],
+  ["workflow_run", "failed", "running", "batch_write", null, 0],
   ["workflow_run", "qc", "succeeded", "qc_completed", null, 1],
   ["workflow_run", "qc", "partial_failed", "qc_completed", null, 1],
   ["workflow_run", "qc", "failed", "qc_completed", null, 1],
@@ -245,6 +247,9 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "waiting_upstream", "pending", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "pending", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "waiting_upstream", "scheduler_retry", null, 0],
+  ["workflow_task", "failed", "waiting_upstream", "batch_write", null, 0],
+  ["workflow_task", "failed", "downloaded", "batch_write", null, 0],
+  ["workflow_task", "failed", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "batch_write", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "stitch_progress", null, 0],
@@ -1689,6 +1694,9 @@ function outputRowToOutput(row, taskIds = []) {
   if (promptStorageUrl) output.promptStorageUrl = promptStorageUrl;
   if (qcReportStorageKey) output.qcReportStorageKey = qcReportStorageKey;
   if (qcReportStorageUrl) output.qcReportStorageUrl = qcReportStorageUrl;
+  if (probe.modelQcSummary && typeof probe.modelQcSummary === "object") output.modelQcSummary = probe.modelQcSummary;
+  if (Array.isArray(probe.qcChecks) && probe.qcChecks.length) output.qcChecks = probe.qcChecks;
+  if (probe.qcSummary) output.qcSummary = probe.qcSummary;
   return output;
 }
 
@@ -2299,7 +2307,9 @@ function normalizeGallerySourceType(query = {}) {
 
 export async function loadGalleryItemsFromMysql(context, query = {}) {
   const pool = await getPool();
-  if (!pool) return null;
+  if (!pool) {
+    throw new Error("MySQL connection pool is not configured");
+  }
   const conn = await pool.getConnection();
   try {
     const facts = await ensureContextFacts(conn, context);
@@ -2427,7 +2437,7 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
     };
   } catch (error) {
     console.warn(`[mysql-facts] failed to load gallery items: ${error.message}`);
-    return null;
+    throw error;
   } finally {
     conn.release();
   }
@@ -3154,6 +3164,10 @@ function shouldScheduleUpstreamPoll(batch = {}) {
   if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return false;
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   if (tasks.some((task) => task.status === "waiting_upstream")) return true;
+  if (tasks.some((task) => task.status === "failed"
+    && task.errorCode === "upstream_failed"
+    && String(task.errorMessage || "").includes("未返回视频地址")
+    && Boolean(task.seedanceTaskId || task.providerJobId))) return true;
   if (tasks.some((task) => task.status === "pending")) {
     return batch.status === "running" || batch.status === "stitching";
   }

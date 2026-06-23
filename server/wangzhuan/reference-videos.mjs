@@ -756,14 +756,17 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
     text: { format: { type: "json_object" } }
   };
   const inputMode = modelInputMode(messages);
-  const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
+  const hasFileUrlInput = inputMode === "file_url";
+  // gpt-5.4 /responses rejects input_file.file_url (probe 2026-06-22); chat/completions
+  // accepts { type: "file", file: { file_url } } together with frame image_url parts.
+  const chatMessages = messages;
   const chatPayload = {
     model: llmConfig.model,
     messages: chatMessages,
     temperature: llmConfig.temperature,
     response_format: { type: "json_object" }
   };
-  const useResponses = canUseResponsesInput(messages);
+  const useResponses = canUseResponsesInput(messages) && !hasFileUrlInput;
   const initialUrl = useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint);
   if (typeof options.dumpRequest === "function") {
     await options.dumpRequest(redactedModelRequest({

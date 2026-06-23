@@ -317,7 +317,18 @@ test("llm config endpoint returns model defaults without exposing api key", asyn
     temperature: 0.2,
     timeoutMs: 180000,
     apiKeyEnv: "WANGZHUAN_LLM_API_KEY",
-    hasApiKey: true
+    hasApiKey: true,
+    preferVideoUrl: false
+  });
+  assert.deepEqual(payload.data.qcLlmConfig, {
+    provider: "skylink",
+    endpoint: "https://skylink-gateway.com/api/v1",
+    model: "doubao-seed-2-0-lite-260428",
+    temperature: 0.2,
+    timeoutMs: 180000,
+    apiKeyEnv: "WANGZHUAN_LLM_API_KEY",
+    hasApiKey: true,
+    preferVideoUrl: true
   });
   assert.doesNotMatch(res.body, /secret-token/);
   assert.doesNotMatch(res.body, /"apiKey"\s*:/);

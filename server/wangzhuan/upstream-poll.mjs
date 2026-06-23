@@ -12,6 +12,7 @@ import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { WangzhuanError } from "./http.mjs";
 
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
+const MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS = 30;
 
 function userRelative(context, fullPath) {
   return toProjectRelative(context.userProjectRoot, fullPath);
@@ -30,7 +31,7 @@ function isLegacyMockGenerationTask(task = {}) {
 function batchNeedsUpstreamPoll(batch = {}) {
   if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return false;
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
-  if (tasks.some((task) => task.status === "waiting_upstream")) return true;
+  if (tasks.some((task) => shouldPollTaskStatus(task))) return true;
   if (tasks.some((task) => task.status === "pending") && ACTIVE_POLL_BATCH_STATUSES.has(batch.status)) return true;
   if (!ACTIVE_POLL_BATCH_STATUSES.has(batch.status)) return false;
   const durationSec = Number(batch.estimate?.durationSec || 15);
@@ -51,6 +52,23 @@ async function writeSegmentBuffer(context, batchId, generationTaskId, buffer) {
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, buffer);
   return userRelative(context, target);
+}
+
+function shouldPollTaskStatus(task = {}) {
+  if (task.status === "waiting_upstream") return true;
+  return task.status === "failed"
+    && task.errorCode === "upstream_failed"
+    && String(task.errorMessage || "").includes("未返回视频地址")
+    && Boolean(task.seedanceTaskId || task.providerJobId);
+}
+
+function generationTaskPollChanged(before = {}, after = {}) {
+  return before.status !== after.status
+    || before.outputPath !== after.outputPath
+    || before.errorMessage !== after.errorMessage
+    || Number(before.missingVideoUrlPolls || 0) !== Number(after.missingVideoUrlPolls || 0)
+    || Boolean(before.responseSummary?.waitingForVideoUrl) !== Boolean(after.responseSummary?.waitingForVideoUrl)
+    || Boolean(before.responseSummary?.videoUrlStored) !== Boolean(after.responseSummary?.videoUrlStored);
 }
 
 async function pollGenerationTask(context, batch, task, provider, now) {
@@ -104,13 +122,51 @@ async function pollGenerationTask(context, batch, task, provider, now) {
     };
   }
 
-  if (!polled.videoUrl || typeof provider.downloadVideo !== "function") {
+  if (normalized === "succeeded") {
+    if (!polled.videoUrl || typeof provider.downloadVideo !== "function") {
+      const missingVideoUrlPolls = Number(task.missingVideoUrlPolls || 0) + 1;
+      if (!polled.videoUrl && missingVideoUrlPolls < MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS) {
+        return {
+          ...task,
+          status: "waiting_upstream",
+          errorCode: "",
+          errorMessage: "",
+          finishedAt: "",
+          missingVideoUrlPolls,
+          responseSummary: {
+            ...(task.responseSummary || {}),
+            ...responseSummary,
+            waitingForVideoUrl: true,
+            missingVideoUrlPolls
+          }
+        };
+      }
+      return {
+        ...task,
+        status: "failed",
+        finishedAt: now,
+        errorCode: "upstream_failed",
+        errorMessage: polled.videoUrl ? "Seedance provider 未配置视频下载能力" : "Seedance 上游未返回视频地址",
+        responseSummary: {
+          ...(task.responseSummary || {}),
+          ...responseSummary,
+          missingVideoUrlPolls
+        }
+      };
+    }
+
+    const buffer = await provider.downloadVideo(polled.videoUrl);
+    const outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
+
     return {
       ...task,
-      status: "failed",
+      status: "downloaded",
+      outputPath,
+      remoteUrlStored: true,
       finishedAt: now,
-      errorCode: "upstream_failed",
-      errorMessage: polled.videoUrl ? "Seedance provider 未配置视频下载能力" : "Seedance 上游未返回视频地址",
+      missingVideoUrlPolls: 0,
+      errorCode: "",
+      errorMessage: "",
       responseSummary: {
         ...(task.responseSummary || {}),
         ...responseSummary
@@ -118,15 +174,12 @@ async function pollGenerationTask(context, batch, task, provider, now) {
     };
   }
 
-  const buffer = await provider.downloadVideo(polled.videoUrl);
-  const outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
-
   return {
     ...task,
-    status: "downloaded",
-    outputPath,
-    remoteUrlStored: true,
+    status: "failed",
     finishedAt: now,
+    errorCode: "upstream_failed",
+    errorMessage: `Seedance 上游任务状态异常：${normalized || polled.status || "unknown"}`,
     responseSummary: {
       ...(task.responseSummary || {}),
       ...responseSummary
@@ -162,13 +215,13 @@ export async function pollUpstreamBatch(context, batchId) {
   const nextTasks = [];
 
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
-    if (task.status !== "waiting_upstream") {
+    if (!shouldPollTaskStatus(task)) {
       nextTasks.push(task);
       continue;
     }
     polledCount += 1;
     const polledTask = await pollGenerationTask(context, batch, task, provider, now);
-    if (polledTask.status !== task.status || polledTask.outputPath !== task.outputPath) {
+    if (generationTaskPollChanged(task, polledTask)) {
       tasksChanged = true;
     }
     nextTasks.push(polledTask);

@@ -230,7 +230,7 @@ test("QC writes one report per output and makes only stitched 30s output downloa
   }
 });
 
-test("QC calls the model with generated video S3 URL and blocks failed visual review", async () => {
+test("QC calls the model via /responses with generated video S3 URL and blocks failed visual review", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-"));
   try {
     const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc");
@@ -255,7 +255,7 @@ test("QC calls the model with generated video S3 URL and blocks failed visual re
       ...ctx,
       callWangzhuanLlm: async ({ messages, llmConfig, generatedVideo, visionInputs, output, tasks, scripts }) => {
         modelCalls.push({ messages, llmConfig, generatedVideo, visionInputs, output, tasks, scripts });
-        assert.equal(llmConfig.model, "gpt-5.4");
+        assert.equal(llmConfig.model, "doubao-seed-2-0-lite-260428");
         assert.equal(output.outputId, stitchedOutput.outputId);
         assert.equal(generatedVideo.fileUrl, s3VideoUrl);
         assert.equal(generatedVideo.fileDataUrl, undefined);
@@ -304,13 +304,209 @@ test("QC calls the model with generated video S3 URL and blocks failed visual re
     const reportPath = join(wangzhuanPaths(ctx).batchesDir, qc.batch.batchId, "qc", `${stitchedOutput.outputId}.json`);
     const report = JSON.parse(await readFile(reportPath, "utf8"));
     assert.equal(report.modelReview.provider, "skylink");
-    assert.equal(report.modelReview.model, "gpt-5.4");
+    assert.equal(report.modelReview.model, "doubao-seed-2-0-lite-260428");
     assert.equal(report.modelReview.passed, false);
     assert.equal(report.modelReview.score, 0.42);
     assert.deepEqual(report.modelReview.issues.map((issue) => issue.code), ["missing_reward_feedback"]);
     assert.equal(report.checks.some((check) => check.checkId === "model_video_qc" && check.status === "fail"), true);
     assert.doesNotMatch(JSON.stringify(report), /https:\/\/cdn\.example\.com/);
   } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("QC falls back to inline local video when frame extract fails and URL input is disabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-inline-"));
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc-inline");
+    const batch = (await loadBatchDetailFromMysql(ctx, stitched.batch.batchId)).batch;
+    const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
+    const s3VideoUrl = "https://cdn.example.com/wangzhuan/generated/stitched-output-inline.mp4";
+    const patchedBatch = {
+      ...batch,
+      outputs: batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+        ? {
+          ...output,
+          storageKey: "uploads/wangzhuan/generated/stitched-output-inline.mp4",
+          storageUrl: s3VideoUrl,
+          previewUrl: s3VideoUrl
+        }
+        : output)
+    };
+    assert.equal((await syncBatchFacts(ctx, patchedBatch, "batch_write")).skipped, false);
+
+    const modelCalls = [];
+    await runBatchQc({
+      ...ctx,
+      config: {
+        wangzhuan: {
+          qcLlm: {
+            provider: "skylink",
+            endpoint: "https://skylink-gateway.com/api/v1",
+            model: "gpt-5.4",
+            preferVideoUrl: false
+          }
+        }
+      },
+      extractGeneratedVideoFrames: async () => {
+        throw new Error("generated frame samples missing");
+      },
+      callWangzhuanLlm: async ({ generatedVideo, visionInputs }) => {
+        modelCalls.push({ generatedVideo, visionInputs });
+        assert.equal(generatedVideo.fileUrl, undefined);
+        assert.match(generatedVideo.fileDataUrl, /^data:video\/mp4;base64,/);
+        assert.equal(visionInputs.fileUrl, undefined);
+        assert.match(visionInputs.fileDataUrl, /^data:video\/mp4;base64,/);
+        assert.equal(visionInputs.frames.length, 0);
+        assert.equal(
+          visionInputs.warnings.some((warning) => warning.code === "generated_frame_extract_failed"),
+          true
+        );
+        assert.equal(
+          visionInputs.warnings.some((warning) => warning.code === "generated_video_inline_fallback"),
+          true
+        );
+        return JSON.stringify({
+          passed: true,
+          score: 0.91,
+          summary: "生成视频符合脚本要求。",
+          issues: [],
+          matched: ["camera", "cta"],
+          recommendedAction: "approve"
+        });
+      }
+    }, stitched.batch.batchId);
+
+    assert.equal(modelCalls.length, 1);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("QC prefers remote video URL for doubao seed when frame extract fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-url-"));
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc-url");
+    const batch = (await loadBatchDetailFromMysql(ctx, stitched.batch.batchId)).batch;
+    const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
+    const s3VideoUrl = "https://cdn.example.com/wangzhuan/generated/stitched-output-url.mp4";
+    const patchedBatch = {
+      ...batch,
+      outputs: batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+        ? {
+          ...output,
+          storageKey: "uploads/wangzhuan/generated/stitched-output-url.mp4",
+          storageUrl: s3VideoUrl,
+          previewUrl: s3VideoUrl
+        }
+        : output)
+    };
+    assert.equal((await syncBatchFacts(ctx, patchedBatch, "batch_write")).skipped, false);
+
+    const modelCalls = [];
+    await runBatchQc({
+      ...ctx,
+      extractGeneratedVideoFrames: async () => {
+        throw new Error("generated frame samples missing");
+      },
+      callWangzhuanLlm: async ({ generatedVideo, visionInputs, llmConfig }) => {
+        modelCalls.push({ generatedVideo, visionInputs, llmConfig });
+        assert.equal(llmConfig.model, "doubao-seed-2-0-lite-260428");
+        assert.equal(generatedVideo.fileUrl, s3VideoUrl);
+        assert.equal(generatedVideo.fileDataUrl, undefined);
+        assert.equal(visionInputs.fileUrl, s3VideoUrl);
+        assert.equal(visionInputs.fileDataUrl, undefined);
+        assert.equal(
+          visionInputs.warnings.some((warning) => warning.code === "generated_video_url_primary"),
+          true
+        );
+        return JSON.stringify({
+          passed: true,
+          score: 0.88,
+          summary: "生成视频符合脚本要求。",
+          issues: [],
+          matched: ["camera"],
+          recommendedAction: "approve"
+        });
+      }
+    }, stitched.batch.batchId);
+
+    assert.equal(modelCalls.length, 1);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("QC posts /responses input_file payload when calling Skylink without mock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-responses-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "modelqc-responses");
+    const qcCtx = {
+      ...ctx,
+      config: {
+        wangzhuan: {
+          qcLlm: {
+            provider: "skylink",
+            endpoint: "https://skylink-gateway.com/api/v1",
+            model: "doubao-seed-2-0-lite-260428",
+            apiKey: "test-key"
+          }
+        }
+      }
+    };
+    const batch = (await loadBatchDetailFromMysql(ctx, stitched.batch.batchId)).batch;
+    const stitchedOutput = batch.outputs.find((output) => output.kind === "stitched_video");
+    const s3VideoUrl = "https://cdn.example.com/wangzhuan/generated/stitched-output-responses.mp4";
+    const patchedBatch = {
+      ...batch,
+      outputs: batch.outputs.map((output) => output.outputId === stitchedOutput.outputId
+        ? {
+          ...output,
+          storageKey: "uploads/wangzhuan/generated/stitched-output-responses.mp4",
+          storageUrl: s3VideoUrl,
+          previewUrl: s3VideoUrl
+        }
+        : output)
+    };
+    assert.equal((await syncBatchFacts(qcCtx, patchedBatch, "batch_write")).skipped, false);
+
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body });
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              passed: true,
+              score: 0.9,
+              summary: "生成视频符合脚本要求。",
+              issues: [],
+              matched: ["camera"],
+              recommendedAction: "approve"
+            })
+          }
+        }]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+
+    await runBatchQc(qcCtx, stitched.batch.batchId);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1/responses");
+    assert.equal(calls[0].body.model, "doubao-seed-2-0-lite-260428");
+    const userContent = calls[0].body.input.find((item) => item.role === "user").content;
+    assert.equal(userContent.some((part) => part.type === "input_file" && part.file_url === s3VideoUrl && part.filename), true);
+    assert.equal(userContent.some((part) => part.type === "input_file" && part.file), false);
+  } finally {
+    globalThis.fetch = previousFetch;
     await resetFactsPool();
     await rm(root, { recursive: true, force: true });
   }

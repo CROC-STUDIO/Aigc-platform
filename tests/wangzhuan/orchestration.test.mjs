@@ -202,3 +202,109 @@ test("remote seedance poll downloads completed tasks through provider client", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("upstream poll waits for video url when Seedance reports succeeded early", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-orchestration-succeeded-no-url-"));
+  let pollCount = 0;
+  try {
+    const { ctx, started } = await startedBatch(root, 15, {
+      context: {
+        seedanceProviderClient: {
+          provider: "seedance",
+          async createTask() {
+            return { taskId: "remote_task_002", status: "queued", responsePayload: { id: "remote_task_002", status: "queued" } };
+          },
+          async getTask(taskId) {
+            pollCount += 1;
+            if (pollCount === 1) {
+              return {
+                taskId,
+                status: "succeeded",
+                videoUrl: "",
+                responsePayload: { id: taskId, status: "succeeded", content: {} }
+              };
+            }
+            return {
+              taskId,
+              status: "succeeded",
+              videoUrl: "https://cdn.example.com/output-late.mp4",
+              responsePayload: {
+                id: taskId,
+                status: "succeeded",
+                content: { video_url: "https://cdn.example.com/output-late.mp4" }
+              }
+            };
+          },
+          async downloadVideo() {
+            return Buffer.from("late mp4 bytes");
+          }
+        }
+      }
+    });
+
+    const first = await pollUpstreamBatch(ctx, started.batch.batchId);
+    assert.equal(first.batch.tasks[0].status, "waiting_upstream");
+    assert.equal(first.batch.tasks[0].responseSummary.waitingForVideoUrl, true);
+
+    const second = await pollUpstreamBatch(ctx, started.batch.batchId);
+    assert.equal(second.batch.tasks[0].status, "downloaded");
+    assert.equal(second.batch.status, "qc");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("upstream poll recovers failed tasks that missed the initial video url", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-orchestration-recover-failed-"));
+  try {
+    const { ctx, started } = await startedBatch(root, 15, {
+      context: {
+        seedanceProviderClient: {
+          provider: "seedance",
+          async createTask() {
+            return { taskId: "remote_task_003", status: "queued", responsePayload: { id: "remote_task_003", status: "queued" } };
+          },
+          async getTask(taskId) {
+            return {
+              taskId,
+              status: "succeeded",
+              videoUrl: "https://cdn.example.com/recovered.mp4",
+              responsePayload: {
+                id: taskId,
+                status: "succeeded",
+                content: { video_url: "https://cdn.example.com/recovered.mp4" }
+              }
+            };
+          },
+          async downloadVideo() {
+            return Buffer.from("recovered mp4 bytes");
+          }
+        }
+      }
+    });
+
+    const { syncBatchFacts, loadBatchDetailFromMysql } = await import("../../server/wangzhuan/mysql-facts.mjs");
+    const batch = (await loadBatchDetailFromMysql(ctx, started.batch.batchId)).batch;
+    await syncBatchFacts(ctx, {
+      ...batch,
+      tasks: batch.tasks.map((task) => ({
+        ...task,
+        status: "failed",
+        errorCode: "upstream_failed",
+        errorMessage: "Seedance 上游未返回视频地址",
+        seedanceTaskId: "remote_task_003",
+        responseSummary: {
+          status: "succeeded",
+          upstreamStatus: "succeeded",
+          videoUrlStored: false
+        }
+      }))
+    }, "batch_write");
+
+    const polled = await pollUpstreamBatch(ctx, started.batch.batchId);
+    assert.equal(polled.batch.tasks[0].status, "downloaded");
+    assert.equal(polled.batch.status, "qc");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -4,7 +4,7 @@ import { getGallery } from "./gallery.mjs";
 import { listTasks } from "./tasks.mjs";
 import { WangzhuanError, requirePermission, sendErrorEnvelope, sendOk } from "./http.mjs";
 import { makeRequestId } from "./ids.mjs";
-import { publicLlmConfig } from "./llm-config.mjs";
+import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
 import { confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
 import { uploadProductAsset } from "./product-assets.mjs";
@@ -90,7 +90,10 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       return sendOk(res, await getChannelRules(scoped, queryObject(url)), requestId);
     }
     if (req.method === "GET" && url.pathname === "/api/wangzhuan/llm-config") {
-      return sendOk(res, publicLlmConfig(scoped.config), requestId);
+      return sendOk(res, {
+        ...publicLlmConfig(scoped.config),
+        ...publicQcLlmConfig(scoped.config)
+      }, requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/check") {
       return sendOk(res, await checkReferenceVideo(scoped, await context.readJson(req)), requestId);

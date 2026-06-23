@@ -84,10 +84,18 @@
               <section class="wz-node" id="remixNodeSource" data-node="source" data-port-out="1">
                 <div class="panel-head">
                   <h2>上传源素材</h2>
+                  <span>选择后自动上传并进入区域编辑</span>
                 </div>
                 <div class="wz-node-body">
-                  <input id="remixSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
-                  <button id="remixUploadBtn" type="button">上传并检查</button>
+                  <input id="remixSourceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
+                  <div id="remixSourceUploadPanel" class="wz-upload-panel">
+                    <div class="wz-upload-copy">
+                      <span class="wz-upload-kicker">VIDEO / IMAGE</span>
+                      <strong>上传竞品源素材</strong>
+                      <small id="remixSourceUploadStatus">选中文件后会自动上传、校验并生成可框选预览。</small>
+                    </div>
+                    <button id="remixUploadBtn" class="wz-upload-button" type="button">选择并上传</button>
+                  </div>
                   <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
                 </div>
               </section>

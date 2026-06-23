@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { publicLlmConfig, resolveLlmConfig } from "../../server/wangzhuan/llm-config.mjs";
+import { publicLlmConfig, publicQcLlmConfig, resolveLlmConfig, resolveQcLlmConfig } from "../../server/wangzhuan/llm-config.mjs";
 
 test("normalizes Skylink GPT model ids to the lowercase ids returned by /models", () => {
   const config = {
@@ -33,4 +33,22 @@ test("keeps non-Skylink model ids case-sensitive", () => {
   };
 
   assert.equal(resolveLlmConfig(config).model, "GPT-5.4");
+});
+
+test("resolves QC llm defaults to doubao seed with video URL preference", () => {
+  const config = {
+    wangzhuan: {
+      llm: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "gpt-5.4"
+      }
+    }
+  };
+
+  const qc = resolveQcLlmConfig(config);
+  assert.equal(qc.model, "doubao-seed-2-0-lite-260428");
+  assert.equal(qc.preferVideoUrl, true);
+  assert.equal(publicQcLlmConfig(config).qcLlmConfig.model, "doubao-seed-2-0-lite-260428");
+  assert.equal(publicQcLlmConfig(config).qcLlmConfig.preferVideoUrl, true);
 });
