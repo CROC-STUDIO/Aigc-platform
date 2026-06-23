@@ -87,7 +87,7 @@
                   <span>选择后自动上传并进入区域编辑</span>
                 </div>
                 <div class="wz-node-body">
-                  <input id="remixSourceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" />
+                  <input id="remixSourceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" multiple />
                   <div id="remixSourceUploadPanel" class="wz-upload-panel">
                     <div class="wz-upload-copy">
                       <span class="wz-upload-kicker">VIDEO / IMAGE</span>
@@ -96,7 +96,12 @@
                     </div>
                     <button id="remixUploadBtn" class="wz-upload-button" type="button">选择并上传</button>
                   </div>
+                  <div class="remix-prototype-toolbar">
+                    <label class="wz-check"><input id="remixPrototypeReviewOnly" type="checkbox" /> 只看需复核</label>
+                    <button id="remixPrototypeSeedBtn" class="mini ghost" type="button">载入示例素材</button>
+                  </div>
                   <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
+                  <div id="remixPrototypeSourceList" class="remix-prototype-source-list" aria-label="批量素材列表"></div>
                 </div>
               </section>
             </div>
@@ -106,7 +111,7 @@
               <div class="wz-col-label"><b>2</b> 区域与能力</div>
               <section class="wz-node" id="remixNodeMask" data-node="mask" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
-                  <h2>Mask 编辑窗口</h2>
+                  <h2>单素材可视化编辑</h2>
                   <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
                 </div>
                 <div class="wz-node-body">
@@ -123,6 +128,12 @@
                       <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
                     </select>
                   </label>
+                  <div class="remix-prototype-toolbar">
+                    <button id="remixPrototypeApplyRegionsBtn" class="ghost" type="button" disabled>应用当前区域到选中素材</button>
+                    <button id="remixPrototypeConfirmReviewBtn" class="ghost" type="button" disabled>确认当前素材复核</button>
+                    <button id="remixPrototypeGenerateTasksBtn" type="button" disabled>生成草稿任务</button>
+                  </div>
+                  <div id="remixPrototypeCapabilityPlan" class="remix-prototype-capability-grid" aria-label="能力映射预览"></div>
                 </div>
               </section>
 
@@ -152,6 +163,11 @@
                 </div>
                 <div class="wz-node-body">
                   <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
+                  <div class="remix-prototype-toolbar">
+                    <button id="remixPrototypeSubmitTasksBtn" type="button" disabled>模拟提交队列</button>
+                    <button id="remixPrototypeAdvanceTasksBtn" class="ghost" type="button" disabled>模拟推进</button>
+                  </div>
+                  <div id="remixPrototypeTaskQueue" class="remix-prototype-task-list" aria-label="异步任务队列"></div>
                   <div class="modal-actions wz-actions">
                     <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
                     <button id="remixStopBtn" class="ghost" type="button" hidden>停止改造</button>
@@ -167,6 +183,7 @@
                 </div>
                 <div class="wz-node-body">
                   <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
+                  <div id="remixPrototypeGallery" class="remix-prototype-output-grid" aria-label="批次输出预览"></div>
                 </div>
               </section>
             </div>
