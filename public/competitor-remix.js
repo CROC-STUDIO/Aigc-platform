@@ -857,7 +857,7 @@ function renderPrototypeCapabilityPlan() {
     const capability = PROTOTYPE_CAPABILITIES[key];
     const count = regions.filter((region) => region.capabilityKey === key).length;
     return `
-      <article class="wz-row">
+      <article class="wz-row remix-prototype-capability">
         <div>
           <strong>${escapeHtml(capability.label)}</strong>
           <small>${escapeHtml(capability.detail)} · ${escapeHtml(capability.jobType)} · ${escapeHtml(count)} 个区域</small>
@@ -1014,7 +1014,7 @@ function renderPrototypeTaskQueue() {
           ${task.failureReason ? `<p>${escapeHtml(task.failureReason)}</p>` : ""}
         </div>
         ${badge(task.status, PROTOTYPE_STATUS_LABELS)}
-        <div class="wz-row-actions">
+        <div class="wz-row-actions remix-prototype-task-actions">
           <button type="button" class="ghost" data-prototype-task-advance="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>推进</button>
           <button type="button" class="ghost" data-prototype-task-retry="${escapeHtml(task.taskId)}" ${task.status === "failed" ? "" : "disabled"}>重试</button>
           <button type="button" class="ghost" data-prototype-task-stop="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>停止</button>
