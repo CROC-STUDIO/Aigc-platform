@@ -62,7 +62,18 @@ const els = {
   stopBtn: $("#remixStopBtn"),
   downloadBtn: $("#remixDownloadBtn"),
   refreshGalleryBtn: $("#remixRefreshGalleryBtn"),
-  galleryBox: $("#remixGalleryBox")
+  galleryBox: $("#remixGalleryBox"),
+  prototypeReviewOnly: $("#remixPrototypeReviewOnly"),
+  prototypeSeedBtn: $("#remixPrototypeSeedBtn"),
+  prototypeSourceList: $("#remixPrototypeSourceList"),
+  prototypeApplyRegionsBtn: $("#remixPrototypeApplyRegionsBtn"),
+  prototypeConfirmReviewBtn: $("#remixPrototypeConfirmReviewBtn"),
+  prototypeGenerateTasksBtn: $("#remixPrototypeGenerateTasksBtn"),
+  prototypeCapabilityPlan: $("#remixPrototypeCapabilityPlan"),
+  prototypeSubmitTasksBtn: $("#remixPrototypeSubmitTasksBtn"),
+  prototypeAdvanceTasksBtn: $("#remixPrototypeAdvanceTasksBtn"),
+  prototypeTaskQueue: $("#remixPrototypeTaskQueue"),
+  prototypeGallery: $("#remixPrototypeGallery")
 };
 
 const state = {
@@ -79,7 +90,15 @@ const state = {
   submitBlocked: false,
   initFailed: false,
   actualMediaCache: null,
-  activeLock: null
+  activeLock: null,
+  prototype: {
+    activeSourceId: "",
+    selectedSourceIds: new Set(),
+    reviewOnly: false,
+    sources: [],
+    tasks: [],
+    outputs: []
+  }
 };
 
 let hasHandledInitialPageShow = false;
@@ -97,6 +116,9 @@ function resetWorkshopState() {
   state.maskDrag = null;
   resetBrowserRestoredInputs();
   renderSource();
+  if (PROTOTYPE_MODE && !state.prototype.sources.length) seedPrototypeSources();
+  syncPrototypeActiveSourceToLegacyState();
+  renderPrototypeSources();
   renderDetail();
   syncMetrics();
 }
@@ -118,6 +140,25 @@ const DEFAULT_DIRECT_OPERATION = "watermark_cover";
 const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
 const SOURCE_SUBMIT_LOCKED_STATUSES = new Set([...ACTIVE_REMIX_STATUSES, "succeeded"]);
 const PROVIDER_RUNNING_STATUSES = new Set(["submitting", "pending", "running"]);
+const PROTOTYPE_MODE = true;
+const PROTOTYPE_CAPABILITIES = {
+  logo_icon: { label: "Logo/Icon 去除", jobType: "auto_ai_remove", detail: "框选或点选后传播 mask" },
+  watermark: { label: "水印遮挡", jobType: "mask_edit", detail: "区域遮挡或模糊" },
+  product_name: { label: "产品名替换", jobType: "language_rewrite", detail: "OCR 后生成覆盖计划" },
+  cta: { label: "CTA 文案替换", jobType: "video_copy_translate", detail: "字幕/画面文字回写" },
+  subtitle: { label: "字幕处理", jobType: "video_copy_translate", detail: "OCR/ASR 时间轴处理" },
+  phone_ui: { label: "手机界面区域", jobType: "mask_edit", detail: "标记需人工确认" },
+  ending: { label: "Ending 检测", jobType: "end_trim_detection", detail: "尾部导流检测/裁切" }
+};
+const PROTOTYPE_STATUS_LABELS = {
+  draft: "草稿",
+  queued: "排队中",
+  running: "处理中",
+  review_required: "待确认",
+  succeeded: "成功",
+  failed: "失败",
+  stopped: "已停止"
+};
 
 function isActiveRemixStatus(status) {
   return ACTIVE_REMIX_STATUSES.has(status);
@@ -142,6 +183,130 @@ function isSourceSubmitLocked() {
 
 function selectedOperationType() {
   return els.operationType?.value || DEFAULT_DIRECT_OPERATION;
+}
+
+function prototypeSourceStatus(source) {
+  const counts = prototypeTaskCountsForSource(source?.sourceId);
+  if (counts.failed) return "failed";
+  if (counts.running) return "running";
+  if (counts.queued) return "queued";
+  if (counts.succeeded && counts.succeeded === counts.total) return "succeeded";
+  if (source?.reviewRequired || source?.status === "review_required") return "review_required";
+  return source?.status || "draft";
+}
+
+function prototypeSourceStatusLabel(source) {
+  return PROTOTYPE_STATUS_LABELS[prototypeSourceStatus(source)] || "草稿";
+}
+
+function createMockSourceFromFile(file, index = state.prototype.sources.length) {
+  const safeIndex = Number.isFinite(Number(index)) ? Number(index) : state.prototype.sources.length;
+  const fileName = file?.name || `competitor-demo-${safeIndex + 1}.mp4`;
+  const mimeType = file?.type || "video/mp4";
+  const kind = String(mimeType).startsWith("image/") ? "image" : "video";
+  const sourceId = `prototype_source_${safeIndex + 1}`;
+  const regions = (file?.regions || []).map((region, regionIndex) => ({
+    regionId: region.regionId || `mask_${regionIndex + 1}`,
+    type: "bbox",
+    label: region.label || `mask_${regionIndex + 1}`,
+    capabilityKey: region.capabilityKey || "",
+    bbox: normalizeBbox(region.bbox)
+  }));
+  return {
+    sourceId,
+    fileName,
+    status: file?.status || "draft",
+    reviewRequired: Boolean(file?.reviewRequired),
+    selected: Boolean(file?.selected),
+    capabilityKeys: Array.isArray(file?.capabilityKeys) ? [...file.capabilityKeys] : [],
+    regions,
+    previewUrl: file?.previewUrl || "",
+    probe: {
+      sourceId,
+      fileName,
+      kind,
+      mimeType,
+      status: file?.probe?.status || "pass",
+      durationSec: Number(file?.durationSec || file?.probe?.durationSec || 15),
+      width: Number(file?.width || file?.probe?.width || 720),
+      height: Number(file?.height || file?.probe?.height || 1280),
+      ratio: file?.ratio || file?.probe?.ratio || "9:16"
+    }
+  };
+}
+
+function seedPrototypeSources() {
+  const mockSources = [
+    {
+      name: "competitor-logo-watermark-demo.mp4",
+      type: "video/mp4",
+      durationSec: 18,
+      capabilityKeys: ["logo_icon", "watermark", "cta"],
+      selected: true,
+      regions: [
+        { regionId: "mask_1", label: "Logo/Icon", capabilityKey: "logo_icon", bbox: { x: 0.06, y: 0.05, width: 0.2, height: 0.1 } },
+        { regionId: "mask_2", label: "CTA", capabilityKey: "cta", bbox: { x: 0.18, y: 0.82, width: 0.64, height: 0.1 } }
+      ]
+    },
+    {
+      name: "competitor-product-name-demo.mp4",
+      type: "video/mp4",
+      durationSec: 22,
+      capabilityKeys: ["product_name", "subtitle", "phone_ui"],
+      reviewRequired: true,
+      regions: [
+        { regionId: "mask_1", label: "产品名", capabilityKey: "product_name", bbox: { x: 0.16, y: 0.16, width: 0.68, height: 0.08 } },
+        { regionId: "mask_2", label: "手机界面", capabilityKey: "phone_ui", bbox: { x: 0.12, y: 0.28, width: 0.76, height: 0.42 } }
+      ]
+    },
+    {
+      name: "competitor-ending-demo.mp4",
+      type: "video/mp4",
+      durationSec: 12,
+      capabilityKeys: ["ending", "watermark"],
+      regions: [
+        { regionId: "mask_1", label: "Ending", capabilityKey: "ending", bbox: { x: 0.1, y: 0.72, width: 0.8, height: 0.18 } }
+      ]
+    }
+  ];
+  state.prototype.sources = mockSources.map((item, index) => createMockSourceFromFile(item, index));
+  state.prototype.selectedSourceIds = new Set(state.prototype.sources.filter((source) => source.selected).map((source) => source.sourceId));
+  state.prototype.activeSourceId = state.prototype.sources[0]?.sourceId || "";
+}
+
+function activePrototypeSource() {
+  if (!state.prototype.activeSourceId && state.prototype.sources[0]) {
+    state.prototype.activeSourceId = state.prototype.sources[0].sourceId;
+  }
+  return state.prototype.sources.find((source) => source.sourceId === state.prototype.activeSourceId)
+    || state.prototype.sources[0]
+    || null;
+}
+
+function syncPrototypeActiveSourceToLegacyState() {
+  if (!PROTOTYPE_MODE) return;
+  const source = activePrototypeSource();
+  if (!source) {
+    state.source = null;
+    state.regions = [];
+    state.selectedRegionId = "";
+    state.actualMediaCache = null;
+    return;
+  }
+  state.source = {
+    sourceId: source.sourceId,
+    previewUrl: source.previewUrl,
+    probe: { ...source.probe }
+  };
+  state.regions = source.regions.map((region, index) => ({
+    regionId: region.regionId || `mask_${index + 1}`,
+    type: "bbox",
+    label: region.label || `mask_${index + 1}`,
+    capabilityKey: region.capabilityKey || "",
+    bbox: normalizeBbox(region.bbox)
+  }));
+  state.selectedRegionId = state.regions[0]?.regionId || "";
+  state.actualMediaCache = null;
 }
 
 function activeRemixNotice(status) {
@@ -570,6 +735,57 @@ function renderSource() {
     ${renderSourcePreview(state.source)}
   `;
   renderMaskEditor(true);
+}
+
+function prototypeTaskCountsForSource(sourceId) {
+  const tasks = state.prototype.tasks.filter((task) => task.sourceId === sourceId);
+  return {
+    total: tasks.length,
+    draft: tasks.filter((task) => task.status === "draft").length,
+    queued: tasks.filter((task) => task.status === "queued").length,
+    running: tasks.filter((task) => task.status === "running").length,
+    review_required: tasks.filter((task) => task.status === "review_required").length,
+    succeeded: tasks.filter((task) => task.status === "succeeded").length,
+    failed: tasks.filter((task) => task.status === "failed").length,
+    stopped: tasks.filter((task) => task.status === "stopped").length
+  };
+}
+
+function renderPrototypeSources() {
+  if (!els.prototypeSourceList) return;
+  const reviewOnly = Boolean(els.prototypeReviewOnly?.checked || state.prototype.reviewOnly);
+  state.prototype.reviewOnly = reviewOnly;
+  const sources = reviewOnly
+    ? state.prototype.sources.filter((source) => prototypeSourceStatus(source) === "review_required")
+    : state.prototype.sources;
+  if (!sources.length) {
+    els.prototypeSourceList.className = "wz-list empty-line";
+    els.prototypeSourceList.textContent = "暂无批量素材";
+    return;
+  }
+  els.prototypeSourceList.className = "wz-list";
+  els.prototypeSourceList.innerHTML = sources.map((source) => {
+    const active = source.sourceId === state.prototype.activeSourceId ? " active" : "";
+    const selected = state.prototype.selectedSourceIds.has(source.sourceId);
+    const counts = prototypeTaskCountsForSource(source.sourceId);
+    const capabilityLabels = source.capabilityKeys
+      .map((key) => PROTOTYPE_CAPABILITIES[key]?.label || key)
+      .filter(Boolean)
+      .join("、") || "待识别";
+    return `
+      <article class="wz-row remix-prototype-source-card${active}" data-prototype-source-id="${escapeHtml(source.sourceId)}">
+        <label>
+          <input type="checkbox" data-prototype-source-select="${escapeHtml(source.sourceId)}" ${selected ? "checked" : ""} />
+          <span>
+            <strong>${escapeHtml(source.fileName)}</strong>
+            <small>${escapeHtml(source.probe.kind)} · ${escapeHtml(source.probe.durationSec)}s · ${escapeHtml(capabilityLabels)} · ${escapeHtml(counts.total)} 个任务</small>
+          </span>
+        </label>
+        ${badge(prototypeSourceStatus(source), PROTOTYPE_STATUS_LABELS)}
+        <button type="button" class="ghost" data-prototype-source-open="${escapeHtml(source.sourceId)}">编辑</button>
+      </article>
+    `;
+  }).join("");
 }
 
 function pointerToCanvasPoint(event) {
