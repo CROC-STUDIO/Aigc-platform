@@ -1,173 +1,173 @@
-# Competitor Remix Async Prototype Design
+# 竞品素材改造异步任务原型设计
 
-Date: 2026-06-23
-Branch: feature/20260617_xxdd
+日期：2026-06-23
+分支：feature/20260617_xxdd
 
-## Goal
+## 目标
 
-Build a front-end prototype on the existing `competitor-remix.html` workflow for competitor-material async processing. The prototype must let users review the batch workflow before back-end integration starts.
+基于现有 `competitor-remix.html` 工作流，开发一版竞品素材异步处理的前端原型。原型用于先确认批量素材、单素材可视化点选、任务队列和交付状态等核心交互，再进入后端真实接入。
 
-The prototype is intentionally UI-first:
+本阶段是 UI 优先的原型阶段：
 
-- Use the current `competitor-remix.html`, `competitor-remix.js`, and `styles.css` surface.
-- Add realistic page structure, status states, and mock task progression.
-- Do not submit real `video-content-ops` jobs in the prototype.
-- Do not change the existing back-end API in this phase.
+- 复用当前 `competitor-remix.html`、`competitor-remix.js` 和 `styles.css`。
+- 增加真实的页面结构、状态样式和 mock 任务流转。
+- 原型阶段不提交真实 `video-content-ops` 任务。
+- 原型阶段不修改现有后端 API。
 
-## Source Requirement
+## 需求来源
 
-The Lark requirement describes "竞品素材快速改造" as:
+Lark 文档中的「竞品素材快速改造」描述为：
 
-1. Upload a competitor video.
-2. Identify competitor icon, product name, CTA, ending, watermark, subtitles, and phone UI regions.
-3. Allow manual screenshot selection or text description for replacement areas.
-4. Replace icon, product name, CTA, ending, remove or cover watermarks, and use K-frame local handling when needed.
-5. Output a new video.
-6. Run automatic QC.
-7. Put passing results into the gallery.
+1. 上传竞品视频。
+2. 系统识别竞品 icon、产品名、CTA、ending、水印、字幕、手机界面区域。
+3. 用户可手动截图圈选替换区域，或用文字描述替换要求。
+4. 系统执行 icon、产品名、CTA、ending 替换，去除或遮挡水印，必要时做 K 帧局部处理。
+5. 系统输出新视频。
+6. 系统自动质检。
+7. 质检通过后进入结果库。
 
-The embedded requirement table adds:
+嵌入表格补充了首期要求：
 
-- Support videos within one minute.
-- Support daily volume from dozens to hundreds.
-- Return a task id for every task.
-- Return explicit failure reasons.
-- Let users preview, download, and inspect QC results.
+- 支持 1 分钟以内视频。
+- 支持每日几十到上百条处理量。
+- 每条任务返回 `task_id`。
+- 替换失败时返回明确原因。
+- 输出结果可预览、可下载、可查看质检结果。
 
-## Current System Fit
+## 当前系统适配度
 
-`video-content-ops` can be integrated later through its async job flow:
+后续真实接入时，`video-content-ops` 可以通过异步任务链路接入：
 
 - `POST /api/v1/jobs`
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/jobs/{job_id}/download`
 
-Relevant job capabilities:
+相关能力包括：
 
-- `auto_ai_remove`: point or box prompt, SAM2 mask propagation, removal through the configured back end.
-- `mask_edit`: region-based cover or blur.
-- `ai_remove`: automatic or manual mask-based LaMa removal.
-- `language_rewrite` and `video_copy_translate`: OCR/ASR subtitle and on-screen text handling.
-- `end_trim_detection`: ending or tail guidance detection/cut.
+- `auto_ai_remove`：支持点选或框选，使用 SAM2 传播 mask，再通过配置的后端执行去除。
+- `mask_edit`：基于区域做遮挡或模糊。
+- `ai_remove`：支持自动或手工 mask，并通过 LaMa 去除。
+- `language_rewrite` 和 `video_copy_translate`：支持 OCR/ASR 字幕、画面文字处理。
+- `end_trim_detection`：支持 ending 或尾部导流检测/裁切。
 
-The prototype should expose these capability choices, but only as mock task types.
+本原型需要把这些能力作为可选任务类型展示出来，但只使用 mock 任务，不调用真实接口。
 
-## Core Interaction Model
+## 核心交互模型
 
-Use a split model: batch list plus single-material visual editor.
+采用「批量素材列表 + 单素材可视化编辑器」的拆分模型。
 
-Multiple source videos can exist in the batch, but point/box selection only happens for one active video at a time. This avoids ambiguous region editing across videos.
+一个批次中可以有多个源视频，但点选、框选、区域编辑一次只针对一个当前激活视频。这样可以避免多个视频同时编辑时区域归属不清、坐标误用、任务提交对象混乱等问题。
 
-### Source Material List
+### 源素材列表
 
-The source column becomes a multi-material list. Each card shows:
+左侧源素材列改造成多素材列表。每张素材卡片展示：
 
-- File name.
-- Duration and aspect ratio when known or mocked.
-- Upload/mock readiness state.
-- Region configuration state: not configured, configured, needs review.
-- Task summary: pending tasks, running tasks, failed tasks, succeeded tasks.
+- 文件名。
+- 时长和比例，原型中可使用 mock 信息。
+- 上传或 mock 准备状态。
+- 区域配置状态：未配置、已配置、需复核。
+- 任务摘要：待提交、进行中、失败、成功数量。
 
-Clicking a card makes it the active editable material.
+点击素材卡片后，该素材成为当前可编辑素材。
 
-### Single-Material Visual Editor
+### 单素材可视化编辑器
 
-The middle column edits only the active material. It shows:
+中间区域只编辑当前激活素材。需要展示：
 
-- Preview frame or video placeholder.
-- Region overlay layer.
-- Region tools: box select, point select, clear selected, delete region.
-- Region type: logo/icon, watermark, product name, CTA, subtitle, phone UI, ending.
-- Capability mapping preview:
-  - logo/icon/watermark -> `auto_ai_remove`, `ai_remove`, or `mask_edit`
-  - subtitle/on-screen text/CTA -> `language_rewrite` or `video_copy_translate`
+- 视频预览帧或视频占位画面。
+- 区域覆盖层。
+- 区域工具：框选、点选、清空选中、删除区域。
+- 区域类型：logo/icon、水印、产品名、CTA、字幕、手机界面、ending。
+- 能力映射预览：
+  - logo/icon/水印 -> `auto_ai_remove`、`ai_remove` 或 `mask_edit`
+  - 字幕/画面文字/CTA -> `language_rewrite` 或 `video_copy_translate`
   - ending -> `end_trim_detection`
 
-Saving regions updates only the active source material.
+保存区域后，只更新当前激活素材的配置。
 
-### Batch Apply And Review Queue
+### 批量应用与复核队列
 
-Because many competitor videos share layout, users need a way to reuse region work safely.
+很多竞品视频可能使用相同版式，因此需要安全复用区域配置。
 
-Add actions:
+新增操作：
 
-- "Apply current regions to selected materials": copies normalized region coordinates from the active material.
-- Copied materials become "needs review" rather than "ready", because layout differences may make copied coordinates wrong.
-- "Show needs review only": filters the material list to sources that still require manual confirmation.
+- 「应用当前区域到选中素材」：把当前素材的归一化区域坐标复制到其他选中素材。
+- 被复制配置的素材标记为「需复核」，而不是直接标记为「可提交」，因为不同视频的分辨率和版式可能导致坐标不准确。
+- 「只看需复核」：筛选还需要人工确认的素材。
 
-### Async Task Queue
+### 异步任务队列
 
-Add a task queue panel in the delivery column. It shows mock jobs generated from configured regions:
+右侧交付列增加任务队列面板。面板展示由区域配置生成的 mock 任务：
 
-- Local task id.
-- Source material.
-- Capability type.
-- Status: draft, queued, running, review_required, succeeded, failed.
-- Failure reason when failed.
-- Actions: simulate submit, simulate progress, retry, stop, inspect log.
+- 本地任务 ID。
+- 所属源素材。
+- 能力类型。
+- 状态：草稿、排队中、处理中、待确认、成功、失败。
+- 失败原因。
+- 操作：模拟提交、模拟推进、重试、停止、查看日志。
 
-The prototype should make the future back-end contract visible without relying on the real API.
+原型需要让后续真实后端契约变得可见，但不依赖真实 API。
 
-### Preview And Delivery
+### 预览与交付
 
-Keep the current "processing status and gallery" idea, but make it batch-aware:
+保留当前「处理状态与预览确认 / 改造图库」的思路，但改成批次视角：
 
-- Per-material output cards.
-- QC badge: pass, manual required, failed.
-- Preview link placeholder.
-- Single output download placeholder.
-- Batch download placeholder.
+- 每条素材的输出卡片。
+- QC 状态：通过、需人工确认、失败。
+- 预览链接占位。
+- 单条下载占位。
+- 批量下载占位。
 
-## States To Prototype
+## 原型需要覆盖的状态
 
-The prototype must show these user-visible states:
+原型需要展示以下用户可见状态：
 
-1. Empty batch.
-2. Multiple sources uploaded.
-3. Active source selected.
-4. Region configured.
-5. Region copied to another source and marked needs review.
-6. Draft tasks generated.
-7. Queued/running task.
-8. Review-required task.
-9. Failed task with explicit reason.
-10. Succeeded output in gallery.
+1. 空批次。
+2. 多条源素材已加入。
+3. 已选中当前激活素材。
+4. 当前素材已配置区域。
+5. 区域复制到其他素材后标记为需复核。
+6. 已生成草稿任务。
+7. 任务排队中或处理中。
+8. 任务进入待确认状态。
+9. 任务失败并展示明确原因。
+10. 成功输出进入图库。
 
-## Error Handling
+## 错误处理
 
-Prototype errors are mock-only but should mirror real integration concerns:
+原型中的错误都是 mock 错误，但需要贴近真实接入风险：
 
-- Unsupported file: source card displays rejected state.
-- Missing region: task generation disabled for region-dependent capabilities.
-- Needs review: copied regions cannot submit until confirmed.
-- Upstream failure: task shows code and user-facing reason.
-- Capacity wait: queued task explains that GPU or LLM capacity is busy.
+- 不支持的文件：素材卡片显示拒绝状态。
+- 缺少区域：依赖区域的任务不允许生成或提交。
+- 需复核：复制来的区域未确认前不能提交。
+- 上游失败：任务展示错误码和用户可读失败原因。
+- 容量等待：排队任务说明 GPU 或 LLM 容量繁忙。
 
-## Testing And Verification
+## 测试与验证
 
-For prototype implementation:
+原型实现阶段需要验证：
 
-- Run the existing Node test suite if changes touch shared JS helpers.
-- Open `/competitor-remix.html` locally.
-- Verify desktop layout.
-- Verify a mobile/narrow viewport does not overlap text or controls.
-- Verify mock task transitions work without a back-end call.
+- 如果改动触及共享 JS helper，运行现有 Node 测试。
+- 本地打开 `/competitor-remix.html`。
+- 检查桌面布局。
+- 检查移动端或窄屏下文字、按钮、面板不重叠。
+- 验证 mock 任务状态切换不依赖后端调用。
 
-For later real integration:
+后续真实接入阶段需要补充：
 
-- Add contract tests for request payload mapping from UI task type to `video-content-ops` job payload.
-- Add failure mapping tests for `video-content-ops` errors.
-- Add polling tests for queued/running/review_required/succeeded/failed.
+- UI 任务类型到 `video-content-ops` job payload 的契约测试。
+- `video-content-ops` 错误到前端失败原因的映射测试。
+- queued、running、review_required、succeeded、failed 的轮询测试。
 
-## Out Of Scope For Prototype
+## 原型阶段不做
 
-- Real `video-content-ops` job submission.
-- Real file upload changes.
-- Real object storage or signed URL changes.
-- True multi-batch concurrent execution.
-- Full automatic detection of product name, CTA, phone UI, or ending.
-- Final QC model implementation.
+- 不提交真实 `video-content-ops` 任务。
+- 不改真实文件上传链路。
+- 不改对象存储或签名 URL 链路。
+- 不做真正的多批次并发执行。
+- 不做产品名、CTA、手机界面、ending 的完整自动识别。
+- 不实现最终 QC 模型。
 
-## Approval Gate
+## 审批门禁
 
-After this design is reviewed, the next step is an implementation plan for the front-end prototype only. Back-end async job integration should be planned after the prototype interaction is accepted.
+这份设计确认后，下一步只进入前端原型的实现计划。后端异步任务真实接入，需要在原型交互确认后再单独规划。
