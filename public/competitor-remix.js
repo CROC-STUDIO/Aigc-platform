@@ -326,10 +326,13 @@ function syncMetrics() {
   const uploading = Boolean(els.uploadBtn?.dataset.originalText);
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
   const unavailable = state.initFailed;
-  els.sourceCount.textContent = state.source ? "1" : "0";
-  els.regionCount.textContent = state.regions.length;
-  els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
-  els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
+  const prototypeSourceCount = state.prototype.sources.length;
+  const prototypeRegionCount = state.prototype.sources.reduce((sum, source) => sum + (source.regions?.length || 0), 0);
+  const prototypeOutputCount = state.prototype.outputs.length;
+  els.sourceCount.textContent = prototypeSourceCount || (state.source ? "1" : "0");
+  els.regionCount.textContent = prototypeRegionCount || state.regions.length;
+  els.outputCount.textContent = prototypeOutputCount || state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
+  els.downloadCount.textContent = prototypeOutputCount || state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
   els.maskConfirmBtn.disabled = unavailable || state.submitBlocked || submitLocked || !state.source || !state.regions.length;
   if (prototypeOnly) els.maskConfirmBtn.disabled = true;
   els.uploadBtn.disabled = unavailable || activeRemix;
@@ -874,6 +877,165 @@ function confirmPrototypeSourceReview() {
   activeSource.reviewRequired = false;
   renderPrototypeAll();
   showToast("当前素材复核已确认", { type: "success" });
+}
+
+function prototypeTaskIsTerminal(task) {
+  return ["succeeded", "failed", "stopped"].includes(task?.status);
+}
+
+function prototypeTaskLog(task, message) {
+  task.log = Array.isArray(task.log) ? [...task.log, message] : [message];
+}
+
+function generatePrototypeDraftTasks() {
+  const source = activePrototypeSource();
+  if (!source || source.rejected || source.reviewRequired || !source.regions?.length) return;
+  const existing = new Set(state.prototype.tasks.map((task) => `${task.sourceId}:${task.capabilityKey}`));
+  const capabilityKeys = capabilityKeysForRegions(source.regions);
+  for (const capabilityKey of capabilityKeys) {
+    if (existing.has(`${source.sourceId}:${capabilityKey}`)) continue;
+    const capability = PROTOTYPE_CAPABILITIES[capabilityKey];
+    state.prototype.tasks.push({
+      taskId: `prototype_task_${state.prototype.tasks.length + 1}`,
+      sourceId: source.sourceId,
+      sourceName: source.fileName,
+      capabilityKey,
+      jobType: capability.jobType,
+      status: "draft",
+      failureReason: "",
+      log: [`已生成 ${capability.label} 草稿任务`]
+    });
+    existing.add(`${source.sourceId}:${capabilityKey}`);
+  }
+  renderPrototypeAll();
+}
+
+function nextPrototypeTaskStatus(task) {
+  if (!task) return "";
+  if (task.status === "draft") return "queued";
+  if (task.status === "queued") return "running";
+  if (task.status === "running") return task.capabilityKey === "phone_ui" ? "failed" : "review_required";
+  if (task.status === "review_required") return "succeeded";
+  return task.status;
+}
+
+function prototypeOutputForTask(task) {
+  const capability = PROTOTYPE_CAPABILITIES[task.capabilityKey] || {};
+  return {
+    outputId: `prototype_output_${task.taskId}`,
+    taskId: task.taskId,
+    sourceId: task.sourceId,
+    sourceName: task.sourceName,
+    kind: capability.label || task.jobType,
+    qcStatus: "pass"
+  };
+}
+
+function appendPrototypeOutputForTask(task) {
+  const outputId = `prototype_output_${task.taskId}`;
+  if (state.prototype.outputs.some((output) => output.outputId === outputId)) return;
+  state.prototype.outputs.push(prototypeOutputForTask(task));
+}
+
+function advancePrototypeTask(taskId = "") {
+  const tasks = taskId
+    ? state.prototype.tasks.filter((task) => task.taskId === taskId)
+    : state.prototype.tasks.filter((task) => !prototypeTaskIsTerminal(task));
+  for (const task of tasks) {
+    if (prototypeTaskIsTerminal(task)) continue;
+    const nextStatus = nextPrototypeTaskStatus(task);
+    if (nextStatus === task.status) continue;
+    task.status = nextStatus;
+    if (nextStatus === "failed" && task.capabilityKey === "phone_ui") {
+      task.failureReason = "手机界面区域需要人工复核";
+      prototypeTaskLog(task, task.failureReason);
+    } else if (nextStatus === "succeeded") {
+      task.failureReason = "";
+      appendPrototypeOutputForTask(task);
+      prototypeTaskLog(task, "mock 输出已生成");
+    } else {
+      prototypeTaskLog(task, `状态更新为 ${PROTOTYPE_STATUS_LABELS[nextStatus] || nextStatus}`);
+    }
+  }
+  renderPrototypeAll();
+}
+
+function stopPrototypeTask(taskId) {
+  const task = state.prototype.tasks.find((item) => item.taskId === taskId);
+  if (!task || prototypeTaskIsTerminal(task)) return;
+  task.status = "stopped";
+  prototypeTaskLog(task, "任务已停止");
+  renderPrototypeAll();
+}
+
+function retryPrototypeTask(taskId) {
+  const task = state.prototype.tasks.find((item) => item.taskId === taskId);
+  if (!task || task.status !== "failed") return;
+  task.status = "queued";
+  task.failureReason = "";
+  prototypeTaskLog(task, "失败任务已重新排队");
+  renderPrototypeAll();
+}
+
+function renderPrototypeTaskQueue() {
+  if (!els.prototypeTaskQueue) return;
+  const tasks = state.prototype.tasks;
+  const draftTasks = tasks.filter((task) => task.status === "draft");
+  const nonterminalTasks = tasks.filter((task) => !prototypeTaskIsTerminal(task));
+  if (els.prototypeSubmitTasksBtn) {
+    els.prototypeSubmitTasksBtn.disabled = state.initFailed || !draftTasks.length;
+  }
+  if (els.prototypeAdvanceTasksBtn) {
+    els.prototypeAdvanceTasksBtn.disabled = state.initFailed || !nonterminalTasks.length;
+  }
+  if (!tasks.length) {
+    els.prototypeTaskQueue.className = "wz-list empty-line";
+    els.prototypeTaskQueue.textContent = "暂无异步任务，先配置区域并生成草稿任务";
+    return;
+  }
+  els.prototypeTaskQueue.className = "wz-list";
+  els.prototypeTaskQueue.innerHTML = tasks.map((task) => {
+    const terminal = prototypeTaskIsTerminal(task);
+    return `
+      <article class="remix-prototype-task ${escapeHtml(task.status)}">
+        <div>
+          <strong>${escapeHtml(task.taskId)}</strong>
+          <small>${escapeHtml(task.sourceName)} · ${escapeHtml(task.jobType)}</small>
+          ${task.failureReason ? `<p>${escapeHtml(task.failureReason)}</p>` : ""}
+        </div>
+        ${badge(task.status, PROTOTYPE_STATUS_LABELS)}
+        <div class="wz-row-actions">
+          <button type="button" class="ghost" data-prototype-task-advance="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>推进</button>
+          <button type="button" class="ghost" data-prototype-task-retry="${escapeHtml(task.taskId)}" ${task.status === "failed" ? "" : "disabled"}>重试</button>
+          <button type="button" class="ghost" data-prototype-task-stop="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>停止</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderPrototypeGallery() {
+  if (!els.prototypeGallery) return;
+  const outputs = state.prototype.outputs;
+  if (!outputs.length) {
+    els.prototypeGallery.className = "wz-list empty-line";
+    els.prototypeGallery.textContent = "暂无 mock 输出";
+    return;
+  }
+  els.prototypeGallery.className = "wz-list";
+  els.prototypeGallery.innerHTML = outputs.map((output) => `
+    <article class="remix-prototype-output">
+      <div>
+        <strong>${escapeHtml(output.outputId)}</strong>
+        <small>${escapeHtml(output.sourceName)} · ${escapeHtml(output.kind)}</small>
+      </div>
+      ${badge(output.qcStatus, { pass: "QC 通过", manual_required: "需人工确认", fail: "QC 失败" })}
+      <div class="wz-row-actions">
+        <button type="button" class="ghost">预览占位</button>
+        <button type="button" class="ghost">下载占位</button>
+      </div>
+    </article>
+  `).join("");
 }
 
 function renderPrototypeAll() {
