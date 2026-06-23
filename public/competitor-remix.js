@@ -238,6 +238,8 @@ function createMockSourceFromFile(file, index = state.prototype.sources.length) 
 }
 
 function seedPrototypeSources() {
+  state.prototype.tasks = [];
+  state.prototype.outputs = [];
   const mockSources = [
     {
       name: "competitor-logo-watermark-demo.mp4",
@@ -1655,16 +1657,19 @@ function bindEvents() {
     renderPrototypeSources();
     syncMetrics();
   });
-  els.prototypeSourceList?.addEventListener("click", (event) => {
+  els.prototypeSourceList?.addEventListener("change", (event) => {
     if (!(event.target instanceof Element)) return;
     const selector = event.target.closest("[data-prototype-source-select]");
-    if (selector) {
-      const sourceId = selector.dataset.prototypeSourceSelect;
-      if (selector.checked) state.prototype.selectedSourceIds.add(sourceId);
-      else state.prototype.selectedSourceIds.delete(sourceId);
-      syncMetrics();
-      return;
-    }
+    if (!selector) return;
+    const sourceId = selector.dataset.prototypeSourceSelect;
+    if (selector.checked) state.prototype.selectedSourceIds.add(sourceId);
+    else state.prototype.selectedSourceIds.delete(sourceId);
+    syncMetrics();
+  });
+  els.prototypeSourceList?.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest("[data-prototype-source-select]")) return;
+    if (event.target.closest("label")) return;
     const opener = event.target.closest("[data-prototype-source-open], [data-prototype-source-id]");
     const sourceId = opener?.dataset.prototypeSourceOpen || opener?.dataset.prototypeSourceId;
     if (!sourceId) return;
