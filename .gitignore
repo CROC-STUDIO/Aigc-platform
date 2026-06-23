@@ -3,6 +3,7 @@ dist/
 build/
 .env
 .env.*
+env.export.txt
 *.log
 server-error.log
 server-start.log

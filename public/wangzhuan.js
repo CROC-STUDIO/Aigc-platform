@@ -309,6 +309,51 @@ function clearWorkflowSession() {
   sessionStorage.removeItem(WORKFLOW_SESSION_KEY);
 }
 
+function resetControlToDefault(control) {
+  if (control instanceof HTMLSelectElement) {
+    if (control.multiple) {
+      for (const option of control.options) option.selected = option.defaultSelected;
+      return;
+    }
+    const defaultIndex = [...control.options].findIndex((option) => option.defaultSelected);
+    control.selectedIndex = defaultIndex >= 0 ? defaultIndex : (control.options.length ? 0 : -1);
+    return;
+  }
+  if (control instanceof HTMLInputElement) {
+    if (control.type === "file") {
+      control.value = "";
+      return;
+    }
+    if (control.type === "checkbox" || control.type === "radio") {
+      control.checked = control.defaultChecked;
+      return;
+    }
+    control.value = control.defaultValue || "";
+    return;
+  }
+  if (control instanceof HTMLTextAreaElement) {
+    control.value = control.defaultValue || "";
+  }
+}
+
+function resetTransientFormState() {
+  clearWorkflowSession();
+  state.referenceVideo = null;
+  state.decomposition = null;
+  state.estimate = null;
+  state.capabilities = null;
+  state.batchDetail = null;
+  state.activeLock = null;
+  state.templateCommitted = false;
+  state.selectedTemplate = null;
+  state.suppressTemplateUnlock = false;
+  const root = document.getElementById("wzCanvas");
+  for (const control of root?.querySelectorAll("input, textarea, select") || []) {
+    resetControlToDefault(control);
+  }
+  if (els.truthDetails) els.truthDetails.open = false;
+}
+
 function persistWorkflowSession() {
   writeWorkflowSession({
     referenceVideoId: state.referenceVideo?.referenceVideoId || null,
@@ -630,6 +675,10 @@ function hasActivePipelineBatch() {
   return Boolean(batch?.batchId && !terminalBatchStatus(batch.status));
 }
 
+function isQcBatchPending(batch = state.batchDetail?.batch) {
+  return batch?.status === "qc";
+}
+
 function activeLockFromBatch(batch) {
   if (!batch?.batchId || terminalBatchStatus(batch.status)) return null;
   return {
@@ -645,6 +694,7 @@ function syncBatchActionButtons() {
   const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
   const locked = hasActivePipelineBatch();
+  const qcPending = isQcBatchPending(batch);
 
   if (!estimate) {
     els.planBatchBtn.disabled = true;
@@ -653,6 +703,7 @@ function syncBatchActionButtons() {
   }
 
   els.planBatchBtn.disabled = locked
+    || qcPending
     || estimate.hardBlocked
     || (estimate.confirmationRequired && !els.confirmLimits.checked);
   els.confirmPlanBtn.disabled = batch?.status !== "preview_required" || !plans.length;
@@ -662,17 +713,22 @@ function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
   const locked = hasActivePipelineBatch();
+  const qcPending = isQcBatchPending(batch);
   syncActionHint(
     els.estimateBtn,
-    !isDecompositionConfirmed() || !isTemplateCommitted() ? "需先完成脚本确认与模板保存" : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
-    { tone: !isDecompositionConfirmed() || !isTemplateCommitted() ? "warn" : "muted" }
+    qcPending
+      ? "当前批次已生成完成，请先运行视频质检或放弃批次"
+      : !isDecompositionConfirmed() || !isTemplateCommitted() ? "需先完成脚本确认与模板保存" : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
+    { tone: qcPending || !isDecompositionConfirmed() || !isTemplateCommitted() ? "warn" : "muted" }
   );
   syncActionHint(
     els.planBatchBtn,
-    locked
+    qcPending
+      ? `当前批次 ${batch.batchId} 待质检，请先运行视频质检或放弃批次`
+      : locked
       ? `当前批次 ${batch.batchId} 进行中（${batchStatusLabels[batch.status] || batch.status}），请先确认预案、等待完成或停止后再新建`
       : !estimate ? "需先完成拆解、模板保存和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
-    { tone: locked || estimate?.hardBlocked ? "error" : "warn" }
+    { tone: locked || qcPending || estimate?.hardBlocked ? "error" : "warn" }
   );
   syncActionHint(
     els.confirmPlanBtn,
@@ -1581,7 +1637,9 @@ function renderBatch() {
     ...batchStatusLabels,
     [batch.status]: batchStatusDisplayLabel(batch)
   });
+  if (els.estimateBtn) els.estimateBtn.disabled = isQcBatchPending(batch);
   els.stopBatchBtn.disabled = terminalBatchStatus(batch.status);
+  els.stopBatchBtn.textContent = isQcBatchPending(batch) ? "放弃批次" : "停止任务";
   els.retryStitchBtn.hidden = batch.status !== "partial_failed";
   els.retryStitchBtn.disabled = batch.status !== "partial_failed";
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
@@ -1602,6 +1660,7 @@ function renderBatch() {
       : [];
   els.batchBox.innerHTML = `
     ${batchProgressSection(batch, tasks, outputs)}
+    ${batch.status === "qc" ? `<div class="wz-warning">视频已生成完成，下一步请运行视频质检；如不再交付本批次，可选择放弃批次。</div>` : ""}
     ${generationActive ? `<div class="wz-generation-panel is-live"><div class="wz-generation-head"><strong>Seedance 视频生成中</strong><span class="wz-badge neutral">实时刷新</span></div><p class="wz-generation-note">页面每 2 秒轮询一次上游任务状态；下方卡片展示每个分段的提交模式、上游任务 ID 与当前阶段。</p><div class="wz-generation-tasks">${renderGenerationTaskCards(tasks)}</div></div>` : ""}
     <div class="wz-info">产品素材已在第 3 步上传至对象存储；确认预案后会把素材 URL 作为 <code>omni_reference</code> 引用提交 Seedance（与 OMS 先审后用的 asset_id 链路不同）。过程追踪文件见批次目录 <code>00-brief.json</code> ~ <code>05-video-tasks.json</code>。</div>
     ${inlineRetryHtml({
@@ -2264,6 +2323,7 @@ async function loadInitialData() {
 }
 
 async function init() {
+  resetTransientFormState();
   renderTruthFields();
   ensureDecompositionForm();
   renderDecompositionForm({});

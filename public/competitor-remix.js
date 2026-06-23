@@ -77,6 +77,7 @@ const state = {
   selectedRegionId: "",
   maskDrag: null,
   submitBlocked: false,
+  initFailed: false,
   actualMediaCache: null,
   activeLock: null
 };
@@ -94,10 +95,19 @@ function resetWorkshopState() {
   state.detail = null;
   state.submitBlocked = false;
   state.maskDrag = null;
-  if (els.sourceFile) els.sourceFile.value = "";
+  resetBrowserRestoredInputs();
   renderSource();
   renderDetail();
   syncMetrics();
+}
+
+function resetBrowserRestoredInputs() {
+  if (els.sourceFile) els.sourceFile.value = "";
+  if (!els.operationType) return;
+  const defaultOption = [...els.operationType.options].find((option) => option.defaultSelected)
+    || [...els.operationType.options].find((option) => option.value === DEFAULT_DIRECT_OPERATION)
+    || els.operationType.options[0];
+  els.operationType.value = defaultOption?.value || DEFAULT_DIRECT_OPERATION;
 }
 
 const MIN_MASK_SIZE = 0.03;
@@ -145,14 +155,15 @@ function syncMetrics() {
   const submitLocked = isSourceSubmitLocked();
   const uploading = Boolean(els.uploadBtn?.dataset.originalText);
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
+  const unavailable = state.initFailed;
   els.sourceCount.textContent = state.source ? "1" : "0";
   els.regionCount.textContent = state.regions.length;
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
-  els.maskConfirmBtn.disabled = state.submitBlocked || submitLocked || !state.source || !state.regions.length;
-  els.uploadBtn.disabled = activeRemix;
+  els.maskConfirmBtn.disabled = unavailable || state.submitBlocked || submitLocked || !state.source || !state.regions.length;
+  els.uploadBtn.disabled = unavailable || activeRemix;
   if (uploading) els.uploadBtn.disabled = true;
-  els.sourceFile.disabled = activeRemix || uploading;
+  els.sourceFile.disabled = unavailable || activeRemix || uploading;
   els.sourceUploadPanel?.classList.toggle("has-file", fileReady || Boolean(state.source));
   els.sourceUploadPanel?.classList.toggle("is-uploading", uploading);
   els.sourceUploadPanel?.classList.toggle("has-upload", Boolean(state.source));
@@ -163,10 +174,10 @@ function syncMetrics() {
         ? `已选择 ${els.sourceFile.files[0]?.name || "源素材"}，正在准备上传。`
         : "选中文件后会自动上传、校验并生成可框选预览。";
   }
-  els.clearMaskBtn.disabled = activeRemix;
-  els.operationType.disabled = activeRemix;
+  els.clearMaskBtn.disabled = unavailable || activeRemix;
+  els.operationType.disabled = unavailable || activeRemix;
   els.stopBtn.hidden = !activeRemix;
-  els.stopBtn.disabled = !activeRemix;
+  els.stopBtn.disabled = unavailable || !activeRemix;
   els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
   syncFlowHints();
 }
@@ -175,9 +186,12 @@ function syncFlowHints() {
   const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
   const submitLocked = isSourceSubmitLocked();
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
+  const unavailable = state.initFailed;
   syncActionHint(
     els.uploadBtn,
-    activeRemix
+    unavailable
+      ? "页面初始化失败，请修复 MySQL 连接后刷新"
+      : activeRemix
       ? "当前有改造任务处理中，请等待完成"
       : !fileReady && !state.source
         ? "点击选择需要改造的视频或图片，选择后自动上传"
@@ -188,7 +202,9 @@ function syncFlowHints() {
   );
   syncActionHint(
     els.maskConfirmBtn,
-    submitLocked
+    unavailable
+      ? "页面初始化失败，暂不可提交改造任务"
+      : submitLocked
       ? "当前素材已有任务或已完成改造，暂不可重复提交"
       : !state.source
         ? "需先上传源素材"
@@ -197,7 +213,7 @@ function syncFlowHints() {
           : state.submitBlocked
             ? "当前能力不可用，请检查改造类型"
             : "确认后将提交视频处理平台任务",
-    { tone: submitLocked || state.submitBlocked ? "warn" : "muted" }
+    { tone: unavailable || submitLocked || state.submitBlocked ? "warn" : "muted" }
   );
   const remix = state.detail?.remix;
   const output = remix?.outputs?.[0];
@@ -1109,9 +1125,16 @@ function bindEvents() {
 async function loadInitialData() {
   clearError(els.globalError);
   clearActiveLockBanner(lockHost());
+  state.initFailed = false;
   resetWorkshopState();
   await loadActiveRemix();
   await loadGallery();
+}
+
+function handleInitialDataError(error, title) {
+  state.initFailed = true;
+  renderError(els.globalError, error, title);
+  syncMetrics();
 }
 
 function bindPageLifecycle() {
@@ -1122,12 +1145,13 @@ function bindPageLifecycle() {
       return;
     }
     loadInitialData().catch((error) => {
-      renderError(els.globalError, error, "页面刷新失败");
+      handleInitialDataError(error, "页面刷新失败");
     });
   });
 }
 
 async function init() {
+  resetBrowserRestoredInputs();
   renderMaskEditor();
   bindMaskEditor();
   bindEvents();
@@ -1139,7 +1163,7 @@ async function init() {
     onAuthed: (user) => {
       state.user = user;
       loadInitialData().catch((error) => {
-        renderError(els.globalError, error, "页面初始化失败");
+        handleInitialDataError(error, "页面初始化失败");
       });
     }
   });

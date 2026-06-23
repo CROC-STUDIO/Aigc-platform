@@ -5,6 +5,7 @@ dist
 build
 .env
 .env.*
+env.export.txt
 *.log
 tmp-*.log
 users.json

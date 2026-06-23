@@ -701,6 +701,16 @@ function modelInputMode(messages = []) {
   return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
 }
 
+function redactedModelRequestBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  if (Array.isArray(body.input)) return body;
+  if (!Array.isArray(body.messages)) return body;
+  return {
+    ...body,
+    input: responsesInputFromMessages(body.messages)
+  };
+}
+
 function redactedModelRequest({ requestId, inputMode, url, headers, body }) {
   const apiKeyEnv = headers?.Authorization ? "WANGZHUAN_LLM_API_KEY" : "API_KEY";
   return {
@@ -714,7 +724,7 @@ function redactedModelRequest({ requestId, inputMode, url, headers, body }) {
         ...headers,
         ...(headers?.Authorization ? { Authorization: `Bearer <REDACTED:${apiKeyEnv}>` } : {})
       },
-      body
+      body: redactedModelRequestBody(body)
     }
   };
 }

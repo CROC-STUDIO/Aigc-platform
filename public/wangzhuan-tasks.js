@@ -264,6 +264,9 @@ function detailNotice(type, status) {
   if (type === "batch" && status === "preview_required") {
     return "批次已生成 Seedance 预案，请在此确认后开始生成视频。";
   }
+  if (type === "batch" && status === "qc") {
+    return "视频已生成完成，下一步请运行视频质检；质检通过后才能下载交付包。";
+  }
   if (type === "remix" && status === "preview_required") {
     return "改造已完成，请预览输出并确认交付。";
   }
@@ -316,8 +319,9 @@ function renderBatchDetail(detail) {
     ` : batch.status === "preview_required" ? `<div class="wz-warning">未读取到 Seedance 预案，请刷新或前往管线工作台第 4 步查看。</div>` : ""}
     <div class="modal-actions wz-actions wz-tasks-actions">
       ${batch.status === "preview_required" && plans.length ? `<button id="wzTasksConfirmPlanBtn" type="button">确认预案并生成视频</button>` : ""}
+      ${batch.status === "qc" ? `<button id="wzTasksRunQcBtn" type="button">运行视频质检</button>` : ""}
       <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status))}">前往管线工作台</a>
-      ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">停止任务</button>` : ""}
+      ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
       ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载交付包</button>` : ""}
     </div>
   `;
@@ -467,6 +471,26 @@ async function confirmBatchPlan() {
   }
 }
 
+async function runSelectedBatchQc() {
+  const batch = state.detail?.batch;
+  if (!batch?.batchId || batch.status !== "qc") return;
+  const button = $("#wzTasksRunQcBtn");
+  setBusy(button, true, "质检中");
+  try {
+    state.detail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/qc`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    showToast("视频质检已完成", { type: "success" });
+    renderDetailPanel();
+    await loadTasks();
+  } catch (error) {
+    renderError(els.globalError, error, "视频质检失败");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
 async function confirmRemixPreview() {
   const remix = state.detail?.remix;
   const output = pickPrimaryOutput(remix?.outputs);
@@ -566,6 +590,10 @@ function bindEvents() {
     if (!(event.target instanceof Element)) return;
     if (event.target.closest("#wzTasksConfirmPlanBtn")) {
       confirmBatchPlan();
+      return;
+    }
+    if (event.target.closest("#wzTasksRunQcBtn")) {
+      runSelectedBatchQc();
       return;
     }
     if (event.target.closest("#wzTasksConfirmPreviewBtn")) {

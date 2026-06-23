@@ -37,6 +37,7 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(html, /class="[^"]*\bwz-col-branches\b/);
   assert.match(html, /class="[^"]*\bwz-subflow\b/);
   assert.match(html, /class="[^"]*\bwz-primary-form\b/);
+  assert.match(html, /autocomplete="off"/);
   assert.match(html, /class="[^"]*\bwz-advanced-settings\b/);
   assert.match(html, /id="wzStepbar"/);
   assert.match(html, /id="wzCanvas"/);
@@ -121,6 +122,8 @@ test("wangzhuan page wires required API flows and states", async () => {
   assert.match(script, /assetFileNames/);
   assert.match(script, /llmConfig/);
   assert.match(script, /llmEndpoint/);
+  assert.match(script, /function resetTransientFormState/);
+  assert.match(script, /resetTransientFormState\(\);\s*\n\s*renderTruthFields/);
   assert.match(script, /loadLlmConfig/);
   assert.match(script, /renderLlmServiceStatus/);
   assert.match(script, /AI 拆解服务已就绪/);
@@ -216,6 +219,7 @@ test("competitor remix page keeps independent video-platform remix flow", async 
   const styles = await readPublic("styles.css");
 
   assert.match(html, /class="[^"]*\bwz-workbench\b/);
+  assert.match(html, /autocomplete="off"/);
   assert.match(html, /id="remixStepbar"/);
   assert.match(html, /id="remixCanvas"/);
   assert.match(html, /id="remixCanvasLinks"/);
@@ -252,6 +256,8 @@ test("competitor remix page keeps independent video-platform remix flow", async 
   assert.match(html, /id="remixDownloadBtn"/);
   assert.match(script, /\/api\/wangzhuan\/remix\/upload/);
   assert.match(script, /\/api\/wangzhuan\/remix\/active/);
+  assert.match(script, /function resetBrowserRestoredInputs/);
+  assert.match(script, /resetBrowserRestoredInputs\(\);\s*\n\s*renderMaskEditor/);
   assert.match(script, /loadActiveRemix/);
   assert.match(script, /\/api\/wangzhuan\/remix\/mask-edit/);
   assert.doesNotMatch(script, /\/api\/wangzhuan\/remix\/estimate/);
@@ -322,6 +328,10 @@ test("task management page exposes dedicated task space", async () => {
   assert.match(script, /pickPrimaryOutput/);
   assert.match(script, /runType/);
   assert.match(script, /confirmBatchPlan/);
+  assert.match(script, /wzTasksRunQcBtn/);
+  assert.match(script, /运行视频质检/);
+  assert.match(script, /\/api\/wangzhuan\/batches\/\$\{encodeURIComponent\(batch\.batchId\)\}\/qc/);
+  assert.match(script, /batch\.status === "qc" \? "放弃批次" : "停止任务"/);
   assert.match(script, /workbenchHref/);
   assert.match(styles, /\.wz-tasks-layout/);
   assert.match(styles, /\.wz-tasks-media-stage/);
@@ -393,6 +403,10 @@ test("wangzhuan batch qc state distinguishes generation done from qc running", a
   assert.match(common, /downloaded: "已下载"/);
   assert.match(common, /qc: "待质检"/);
   assert.match(script, /isBatchQcRunnable\(batch, tasks, outputs\)/);
+  assert.match(script, /function isQcBatchPending/);
+  assert.match(script, /当前批次已生成完成，请先运行视频质检或放弃批次/);
+  assert.match(script, /els\.estimateBtn\) els\.estimateBtn\.disabled = isQcBatchPending\(batch\)/);
+  assert.match(script, /isQcBatchPending\(batch\) \? "放弃批次" : "停止任务"/);
   assert.match(script, /omni_reference/);
 });
 
@@ -419,9 +433,29 @@ test("competitor remix locks submit controls while a task is active", async () =
   assert.match(script, /addEventListener\("pageshow"/);
   assert.match(script, /state\.detail = \{ remix: \{ status: "queued"/);
   assert.match(script, /const active = isActiveRemixStatus\(remix\.status\)/);
-  assert.match(script, /els\.maskConfirmBtn\.disabled = state\.submitBlocked \|\| submitLocked \|\| !state\.source \|\| !state\.regions\.length/);
-  assert.match(script, /els\.uploadBtn\.disabled = activeRemix/);
-  assert.match(script, /els\.clearMaskBtn\.disabled = activeRemix/);
+  assert.match(script, /const unavailable = state\.initFailed/);
+  assert.match(script, /els\.maskConfirmBtn\.disabled = unavailable \|\| state\.submitBlocked \|\| submitLocked \|\| !state\.source \|\| !state\.regions\.length/);
+  assert.match(script, /els\.uploadBtn\.disabled = unavailable \|\| activeRemix/);
+  assert.match(script, /els\.clearMaskBtn\.disabled = unavailable \|\| activeRemix/);
   assert.match(script, /该素材已完成改造，不可重复提交/);
   assert.match(script, /处理中，请等待状态刷新后再继续操作/);
+});
+
+test("competitor remix disables writes when initialization fails", async () => {
+  const script = await readPublic("competitor-remix.js");
+
+  assert.match(script, /initFailed: false/);
+  assert.match(script, /function handleInitialDataError/);
+  assert.match(script, /state\.initFailed = true/);
+  assert.match(script, /页面初始化失败，请修复 MySQL 连接后刷新/);
+});
+
+test("release packaging excludes exported environment dumps", async () => {
+  const gitignore = await readFile(join(publicDir, "../.gitignore"), "utf8");
+  const dockerignore = await readFile(join(publicDir, "../.dockerignore"), "utf8");
+  const releaseScript = await readFile(join(publicDir, "../package-release.ps1"), "utf8");
+
+  assert.match(gitignore, /^env\.export\.txt$/m);
+  assert.match(dockerignore, /^env\.export\.txt$/m);
+  assert.match(releaseScript, /env\.export\.txt/);
 });
