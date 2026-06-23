@@ -191,6 +191,7 @@ function prototypeSourceStatus(source) {
   if (counts.failed) return "failed";
   if (counts.running) return "running";
   if (counts.queued) return "queued";
+  if (counts.review_required) return "review_required";
   if (counts.succeeded && counts.succeeded === counts.total) return "succeeded";
   if (source?.reviewRequired || source?.status === "review_required") return "review_required";
   return source?.status || "draft";
