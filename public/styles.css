@@ -3217,6 +3217,88 @@ button.mini {
   image-rendering: pixelated;
 }
 
+.remix-prototype-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.remix-prototype-source-list,
+.remix-prototype-task-list,
+.remix-prototype-output-grid,
+.remix-prototype-capability-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.remix-prototype-source-card,
+.remix-prototype-task,
+.remix-prototype-output,
+.remix-prototype-capability {
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.remix-prototype-source-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+}
+
+.remix-prototype-source-card.active {
+  border-color: rgba(96, 165, 250, 0.78);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.22);
+}
+
+.remix-prototype-source-card > small,
+.remix-prototype-capability small,
+.remix-prototype-task small,
+.remix-prototype-output small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.remix-prototype-source-meta,
+.remix-prototype-task-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.remix-prototype-task {
+  display: grid;
+  gap: 8px;
+}
+
+.remix-prototype-task.failed {
+  border-color: rgba(248, 113, 113, 0.68);
+}
+
+.remix-prototype-task p {
+  margin: 0;
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.remix-prototype-output-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.remix-prototype-output {
+  display: grid;
+  gap: 8px;
+}
+
+.remix-prototype-capability-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .wz-kv-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4391,6 +4473,15 @@ button.mini {
 
   .wz-task-list div {
     grid-template-columns: 1fr;
+  }
+
+  .remix-prototype-source-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remix-prototype-toolbar > button,
+  .remix-prototype-toolbar > label {
+    width: 100%;
   }
 
   .wz-region-canvas {
