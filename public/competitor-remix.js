@@ -334,8 +334,15 @@ function syncMetrics() {
   els.regionCount.textContent = prototypeRegionCount || state.regions.length;
   els.outputCount.textContent = prototypeOutputCount || state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = prototypeOutputCount || state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
+  const canSubmitPrototype = Boolean(
+    prototypeOnly
+    && activePrototype
+    && hasPrototypeRegions
+    && !activePrototype.reviewRequired
+    && !activePrototype.rejected
+  );
   els.maskConfirmBtn.disabled = unavailable || state.submitBlocked || submitLocked || !state.source || !state.regions.length;
-  if (prototypeOnly) els.maskConfirmBtn.disabled = true;
+  if (prototypeOnly) els.maskConfirmBtn.disabled = !canSubmitPrototype || unavailable || state.submitBlocked || submitLocked;
   els.uploadBtn.disabled = unavailable || activeRemix;
   if (uploading) els.uploadBtn.disabled = true;
   els.sourceFile.disabled = unavailable || activeRemix || uploading;
@@ -1588,12 +1595,23 @@ function bindEvents() {
     state.regions = [];
     state.selectedRegionId = "";
     state.actualMediaCache = null;
-    const file = els.sourceFile.files?.[0];
-    if (!file) {
+    const files = [...(els.sourceFile.files || [])];
+    if (!files.length) {
       clearSourceObjectUrl();
-      renderSource();
+      renderPrototypeAll();
       return;
     }
+    if (PROTOTYPE_MODE) {
+      const baseIndex = state.prototype.sources.length;
+      const mockSources = files.map((file, index) => createMockSourceFromFile(file, baseIndex + index));
+      state.prototype.sources.push(...mockSources);
+      if (!state.prototype.activeSourceId) state.prototype.activeSourceId = mockSources[0]?.sourceId || "";
+      mockSources.forEach((source) => state.prototype.selectedSourceIds.add(source.sourceId));
+      renderPrototypeAll();
+      showToast("已加入 mock 批量素材，原型阶段不会上传真实文件", { type: "success" });
+      return;
+    }
+    const file = files[0];
     renderSelectedSource(file);
     uploadSource();
   });
@@ -1610,7 +1628,14 @@ function bindEvents() {
     renderPrototypeCapabilityPlan();
     syncMetrics();
   });
-  els.maskConfirmBtn.addEventListener("click", startMaskEdit);
+  els.maskConfirmBtn.addEventListener("click", () => {
+    if (PROTOTYPE_MODE) {
+      generatePrototypeDraftTasks();
+      showToast("已生成原型草稿任务，未调用真实后端", { type: "success" });
+      return;
+    }
+    startMaskEdit();
+  });
   els.detailBox?.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-inline-retry]");
     if (!btn) return;
@@ -1626,6 +1651,7 @@ function bindEvents() {
     showToast("示例素材已载入", { type: "success" });
   });
   els.prototypeReviewOnly?.addEventListener("change", () => {
+    state.prototype.reviewOnly = Boolean(els.prototypeReviewOnly.checked);
     renderPrototypeSources();
     syncMetrics();
   });
@@ -1647,6 +1673,31 @@ function bindEvents() {
   });
   els.prototypeApplyRegionsBtn?.addEventListener("click", copyRegionsToSelectedPrototypeSources);
   els.prototypeConfirmReviewBtn?.addEventListener("click", confirmPrototypeSourceReview);
+  els.prototypeGenerateTasksBtn?.addEventListener("click", generatePrototypeDraftTasks);
+  els.prototypeSubmitTasksBtn?.addEventListener("click", () => {
+    state.prototype.tasks = state.prototype.tasks.map((task) => (
+      task.status === "draft" ? { ...task, status: "queued" } : task
+    ));
+    renderPrototypeAll();
+  });
+  els.prototypeAdvanceTasksBtn?.addEventListener("click", () => advancePrototypeTask());
+  els.prototypeTaskQueue?.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const advanceBtn = event.target.closest("[data-prototype-task-advance]");
+    if (advanceBtn && !advanceBtn.disabled) {
+      advancePrototypeTask(advanceBtn.dataset.prototypeTaskAdvance);
+      return;
+    }
+    const retryBtn = event.target.closest("[data-prototype-task-retry]");
+    if (retryBtn && !retryBtn.disabled) {
+      retryPrototypeTask(retryBtn.dataset.prototypeTaskRetry);
+      return;
+    }
+    const stopBtn = event.target.closest("[data-prototype-task-stop]");
+    if (stopBtn && !stopBtn.disabled) {
+      stopPrototypeTask(stopBtn.dataset.prototypeTaskStop);
+    }
+  });
   els.galleryBox.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
     const button = event.target.closest("[data-gallery-page]");
