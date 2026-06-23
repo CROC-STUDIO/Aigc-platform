@@ -1743,10 +1743,14 @@ function bindPageLifecycle() {
 async function init() {
   resetBrowserRestoredInputs();
   renderMaskEditor();
+  if (PROTOTYPE_MODE && !state.prototype.sources.length) {
+    seedPrototypeSources();
+    renderPrototypeAll();
+  }
   bindMaskEditor();
   bindEvents();
   bindPageLifecycle();
-  await bindLogin({
+  const authenticated = await bindLogin({
     modal: els.loginModal,
     badge: els.badge,
     logoutBtn: els.logoutBtn,
@@ -1757,6 +1761,10 @@ async function init() {
       });
     }
   });
+  if (PROTOTYPE_MODE && !authenticated && els.loginModal) {
+    els.loginModal.hidden = true;
+    requestAnimationFrame(() => window.wzFocusNode?.("remixNodeSource", { center: false }));
+  }
 }
 
 init();

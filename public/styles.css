@@ -6822,3 +6822,53 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
     transition: none;
   }
 }
+
+@media (max-width: 760px) {
+  .wz-app .wz-canvas {
+    width: 100%;
+    max-width: calc(100vw - 36px);
+    padding-inline: 0;
+    align-items: stretch;
+  }
+
+  .wz-app .wz-col,
+  .wz-app .wz-col-wide,
+  .wz-app .wz-node,
+  .wz-app .wz-col-wide .wz-node {
+    flex-basis: auto;
+    width: 100%;
+    max-width: calc(100vw - 36px);
+  }
+
+  .wz-app .wz-col {
+    width: 100%;
+    max-width: calc(100vw - 36px);
+  }
+
+  .wz-app .wz-canvas .wz-col[data-step="2"] + .wz-col[data-step="3"],
+  .wz-app .wz-canvas.wz-focus-mode .wz-col[data-step="2"] + .wz-col[data-step="3"],
+  .wz-app .wz-canvas.wz-focus-mode .wz-col[data-step="2"].wz-col-focus {
+    margin-left: 0;
+    padding-right: 0;
+  }
+
+  .wz-app .wz-canvas.wz-focus-mode .wz-col-focus .wz-node.focused,
+  .wz-app .wz-canvas.wz-focus-mode .wz-col-wide.wz-col-focus .wz-node.focused,
+  .wz-app .wz-canvas .wz-node.focused,
+  .wz-app .wz-canvas .wz-col-wide .wz-node.focused {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .wz-app .remix-prototype-toolbar,
+  .wz-app .remix-prototype-source-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .wz-app .remix-mask-layer {
+    max-width: 100%;
+    overflow: hidden;
+  }
+}
