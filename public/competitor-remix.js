@@ -116,11 +116,8 @@ function resetWorkshopState() {
   state.maskDrag = null;
   resetBrowserRestoredInputs();
   if (PROTOTYPE_MODE && !state.prototype.sources.length) seedPrototypeSources();
-  syncPrototypeActiveSourceToLegacyState();
-  renderSource();
-  renderPrototypeSources();
+  renderPrototypeAll();
   renderDetail();
-  syncMetrics();
 }
 
 function resetBrowserRestoredInputs() {
@@ -324,6 +321,8 @@ function syncMetrics() {
   const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
   const submitLocked = isSourceSubmitLocked();
   const prototypeOnly = isPrototypeMirroredSource();
+  const activePrototype = activePrototypeSource();
+  const hasPrototypeRegions = Boolean(activePrototype?.regions?.length);
   const uploading = Boolean(els.uploadBtn?.dataset.originalText);
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
   const unavailable = state.initFailed;
@@ -351,6 +350,15 @@ function syncMetrics() {
   els.stopBtn.hidden = !activeRemix;
   els.stopBtn.disabled = unavailable || !activeRemix;
   els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
+  if (els.prototypeApplyRegionsBtn) {
+    els.prototypeApplyRegionsBtn.disabled = unavailable || !hasPrototypeRegions || state.prototype.selectedSourceIds.size <= 1;
+  }
+  if (els.prototypeConfirmReviewBtn) {
+    els.prototypeConfirmReviewBtn.disabled = unavailable || !activePrototype?.reviewRequired;
+  }
+  if (els.prototypeGenerateTasksBtn) {
+    els.prototypeGenerateTasksBtn.disabled = unavailable || !hasPrototypeRegions || activePrototype?.reviewRequired || activePrototype?.rejected;
+  }
   syncFlowHints();
 }
 
@@ -465,6 +473,16 @@ function normalizedRegions() {
     regionId: region.regionId || `mask_${index + 1}`,
     type: "bbox",
     label: region.label || `mask_${index + 1}`,
+    bbox: normalizeBbox(region.bbox)
+  }));
+}
+
+function clonePrototypeRegions(regions = []) {
+  return regions.map((region, index) => ({
+    regionId: region.regionId || `mask_${index + 1}`,
+    type: region.type || "bbox",
+    label: region.label || `mask_${index + 1}`,
+    capabilityKey: region.capabilityKey || "",
     bbox: normalizeBbox(region.bbox)
   }));
 }
@@ -795,6 +813,73 @@ function renderPrototypeSources() {
   }).join("");
 }
 
+function capabilityKeysForRegions(regions = []) {
+  return [...new Set(regions
+    .map((region) => region.capabilityKey)
+    .filter((key) => key && PROTOTYPE_CAPABILITIES[key]))];
+}
+
+function renderPrototypeCapabilityPlan() {
+  if (!els.prototypeCapabilityPlan) return;
+  const source = activePrototypeSource();
+  const regions = source?.regions || [];
+  const capabilityKeys = capabilityKeysForRegions(regions);
+  if (!source || !capabilityKeys.length) {
+    els.prototypeCapabilityPlan.className = "remix-prototype-capability-grid empty-line";
+    els.prototypeCapabilityPlan.textContent = "请选择素材后配置能力";
+    return;
+  }
+  els.prototypeCapabilityPlan.className = "remix-prototype-capability-grid";
+  els.prototypeCapabilityPlan.innerHTML = capabilityKeys.map((key) => {
+    const capability = PROTOTYPE_CAPABILITIES[key];
+    const count = regions.filter((region) => region.capabilityKey === key).length;
+    return `
+      <article class="wz-row">
+        <div>
+          <strong>${escapeHtml(capability.label)}</strong>
+          <small>${escapeHtml(capability.detail)} · ${escapeHtml(capability.jobType)} · ${escapeHtml(count)} 个区域</small>
+        </div>
+        ${badge(key, { [key]: "已配置" })}
+      </article>
+    `;
+  }).join("");
+}
+
+function copyRegionsToSelectedPrototypeSources() {
+  const activeSource = activePrototypeSource();
+  if (!activeSource?.regions?.length) return;
+  const sourceRegions = clonePrototypeRegions(activeSource.regions);
+  state.prototype.sources = state.prototype.sources.map((source) => {
+    if (source.sourceId === activeSource.sourceId) return source;
+    if (!state.prototype.selectedSourceIds.has(source.sourceId) || source.rejected) return source;
+    return {
+      ...source,
+      regions: clonePrototypeRegions(sourceRegions),
+      reviewRequired: true
+    };
+  });
+  renderPrototypeAll();
+  showToast("当前区域已复制到选中素材，请逐条复核", { type: "success" });
+}
+
+function confirmPrototypeSourceReview() {
+  const activeSource = activePrototypeSource();
+  if (!activeSource) return;
+  activeSource.reviewRequired = false;
+  renderPrototypeAll();
+  showToast("当前素材复核已确认", { type: "success" });
+}
+
+function renderPrototypeAll() {
+  syncPrototypeActiveSourceToLegacyState();
+  renderSource();
+  renderPrototypeSources();
+  renderPrototypeCapabilityPlan();
+  if (typeof renderPrototypeTaskQueue === "function") renderPrototypeTaskQueue();
+  if (typeof renderPrototypeGallery === "function") renderPrototypeGallery();
+  syncMetrics();
+}
+
 function pointerToCanvasPoint(event) {
   const viewport = syncMaskLayerViewport();
   const rawX = (event.clientX - viewport.rect.left - viewport.left) / viewport.width;
@@ -812,7 +897,14 @@ function commitMaskEdit(regionId, bbox) {
     return { ...region, type: "bbox", bbox: normalizeBbox(bbox) };
   });
   state.selectedRegionId = regionId;
+  const source = PROTOTYPE_MODE ? activePrototypeSource() : null;
+  if (source) {
+    source.regions = clonePrototypeRegions(state.regions);
+    source.reviewRequired = false;
+  }
   renderMaskEditor();
+  renderPrototypeSources();
+  renderPrototypeCapabilityPlan();
 }
 
 function resizeBboxFromDrag(startBox, dx, dy, handle) {
@@ -951,8 +1043,14 @@ function bindMaskEditor() {
     } else if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       state.regions = state.regions.filter((item) => item.regionId !== region.regionId);
+      const source = PROTOTYPE_MODE ? activePrototypeSource() : null;
+      if (source) {
+        source.regions = clonePrototypeRegions(state.regions);
+      }
       state.selectedRegionId = selectedBboxRegion()?.regionId || "";
       renderMaskEditor();
+      renderPrototypeSources();
+      renderPrototypeCapabilityPlan();
       return;
     } else {
       return;
@@ -1345,6 +1443,33 @@ function bindEvents() {
   els.stopBtn.addEventListener("click", stopRemix);
   els.downloadBtn.addEventListener("click", downloadRemixPackage);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
+  els.prototypeSeedBtn?.addEventListener("click", () => {
+    seedPrototypeSources();
+    renderPrototypeAll();
+    showToast("示例素材已载入", { type: "success" });
+  });
+  els.prototypeReviewOnly?.addEventListener("change", () => {
+    renderPrototypeSources();
+    syncMetrics();
+  });
+  els.prototypeSourceList?.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const selector = event.target.closest("[data-prototype-source-select]");
+    if (selector) {
+      const sourceId = selector.dataset.prototypeSourceSelect;
+      if (selector.checked) state.prototype.selectedSourceIds.add(sourceId);
+      else state.prototype.selectedSourceIds.delete(sourceId);
+      syncMetrics();
+      return;
+    }
+    const opener = event.target.closest("[data-prototype-source-open], [data-prototype-source-id]");
+    const sourceId = opener?.dataset.prototypeSourceOpen || opener?.dataset.prototypeSourceId;
+    if (!sourceId) return;
+    state.prototype.activeSourceId = sourceId;
+    renderPrototypeAll();
+  });
+  els.prototypeApplyRegionsBtn?.addEventListener("click", copyRegionsToSelectedPrototypeSources);
+  els.prototypeConfirmReviewBtn?.addEventListener("click", confirmPrototypeSourceReview);
   els.galleryBox.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
     const button = event.target.closest("[data-gallery-page]");
