@@ -115,9 +115,9 @@ function resetWorkshopState() {
   state.submitBlocked = false;
   state.maskDrag = null;
   resetBrowserRestoredInputs();
-  renderSource();
   if (PROTOTYPE_MODE && !state.prototype.sources.length) seedPrototypeSources();
   syncPrototypeActiveSourceToLegacyState();
+  renderSource();
   renderPrototypeSources();
   renderDetail();
   syncMetrics();
@@ -179,6 +179,10 @@ function isSourceSubmitLocked() {
   if (!remix || !sourceId) return false;
   if (remixSourceId(remix) !== sourceId) return false;
   return SOURCE_SUBMIT_LOCKED_STATUSES.has(remix.status) || isProviderJobRunning(remix);
+}
+
+function isPrototypeMirroredSource() {
+  return Boolean(PROTOTYPE_MODE && state.source?.prototypeOnly);
 }
 
 function selectedOperationType() {
@@ -296,6 +300,7 @@ function syncPrototypeActiveSourceToLegacyState() {
   state.source = {
     sourceId: source.sourceId,
     previewUrl: source.previewUrl,
+    prototypeOnly: true,
     probe: { ...source.probe }
   };
   state.regions = source.regions.map((region, index) => ({
@@ -318,6 +323,7 @@ function activeRemixNotice(status) {
 function syncMetrics() {
   const activeRemix = isActiveRemixStatus(state.detail?.remix?.status);
   const submitLocked = isSourceSubmitLocked();
+  const prototypeOnly = isPrototypeMirroredSource();
   const uploading = Boolean(els.uploadBtn?.dataset.originalText);
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
   const unavailable = state.initFailed;
@@ -326,6 +332,7 @@ function syncMetrics() {
   els.outputCount.textContent = state.detail?.remix?.outputs?.length || state.gallery?.counts?.total || 0;
   els.downloadCount.textContent = state.detail?.downloadSummary?.downloadEligibleCount || state.gallery?.counts?.downloadEligible || 0;
   els.maskConfirmBtn.disabled = unavailable || state.submitBlocked || submitLocked || !state.source || !state.regions.length;
+  if (prototypeOnly) els.maskConfirmBtn.disabled = true;
   els.uploadBtn.disabled = unavailable || activeRemix;
   if (uploading) els.uploadBtn.disabled = true;
   els.sourceFile.disabled = unavailable || activeRemix || uploading;
@@ -1115,6 +1122,15 @@ async function startMaskEdit() {
       code: "region_required",
       message: "请先上传素材并框选至少一个区域"
     }, "Mask 校验");
+    return;
+  }
+  if (isPrototypeMirroredSource()) {
+    renderError(els.globalError, {
+      code: "prototype_source_submit_blocked",
+      message: "当前是原型演示素材，暂不可提交真实后端任务"
+    }, "改造启动失败");
+    showToast("原型演示素材不会提交真实任务", { type: "warn" });
+    syncMetrics();
     return;
   }
   if (isSourceSubmitLocked()) {
