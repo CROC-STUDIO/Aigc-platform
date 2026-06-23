@@ -473,6 +473,7 @@ function normalizedRegions() {
     regionId: region.regionId || `mask_${index + 1}`,
     type: "bbox",
     label: region.label || `mask_${index + 1}`,
+    capabilityKey: region.capabilityKey || "",
     bbox: normalizeBbox(region.bbox)
   }));
 }
@@ -819,6 +820,15 @@ function capabilityKeysForRegions(regions = []) {
     .filter((key) => key && PROTOTYPE_CAPABILITIES[key]))];
 }
 
+function persistPrototypeSourceRegions(source, regions, { reviewRequired = source?.reviewRequired } = {}) {
+  if (!source) return null;
+  const nextRegions = clonePrototypeRegions(regions);
+  source.regions = nextRegions;
+  source.capabilityKeys = capabilityKeysForRegions(nextRegions);
+  source.reviewRequired = Boolean(reviewRequired);
+  return source;
+}
+
 function renderPrototypeCapabilityPlan() {
   if (!els.prototypeCapabilityPlan) return;
   const source = activePrototypeSource();
@@ -852,11 +862,7 @@ function copyRegionsToSelectedPrototypeSources() {
   state.prototype.sources = state.prototype.sources.map((source) => {
     if (source.sourceId === activeSource.sourceId) return source;
     if (!state.prototype.selectedSourceIds.has(source.sourceId) || source.rejected) return source;
-    return {
-      ...source,
-      regions: clonePrototypeRegions(sourceRegions),
-      reviewRequired: true
-    };
+    return persistPrototypeSourceRegions({ ...source }, sourceRegions, { reviewRequired: true });
   });
   renderPrototypeAll();
   showToast("当前区域已复制到选中素材，请逐条复核", { type: "success" });
@@ -897,14 +903,14 @@ function commitMaskEdit(regionId, bbox) {
     return { ...region, type: "bbox", bbox: normalizeBbox(bbox) };
   });
   state.selectedRegionId = regionId;
-  const source = PROTOTYPE_MODE ? activePrototypeSource() : null;
+  const source = isPrototypeMirroredSource() ? activePrototypeSource() : null;
   if (source) {
-    source.regions = clonePrototypeRegions(state.regions);
-    source.reviewRequired = false;
+    persistPrototypeSourceRegions(source, state.regions, { reviewRequired: false });
   }
   renderMaskEditor();
   renderPrototypeSources();
   renderPrototypeCapabilityPlan();
+  syncMetrics();
 }
 
 function resizeBboxFromDrag(startBox, dx, dy, handle) {
@@ -1043,14 +1049,15 @@ function bindMaskEditor() {
     } else if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       state.regions = state.regions.filter((item) => item.regionId !== region.regionId);
-      const source = PROTOTYPE_MODE ? activePrototypeSource() : null;
+      const source = isPrototypeMirroredSource() ? activePrototypeSource() : null;
       if (source) {
-        source.regions = clonePrototypeRegions(state.regions);
+        persistPrototypeSourceRegions(source, state.regions, { reviewRequired: false });
       }
       state.selectedRegionId = selectedBboxRegion()?.regionId || "";
       renderMaskEditor();
       renderPrototypeSources();
       renderPrototypeCapabilityPlan();
+      syncMetrics();
       return;
     } else {
       return;
@@ -1431,7 +1438,14 @@ function bindEvents() {
     if (isActiveRemixStatus(state.detail?.remix?.status)) return;
     state.regions = [];
     state.selectedRegionId = "";
+    const source = isPrototypeMirroredSource() ? activePrototypeSource() : null;
+    if (source) {
+      persistPrototypeSourceRegions(source, [], { reviewRequired: false });
+    }
     renderMaskEditor();
+    renderPrototypeSources();
+    renderPrototypeCapabilityPlan();
+    syncMetrics();
   });
   els.maskConfirmBtn.addEventListener("click", startMaskEdit);
   els.detailBox?.addEventListener("click", (event) => {
