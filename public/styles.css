@@ -3056,6 +3056,131 @@ button.mini {
   text-decoration: none;
 }
 
+.wz-runtime-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wz-runtime-strip .wz-kv {
+  min-width: 0;
+}
+
+.wz-failure-panel {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(255, 107, 138, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 107, 138, 0.08);
+}
+
+.wz-failure-panel strong {
+  color: #ffd0d9;
+  font-size: 13px;
+}
+
+.wz-failure-panel small {
+  color: #f4dce2;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.wz-failure-panel b {
+  color: #ffffff;
+}
+
+.wz-output-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.wz-output-previews.empty-line {
+  align-items: center;
+  min-height: 52px;
+  padding: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.wz-output-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 12, 20, 0.5);
+}
+
+.wz-output-card-media {
+  display: grid;
+  overflow: hidden;
+  min-height: 180px;
+  aspect-ratio: 9 / 16;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wz-output-card-media video,
+.wz-output-card-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wz-output-card-empty {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.wz-output-card-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wz-output-card-body strong {
+  color: #ffffff;
+  overflow-wrap: anywhere;
+}
+
+.wz-output-card-body small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wz-output-error {
+  color: #ffd0d9 !important;
+}
+
+.wz-output-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wz-output-card-actions span {
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .wz-plan-edit-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -4500,6 +4625,10 @@ button.mini {
   .wz-row,
   .wz-output {
     grid-template-columns: 1fr;
+  }
+
+  .wz-runtime-strip {
+    grid-template-columns: 1fr 1fr;
   }
 
   .wz-gallery-pager {

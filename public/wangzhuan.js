@@ -3,6 +3,7 @@ import {
   apiEnvelope,
   badge,
   batchGenerationProgress,
+  batchRuntimeSummary,
   batchGenerationTaskStatusLabels,
   batchStatusDisplayLabel,
   batchStatusLabels,
@@ -23,10 +24,14 @@ import {
   inlineRetryHtml,
   promiseLabels,
   renderError,
+  renderFailureReasons,
   renderKeyValues,
+  renderOutputPreviewCards,
+  restorePreviewPlayback,
   setBusy,
   showLogin,
   showToast,
+  snapshotPreviewPlayback,
   syncActionHint,
   taskProgressHtml,
   strongTruthFields,
@@ -747,7 +752,19 @@ function syncFlowHints() {
 function batchProgressSection(batch, tasks, outputs = []) {
   if (!batch || terminalBatchStatus(batch.status)) return "";
   const progress = batchGenerationProgress(batch, tasks);
-  return taskProgressHtml(progress);
+  const runtime = batchRuntimeSummary(batch, tasks);
+  return `
+    ${taskProgressHtml(progress)}
+    <div class="wz-runtime-strip" aria-label="批次运行信息">
+      ${renderKeyValues([
+        ["创建时间", runtime.createdAt],
+        ["执行进度", `${runtime.progressText}${runtime.percent === null ? "" : ` · ${runtime.percent}%`}`],
+        ["已运行", runtime.elapsed],
+        ["预估剩余", runtime.eta],
+        ["更新时间", runtime.updatedAt]
+      ])}
+    </div>
+  `;
 }
 
 function clearDecompositionDraft() {
@@ -1681,6 +1698,7 @@ function renderBatch() {
   const generationActive = isBatchGenerationActive(batch, tasks);
   const logNode = document.getElementById("wzNodeLog");
   if (logNode) logNode.classList.toggle("wz-generation-live", generationActive);
+  const previewPlayback = snapshotPreviewPlayback(els.batchBox);
   els.batchBox.className = "wz-list";
   const retryActions = batch.status === "partial_failed"
     ? [{ id: "retry-stitch", label: "重试拼接" }, { id: "re-estimate", label: "重新估算" }]
@@ -1693,6 +1711,7 @@ function renderBatch() {
     ${batchProgressSection(batch, tasks, outputs)}
     ${batch.status === "qc" ? `<div class="wz-warning">视频已生成完成，下一步请运行视频质检；如不再交付本批次，可选择放弃批次。</div>` : ""}
     ${generationActive ? `<div class="wz-generation-panel is-live"><div class="wz-generation-head"><strong>Seedance 视频生成中</strong><span class="wz-badge neutral">实时刷新</span></div><p class="wz-generation-note">页面每 2 秒轮询一次上游任务状态；下方卡片展示每个分段的提交模式、上游任务 ID 与当前阶段。</p><div class="wz-generation-tasks">${renderGenerationTaskCards(tasks)}</div></div>` : ""}
+    ${renderFailureReasons({ batch, tasks, outputs, providerJob: batch.providerJob })}
     <div class="wz-info">产品素材已在第 3 步上传至对象存储；确认预案后会把素材 URL 作为 <code>omni_reference</code> 引用提交 Seedance（与 OMS 先审后用的 asset_id 链路不同）。过程追踪文件见批次目录 <code>00-brief.json</code> ~ <code>05-video-tasks.json</code>。</div>
     ${inlineRetryHtml({
       message: batch.status === "failed"
@@ -1724,17 +1743,19 @@ function renderBatch() {
         ["模型视频质检", modelQcStatusLabel(outputs, qcRunnable)]
       ])}
     </div>
+    ${renderOutputPreviewCards(outputs, { emptyText: "Seedance 输出生成后会显示在这里" })}
     <div class="wz-task-list">
       ${tasks.slice(0, 12).map((task) => `
         <div>
           <span>${escapeHtml(task.generationTaskId)}</span>
           <strong>${escapeHtml(batchGenerationTaskStatusLabels[task.status] || task.status)}</strong>
-          <small>${escapeHtml(task.seedanceTaskId || task.errorCode || "pending")}</small>
+          <small>${escapeHtml(task.errorMessage || task.seedanceTaskId || task.errorCode || "pending")}</small>
         </div>
       `).join("")}
     </div>
     ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(event.createdAt || "")}</small>`).join("")}</div>` : ""}
   `;
+  restorePreviewPlayback(previewPlayback, els.batchBox);
   els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
   renderPlanPreview(batch);
   syncMetrics();
@@ -1754,20 +1775,12 @@ function renderGallery() {
     return;
   }
   els.galleryBox.className = "wz-gallery";
+  const previewPlayback = snapshotPreviewPlayback(els.galleryBox);
   els.galleryBox.innerHTML = `
-    ${gallery.items.map((item) => `
-    <article class="wz-output">
-      <div>
-        <strong>${escapeHtml(item.outputId)}</strong>
-        <small>${escapeHtml(item.kind)} · ${escapeHtml(item.qcStatus)} · ${escapeHtml(item.durationSec || "-")}s</small>
-      </div>
-      ${badge(item.qcStatus, { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" })}
-      ${renderOutputPreview(item)}
-      ${item.modelQcSummary ? `<small>模型质检 ${escapeHtml(item.modelQcSummary.score ?? "-")} · ${escapeHtml(item.modelQcSummary.summary || "")}</small>` : ""}
-    </article>
-  `).join("")}
+    ${renderOutputPreviewCards(gallery.items)}
     ${galleryPaginationHtml(gallery)}
   `;
+  restorePreviewPlayback(previewPlayback, els.galleryBox);
   syncMetrics();
 }
 
