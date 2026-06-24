@@ -7365,6 +7365,11 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   transform: translateX(-50%);
 }
 
+.video-ops-canvas .wz-node.collapsed[data-chip-summary]:hover::after {
+  content: none;
+  display: none;
+}
+
 .wz-canvas.wz-focus-mode .wz-canvas-link {
   opacity: 0.34;
   transition: opacity 0.18s ease;

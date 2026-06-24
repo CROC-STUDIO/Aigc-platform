@@ -12,6 +12,7 @@ import {
   seedanceSubmitUrl,
   seedanceTaskUrl
 } from "../../server/wangzhuan/seedance-provider.mjs";
+import { reviewSeedanceAsset } from "../../server/wangzhuan/asset-review.mjs";
 import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
 
 test("builds Skylink Seedance payload with prompt and content", () => {
@@ -272,5 +273,55 @@ test("reuses LLM Skylink key fallbacks for Seedance provider", () => {
   } finally {
     if (previous === undefined) delete process.env.VIDEO_AIGC_API_KEY;
     else process.env.VIDEO_AIGC_API_KEY = previous;
+  }
+});
+
+test("asset review reuses Seedance provider apiKeyEnv when review key is not configured", async () => {
+  const previousProviderKey = process.env.WANGZHUAN_LLM_API_KEY;
+  const previousSeedanceKey = process.env.WANGZHUAN_SEEDANCE_API_KEY;
+  const previousSharedKey = process.env.VIDEO_AIGC_API_KEY;
+  delete process.env.WANGZHUAN_SEEDANCE_API_KEY;
+  delete process.env.VIDEO_AIGC_API_KEY;
+  process.env.WANGZHUAN_LLM_API_KEY = "provider-env-key";
+  const requests = [];
+  try {
+    const review = await reviewSeedanceAsset({
+      config: {
+        wangzhuan: {
+          seedanceProvider: {
+            endpoint: "https://skylink-gateway.com/api/v1",
+            apiKeyEnv: "WANGZHUAN_LLM_API_KEY"
+          }
+        }
+      },
+      fetch: async (url, init) => {
+        requests.push({ url, authorization: init.headers.Authorization });
+        return new Response(JSON.stringify({
+          data: {
+            asset_id: "asset_icon_001",
+            status: "approved"
+          }
+        }), { status: 200 });
+      }
+    }, {
+      assetKey: "productIcon",
+      fileName: "icon.png",
+      mimeType: "image/png",
+      buffer: Buffer.from("png"),
+      storageUrl: "https://cdn.example.com/icon.png"
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://skylink-gateway.com/api/v1/seedance/assets/upload");
+    assert.equal(requests[0].authorization, "Bearer provider-env-key");
+    assert.equal(review.assetId, "asset_icon_001");
+    assert.equal(review.status, "approved");
+  } finally {
+    if (previousProviderKey === undefined) delete process.env.WANGZHUAN_LLM_API_KEY;
+    else process.env.WANGZHUAN_LLM_API_KEY = previousProviderKey;
+    if (previousSeedanceKey === undefined) delete process.env.WANGZHUAN_SEEDANCE_API_KEY;
+    else process.env.WANGZHUAN_SEEDANCE_API_KEY = previousSeedanceKey;
+    if (previousSharedKey === undefined) delete process.env.VIDEO_AIGC_API_KEY;
+    else process.env.VIDEO_AIGC_API_KEY = previousSharedKey;
   }
 });

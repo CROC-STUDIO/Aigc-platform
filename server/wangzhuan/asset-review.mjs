@@ -85,7 +85,17 @@ function seedanceAssetsUploadUrl(context = {}) {
 function seedanceApiKey(context = {}) {
   const provider = context.config?.wangzhuan?.seedanceProvider || {};
   const review = context.config?.wangzhuan?.seedanceAssetReview || {};
-  return cleanString(review.apiKey, cleanString(provider.apiKey, cleanString(process.env.WANGZHUAN_SEEDANCE_API_KEY, cleanString(process.env.VIDEO_AIGC_API_KEY))));
+  const configuredApiKeyEnv = cleanString(review.apiKeyEnv, cleanString(provider.apiKeyEnv));
+  return cleanString(
+    review.apiKey,
+    cleanString(
+      provider.apiKey,
+      cleanString(
+        process.env.WANGZHUAN_SEEDANCE_API_KEY,
+        cleanString(configuredApiKeyEnv ? process.env[configuredApiKeyEnv] : "", cleanString(process.env.VIDEO_AIGC_API_KEY))
+      )
+    )
+  );
 }
 
 export async function reviewSeedanceAsset(context = {}, asset = {}) {

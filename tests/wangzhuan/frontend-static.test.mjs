@@ -479,6 +479,9 @@ test("wangzhuan locks upstream workflow after seedance plan confirm", async () =
   assert.match(script, /previewConfirmedAt/);
   assert.match(script, /dataset\.workflowFrozen/);
   assert.match(script, /Seedance 已提交生成，前序步骤已锁定/);
+  assert.match(script, /批次已停止/);
+  assert.match(script, /clearActiveLockBanner\(lockHost\(\)\)/);
+  assert.match(script, /showToast\("批次已停止"/);
   assert.match(styles, /#wzCanvas\[data-workflow-frozen\]/);
 });
 

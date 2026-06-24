@@ -695,6 +695,15 @@ async function restoreWorkflowSession() {
 
 function renderBatchReadiness() {
   if (!els.batchReadiness) return;
+  const batch = state.batchDetail?.batch;
+  if (batch?.status === "stopped") {
+    els.batchReadiness.hidden = false;
+    els.batchReadiness.className = "wz-batch-readiness wz-info";
+    els.batchReadiness.innerHTML = isUpstreamWorkflowLocked()
+      ? "<span>批次已停止</span><span>前序步骤仍锁定；请点击顶部「开始新任务」重新填写</span>"
+      : "<span>批次已停止</span><span>可修改前序步骤后重新估算，或点击顶部「开始新任务」清空重来</span>";
+    return;
+  }
   if (isUpstreamWorkflowLocked()) {
     els.batchReadiness.hidden = false;
     els.batchReadiness.className = "wz-batch-readiness wz-info";
@@ -704,7 +713,6 @@ function renderBatchReadiness() {
   const decomp = isDecompositionConfirmed();
   const rewrite = isRewriteConfirmed();
   const estimate = state.estimate?.estimate;
-  const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
   if (!decomp && !rewrite && !estimate) {
     els.batchReadiness.hidden = true;
@@ -3399,7 +3407,11 @@ async function stopBatch() {
       method: "POST",
       body: JSON.stringify({ reason: "frontend_stop" })
     });
+    clearActiveLockBanner(lockHost());
+    window.clearTimeout(state.pollTimer);
+    state.pollTimer = 0;
     renderBatch();
+    showToast("批次已停止", { type: "success" });
   } catch (error) {
     renderError(els.globalError, error, "停止失败");
   } finally {
