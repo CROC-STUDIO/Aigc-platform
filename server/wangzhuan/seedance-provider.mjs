@@ -133,7 +133,7 @@ export function buildSeedanceGenerationPayload({
   if (normalizedResolution) payload.resolution = normalizedResolution;
   if (ratio) payload.ratio = ratio;
   payload.watermark = watermark === undefined || watermark === null ? false : Boolean(watermark);
-  if (generateAudio !== undefined && generateAudio !== null) payload.generate_audio = Boolean(generateAudio);
+  payload.generate_audio = generateAudio === undefined || generateAudio === null ? true : Boolean(generateAudio);
   if (references.length) payload.references = references;
   if (seed !== undefined && seed !== null && seed !== "") payload.seed = Number(seed);
   if (cameraFixed !== undefined && cameraFixed !== null) payload.camera_fixed = Boolean(cameraFixed);
@@ -165,7 +165,7 @@ function configuredProvider(context = {}, capability = {}) {
     timeoutMs,
     resolution: cleanString(capability.resolution, cleanString(config.resolution, "720p")),
     ratio: cleanString(capability.ratio, cleanString(config.ratio, "9:16")),
-    generateAudio: capability.generateAudio ?? config.generateAudio,
+    generateAudio: capability.generateAudio ?? config.generateAudio ?? true,
     watermark: capability.watermark ?? config.watermark ?? false
   };
 }

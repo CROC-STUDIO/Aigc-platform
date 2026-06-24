@@ -50,6 +50,17 @@ test("builds Skylink Seedance payload with prompt and references", () => {
   ]);
 });
 
+test("defaults Seedance generation payload to audio enabled for quality visibility", () => {
+  const payload = buildSeedanceGenerationPayload({
+    prompt: "Generate a reward app ad",
+    media: [{ type: "image_url", url: "https://cdn.example.com/app.png", role: "reference_image" }]
+  });
+
+  assert.equal(payload.generate_audio, true);
+  assert.equal(payload.mode, "omni_reference");
+  assert.equal(payload.references.length, 1);
+});
+
 test("builds Skylink Seedance 2.0 zone submit and poll URLs", () => {
   assert.equal(
     seedanceSubmitUrl("https://skylink-gateway.com/api/v1", "/seedance/videos/generations"),

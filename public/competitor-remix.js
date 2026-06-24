@@ -11,12 +11,16 @@ import {
   idempotencyKey,
   inlineRetryHtml,
   operationLabels,
+  renderFailureReasons,
+  renderOutputPreviewCards,
   remixStatusLabels,
   renderError,
   renderKeyValues,
+  restorePreviewPlayback,
   setBusy,
   showLogin,
   showToast,
+  snapshotPreviewPlayback,
   syncActionHint,
   taskProgressHtml,
   terminalRemixStatus
@@ -1258,7 +1262,9 @@ function renderDetail() {
   els.statusBadge.innerHTML = badge(remix.status, remixStatusLabels);
   const active = isActiveRemixStatus(remix.status);
   const submitLocked = isSourceSubmitLocked();
-  const output = remix.outputs?.[0];
+  const outputs = Array.isArray(remix.outputs) ? remix.outputs : [];
+  const tasks = Array.isArray(remix.tasks) ? remix.tasks : [];
+  const output = outputs.find((item) => item.qcStatus === "manual_required") || outputs[0];
   els.confirmBtn.disabled = remix.status !== "preview_required" || !output;
   els.downloadBtn.disabled = !state.detail.downloadSummary?.packageReady;
   const retryActions = remix.status === "failed"
@@ -1267,6 +1273,7 @@ function renderDetail() {
       ? [{ id: "retry-mask", label: "重新提交改造" }]
       : [];
   els.detailBox.className = "wz-list";
+  const previewPlayback = snapshotPreviewPlayback(els.detailBox);
   els.detailBox.innerHTML = `
     ${remixProgressSection(remix)}
     ${inlineRetryHtml({
@@ -1277,6 +1284,7 @@ function renderDetail() {
           : "",
       actions: retryActions
     })}
+    ${renderFailureReasons({ remix, tasks, outputs, providerJob: remix.providerJob })}
     <article class="wz-row">
       <div>
         <strong>${escapeHtml(remix.remixId)}</strong>
@@ -1286,7 +1294,7 @@ function renderDetail() {
     </article>
     <div class="wz-kv-grid">
       ${renderKeyValues([
-        ["输出", remix.outputs?.length || 0],
+        ["输出", outputs.length],
         ["可下载", state.detail.downloadSummary?.downloadEligibleCount || 0],
         ["QC 通过", remix.qcSummary?.passed || 0],
         ["QC 失败", remix.qcSummary?.failed || 0],
@@ -1296,17 +1304,9 @@ function renderDetail() {
       ])}
     </div>
     ${active || submitLocked ? `<div class="wz-warning">${escapeHtml(activeRemixNotice(remix.status))}</div>` : ""}
-    ${output ? `
-      <article class="wz-output">
-        <div>
-          <strong>${escapeHtml(output.outputId)}</strong>
-          <small>${escapeHtml(output.kind)} · ${escapeHtml(output.qcStatus)}</small>
-        </div>
-        ${badge(output.qcStatus, { pass: "QC 通过", manual_required: "需人工确认", fail: "QC 失败" })}
-        ${output.previewUrl ? `<a href="${escapeHtml(output.previewUrl)}" target="_blank" rel="noreferrer">打开预览</a>` : ""}
-      </article>
-    ` : ""}
+    ${renderOutputPreviewCards(outputs, { emptyText: "改造输出生成后会显示在这里", confirmable: true })}
   `;
+  restorePreviewPlayback(previewPlayback, els.detailBox);
   syncMetrics();
   syncFlowHints();
 }
@@ -1323,19 +1323,12 @@ function renderGallery() {
     return;
   }
   els.galleryBox.className = "wz-gallery";
+  const previewPlayback = snapshotPreviewPlayback(els.galleryBox);
   els.galleryBox.innerHTML = `
-    ${gallery.items.map((item) => `
-    <article class="wz-output">
-      <div>
-        <strong>${escapeHtml(item.outputId)}</strong>
-        <small>${escapeHtml(item.kind)} · ${escapeHtml(item.qcStatus)} · ${escapeHtml(item.productName || "")}</small>
-      </div>
-      ${badge(item.qcStatus, { pass: "QC 通过", manual_required: "需人工确认", fail: "QC 失败" })}
-      ${item.previewUrl ? `<a href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noreferrer">预览文件</a>` : ""}
-    </article>
-  `).join("")}
+    ${renderOutputPreviewCards(gallery.items)}
     ${galleryPaginationHtml(gallery)}
   `;
+  restorePreviewPlayback(previewPlayback, els.galleryBox);
   syncMetrics();
 }
 

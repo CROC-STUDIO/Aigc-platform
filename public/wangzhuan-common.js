@@ -98,6 +98,76 @@ export function batchGenerationProgress(batch = {}, tasks = []) {
   };
 }
 
+const DONE_TASK_STATUSES = new Set(["downloaded", "qc", "succeeded", "failed", "skipped", "stopped"]);
+
+function timestampMs(value) {
+  if (!value) return 0;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function formatTimestamp(value) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) {
+    return text.slice(0, 16).replace("T", " ");
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours} 小时 ${restMinutes} 分钟` : `${hours} 小时`;
+}
+
+function doneTaskCount(tasks = []) {
+  return tasks.filter((task) => DONE_TASK_STATUSES.has(task.status)).length;
+}
+
+function taskDurationMs(task = {}) {
+  const started = timestampMs(task.startedAt || task.createdAt);
+  const finished = timestampMs(task.finishedAt || task.updatedAt);
+  return started && finished && finished >= started ? finished - started : 0;
+}
+
+export function batchRuntimeSummary(batch = {}, tasks = [], { now = Date.now() } = {}) {
+  const nowMs = typeof now === "number" ? now : timestampMs(now);
+  const total = tasks.length;
+  const done = doneTaskCount(tasks);
+  const startedMs = timestampMs(batch.startedAt || batch.createdAt);
+  const endMs = timestampMs(batch.finishedAt || batch.stoppedAt) || nowMs || timestampMs(batch.updatedAt);
+  const completedDurations = tasks.map(taskDurationMs).filter((value) => value > 0);
+  const averageDoneMs = completedDurations.length
+    ? completedDurations.reduce((sum, value) => sum + value, 0) / completedDurations.length
+    : startedMs && done > 0 && endMs > startedMs
+      ? (endMs - startedMs) / done
+      : 0;
+  const remaining = Math.max(0, total - done);
+  const active = !terminalBatchStatus(batch.status);
+  return {
+    createdAt: formatTimestamp(batch.createdAt),
+    updatedAt: formatTimestamp(batch.updatedAt),
+    elapsed: startedMs && endMs >= startedMs ? formatDuration(endMs - startedMs) : "-",
+    eta: total && remaining === 0
+      ? "已完成"
+      : active && averageDoneMs && remaining
+        ? `约 ${formatDuration(averageDoneMs * remaining)}`
+        : total
+          ? "计算中"
+          : "等待任务",
+    progressText: total ? `${done}/${total}` : "0/0",
+    percent: total ? Math.round((done / total) * 100) : null
+  };
+}
+
 export function modelQcStatusLabel(outputs = [], qcRunnable = false) {
   if (!outputs.length) return qcRunnable ? "待执行（需手动点击）" : "未就绪";
   const modelChecked = outputs.filter((output) =>
@@ -178,11 +248,22 @@ export function generationTaskUpstreamLabel(task = {}) {
 export function summarizeGenerationRequest(task = {}) {
   const request = task.requestSummary || {};
   const content = Array.isArray(request.content) ? request.content : [];
-  const mediaCount = content.filter((item) => item?.type && item.type !== "text").length;
+  const references = Array.isArray(request.references) ? request.references : [];
+  const mediaItems = references.length
+    ? references
+    : content.filter((item) => item?.type && item.type !== "text");
+  const mediaCount = mediaItems.length;
+  const typeCounts = mediaItems.reduce((counts, item) => {
+    const type = String(item?.type || "").replace(/_url$/, "") || "media";
+    counts[type] = (counts[type] || 0) + 1;
+    return counts;
+  }, {});
+  const typeSummary = Object.entries(typeCounts).map(([type, count]) => `${type} ${count}`).join(" / ");
   const parts = [
     request.mode ? `模式 ${request.mode}` : "",
     request.model ? `模型 ${request.model}` : "",
-    mediaCount ? `${mediaCount} 个参考素材 URL` : "纯文生视频"
+    mediaCount ? `${mediaCount} 个参考素材${typeSummary ? `（${typeSummary}）` : ""}` : "纯文生视频",
+    request.generate_audio === true ? "含音频" : request.generate_audio === false ? "静音" : ""
   ].filter(Boolean);
   return parts.join(" · ") || "等待提交";
 }
@@ -501,6 +582,149 @@ export function renderKeyValues(items) {
       <strong>${escapeHtml(value ?? "-")}</strong>
     </div>
   `).join("");
+}
+
+function outputPreviewUrl(output = {}) {
+  return output.previewUrl || output.storageUrl || output.publicUrl || "";
+}
+
+function isImagePreview(output = {}) {
+  const url = outputPreviewUrl(output);
+  const kind = String(output.kind || output.sourceType || "").toLowerCase();
+  return /^data:image\//i.test(url)
+    || /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(url)
+    || kind.includes("image");
+}
+
+export function renderOutputPreviewCards(outputs = [], { emptyText = "暂无输出", confirmable = false } = {}) {
+  const items = (Array.isArray(outputs) ? outputs : []).filter(Boolean);
+  if (!items.length) return `<div class="wz-output-previews empty-line">${escapeHtml(emptyText)}</div>`;
+  return `
+    <div class="wz-output-previews">
+      ${items.map((output, index) => {
+        const url = outputPreviewUrl(output);
+        const key = output.outputId || output.storageKey || url || `output_${index + 1}`;
+        const statusMap = { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" };
+        const meta = [
+          output.kind,
+          output.durationSec ? `${output.durationSec}s` : "",
+          output.downloadEligible ? "可下载" : "",
+          output.previewConfirmed ? "已确认" : ""
+        ].filter(Boolean).join(" · ");
+        return `
+          <article class="wz-output-card" data-output-id="${escapeHtml(key)}">
+            <div class="wz-output-card-media">
+              ${url
+                ? isImagePreview(output)
+                  ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(output.outputId || "输出预览")}" loading="lazy" />`
+                  : `<video class="wz-output-video" data-preview-key="${escapeHtml(key)}" src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(output.outputId || "输出视频预览")}"></video>`
+                : `<div class="wz-output-card-empty">暂无预览地址</div>`}
+            </div>
+            <div class="wz-output-card-body">
+              <div>
+                <strong>${escapeHtml(output.outputId || `输出 ${index + 1}`)}</strong>
+                ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+              </div>
+              ${badge(output.qcStatus || "not_started", statusMap)}
+              ${output.modelQcSummary ? `<small>模型质检 ${escapeHtml(output.modelQcSummary.score ?? "-")} · ${escapeHtml(output.modelQcSummary.summary || "")}</small>` : ""}
+              ${output.errorMessage ? `<small class="wz-output-error">${escapeHtml(output.errorMessage)}</small>` : ""}
+              <div class="wz-output-card-actions">
+                ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开文件</a>` : ""}
+                ${confirmable && output.qcStatus === "manual_required" ? `<span>待人工确认</span>` : ""}
+              </div>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function compactFailureRows(rows = []) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const message = String(row?.message || "").trim();
+    if (!message) return false;
+    const key = `${row.scope}|${row.id}|${message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function renderFailureReasons({ batch = null, remix = null, tasks = [], outputs = [], providerJob = null } = {}) {
+  const rows = [];
+  const run = batch || remix || {};
+  if (run.errorMessage) {
+    rows.push({ scope: batch ? "批次" : "任务", id: run.batchId || run.remixId || "", message: run.errorMessage });
+  }
+  if (providerJob?.errorMessage || providerJob?.responseSummary?.message || providerJob?.responseSummary?.upstreamMessage) {
+    rows.push({
+      scope: "远端 Job",
+      id: providerJob.jobId || providerJob.providerJobId || "",
+      message: providerJob.errorMessage || providerJob.responseSummary?.message || providerJob.responseSummary?.upstreamMessage
+    });
+  }
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const message = task.errorMessage || task.responseSummary?.upstreamMessage || task.responseSummary?.message || "";
+    if (!message && task.status !== "failed") continue;
+    rows.push({
+      scope: "子任务",
+      id: task.generationTaskId || task.taskId || task.seedanceTaskId || task.providerJobId || "",
+      message: message || task.errorCode || "任务失败"
+    });
+  }
+  for (const output of Array.isArray(outputs) ? outputs : []) {
+    const failed = ["fail", "failed", "warn"].includes(output.qcStatus) || output.errorMessage;
+    if (!failed) continue;
+    rows.push({
+      scope: "输出",
+      id: output.outputId || "",
+      message: output.errorMessage || output.modelQcSummary?.summary || output.qcSummary?.summary || "输出质检未通过"
+    });
+  }
+  const visibleRows = compactFailureRows(rows);
+  if (!visibleRows.length) return "";
+  return `
+    <div class="wz-failure-panel" role="alert">
+      <strong>失败原因</strong>
+      ${visibleRows.slice(0, 8).map((row) => `
+        <small><b>${escapeHtml(row.scope)}${row.id ? ` ${escapeHtml(row.id)}` : ""}</b> · ${escapeHtml(row.message)}</small>
+      `).join("")}
+    </div>
+  `;
+}
+
+export function snapshotPreviewPlayback(root = document) {
+  const state = new Map();
+  for (const video of root.querySelectorAll?.(".wz-output-video[data-preview-key]") || []) {
+    state.set(video.dataset.previewKey, {
+      src: video.currentSrc || video.src,
+      currentTime: video.currentTime || 0,
+      paused: video.paused
+    });
+  }
+  return state;
+}
+
+export function restorePreviewPlayback(snapshot, root = document) {
+  if (!snapshot?.size) return;
+  requestAnimationFrame(() => {
+    for (const video of root.querySelectorAll?.(".wz-output-video[data-preview-key]") || []) {
+      const previous = snapshot.get(video.dataset.previewKey);
+      if (!previous) continue;
+      const currentSrc = video.currentSrc || video.src;
+      if (previous.src && currentSrc && previous.src !== currentSrc) continue;
+      if (previous.currentTime > 0 && Number.isFinite(previous.currentTime)) {
+        try {
+          video.currentTime = previous.currentTime;
+        } catch {
+          // Some browsers reject seeking before metadata is loaded.
+        }
+      }
+      if (!previous.paused) video.play?.().catch(() => {});
+    }
+  });
 }
 
 const DECOMPOSITION_NESTED_LABELS = Object.freeze({
