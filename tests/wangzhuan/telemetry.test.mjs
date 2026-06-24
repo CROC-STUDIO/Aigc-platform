@@ -23,7 +23,7 @@ import { adminTemplateAction, saveTemplate } from "../../server/wangzhuan/templa
 import { recordTelemetryEvent } from "../../server/wangzhuan/telemetry.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
 import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
-import { testSeedanceProviderClient, prepareDownloadedSegmentsWithoutStitch } from "./test-providers.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testGeneratedVideoProbe, testSeedanceProviderClient } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -54,6 +54,7 @@ function context(root, userId = "alice", overrides = {}) {
       }
     },
     seedanceProviderClient: testSeedanceProviderClient(),
+    probeGeneratedVideo: testGeneratedVideoProbe,
     remixProviderClient: {
       provider: "video_aigc",
       async createJob() {

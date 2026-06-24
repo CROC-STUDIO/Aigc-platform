@@ -25,7 +25,7 @@ import {
 } from "../../server/wangzhuan/mysql-facts.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
 import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
-import { prepareDownloadedSegmentsWithoutStitch, testSeedanceProviderClient } from "./test-providers.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testGeneratedVideoProbe, testSeedanceProviderClient } from "./test-providers.mjs";
 
 const baseDraft = {
   displayName: "Cash Reward US EN",
@@ -60,6 +60,7 @@ function context(root, userId = "alice", overrides = {}) {
     mockReferenceProbe: true,
     config: {},
     seedanceProviderClient: testSeedanceProviderClient(),
+    probeGeneratedVideo: testGeneratedVideoProbe,
     capabilities: { stitcher: { status: "available", provider: "mock_stitch", version: "test" } },
     ...overrides
   };
@@ -220,6 +221,13 @@ test("QC writes one report per output and makes only stitched 30s output downloa
       assert.ok(report.checks.some((check) => check.checkId === "script_schema"));
       assert.ok(report.checks.some((check) => check.checkId === "prompt_schema"));
       assert.ok(report.checks.some((check) => check.checkId === "task_id_presence"));
+      assert.ok(report.checks.some((check) => check.checkId === "ffprobe_readable"));
+      assert.ok(report.checks.some((check) => check.checkId === "resolution_spec"));
+      assert.ok(report.checks.some((check) => check.checkId === "duration_tolerance"));
+      assert.ok(report.checks.some((check) => check.checkId === "download_status"));
+      assert.ok(report.checks.some((check) => check.checkId === "competitor_residue_ocr"));
+      assert.ok(report.checks.some((check) => check.checkId === "cta_product_presence"));
+      assert.ok(batch.outputs.find((item) => item.outputId === output.outputId).qcChecks.some((check) => check.checkId === "ffprobe_readable"));
       if (output.kind === "stitched_video") {
         assert.ok(report.checks.some((check) => check.checkId === "stitch_report_presence"));
       }
@@ -270,6 +278,11 @@ test("QC calls the model via /responses with generated video S3 URL and blocks f
         assert.match(text, /Phone app reward screen/);
         assert.match(text, /Lucky Cash/);
         assert.match(text, /Seedance/);
+        assert.match(text, /Seedance prompt execution checks/);
+        assert.match(text, /字幕\/画面文字/);
+        assert.match(text, /CTA\/Ending/);
+        assert.match(text, /免责声明只应作为后处理底部贴片/);
+        assert.match(text, /不得复刻竞品品牌、水印、UI、原文案/);
         return JSON.stringify({
           passed: false,
           score: 0.42,

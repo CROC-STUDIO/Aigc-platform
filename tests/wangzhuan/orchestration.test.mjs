@@ -145,6 +145,27 @@ test("upstream poll completes 15s batches into qc with segment outputs", async (
   }
 });
 
+test("upstream poll overlays disclaimer on final 15s segment outputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-orchestration-15-disclaimer-"));
+  try {
+    const { ctx, started } = await startedBatch(root, 15, {
+      draft: {
+        ...baseDraft,
+        disclaimer: "Final reward details depend on in-app rules and task completion."
+      }
+    });
+    const polled = await pollUpstreamBatch(ctx, started.batch.batchId);
+
+    assert.equal(polled.batch.status, "qc");
+    assert.equal(polled.batch.outputs.length, 1);
+    assert.equal(polled.batch.outputs[0].kind, "segment_video");
+    assert.equal(polled.batch.outputs[0].disclaimerOverlay?.applied, true);
+    assert.match(polled.batch.outputs[0].disclaimerOverlay?.text || "", /task completion/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("upstream poll completes 30s batches into qc with stitched outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-orchestration-30-"));
   try {

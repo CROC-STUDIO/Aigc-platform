@@ -1,5 +1,5 @@
-// Horizontal node-canvas controller for the 竞品素材改造 pipeline.
-// Linear topology: source → mask → mask-preview → delivery → gallery.
+// Horizontal node-canvas controller for the 竞品素材 video-ops 工作台.
+// Linear topology: task → input → job → result.
 // Draws SVG links from real DOM positions (responsive, no hard coords).
 // Self-contained, no imports, safe to load with `defer`.
 (() => {
@@ -25,16 +25,14 @@
   const id = (x) => document.getElementById(x);
 
   function edges() {
-    const source = id("remixNodeSource");
-    const mask = id("remixNodeMask");
-    const preview = id("remixNodeMaskPreview");
-    const delivery = id("remixNodeDelivery");
-    const gallery = id("remixNodeGallery");
+    const task = id("remixNodeTask");
+    const input = id("remixNodeInput");
+    const job = id("remixNodeJob");
+    const result = id("remixNodeResult");
     const list = [];
-    if (source && mask) list.push([source, mask, "flow-blue"]);
-    if (mask && preview) list.push([mask, preview, "flow-purple"]);
-    if (preview && delivery) list.push([preview, delivery, "flow-blue"]);
-    if (delivery && gallery) list.push([delivery, gallery, "flow-green"]);
+    if (task && input) list.push([task, input, "flow-blue"]);
+    if (input && job) list.push([input, job, "flow-purple"]);
+    if (job && result) list.push([job, result, "flow-green"]);
     return list;
   }
 
@@ -107,9 +105,9 @@
 
   if ("IntersectionObserver" in window) {
     const stageNodes = [
-      ["1", id("remixNodeSource")],
-      ["2", id("remixNodeMask")],
-      ["3", id("remixNodeDelivery")]
+      ["1", id("remixNodeTask")],
+      ["2", id("remixNodeInput")],
+      ["3", id("remixNodeJob")]
     ].filter(([, el]) => el);
     const visible = new Map();
     const byStep = new Map(items.map((it) => [it.dataset.step, it]));
@@ -155,26 +153,29 @@
   function chipSummaryForNode(node) {
     if (!node) return "";
     switch (node.id) {
-      case "remixNodeSource": {
-        const box = document.getElementById("remixSourceBox");
-        if (!box || box.classList.contains("empty-line")) return "未上传源素材";
-        return box.textContent.trim().replace(/\s+/g, " ").slice(0, 56) || "源素材已上传";
+      case "remixNodeTask": {
+        const title = document.getElementById("videoOpsSelectedTitle")?.textContent?.trim();
+        return title || "未选择任务";
       }
-      case "remixNodeMask": {
-        const count = document.getElementById("remixRegionCount")?.textContent || "0";
-        return Number(count) > 0 ? `已框选 ${count} 个区域` : "待框选改造区域";
+      case "remixNodeInput": {
+        const reportText = document.getElementById("videoOpsReportText")?.value?.trim();
+        if (reportText) return "分析文本已填写";
+        const url = document.getElementById("videoOpsSourceUrl")?.value?.trim();
+        if (url) return "视频 URL 已填写";
+        const fileStatus = document.getElementById("videoOpsFileStatus");
+        const fileLabel = fileStatus?.textContent?.trim().replace(/\s+/g, " ") || "";
+        if (fileLabel && fileLabel !== "未选择文件" && !fileStatus?.classList.contains("empty-line")) {
+          return fileLabel.slice(0, 56);
+        }
+        return "待填写输入素材";
       }
-      case "remixNodeMaskPreview": {
-        const summary = document.getElementById("remixMaskSummary")?.textContent?.trim();
-        return summary && summary !== "未生成" ? summary : "Mask 预览待生成";
+      case "remixNodeJob": {
+        const badge = document.getElementById("videoOpsStatusBadge")?.textContent?.trim();
+        return badge && badge !== "未提交" ? `任务状态：${badge}` : "暂无任务";
       }
-      case "remixNodeDelivery": {
-        const badge = document.getElementById("remixStatusBadge")?.textContent?.trim();
-        return badge && badge !== "未开始" ? `任务状态：${badge}` : "暂无改造任务";
-      }
-      case "remixNodeGallery": {
-        const count = document.getElementById("remixDownloadCount")?.textContent || "0";
-        return Number(count) > 0 ? `${count} 个结果可下载` : "改造图库暂无结果";
+      case "remixNodeResult": {
+        const status = document.getElementById("videoOpsResultStatus")?.textContent?.trim();
+        return status && status !== "未读取" ? `结果：${status}` : "结果待读取";
       }
       default:
         return node.querySelector(".panel-head h2")?.textContent?.trim() || "";
@@ -216,8 +217,8 @@
       }
       if (isTarget) {
         n.classList.remove("collapsed");
-      } else if (sameCol && focusStep === "2") {
-        // Step 2 column keeps mask editor + preview visible; only dim non-target.
+      } else if (sameCol && (focusStep === "2" || focusStep === "3")) {
+        // Wide input column and job/result column keep sibling nodes visible.
         n.classList.remove("collapsed");
       } else {
         n.classList.add("collapsed");
@@ -383,36 +384,38 @@
     );
   }
 
-  // --- Soft pipeline state (done / current / pending) ---------------------
-  // Drives off BACKEND-populated DOM signals only (`.empty-line` is present
-  // while a box is empty and removed when real server data arrives), plus the
-  // mask summary text. Default form values never affect these. Monotonic.
-  const hasData = (elId) => {
-    const el = document.getElementById(elId);
-    return !!el && !el.classList.contains("empty-line");
+  // Drives off DOM signals for the video-ops workbench. Monotonic.
+  const hasVideoInput = () => {
+    const reportText = document.getElementById("videoOpsReportText")?.value?.trim();
+    if (reportText) return true;
+    const url = document.getElementById("videoOpsSourceUrl")?.value?.trim();
+    if (/^https?:\/\//i.test(url || "")) return true;
+    const fileStatus = document.getElementById("videoOpsFileStatus");
+    const fileLabel = fileStatus?.textContent?.trim() || "";
+    return Boolean(fileLabel && fileLabel !== "未选择文件" && !fileStatus?.classList.contains("empty-line"));
+  };
+
+  const hasSubmittedJob = () => {
+    const summary = document.getElementById("videoOpsJobSummary");
+    if (!summary || summary.classList.contains("empty-line")) return false;
+    return (summary.textContent || "").trim() !== "暂无任务";
   };
 
   const STAGES = [
     {
       step: "1",
-      nodes: ["remixNodeSource"],
-      // server returned source spec
-      done: () => hasData("remixSourceBox")
+      nodes: ["remixNodeTask"],
+      done: () => Boolean(document.getElementById("videoOpsSelectedTitle")?.textContent?.trim())
     },
     {
       step: "2",
-      nodes: ["remixNodeMask", "remixNodeMaskPreview"],
-      // mask composed (summary leaves the "未生成" placeholder)
-      done: () => {
-        const t = (document.getElementById("remixMaskSummary")?.textContent || "").trim();
-        return t.length > 0 && t !== "未生成";
-      }
+      nodes: ["remixNodeInput"],
+      done: () => hasVideoInput()
     },
     {
       step: "3",
-      nodes: ["remixNodeDelivery", "remixNodeGallery"],
-      // a remix task / result exists
-      done: () => hasData("remixDetailBox") || hasData("remixGalleryBox")
+      nodes: ["remixNodeJob", "remixNodeResult"],
+      done: () => hasSubmittedJob()
     }
   ];
 
@@ -493,14 +496,14 @@
   document.addEventListener("change", refreshPipelineState, true);
   if ("MutationObserver" in window) {
     const mo = new MutationObserver(refreshPipelineState);
-    for (const elId of ["remixSourceBox", "remixMaskSummary", "remixDetailBox", "remixGalleryBox"]) {
+    for (const elId of ["videoOpsFileStatus", "videoOpsJobSummary", "videoOpsResultBox", "videoOpsStatusBadge"]) {
       const el = document.getElementById(elId);
       if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }
   }
   refreshPipelineState();
 
-  if (focusEnabled()) focusNode(id("remixNodeSource"), { center: false });
+  if (focusEnabled()) focusNode(id("remixNodeTask"), { center: false });
 
   scheduleDraw();
   window.addEventListener("load", scheduleDraw);

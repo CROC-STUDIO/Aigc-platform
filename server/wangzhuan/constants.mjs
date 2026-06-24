@@ -28,8 +28,6 @@ export const DEFAULT_LIMITS = Object.freeze({
 export const REQUIRED_DRAFT_FIELDS = Object.freeze([
   "displayName",
   "productName",
-  "cta",
-  "ending",
   "currencySymbol",
   "language",
   "regions",

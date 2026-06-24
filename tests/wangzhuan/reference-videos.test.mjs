@@ -284,7 +284,18 @@ test("drafts reference video decomposition by calling configured llm", async () 
         assert.equal(Array.isArray(userContent), true);
         assert.equal(userContent.some((part) => part.type === "file" && part.file?.file_url?.startsWith("https://")), true);
         assert.equal(userContent.filter((part) => part.type === "image_url").length, 2);
-        assert.match(userContent.map((part) => part.text || "").join("\n"), /Cash Demo\.mp4/);
+        const textPrompt = userContent.map((part) => part.text || "").join("\n");
+        assert.match(textPrompt, /Cash Demo\.mp4/);
+        assert.match(textPrompt, /Seedance decomposition dimensions/);
+        assert.match(textPrompt, /actionReference/);
+        assert.match(textPrompt, /cameraReference/);
+        assert.match(textPrompt, /textElements/);
+        assert.match(textPrompt, /effectReference/);
+        assert.match(textPrompt, /doNotCopyElements/);
+        assert.match(textPrompt, /动作参考/);
+        assert.match(textPrompt, /运镜参考/);
+        assert.match(textPrompt, /文字生成/);
+        assert.match(textPrompt, /特效参考/);
         return JSON.stringify(validDecomposition({
           scene: "Generated from model",
           subject: "Model subject"

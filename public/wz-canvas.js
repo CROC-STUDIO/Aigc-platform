@@ -155,10 +155,9 @@
   }
 
   // --- Fan-out: add / remove rewrite branches -----------------------------
-  // Each branch is a FULL rewrite form (a clone of node #3.1). The first
-  // branch keeps all real IDs and drives the backend; clones have their
-  // id/name attributes stripped (so they never collide) and stay fillable —
-  // ready to wire up once the backend accepts multiple drafts.
+  // branch is a FULL rewrite form (a clone of node #3.1). The first
+  // branch keeps all real IDs and drives shared globals; clones have
+  // id/name stripped but retain the same sub-flow structure as 3.1.
   const branchesWrap = document.getElementById("wzBranches");
   const addBtn = document.getElementById("wzAddBranchBtn");
   const baseNode = document.getElementById("wzNodeRewrite");
@@ -168,9 +167,12 @@
     wzProductLink: "productLink",
     wzCta: "cta",
     wzLanguage: "language",
+    wzLanguages: "languages",
     wzTargetChannel: "targetChannel",
     wzTargetRegion: "targetRegion",
+    wzTargetRegions: "targetRegions",
     wzMaterialDirection: "materialDirection",
+    wzMaterialDirectionCustom: "materialDirectionCustom",
     wzVoiceoverStyle: "voiceoverStyle",
     wzPromiseLevel: "promiseLevel",
     wzProjectName: "projectName",
@@ -186,13 +188,47 @@
     wzProductIconFile: "productIconFile",
     wzProductScreenshotFile: "productScreenshotFile",
     wzProductRecordingFile: "productRecordingFile",
+    wzCtaAssetFile: "ctaAssetFile",
     wzEndingAssetFile: "endingAssetFile",
     wzPersonAssetFile: "personAssetFile",
     wzRewardElementFile: "rewardElementFile",
     wzVariantPrompt: "variantPrompt",
     wzCustomPrompt: "customPrompt",
-    wzNegativePrompt: "negativePrompt"
+    wzNegativePrompt: "negativePrompt",
+    wzDisclaimerPreset: "disclaimerPreset",
+    wzDisclaimer: "disclaimer",
+    wzDisclaimerOverlayPosition: "disclaimerOverlayPosition",
+    wzDisclaimerOverlayFontSize: "disclaimerOverlayFontSize",
+    wzDisclaimerOverlayBoxHeight: "disclaimerOverlayBoxHeight",
+    wzDisclaimerOverlayOpacity: "disclaimerOverlayOpacity"
   };
+
+  function ensureBranchTemplateSaveUi(node) {
+    const block = node?.querySelector(".wz-template-save-block");
+    if (!block) return;
+    let btn = block.querySelector(".wz-save-template-btn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mini ghost wz-save-template-btn";
+      btn.textContent = "保存模板";
+      const actions = block.querySelector(".modal-actions") || block;
+      actions.appendChild(btn);
+    } else {
+      btn.type = "button";
+      btn.classList.add("mini", "ghost", "wz-save-template-btn");
+      if (!btn.textContent.trim()) btn.textContent = "保存模板";
+    }
+    let status = block.querySelector(".wz-template-save-status");
+    if (!status) {
+      status = document.createElement("div");
+      status.className = "wz-template-save-status wz-field-hint wz-template-save-hint";
+      status.textContent = "保存模板是可选项，不保存也可以估算并生成批次。";
+      block.insertBefore(status, block.firstChild);
+    } else {
+      status.classList.add("wz-template-save-status", "wz-field-hint", "wz-template-save-hint");
+    }
+  }
 
   function branchId(value) {
     return String(value || "").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 48) || `branch_${branchSeq}`;
@@ -259,13 +295,10 @@
     // Drop state classes/pills carried over from the original.
     clone.classList.remove("focused", "collapsed", "state-done", "state-current", "state-pending");
     clone.querySelector(".wz-node-state")?.remove();
+    ensureBranchTemplateSaveUi(clone);
 
     const head = clone.querySelector(".panel-head");
-    const saveBtn = head?.querySelector("button");
-    if (saveBtn) {
-      saveBtn.removeAttribute("id");
-      saveBtn.className = "mini wz-save-branch";
-      saveBtn.textContent = "保存全部分支";
+    if (head && !head.querySelector(".wz-branch-remove")) {
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "mini ghost wz-branch-remove";
@@ -663,7 +696,7 @@
     {
       step: "3",
       nodes: ["wzNodeRewrite"],
-      done: () => document.getElementById("wzNodeRewrite")?.dataset.templateCommitted === "1"
+      done: () => document.getElementById("wzNodeRewrite")?.dataset.rewriteConfirmed === "1"
     },
     {
       step: "4",
@@ -780,10 +813,11 @@
   document.addEventListener("input", refreshPipelineState, true);
   document.addEventListener("change", refreshPipelineState, true);
   window.addEventListener("wz:template-commit-changed", refreshPipelineState);
+  window.addEventListener("wz:rewrite-confirmed-changed", refreshPipelineState);
   window.addEventListener("wz:decomposition-confirmed-changed", refreshPipelineState);
   if ("MutationObserver" in window) {
     const mo = new MutationObserver(refreshPipelineState);
-    for (const id of ["wzReferenceBox", "wzTemplateStatus", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
+    for (const id of ["wzReferenceBox", "wzRewriteStatus", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
       const el = document.getElementById(id);
       if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }

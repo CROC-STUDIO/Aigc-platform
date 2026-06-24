@@ -131,16 +131,36 @@ export function createRemixProviderClient(context = {}, capability = {}) {
     return Buffer.from(await response.arrayBuffer());
   }
 
+  function jobsPath(suffix = "") {
+    const prefix = /\/api\/v1$/i.test(config.endpoint) ? "/jobs" : "/api/v1/jobs";
+    return `${prefix}${suffix}`;
+  }
+
   return {
     provider: config.provider,
     async createJob(payload) {
-      return jsonRequest("/jobs", "POST", payload, "create_job");
+      return jsonRequest(jobsPath(), "POST", payload, "create_job");
     },
-    async getJob(jobId) {
-      return jsonRequest(`/jobs/${encodeURIComponent(jobId)}`, "GET", undefined, "get_job");
+    async listJobs(query = "") {
+      const suffix = query ? `?${String(query).replace(/^\?/, "")}` : "";
+      return jsonRequest(`${jobsPath()}${suffix}`, "GET", undefined, "list_jobs");
+    },
+    async getJob(jobId, query = "") {
+      const suffix = query ? `?${String(query).replace(/^\?/, "")}` : "";
+      return jsonRequest(jobsPath(`/${encodeURIComponent(jobId)}${suffix}`), "GET", undefined, "get_job");
+    },
+    async getJobResult(jobId, query = "") {
+      const suffix = query ? `?${String(query).replace(/^\?/, "")}` : "";
+      return jsonRequest(jobsPath(`/${encodeURIComponent(jobId)}/result${suffix}`), "GET", undefined, "get_job_result");
+    },
+    async cancelJob(jobId) {
+      return jsonRequest(jobsPath(`/${encodeURIComponent(jobId)}/cancel`), "POST", {}, "cancel_job");
+    },
+    async retryJob(jobId) {
+      return jsonRequest(jobsPath(`/${encodeURIComponent(jobId)}/retry`), "POST", {}, "retry_job");
     },
     async downloadJob(jobId) {
-      return downloadRequest(`/jobs/${encodeURIComponent(jobId)}/download`, "download_job");
+      return downloadRequest(jobsPath(`/${encodeURIComponent(jobId)}/download`), "download_job");
     },
     async downloadUrl(url) {
       const targetUrl = cleanString(url);

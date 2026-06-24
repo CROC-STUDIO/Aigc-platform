@@ -29,6 +29,7 @@ import {
   renderOutputPreviewCards,
   restorePreviewPlayback,
   setBusy,
+  showErrorModal,
   showLogin,
   showToast,
   snapshotPreviewPlayback,
@@ -64,18 +65,25 @@ const els = {
   branches: $("#wzBranches"),
   templateSelect: $("#wzTemplateSelect"),
   createTemplateBtn: $("#wzCreateTemplateBtn"),
+  confirmRewriteBtn: $("#wzConfirmRewriteBtn"),
   addBranchBtn: $("#wzAddBranchBtn"),
-  templateStatus: $("#wzTemplateStatus"),
+  rewriteStatus: $("#wzRewriteStatus"),
+  templateSaveStatus: $("#wzTemplateSaveStatus"),
+  rewriteConfirmHint: $("#wzRewriteConfirmHint"),
   projectName: $("#wzProjectName"),
   generationMode: $("#wzGenerationMode"),
   batchName: $("#wzBatchName"),
+  startNewTaskBtn: $("#wzStartNewTaskBtn"),
   displayName: $("#wzDisplayName"),
   productName: $("#wzProductName"),
   productLink: $("#wzProductLink"),
+  inspectStoreBtn: $("#wzInspectStoreBtn"),
+  storeCandidates: $("#wzStoreCandidates"),
   cta: $("#wzCta"),
   ending: $("#wzEnding"),
   currencySymbol: $("#wzCurrencySymbol"),
   language: $("#wzLanguage"),
+  languages: $("#wzLanguages"),
   regions: $("#wzRegions"),
   templateChannel: $("#wzTemplateChannel"),
   defaultDuration: $("#wzDefaultDuration"),
@@ -83,6 +91,7 @@ const els = {
   productIconFile: $("#wzProductIconFile"),
   productScreenshotFile: $("#wzProductScreenshotFile"),
   productRecordingFile: $("#wzProductRecordingFile"),
+  ctaAssetFile: $("#wzCtaAssetFile"),
   endingAssetFile: $("#wzEndingAssetFile"),
   personAssetFile: $("#wzPersonAssetFile"),
   rewardElementFile: $("#wzRewardElementFile"),
@@ -90,8 +99,17 @@ const els = {
   truthFields: $("#wzTruthFields"),
   targetChannel: $("#wzTargetChannel"),
   targetRegion: $("#wzTargetRegion"),
+  targetRegions: $("#wzTargetRegions"),
   materialDirection: $("#wzMaterialDirection"),
+  materialDirectionCustom: $("#wzMaterialDirectionCustom"),
+  materialDirectionCustomWrap: $("#wzMaterialDirectionCustomWrap"),
   voiceoverStyle: $("#wzVoiceoverStyle"),
+  disclaimerPreset: $("#wzDisclaimerPreset"),
+  disclaimer: $("#wzDisclaimer"),
+  disclaimerOverlayPosition: $("#wzDisclaimerOverlayPosition"),
+  disclaimerOverlayFontSize: $("#wzDisclaimerOverlayFontSize"),
+  disclaimerOverlayBoxHeight: $("#wzDisclaimerOverlayBoxHeight"),
+  disclaimerOverlayOpacity: $("#wzDisclaimerOverlayOpacity"),
   llmProvider: $("#wzLlmProvider"),
   llmModel: $("#wzLlmModel"),
   llmEndpoint: $("#wzLlmEndpoint"),
@@ -107,6 +125,7 @@ const els = {
   referenceUploadStatus: $("#wzReferenceUploadStatus"),
   useSampleVideoBtn: $("#wzUseSampleVideoBtn"),
   checkReferenceBtn: $("#wzCheckReferenceBtn"),
+  confirmReferenceBtn: $("#wzConfirmReferenceBtn"),
   draftDecompositionBtn: $("#wzDraftDecompositionBtn"),
   decomposeBtn: $("#wzDecomposeBtn"),
   decompositionForm: $("#wzDecompositionForm"),
@@ -115,6 +134,7 @@ const els = {
   llmServiceStatus: $("#wzLlmServiceStatus"),
   referenceBox: $("#wzReferenceBox"),
   duration: $("#wzDuration"),
+  outputRatio: $("#wzOutputRatio"),
   variantCount: $("#wzVariantCount"),
   concurrency: $("#wzConcurrency"),
   estimateBtn: $("#wzEstimateBtn"),
@@ -155,7 +175,9 @@ const state = {
   galleryPageSize: 20,
   llmDefaults: null,
   activeLock: null,
+  storeInspection: null,
   templateCommitted: false,
+  rewriteConfirmed: false,
   suppressTemplateUnlock: false,
   pollTimer: 0,
   pollIntervalMs: 2000
@@ -167,19 +189,35 @@ const assetInputKeys = [
   ["productIcon", "productIconFile"],
   ["productScreenshot", "productScreenshotFile"],
   ["productRecording", "productRecordingFile"],
+  ["ctaAsset", "ctaAssetFile"],
   ["endingAsset", "endingAssetFile"],
   ["personAsset", "personAssetFile"],
   ["rewardElement", "rewardElementFile"]
 ];
+
+const PLAN_REFERENCE_ASSET_ORDER = Object.freeze([
+  "productIcon",
+  "productScreenshot",
+  "rewardElement",
+  "productRecording",
+  "ctaAsset",
+  "endingAsset",
+  "personAsset"
+]);
+
+const SEEDANCE_REFERENCE_CANVAS = Object.freeze({ cols: 5, rows: 2, slots: 10 });
 
 const branchFieldIds = {
   productName: "wzProductName",
   productLink: "wzProductLink",
   cta: "wzCta",
   language: "wzLanguage",
+  languages: "wzLanguages",
   targetChannel: "wzTargetChannel",
   targetRegion: "wzTargetRegion",
+  targetRegions: "wzTargetRegions",
   materialDirection: "wzMaterialDirection",
+  materialDirectionCustom: "wzMaterialDirectionCustom",
   voiceoverStyle: "wzVoiceoverStyle",
   promiseLevel: "wzPromiseLevel",
   projectName: "wzProjectName",
@@ -195,21 +233,93 @@ const branchFieldIds = {
   productIconFile: "wzProductIconFile",
   productScreenshotFile: "wzProductScreenshotFile",
   productRecordingFile: "wzProductRecordingFile",
+  ctaAssetFile: "wzCtaAssetFile",
   endingAssetFile: "wzEndingAssetFile",
   personAssetFile: "wzPersonAssetFile",
   rewardElementFile: "wzRewardElementFile",
   variantPrompt: "wzVariantPrompt",
   customPrompt: "wzCustomPrompt",
-  negativePrompt: "wzNegativePrompt"
+  negativePrompt: "wzNegativePrompt",
+  disclaimerPreset: "wzDisclaimerPreset",
+  disclaimer: "wzDisclaimer",
+  disclaimerOverlayPosition: "wzDisclaimerOverlayPosition",
+  disclaimerOverlayFontSize: "wzDisclaimerOverlayFontSize",
+  disclaimerOverlayBoxHeight: "wzDisclaimerOverlayBoxHeight",
+  disclaimerOverlayOpacity: "wzDisclaimerOverlayOpacity"
+};
+
+const DISCLAIMER_PRESETS = {
+  en: "Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.",
+  pt: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
+  zh: "奖励结果受 App 内活动规则、用户资格、任务完成情况、地区限制和活动时间影响，不保证每位用户都能获得相同奖励。"
 };
 
 const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，请继续填写第三步产品改写。";
-const TEMPLATE_SAVED_MESSAGE = "模板已保存，请点击第四步「估算本批任务」继续。";
+const REWRITE_CONFIRMED_MESSAGE = "产品改写信息已确认，可进入第四步估算本批任务。";
+const TEMPLATE_SAVED_MESSAGE = "模板已保存，可在后续批次中复用。";
 const ESTIMATE_BTN_LABEL = Object.freeze({
   first: "估算本批任务",
   refresh: "重新估算"
 });
 const WORKFLOW_SESSION_KEY = "wz_workflow_v1";
+
+function defaultUserBatchName(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `wangzhuan_batch_${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function batchNameFromBatch(batch = state.batchDetail?.batch) {
+  if (!batch) return "";
+  return batch.displayBatchName || batch.userBatchName || batch.estimate?.request?.batchName || batch.request?.batchName || batch.batchName || "";
+}
+
+function applyUserBatchName(value = "") {
+  if (!els.batchName) return "";
+  const name = String(value || "").trim();
+  els.batchName.value = name;
+  if (name) writeWorkflowSession({ batchName: name });
+  return name;
+}
+
+function ensureNewTaskBatchName() {
+  return applyUserBatchName(defaultUserBatchName());
+}
+
+function restoreUserBatchName() {
+  const fromBatch = batchNameFromBatch();
+  if (fromBatch) {
+    applyUserBatchName(fromBatch);
+    return true;
+  }
+  const session = readWorkflowSession();
+  if (session?.batchName) {
+    applyUserBatchName(session.batchName);
+    return true;
+  }
+  if (els.batchName) els.batchName.value = "";
+  return false;
+}
+
+function ensureUserBatchNameForSubmit() {
+  const current = els.batchName?.value.trim() || "";
+  if (current) return current;
+  return ensureNewTaskBatchName();
+}
+
+function batchDisplayName(batch = state.batchDetail?.batch) {
+  return batch?.displayBatchName || batch?.userBatchName || batch?.estimate?.request?.batchName || batch?.request?.batchName || batch?.batchName || batch?.batchId || "";
+}
+
+function selectedMaterialDirection() {
+  if (els.materialDirection?.value === "other") {
+    return els.materialDirectionCustom?.value.trim() || "跟随竞品";
+  }
+  return els.materialDirection?.value || "";
+}
+
+function syncMaterialDirectionCustom() {
+  syncMaterialDirectionForNode(primaryBranchNode());
+}
 
 const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
   "scene",
@@ -227,23 +337,24 @@ const DECOMPOSITION_FORM_SECTIONS = Object.freeze([
     title: "画面与动作",
     layout: "stack",
     fields: [
-      { key: "scene", label: "场景", required: true, hint: "空间、App 页面或人物所在环境" },
-      { key: "subject", label: "画面主体", required: true, hint: "人物、手机、产品 UI 或奖励元素" },
-      { key: "action", label: "核心动作", required: true, hint: "用户行为、镜头推进和转折" }
+      { key: "scene", label: "scene", required: true, hint: "空间、App 页面或人物所在环境" },
+      { key: "subject", label: "subject", required: true, hint: "人物、手机、产品 UI 或奖励元素" },
+      { key: "action", label: "action", required: true, hint: "用户行为、镜头推进和转折" }
     ]
   },
   {
     title: "镜头与风格",
     layout: "grid",
     fields: [
-      { key: "camera", label: "镜头语言", required: true, hint: "景别、运镜、节奏" },
-      { key: "lighting", label: "光线氛围", required: true, hint: "光线和画面氛围" },
-      { key: "style", label: "素材风格", required: true, hint: "真人口播、手持演示、UGC、App demo 等" },
-      { key: "quality", label: "画质要求", required: true, hint: "清晰度与生成质量" }
+      { key: "camera", label: "camera", required: true, hint: "景别、运镜、节奏" },
+      { key: "lighting", label: "lighting", required: true, hint: "光线和画面氛围" },
+      { key: "style", label: "style", required: true, hint: "真人口播、手持演示、UGC、App demo 等" },
+      { key: "quality", label: "quality", required: true, hint: "清晰度与生成质量" }
     ]
   },
   {
     title: "脚本节奏",
+    collapsible: true,
     layout: "stack",
     fields: [
       { key: "hook", label: "前三秒钩子", required: true, hint: "保留结构，不要照搬竞品文案" },
@@ -264,8 +375,6 @@ const DECOMPOSITION_FORM_SECTIONS = Object.freeze([
 const REQUIRED_DRAFT_FIELDS = Object.freeze([
   "displayName",
   "productName",
-  "cta",
-  "ending",
   "currencySymbol",
   "language",
   "regions",
@@ -310,8 +419,12 @@ function writeWorkflowSession(patch = {}) {
   }));
 }
 
-function clearWorkflowSession() {
+function clearWorkflowSession({ preserveBatchName = false } = {}) {
+  const preservedBatchName = preserveBatchName
+    ? (readWorkflowSession()?.batchName || els.batchName?.value.trim() || "")
+    : "";
   sessionStorage.removeItem(WORKFLOW_SESSION_KEY);
+  if (preservedBatchName) writeWorkflowSession({ batchName: preservedBatchName });
 }
 
 function resetControlToDefault(control) {
@@ -341,8 +454,8 @@ function resetControlToDefault(control) {
   }
 }
 
-function resetTransientFormState() {
-  clearWorkflowSession();
+function resetTransientFormState({ generateBatchName = false, clearSession = true } = {}) {
+  if (clearSession) clearWorkflowSession();
   state.referenceVideo = null;
   state.decomposition = null;
   state.estimate = null;
@@ -350,21 +463,144 @@ function resetTransientFormState() {
   state.batchDetail = null;
   state.activeLock = null;
   state.templateCommitted = false;
+  state.rewriteConfirmed = false;
   state.selectedTemplate = null;
   state.suppressTemplateUnlock = false;
   const root = document.getElementById("wzCanvas");
   for (const control of root?.querySelectorAll("input, textarea, select") || []) {
     resetControlToDefault(control);
   }
+  if (els.batchName) els.batchName.value = "";
+  if (generateBatchName) ensureNewTaskBatchName();
   if (els.truthDetails) els.truthDetails.open = false;
+}
+
+function bootstrapWorkbenchUi() {
+  state.referenceVideo = null;
+  state.decomposition = null;
+  state.estimate = null;
+  state.capabilities = null;
+  state.batchDetail = null;
+  state.activeLock = null;
+  state.templateCommitted = false;
+  state.rewriteConfirmed = false;
+  state.selectedTemplate = null;
+  state.suppressTemplateUnlock = false;
+  const root = document.getElementById("wzCanvas");
+  for (const control of root?.querySelectorAll("input, textarea, select") || []) {
+    if (control.id === "wzBatchName") continue;
+    resetControlToDefault(control);
+  }
+  if (els.batchName) els.batchName.value = "";
+  if (els.truthDetails) els.truthDetails.open = false;
+}
+
+function syncStartNewTaskButton() {
+  if (!els.startNewTaskBtn) return;
+  const locked = hasActivePipelineBatch();
+  els.startNewTaskBtn.disabled = locked;
+  els.startNewTaskBtn.title = locked
+    ? "当前有进行中的批次，请先停止、完成质检或放弃后再开始新任务"
+    : "清空当前填写并生成新的批次名";
+}
+
+async function startNewTask() {
+  if (hasActivePipelineBatch()) {
+    showToast("当前有进行中的批次，请先停止或完成后再开始新任务", { type: "error" });
+    return;
+  }
+  clearActiveLockBanner(lockHost());
+  resetTransientFormState({ generateBatchName: true, clearSession: true });
+  clearReferenceObjectUrl();
+  syncMaterialDirectionCustom();
+  renderTruthFields();
+  ensureDecompositionForm();
+  renderDecompositionForm({});
+  renderRewriteStatus();
+  renderTemplateSaveStatus();
+  renderBatchReadiness();
+  renderReference();
+  renderBatch();
+  renderEstimate();
+  syncStartNewTaskButton();
+  showToast("已开始新任务", { type: "success" });
 }
 
 function persistWorkflowSession() {
   writeWorkflowSession({
     referenceVideoId: state.referenceVideo?.referenceVideoId || null,
+    batchId: state.batchDetail?.batch?.batchId || null,
     templateVersionId: isTemplateCommitted() ? state.selectedTemplate?.versionId : null,
-    templateCommitted: isTemplateCommitted()
+    templateCommitted: isTemplateCommitted(),
+    rewriteConfirmed: isRewriteConfirmed()
   });
+}
+
+function restoreBatchDraftForm(batch = state.batchDetail?.batch) {
+  const draft = batch?.templateSnapshot?.draft;
+  if (!draft || typeof draft !== "object") return false;
+  const branches = Array.isArray(batch.branchDrafts) && batch.branchDrafts.length
+    ? batch.branchDrafts
+    : draft.branches;
+  const payload = { ...draft, branches: branches || draft.branches };
+  state.suppressTemplateUnlock = true;
+  applyBranches(payload);
+  const request = batch.estimate?.request || batch.request || {};
+  if (request.knowledgeNotes || draft.knowledgeNotes) {
+    els.knowledgeNotes.value = request.knowledgeNotes || draft.knowledgeNotes || "";
+  }
+  if (request.durationSec || draft.defaultDurationSec) {
+    els.duration.value = String(request.durationSec || draft.defaultDurationSec || els.duration.value || 15);
+  }
+  if (request.outputRatio || draft.defaultOutputRatio) {
+    setOptionalValue(els.outputRatio, request.outputRatio || draft.defaultOutputRatio || "9:16");
+  }
+  if (request.variantCount) els.variantCount.value = String(request.variantCount);
+  if (request.requestedConcurrency) els.concurrency.value = String(request.requestedConcurrency);
+  state.suppressTemplateUnlock = false;
+  return true;
+}
+
+function isRewriteConfirmed() {
+  return Boolean(state.rewriteConfirmed);
+}
+
+function syncRewriteDomState() {
+  const node = document.getElementById("wzNodeRewrite");
+  if (!node) return;
+  if (isRewriteConfirmed()) node.dataset.rewriteConfirmed = "1";
+  else node.removeAttribute("data-rewrite-confirmed");
+  window.dispatchEvent(new CustomEvent("wz:rewrite-confirmed-changed"));
+}
+
+function invalidateEstimateFromEdit() {
+  if (!state.estimate?.estimate) return;
+  state.estimate = null;
+  renderEstimate();
+}
+
+function clearRewriteProgress({ clearEstimate = true } = {}) {
+  if (isRewriteConfirmed()) setRewriteConfirmed(false);
+  if (clearEstimate) invalidateEstimateFromEdit();
+}
+
+function restoreRewriteConfirmedFromBatch(batch = {}) {
+  const sourceStep = String(batch.request?.sourceStep || "");
+  if (batch.estimate?.estimateId || ["rewrite_confirmed", "estimate", "template_saved"].includes(sourceStep)) {
+    state.rewriteConfirmed = true;
+    syncRewriteDomState();
+    return true;
+  }
+  return false;
+}
+
+function setRewriteConfirmed(confirmed) {
+  state.rewriteConfirmed = Boolean(confirmed);
+  syncRewriteDomState();
+  renderRewriteStatus();
+  renderBatchReadiness();
+  persistWorkflowSession();
+  syncFlowHints();
 }
 
 function syncDecompositionDomState() {
@@ -383,7 +619,7 @@ function applyRestoredTemplate(versionId, { lock = false } = {}) {
   els.templateSelect.value = template.versionId;
   applyTemplate(template);
   state.suppressTemplateUnlock = false;
-  if (lock) setTemplateFormLocked(true);
+  if (lock) setTemplateCommitted(true, template);
   return true;
 }
 
@@ -406,9 +642,16 @@ function restoreWorkflowFromBatch(detail) {
     state.estimate = { estimate: batch.estimate, capabilities: batch.capabilities || null };
     state.capabilities = batch.capabilities || null;
   }
+  restoreRewriteConfirmedFromBatch(batch);
+  restoreBatchDraftForm(batch);
+  restoreUserBatchName();
   if (restored) {
     renderReference();
     syncDecompositionDomState();
+    if (state.decomposition?.referenceVideoId) {
+      renderDecompositionForm(state.decomposition);
+    }
+    renderRewriteStatus();
     renderBatchReadiness();
     renderEstimate();
     persistWorkflowSession();
@@ -436,39 +679,73 @@ async function restoreWorkflowSession() {
   if (session?.templateCommitted && session.templateVersionId) {
     applyRestoredTemplate(session.templateVersionId, { lock: true });
   }
+  if (session?.rewriteConfirmed) {
+    setRewriteConfirmed(true);
+  } else if (state.batchDetail?.batch) {
+    restoreRewriteConfirmedFromBatch(state.batchDetail.batch);
+  } else {
+    renderRewriteStatus();
+  }
+  renderTemplateSaveStatus();
   renderBatchReadiness();
   renderEstimate();
+  restoreUserBatchName();
   return Boolean(state.referenceVideo?.referenceVideoId);
 }
 
 function renderBatchReadiness() {
   if (!els.batchReadiness) return;
+  if (isUpstreamWorkflowLocked()) {
+    els.batchReadiness.hidden = false;
+    els.batchReadiness.className = "wz-batch-readiness wz-info";
+    els.batchReadiness.innerHTML = "<span>Seedance 已提交生成</span><span>前序步骤已锁定；如需重新开始，请先停止当前批次或点击「开始新任务」</span>";
+    return;
+  }
   const decomp = isDecompositionConfirmed();
-  const tmpl = isTemplateCommitted();
-  if (!decomp && !tmpl) {
+  const rewrite = isRewriteConfirmed();
+  const estimate = state.estimate?.estimate;
+  const batch = state.batchDetail?.batch;
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  if (!decomp && !rewrite && !estimate) {
     els.batchReadiness.hidden = true;
     els.batchReadiness.textContent = "";
     return;
   }
   els.batchReadiness.hidden = false;
-  if (decomp && tmpl) {
+  if (batch?.status === "preview_required" && plans.length) {
     els.batchReadiness.className = "wz-batch-readiness wz-success";
-    els.batchReadiness.innerHTML = "<span>拆解 ✓ · 模板 ✓</span><span>下一步：点击「估算本批任务」</span>";
+    els.batchReadiness.innerHTML = "<span>估算 ✓ · 预案已生成 ✓</span><span>下一步：确认预案并提交 Seedance 生成</span>";
+    return;
+  }
+  if (decomp && rewrite && estimate) {
+    els.batchReadiness.className = "wz-batch-readiness wz-success";
+    els.batchReadiness.innerHTML = "<span>拆解 ✓ · 产品信息已确认 ✓ · 估算 ✓</span><span>下一步：点击「生成 Seedance 预案」</span>";
+    return;
+  }
+  if (decomp && rewrite) {
+    els.batchReadiness.className = "wz-batch-readiness wz-success";
+    els.batchReadiness.innerHTML = "<span>拆解 ✓ · 产品信息已确认 ✓</span><span>下一步：点击「估算本批任务」</span>";
     return;
   }
   els.batchReadiness.className = "wz-batch-readiness wz-info";
   const parts = [
     decomp ? "拆解 ✓" : "拆解待完成",
-    tmpl ? "模板 ✓" : "模板待保存"
-  ];
-  els.batchReadiness.innerHTML = `<span>${parts.join(" · ")}</span><span>完成前两步后再估算本批任务</span>`;
+    rewrite ? "产品信息已确认 ✓" : "产品信息待确认",
+    estimate ? "估算 ✓" : ""
+  ].filter(Boolean);
+  const next = !decomp
+    ? "请先完成脚本拆解"
+    : !rewrite
+      ? "请在第 3 步填写产品信息并点击「确认信息」"
+      : "拆解与产品信息就绪后，可估算本批任务";
+  els.batchReadiness.innerHTML = `<span>${parts.join(" · ")}</span><span>${next}</span>`;
 }
 
 function ensureDecompositionForm() {
   if (!els.decompositionForm || els.decompositionForm.dataset.wired === "1") return;
   els.decompositionForm.innerHTML = DECOMPOSITION_FORM_SECTIONS.map((section) => `
-    <section class="wz-decomposition-section">
-      <h3>${escapeHtml(section.title)}</h3>
+    <${section.collapsible ? "details" : "section"} class="wz-decomposition-section${section.collapsible ? " wz-details wz-advanced-settings" : ""}">
+      ${section.collapsible ? `<summary>${escapeHtml(section.title)}</summary>` : `<h3>${escapeHtml(section.title)}</h3>`}
       <div class="wz-decomposition-fields${section.layout === "grid" ? " grid" : ""}">
         ${section.fields.map((field) => `
           <label class="wz-decomposition-field${field.required ? " required" : ""}">
@@ -484,7 +761,7 @@ function ensureDecompositionForm() {
           </label>
         `).join("")}
       </div>
-    </section>
+    </${section.collapsible ? "details" : "section"}>
   `).join("");
   els.decompositionForm.dataset.wired = "1";
   els.decompositionForm.addEventListener("input", onDecompositionFormInput);
@@ -572,15 +849,14 @@ function renderDecompositionForm(data = {}) {
   els.decompositionForm.classList.toggle("empty-line", !visible);
   if (els.decompositionHint) els.decompositionHint.hidden = !visible;
   document.getElementById("wzNodeDecompose")?.classList.toggle("wz-node-decompose-active", visible);
-  setDecompositionFormLocked(isDecompositionConfirmed());
+  setDecompositionFormLocked(isDecompositionConfirmed() || isUpstreamWorkflowLocked());
   fitDecompositionTextareas();
   syncDecompositionDomState();
-  if (visible && !isDecompositionConfirmed()) focusDecomposeStep();
   syncDecompositionControls();
 }
 
 function onDecompositionFormInput(event) {
-  if (isDecompositionConfirmed()) return;
+  if (isDecompositionConfirmed() || isUpstreamWorkflowLocked()) return;
   if (event?.target instanceof HTMLTextAreaElement) {
     event.target.style.height = "auto";
     event.target.style.height = `${Math.max(84, event.target.scrollHeight + 2)}px`;
@@ -595,6 +871,7 @@ function onDecompositionFormInput(event) {
 
 function syncDecompositionControls() {
   const confirmed = isDecompositionConfirmed();
+  const frozen = isUpstreamWorkflowLocked();
   const probeReady = Boolean(state.referenceVideo && state.referenceVideo.status !== "fail");
   const hasDraft = hasDecompositionDraft();
   const draftComplete = isDecompositionDraftComplete();
@@ -602,21 +879,27 @@ function syncDecompositionControls() {
   const confirmBusy = Boolean(els.decomposeBtn?.dataset.originalText);
 
   if (els.draftDecompositionBtn) {
-    els.draftDecompositionBtn.disabled = !probeReady || confirmed || parseBusy;
+    els.draftDecompositionBtn.disabled = frozen || !probeReady || confirmed || parseBusy;
     if (!parseBusy) {
       els.draftDecompositionBtn.textContent = hasDraft ? "重新解析" : "开始解析";
     }
   }
   if (els.decomposeBtn) {
-    els.decomposeBtn.disabled = confirmed || !draftComplete || confirmBusy;
+    els.decomposeBtn.disabled = frozen || confirmed || !draftComplete || confirmBusy;
   }
   if (els.knowledgeNotes) {
-    els.knowledgeNotes.disabled = confirmed;
+    els.knowledgeNotes.disabled = frozen || confirmed;
+  }
+  for (const input of [els.llmProvider, els.llmModel, els.llmEndpoint, els.llmTemperature]) {
+    if (!input) continue;
+    input.disabled = frozen;
+    input.classList.toggle("wz-readonly", frozen);
   }
   syncFlowHints();
 }
 
 function syncReferenceHints() {
+  const frozen = isUpstreamWorkflowLocked();
   const fileReady = Boolean(els.referenceFile?.files?.[0]);
   const uploaded = Boolean(state.referenceVideo?.referenceVideoId);
   const checking = Boolean(els.checkReferenceBtn?.dataset.originalText);
@@ -626,8 +909,9 @@ function syncReferenceHints() {
     els.referenceUploadPanel.classList.toggle("is-uploading", checking);
     els.referenceUploadPanel.classList.toggle("has-upload", uploaded);
   }
-  if (els.checkReferenceBtn) els.checkReferenceBtn.disabled = checking;
-  if (els.referenceFile) els.referenceFile.disabled = checking;
+  if (els.checkReferenceBtn) els.checkReferenceBtn.disabled = frozen || checking;
+  if (els.confirmReferenceBtn) els.confirmReferenceBtn.disabled = frozen || !uploaded || checking;
+  if (els.referenceFile) els.referenceFile.disabled = frozen || checking;
   if (els.referenceUploadStatus && !checking) {
     els.referenceUploadStatus.textContent = uploaded
       ? `已读取 ${state.referenceVideo.fileName || "参考视频"}，可继续解析脚本。`
@@ -635,6 +919,11 @@ function syncReferenceHints() {
         ? `已选择 ${file?.name || "参考视频"}，正在准备上传。`
         : "选中文件后会自动完成上传、格式检查和视频预览。";
   }
+  syncActionHint(
+    els.confirmReferenceBtn,
+    uploaded ? "确认后进入脚本拆解" : "需先上传并读取参考视频",
+    { tone: uploaded ? "muted" : "warn" }
+  );
   if (uploaded) {
     syncActionHint(els.checkReferenceBtn, "");
     return;
@@ -648,49 +937,131 @@ function syncReferenceHints() {
 
 function syncDecompositionHints() {
   const confirmed = isDecompositionConfirmed();
+  const frozen = isUpstreamWorkflowLocked();
   const probeReady = Boolean(state.referenceVideo && state.referenceVideo.status !== "fail");
   const parseBusy = Boolean(els.draftDecompositionBtn?.dataset.originalText);
   const confirmBusy = Boolean(els.decomposeBtn?.dataset.originalText);
   if (els.draftDecompositionBtn && !parseBusy) {
     syncActionHint(
       els.draftDecompositionBtn,
-      confirmed ? "脚本已确认，如需修改请重新上传参考视频" : !probeReady ? "需先上传并读取参考视频" : "",
-      { tone: confirmed ? "warn" : "muted" }
+      frozen
+        ? "Seedance 已提交生成，前序步骤已锁定"
+        : confirmed ? "脚本已确认，如需修改请重新上传参考视频" : !probeReady ? "需先上传并读取参考视频" : "",
+      { tone: frozen || confirmed ? "warn" : "muted" }
     );
   }
   if (els.decomposeBtn && !confirmBusy) {
     syncActionHint(
       els.decomposeBtn,
-      confirmed ? "脚本已确认，可进入第三步产品改写" : !isDecompositionDraftComplete() ? "请先完成解析并补全必填字段" : "确认后将锁定脚本并进入产品改写",
-      { tone: confirmed ? "muted" : !isDecompositionDraftComplete() ? "warn" : "muted" }
+      frozen
+        ? "Seedance 已提交生成，前序步骤已锁定"
+        : confirmed ? "脚本已确认，可进入第三步产品改写" : !isDecompositionDraftComplete() ? "请先完成解析并补全必填字段" : "确认后将锁定脚本并进入产品改写",
+      { tone: frozen ? "warn" : confirmed ? "muted" : !isDecompositionDraftComplete() ? "warn" : "muted" }
     );
   }
 }
 
-function syncTemplateHints() {
+function syncRewriteHints() {
+  const frozen = isUpstreamWorkflowLocked();
+  syncActionHint(
+    els.confirmRewriteBtn,
+    frozen
+      ? "Seedance 已提交生成，前序步骤已锁定"
+      : isRewriteConfirmed()
+        ? "产品信息已确认，仍可修改；修改后建议重新估算"
+        : "确认后将上传素材并校验必填项，之后可进入批次估算",
+    { tone: frozen ? "warn" : isRewriteConfirmed() ? "muted" : "warn" }
+  );
   syncActionHint(
     els.createTemplateBtn,
-    !isDecompositionConfirmed() ? "需先确认脚本拆解" : isTemplateCommitted() ? "模板已保存，可进入第四步估算" : "填写完成后保存模板",
-    { tone: !isDecompositionConfirmed() ? "warn" : "muted" }
+    isTemplateCommitted()
+      ? "模板已保存，可复用于后续批次"
+      : "保存模板是可选项，不保存也可以估算并生成批次",
+    { tone: "muted" }
   );
 }
 
-function hasActivePipelineBatch() {
+function isBlockingPipelineBatch() {
   const batch = state.batchDetail?.batch;
-  return Boolean(batch?.batchId && !terminalBatchStatus(batch.status));
+  if (!batch?.batchId || terminalBatchStatus(batch.status)) return false;
+  return !["draft", "checking"].includes(batch.status);
+}
+
+function hasActivePipelineBatch() {
+  return isBlockingPipelineBatch();
 }
 
 function isQcBatchPending(batch = state.batchDetail?.batch) {
   return batch?.status === "qc";
 }
 
+function isSeedancePlanConfirmed(batch = state.batchDetail?.batch) {
+  if (!batch?.batchId) return false;
+  if (batch.previewConfirmedAt) return true;
+  const plans = Array.isArray(batch.plans) ? batch.plans : [];
+  return plans.some((plan) => plan.status === "confirmed");
+}
+
+function isUpstreamWorkflowLocked() {
+  return isSeedancePlanConfirmed();
+}
+
+function syncBatchParamControls() {
+  const frozen = isUpstreamWorkflowLocked();
+  for (const input of [els.modelSelect, els.duration, els.outputRatio, els.variantCount, els.concurrency, els.seedanceModel]) {
+    if (!input) continue;
+    input.disabled = frozen;
+  }
+  const uploadAssetsBtn = els.estimateBox?.querySelector("[data-action=upload-seedance-assets]");
+  if (uploadAssetsBtn) uploadAssetsBtn.disabled = frozen;
+}
+
+function syncRewriteControls() {
+  const frozen = isUpstreamWorkflowLocked();
+  for (const node of branchNodes()) {
+    for (const input of node.querySelectorAll("input, textarea, select")) {
+      input.disabled = frozen;
+      input.classList.toggle("wz-readonly", frozen);
+    }
+    for (const btn of node.querySelectorAll("button")) {
+      btn.disabled = frozen;
+    }
+  }
+  for (const btn of document.querySelectorAll(".wz-branch-remove")) {
+    btn.disabled = frozen;
+  }
+  if (els.addBranchBtn) els.addBranchBtn.disabled = frozen;
+  if (els.confirmRewriteBtn) els.confirmRewriteBtn.disabled = frozen;
+  setSaveTemplateButtonsDisabled(frozen || isTemplateCommitted());
+}
+
+function syncUpstreamWorkflowLock() {
+  const locked = isUpstreamWorkflowLocked();
+  const canvas = document.getElementById("wzCanvas");
+  if (canvas) {
+    if (locked) canvas.dataset.workflowFrozen = "1";
+    else delete canvas.dataset.workflowFrozen;
+  }
+  if (els.projectName) {
+    els.projectName.disabled = locked;
+    els.projectName.classList.toggle("wz-readonly", locked);
+  }
+  if (els.batchName) {
+    els.batchName.disabled = locked;
+    els.batchName.classList.toggle("wz-readonly", locked);
+  }
+  syncBatchParamControls();
+  syncRewriteControls();
+}
+
 function activeLockFromBatch(batch) {
-  if (!batch?.batchId || terminalBatchStatus(batch.status)) return null;
+  if (!isBlockingPipelineBatch()) return null;
+  const name = batchDisplayName(batch);
   return {
     type: "batch",
     id: batch.batchId,
     status: batch.status,
-    label: activeLockLabel("batch", batch.batchId, batch.status)
+    label: activeLockLabel("batch", name || batch.batchId, batch.status)
   };
 }
 
@@ -699,6 +1070,7 @@ function syncBatchActionButtons() {
   const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
   const locked = hasActivePipelineBatch();
+  const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
 
   if (!estimate) {
@@ -707,46 +1079,59 @@ function syncBatchActionButtons() {
     return;
   }
 
-  els.planBatchBtn.disabled = locked
+  els.planBatchBtn.disabled = frozen
+    || locked
     || qcPending
     || estimate.hardBlocked
     || (estimate.confirmationRequired && !els.confirmLimits.checked);
-  els.confirmPlanBtn.disabled = batch?.status !== "preview_required" || !plans.length;
+  els.confirmPlanBtn.disabled = frozen || batch?.status !== "preview_required" || !plans.length;
 }
 
 function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
   const locked = hasActivePipelineBatch();
+  const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
   syncActionHint(
     els.estimateBtn,
-    qcPending
+    frozen
+      ? "Seedance 已提交生成，前序步骤已锁定"
+      : qcPending
       ? "当前批次已生成完成，请先运行视频质检或放弃批次"
-      : !isDecompositionConfirmed() || !isTemplateCommitted() ? "需先完成脚本确认与模板保存" : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
-    { tone: qcPending || !isDecompositionConfirmed() || !isTemplateCommitted() ? "warn" : "muted" }
+      : !isDecompositionConfirmed()
+        ? "需先完成脚本确认"
+        : !isRewriteConfirmed()
+          ? "需先在第 3 步确认产品改写信息"
+          : estimate ? "可重新估算以刷新任务规模" : "前置步骤已完成，可以估算",
+    { tone: frozen || qcPending || !isDecompositionConfirmed() || !isRewriteConfirmed() ? "warn" : "muted" }
   );
   syncActionHint(
     els.planBatchBtn,
-    qcPending
-      ? `当前批次 ${batch.batchId} 待质检，请先运行视频质检或放弃批次`
+    frozen
+      ? "Seedance 已提交生成，前序步骤已锁定"
+      : qcPending
+      ? `当前批次 ${batchDisplayName(batch)} 待质检，请先运行视频质检或放弃批次`
       : locked
-      ? `当前批次 ${batch.batchId} 进行中（${batchStatusLabels[batch.status] || batch.status}），请先确认预案、等待完成或停止后再新建`
-      : !estimate ? "需先完成拆解、模板保存和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
-    { tone: locked || qcPending || estimate?.hardBlocked ? "error" : "warn" }
+      ? `当前批次 ${batchDisplayName(batch)} 进行中（${batchStatusLabels[batch.status] || batch.status}），请先确认预案、等待完成或停止后再新建`
+      : !estimate ? "需先完成拆解和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
+    { tone: frozen || locked || qcPending || estimate?.hardBlocked ? "error" : "warn" }
   );
   syncActionHint(
     els.confirmPlanBtn,
-    batch?.status === "preview_required" ? "确认后将提交 Seedance 批量生成" : !estimate ? "需先生成 Seedance 预案" : "",
-    { tone: "muted" }
+    frozen
+      ? "Seedance 已提交生成，前序步骤已锁定"
+      : batch?.status === "preview_required" ? "确认后将提交 Seedance 批量生成" : !estimate ? "需先生成 Seedance 预案" : "",
+    { tone: frozen ? "warn" : "muted" }
   );
 }
 
 function syncFlowHints() {
   syncReferenceHints();
   syncDecompositionHints();
-  syncTemplateHints();
+  syncRewriteHints();
   syncBatchActionHints();
+  syncUpstreamWorkflowLock();
 }
 
 function batchProgressSection(batch, tasks, outputs = []) {
@@ -770,7 +1155,7 @@ function batchProgressSection(batch, tasks, outputs = []) {
 function clearDecompositionDraft() {
   renderDecompositionForm({});
   state.decomposition = null;
-  state.estimate = null;
+  clearRewriteProgress();
   syncDecompositionDomState();
   renderEstimate();
   renderBatchReadiness();
@@ -816,11 +1201,104 @@ function focusRewriteStep(missingFields = []) {
 }
 
 function parseRegions(node) {
-  const raw = fieldValue(node, "regions")
+  const raw = fieldValue(node, "targetRegions")
+    || fieldValue(node, "regions")
     || fieldValue(node, "targetRegion")
+    || els.targetRegions?.value
     || els.regions?.value
     || "US";
-  return String(raw).split(",").map((item) => item.trim()).filter(Boolean);
+  return splitMultiValue(raw, ["US"]);
+}
+
+function splitMultiValue(value, fallback = []) {
+  const source = Array.isArray(value) ? value : String(value || "").split(",");
+  const values = source.map((item) => String(item || "").trim()).filter(Boolean);
+  return values.length ? [...new Set(values)] : fallback;
+}
+
+function primaryLanguage(node) {
+  return splitMultiValue(
+    fieldValue(node, "languages")
+      || fieldValue(node, "language")
+      || els.languages?.value
+      || els.language?.value,
+    ["en-US"]
+  )[0];
+}
+
+function disclaimerPresetForLanguage(language) {
+  const value = String(language || "").trim().toLowerCase();
+  if (value.startsWith("pt")) return "pt";
+  if (value.startsWith("zh") || value.includes("chinese")) return "zh";
+  return "en";
+}
+
+function selectedDisclaimerPreset() {
+  const selected = els.disclaimerPreset?.value || "auto";
+  if (selected !== "auto") return selected;
+  return disclaimerPresetForLanguage(splitMultiValue(els.languages?.value || els.language?.value, ["en-US"])[0]);
+}
+
+function applyDisclaimerPresetForNode(node = primaryBranchNode(), { force = false } = {}) {
+  const disclaimerInput = branchField(node, "disclaimer") || els.disclaimer;
+  const presetSelect = branchField(node, "disclaimerPreset") || els.disclaimerPreset;
+  if (!disclaimerInput) return;
+  const presetValue = presetSelect?.value || "auto";
+  const presetKey = presetValue === "auto"
+    ? disclaimerPresetForLanguage(fieldValue(node, "language") || fieldValue(node, "languages") || els.languages?.value || els.language?.value || "en-US")
+    : presetValue;
+  if (presetKey === "other") return;
+  const presetText = DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en;
+  const current = disclaimerInput.value.trim();
+  const knownText = Object.values(DISCLAIMER_PRESETS).includes(current);
+  if (force || !current || knownText) {
+    disclaimerInput.value = presetText;
+  }
+}
+
+function applyDisclaimerPreset(options = {}) {
+  applyDisclaimerPresetForNode(primaryBranchNode(), options);
+}
+
+function disclaimerRequestFields(node = primaryBranchNode()) {
+  const presetSelect = branchField(node, "disclaimerPreset") || els.disclaimerPreset;
+  const disclaimerInput = branchField(node, "disclaimer") || els.disclaimer;
+  const overlayPositionInput = branchField(node, "disclaimerOverlayPosition") || els.disclaimerOverlayPosition;
+  const overlayFontSizeInput = branchField(node, "disclaimerOverlayFontSize") || els.disclaimerOverlayFontSize;
+  const overlayBoxHeightInput = branchField(node, "disclaimerOverlayBoxHeight") || els.disclaimerOverlayBoxHeight;
+  const overlayOpacityInput = branchField(node, "disclaimerOverlayOpacity") || els.disclaimerOverlayOpacity;
+  const presetValue = presetSelect?.value || "auto";
+  const presetKey = presetValue === "auto"
+    ? disclaimerPresetForLanguage(fieldValue(node, "language") || fieldValue(node, "languages") || els.languages?.value || els.language?.value || "en-US")
+    : presetValue;
+  const languages = splitMultiValue(
+    fieldValue(node, "languages") || fieldValue(node, "language") || els.languages?.value || els.language?.value,
+    ["en-US"]
+  );
+  const fallbackText = presetKey === "other" ? "" : (DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en);
+  const disclaimerText = disclaimerInput?.value.trim() || fallbackText;
+  const overlayPosition = overlayPositionInput?.value || "bottom_center";
+  const overlayFontSize = Number(overlayFontSizeInput?.value || 26);
+  const overlayBoxHeight = Number(overlayBoxHeightInput?.value || 170);
+  const overlayOpacity = Number(overlayOpacityInput?.value || 0.58);
+  return {
+    disclaimer: disclaimerText,
+    disclaimerPresetId: presetValue,
+    disclaimerPreset: presetValue,
+    disclaimerLanguage: presetKey,
+    disclaimerByLanguage: Object.fromEntries(languages.map((language) => [
+      language,
+      presetValue === "other"
+        ? disclaimerText
+        : (DISCLAIMER_PRESETS[presetValue === "auto" ? disclaimerPresetForLanguage(language) : presetKey] || disclaimerText)
+    ])),
+    disclaimerOverlay: {
+      position: overlayPosition,
+      fontSize: Number.isFinite(overlayFontSize) ? overlayFontSize : 26,
+      boxHeight: Number.isFinite(overlayBoxHeight) ? overlayBoxHeight : 170,
+      opacity: Number.isFinite(overlayOpacity) ? overlayOpacity : 0.58
+    }
+  };
 }
 
 function missingRequiredDraftFields(draft) {
@@ -908,13 +1386,34 @@ function galleryPaginationHtml(gallery) {
   `;
 }
 
-function renderTruthFields() {
-  els.truthFields.innerHTML = strongTruthFields.map(([key, label]) => `
+function renderTruthFields(root = els.truthFields) {
+  if (!root) return;
+  root.innerHTML = strongTruthFields.map(([key, label]) => `
     <label>${escapeHtml(label)}
       <input data-truth-field="${escapeHtml(key)}" type="text" />
     </label>
   `).join("");
   markBranchFields();
+}
+
+function renderTruthFieldsForBranch(node) {
+  const container = node?.querySelector(".wz-truth-fields");
+  if (!container || container.querySelector("[data-truth-field]")) return;
+  container.innerHTML = strongTruthFields.map(([key, label]) => `
+    <label>${escapeHtml(label)}
+      <input data-truth-field="${escapeHtml(key)}" type="text" />
+    </label>
+  `).join("");
+  markBranchFields(node.closest(".wz-branches") || els.branches);
+}
+
+function syncMaterialDirectionForNode(node = primaryBranchNode()) {
+  const select = branchField(node, "materialDirection") || els.materialDirection;
+  const wrap = node?.querySelector(".wz-material-direction-custom-wrap") || els.materialDirectionCustomWrap;
+  const custom = branchField(node, "materialDirectionCustom") || els.materialDirectionCustom;
+  const isOther = select?.value === "other";
+  if (wrap) wrap.hidden = !isOther;
+  if (isOther && custom && !custom.value.trim()) custom.value = "跟随竞品";
 }
 
 function markBranchFields(root = els.branches) {
@@ -940,6 +1439,41 @@ function branchField(node, field) {
   return node?.querySelector(`[data-branch-field="${field}"]`) || null;
 }
 
+function saveTemplateButtons() {
+  return [...(els.branches?.querySelectorAll(".wz-save-template-btn") || [])];
+}
+
+function templateSaveStatusNodes() {
+  return [...(els.branches?.querySelectorAll(".wz-template-save-status") || [])];
+}
+
+function templateSelectFields() {
+  const nodes = [...(els.branches?.querySelectorAll('[data-branch-field="templateSelect"]') || [])];
+  if (els.templateSelect && !nodes.includes(els.templateSelect)) nodes.unshift(els.templateSelect);
+  return nodes;
+}
+
+function syncTemplateSelectValues(versionId = els.templateSelect?.value || "") {
+  for (const select of templateSelectFields()) {
+    select.value = versionId;
+  }
+}
+
+function setSaveTemplateButtonsDisabled(disabled) {
+  for (const button of saveTemplateButtons()) {
+    button.disabled = disabled;
+    if (!button.dataset.originalText) {
+      button.textContent = disabled && isTemplateCommitted() ? "模板已保存" : "保存模板";
+    }
+  }
+}
+
+function setSaveTemplateButtonsBusy(busy, label) {
+  for (const button of saveTemplateButtons()) {
+    setBusy(button, busy, label);
+  }
+}
+
 function fieldValue(node, field) {
   const input = branchField(node, field);
   return input ? String(input.value || "").trim() : "";
@@ -951,28 +1485,288 @@ function setFieldValue(node, field, value) {
   input.value = Array.isArray(value) ? value.join(",") : String(value);
 }
 
+function setMaterialDirectionValue(node, value) {
+  const input = branchField(node, "materialDirection") || els.materialDirection;
+  const custom = branchField(node, "materialDirectionCustom") || els.materialDirectionCustom;
+  const text = String(value || "").trim();
+  if (!input) return;
+  const option = [...input.options].find((item) => item.value === text || item.textContent.trim() === text);
+  if (option) {
+    input.value = option.value;
+    if (custom) custom.value = "";
+  } else if (text) {
+    input.value = "other";
+    if (custom) custom.value = text;
+  }
+  syncMaterialDirectionCustom();
+}
+
+function setOptionalValue(input, value) {
+  if (!input || value === undefined || value === null) return;
+  input.value = Array.isArray(value) ? value.join(",") : String(value);
+}
+
+function renderStoreCandidates(node = primaryBranchNode()) {
+  const box = node?.querySelector(".wz-store-candidates") || els.storeCandidates;
+  if (!box) return;
+  const result = state.storeInspection;
+  if (!result) {
+    box.className = "wz-list empty-line wz-store-candidates";
+    box.textContent = "尚未读取商店页资产";
+    return;
+  }
+  const candidates = result.candidates || {};
+  const screenshots = Array.isArray(candidates.screenshots) ? candidates.screenshots : [];
+  const warnings = result.warnings || [];
+  box.className = "wz-list wz-store-candidates";
+  box.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(candidates.productName || "未识别产品名")}</strong>
+        <small>${escapeHtml(result.store || "store")} · ${escapeHtml(candidates.developer || "未知开发者")}</small>
+      </div>
+      <div class="wz-row-actions">
+        ${candidates.productName ? `<button type="button" class="ghost" data-store-apply="productName">应用产品名</button>` : ""}
+      </div>
+    </article>
+    ${candidates.description ? `
+      <article class="wz-row">
+        <div><strong>商店描述</strong><small>${escapeHtml(candidates.description)}</small></div>
+        <button type="button" class="ghost" data-store-apply="description">应用产品描述</button>
+      </article>
+    ` : ""}
+    ${candidates.icon?.url ? `
+      <article class="wz-row">
+        <div><strong>Icon 候选</strong><small>${escapeHtml(candidates.icon.url)}</small></div>
+        <button type="button" class="ghost" data-store-apply="icon">使用此 icon</button>
+      </article>
+    ` : ""}
+    ${screenshots.length ? `
+      <article class="wz-row">
+        <div><strong>截图候选</strong><small>${escapeHtml(screenshots.slice(0, 4).map((item) => item.label || item.url).join(", "))}</small></div>
+        <button type="button" class="ghost" data-store-apply="screenshots">使用前 4 张截图</button>
+      </article>
+    ` : ""}
+    ${warnings.map((item) => `<div class="wz-warning">${escapeHtml(item)}</div>`).join("")}
+  `;
+}
+
+function applyStoreCandidate(kind, node = primaryBranchNode()) {
+  const result = state.storeInspection;
+  if (!result) return;
+  const candidates = result.candidates || {};
+  if (kind === "productName" && candidates.productName) {
+    setFieldValue(node, "productName", candidates.productName);
+  }
+  if (kind === "description" && candidates.description) {
+    const current = fieldValue(node, "customPrompt") || els.customPrompt?.value.trim() || "";
+    const next = [current, `Store description: ${candidates.description}`].filter(Boolean).join("\n");
+    setFieldValue(node, "customPrompt", next);
+  }
+  if (kind === "icon" && candidates.icon?.url) {
+    const input = branchField(node, "productIconFile") || els.productIconFile;
+    if (input) {
+      input.dataset.storageUrl = candidates.icon.url;
+      input.dataset.uploadedFileName = candidates.icon.fileName || "store-icon";
+      input.dataset.storageKey = candidates.icon.storageKey || "";
+    }
+  }
+  if (kind === "screenshots") {
+    const screenshots = Array.isArray(candidates.screenshots) ? candidates.screenshots : [];
+    const input = branchField(node, "productScreenshotFile") || els.productScreenshotFile;
+    if (input && screenshots[0]?.url) {
+      input.dataset.storageUrl = screenshots[0].url;
+      input.dataset.uploadedFileName = screenshots[0].fileName || "store-screenshot";
+      input.dataset.storageKey = screenshots[0].storageKey || "";
+    }
+    const current = fieldValue(node, "customPrompt") || els.customPrompt?.value.trim() || "";
+    const refs = screenshots.slice(0, 4).map((item, index) => `Store screenshot ${index + 1}: ${item.url}`).join("\n");
+    if (refs) setFieldValue(node, "customPrompt", [current, refs].filter(Boolean).join("\n"));
+  }
+  markTemplateDirtyFromEdit();
+  showToast("已应用商店页候选信息", { type: "success" });
+}
+
 function branchTitle(node, index) {
   const explicit = node?.dataset.branchLabel || "";
   const title = node?.querySelector(".wz-branch-title")?.textContent?.trim() || "";
   return explicit || title || `改写 3.${index + 1}`;
 }
 
+function syncAssetInputMeta(input) {
+  if (!input) return;
+  const label = input.closest("label");
+  if (!label) return;
+  let meta = label.querySelector(".wz-file-meta");
+  if (!meta) {
+    meta = document.createElement("small");
+    meta.className = "wz-file-meta";
+    label.appendChild(meta);
+  }
+  const fileName = input.dataset.uploadedFileName || "";
+  const status = input.dataset.reviewStatus || "";
+  const reason = input.dataset.reviewReason || "";
+  if (!fileName && !status && !reason) {
+    meta.hidden = true;
+    meta.textContent = "";
+    return;
+  }
+  const statusText = formatAssetReviewStatus(status, reason);
+  meta.hidden = false;
+  meta.textContent = [fileName, statusText].filter(Boolean).join(" · ");
+}
+
+function formatAssetReviewStatus(status = "", reason = "") {
+  const normalized = normalizeAssetReviewStatus(status);
+  if (normalized === "approved") return "已通过审核";
+  if (normalized === "rejected") return `审核未通过${reason ? `：${reason}` : ""}`;
+  if (normalized === "failed") return `审核失败${reason ? `：${reason}` : ""}`;
+  if (normalized === "running" || normalized === "processing") return `审核处理中${reason ? `：${reason}` : ""}`;
+  if (normalized === "pending" || normalized === "queued") return `等待审核${reason ? `：${reason}` : ""}`;
+  return normalized ? `审核状态 ${normalized}${reason ? `：${reason}` : ""}` : "";
+}
+
+function normalizeAssetReviewStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (["approved", "active", "success", "succeeded", "pass", "passed"].includes(normalized)) return "approved";
+  if (["rejected", "reject"].includes(normalized)) return "rejected";
+  if (["failed", "fail", "error"].includes(normalized)) return "failed";
+  if (["running", "processing", "pending", "queued"].includes(normalized)) return normalized;
+  return normalized || "pending";
+}
+
+function isAssetReviewFailureStatus(status = "") {
+  const normalized = normalizeAssetReviewStatus(status);
+  return normalized === "rejected" || normalized === "failed";
+}
+
+function assetLabel(assetKey = "") {
+  const labels = {
+    productIcon: "产品 Logo",
+    productScreenshot: "产品截图",
+    productRecording: "产品录屏",
+    ctaAsset: "CTA 素材",
+    endingAsset: "结尾素材",
+    personAsset: "人物素材",
+    rewardElement: "奖励元素"
+  };
+  return labels[assetKey] || assetKey || "素材";
+}
+
+function applyAssetReviewResultToInputs(branches = []) {
+  const branchMap = new Map((Array.isArray(branches) ? branches : []).map((branch) => [branch.branchId, branch]));
+  for (const node of branchNodes()) {
+    const branch = branchMap.get(node.dataset.branchId || "branch_1");
+    if (!branch) continue;
+    for (const [assetKey, field] of assetInputKeys) {
+      const input = branchField(node, field);
+      const review = branch.assetReviews?.[assetKey];
+      if (!input || !review) continue;
+      input.dataset.assetId = review.assetId || input.dataset.assetId || "";
+      input.dataset.reviewStatus = review.status || input.dataset.reviewStatus || "";
+      input.dataset.reviewReason = review.reviewReason || "";
+      syncAssetInputMeta(input);
+    }
+  }
+}
+
+function buildAssetReviewFailureMessage(error) {
+  const failures = Array.isArray(error?.data?.failures) ? error.data.failures : [];
+  if (!failures.length) return error?.message || "产品素材审核未通过";
+  return failures.map((item) => {
+    const branch = item.branchLabel || item.branchId || "默认分支";
+    const label = assetLabel(item.assetKey);
+    const name = item.fileName || label;
+    const status = formatAssetReviewStatus(item.status, item.reason);
+    return `${branch} / ${label} / ${name}${status ? ` / ${status}` : ""}`;
+  }).join("\n");
+}
+
+function applyAssetReviewFailureFromError(error) {
+  const failures = Array.isArray(error?.data?.failures) ? error.data.failures : [];
+  for (const node of branchNodes()) {
+    const branchId = node.dataset.branchId || "branch_1";
+    for (const failure of failures) {
+      if (failure.branchId && failure.branchId !== branchId) continue;
+      const field = assetInputKeys.find(([key]) => key === failure.assetKey)?.[1];
+      const input = field ? branchField(node, field) : null;
+      if (!input) continue;
+      if (failure.assetId) input.dataset.assetId = failure.assetId;
+      input.dataset.reviewStatus = failure.status || "pending";
+      input.dataset.reviewReason = failure.reason || "";
+      syncAssetInputMeta(input);
+    }
+  }
+  renderError(els.globalError, {
+    code: error?.code || "asset_review_pending",
+    message: buildAssetReviewFailureMessage(error),
+    data: error?.data || {}
+  }, "产品素材审核未通过");
+  renderEstimate();
+  renderBatch();
+}
+
+async function uploadSeedanceAssetsForReview() {
+  if (isUpstreamWorkflowLocked()) return;
+  clearError(els.globalError);
+  setBusy(els.confirmPlanBtn, true, "上传审核中");
+  try {
+    await uploadBranchAssets();
+    await saveDraftBatch({
+      sourceStep: "seedance_assets_reviewed",
+      templateSnapshot: { draft: draftFromForm() },
+      branches: collectBranchDrafts(),
+      decomposition: state.decomposition
+    });
+    renderEstimate();
+    renderBatch();
+    showToast("Seedance 素材已上传，审核通过后可确认预案", { type: "success" });
+  } catch (error) {
+    if (error?.code === "asset_review_pending") {
+      applyAssetReviewFailureFromError(error);
+      return;
+    }
+    renderError(els.globalError, error, "Seedance 素材上传失败");
+  } finally {
+    setBusy(els.confirmPlanBtn, false);
+  }
+}
+
 function collectBranchAssets(node) {
   const assetFileNames = {};
   const assetUrls = {};
   const assetStorageKeys = {};
+  const assetStoredPaths = {};
+  const assetReviews = {};
   for (const [assetKey, field] of assetInputKeys) {
     const input = branchField(node, field);
     const file = input?.files?.[0];
     const savedName = input?.dataset.uploadedFileName || "";
     const savedUrl = input?.dataset.storageUrl || "";
     const savedStorageKey = input?.dataset.storageKey || "";
+    const savedStoredPath = input?.dataset.storedPath || "";
+    const savedAssetId = input?.dataset.assetId || "";
+    const savedReviewStatus = input?.dataset.reviewStatus || "";
+    const savedReviewReason = input?.dataset.reviewReason || "";
     if (file?.name) assetFileNames[assetKey] = file.name;
     else if (savedName) assetFileNames[assetKey] = savedName;
     if (savedUrl) assetUrls[assetKey] = savedUrl;
     if (savedStorageKey) assetStorageKeys[assetKey] = savedStorageKey;
+    if (savedStoredPath) assetStoredPaths[assetKey] = savedStoredPath;
+    if (savedAssetId || savedReviewStatus || savedReviewReason) {
+      assetReviews[assetKey] = {
+        assetId: savedAssetId,
+        status: savedReviewStatus || "pending",
+        reviewReason: savedReviewReason
+      };
+    }
   }
-  return { assetFileNames, assetUrls, assetStorageKeys };
+  if (assetFileNames.endingAssetInline && !assetFileNames.endingAsset) assetFileNames.endingAsset = assetFileNames.endingAssetInline;
+  if (assetUrls.endingAssetInline && !assetUrls.endingAsset) assetUrls.endingAsset = assetUrls.endingAssetInline;
+  if (assetStorageKeys.endingAssetInline && !assetStorageKeys.endingAsset) assetStorageKeys.endingAsset = assetStorageKeys.endingAssetInline;
+  if (assetStoredPaths.endingAssetInline && !assetStoredPaths.endingAsset) assetStoredPaths.endingAsset = assetStoredPaths.endingAssetInline;
+  if (assetReviews.endingAssetInline && !assetReviews.endingAsset) assetReviews.endingAsset = assetReviews.endingAssetInline;
+  return { assetFileNames, assetUrls, assetStorageKeys, assetStoredPaths, assetReviews };
 }
 
 function collectTruthRules(node) {
@@ -985,10 +1779,14 @@ function collectTruthRules(node) {
 
 function collectAllBranchDrafts() {
   return branchNodes().map((node, index) => {
-    const { assetFileNames, assetUrls, assetStorageKeys } = collectBranchAssets(node);
+    const { assetFileNames, assetUrls, assetStorageKeys, assetStoredPaths, assetReviews } = collectBranchAssets(node);
     const targetChannel = fieldValue(node, "targetChannel") || fieldValue(node, "templateChannel") || "meta_ads";
-    const regions = (fieldValue(node, "regions") || fieldValue(node, "targetRegion") || "US")
-      .split(",").map((item) => item.trim()).filter(Boolean);
+    const regions = parseRegions(node);
+    const languages = splitMultiValue(
+      fieldValue(node, "languages") || fieldValue(node, "language") || els.languages?.value || els.language?.value,
+      ["en-US"]
+    );
+    const disclaimerFields = disclaimerRequestFields(node);
     const branchId = node.dataset.branchId || `branch_${index + 1}`;
     return {
       branchId,
@@ -1000,20 +1798,27 @@ function collectAllBranchDrafts() {
       cta: fieldValue(node, "cta"),
       ending: fieldValue(node, "ending"),
       currencySymbol: fieldValue(node, "currencySymbol"),
-      language: fieldValue(node, "language") || "en-US",
+      language: languages[0] || "en-US",
+      languages,
       regions,
       targetChannels: [targetChannel],
-      defaultOutputRatio: "9:16",
+      defaultOutputRatio: els.outputRatio?.value || "9:16",
       defaultDurationSec: Number(fieldValue(node, "defaultDuration") || 15),
       promiseLevel: fieldValue(node, "promiseLevel") || "stable",
       assetFileNames,
       assetUrls,
       assetStorageKeys,
-      materialDirection: fieldValue(node, "materialDirection"),
+      assetStoredPaths,
+      assetReviews,
+      materialDirection: fieldValue(node, "materialDirection") === "other"
+        ? (fieldValue(node, "materialDirectionCustom") || "跟随竞品")
+        : fieldValue(node, "materialDirection"),
+      materialDirectionCustom: fieldValue(node, "materialDirectionCustom"),
       voiceoverStyle: fieldValue(node, "voiceoverStyle"),
       variantPrompt: fieldValue(node, "variantPrompt"),
       customPrompt: fieldValue(node, "customPrompt"),
       negativePrompt: fieldValue(node, "negativePrompt"),
+      ...disclaimerFields,
       truthRules: collectTruthRules(node)
     };
   });
@@ -1025,17 +1830,36 @@ function collectBranchDrafts() {
 
 function branchDraftToTemplateShape(branch, index = 0) {
   return {
+    branchId: branch.branchId || `branch_${index + 1}`,
+    branchLabel: branch.branchLabel || `改写 3.${index + 1}`,
     displayName: branch.displayName || `改写 3.${index + 1}`,
+    productLink: branch.productLink,
     productName: branch.productName,
     cta: branch.cta,
     ending: branch.ending,
     currencySymbol: branch.currencySymbol,
     language: branch.language,
+    languages: branch.languages,
     regions: branch.regions,
     targetChannels: branch.targetChannels,
     defaultOutputRatio: branch.defaultOutputRatio || "9:16",
     defaultDurationSec: branch.defaultDurationSec,
     promiseLevel: branch.promiseLevel,
+    assetFileNames: branch.assetFileNames || {},
+    assetUrls: branch.assetUrls || {},
+    assetStorageKeys: branch.assetStorageKeys || {},
+    assetStoredPaths: branch.assetStoredPaths || {},
+    assetReviews: branch.assetReviews || {},
+    materialDirection: branch.materialDirection || "",
+    materialDirectionCustom: branch.materialDirectionCustom || "",
+    voiceoverStyle: branch.voiceoverStyle || "",
+    variantPrompt: branch.variantPrompt || "",
+    customPrompt: branch.customPrompt || "",
+    negativePrompt: branch.negativePrompt || "",
+    disclaimer: branch.disclaimer,
+    disclaimerPreset: branch.disclaimerPreset,
+    disclaimerLanguage: branch.disclaimerLanguage,
+    disclaimerByLanguage: branch.disclaimerByLanguage,
     truthRules: branch.truthRules || {}
   };
 }
@@ -1061,67 +1885,76 @@ function isTemplateCommitted() {
   return Boolean(state.templateCommitted && state.selectedTemplate?.versionId);
 }
 
-function setTemplateFormLocked(locked) {
-  state.templateCommitted = locked;
-  for (const node of branchNodes()) {
-    for (const input of node.querySelectorAll("input, textarea, select")) {
-      input.disabled = locked;
-    }
-    for (const button of node.querySelectorAll(".wz-save-branch")) {
-      button.disabled = locked;
-    }
-    node.classList.toggle("state-done", locked);
-    if (locked) node.dataset.templateCommitted = "1";
-    else node.removeAttribute("data-template-committed");
-  }
-  if (els.createTemplateBtn) {
-    els.createTemplateBtn.disabled = locked;
-    if (!els.createTemplateBtn.dataset.originalText) {
-      els.createTemplateBtn.textContent = locked ? "模板已保存" : "保存模板";
-    }
-  }
-  if (els.addBranchBtn) els.addBranchBtn.disabled = locked;
-  document.getElementById("wzNodeRewrite")?.toggleAttribute("data-template-committed", locked);
-  renderTemplateStatus();
-  renderBatchReadiness();
+function setTemplateCommitted(committed, template = null) {
+  state.templateCommitted = Boolean(committed);
+  if (template) state.selectedTemplate = template;
+  setSaveTemplateButtonsDisabled(isTemplateCommitted());
+  renderTemplateSaveStatus();
+  persistWorkflowSession();
   window.dispatchEvent(new CustomEvent("wz:template-commit-changed"));
 }
 
-function renderTemplateStatus() {
-  if (!els.templateStatus) return;
-  if (isTemplateCommitted()) {
-    const name = state.selectedTemplate?.draft?.displayName || state.selectedTemplate?.templateId || "当前模板";
-    els.templateStatus.hidden = false;
-    els.templateStatus.className = "wz-template-status wz-success";
-    els.templateStatus.textContent = `${TEMPLATE_SAVED_MESSAGE}（${name}）`;
-    els.templateStatus.classList.remove("empty-line");
+function renderRewriteStatus() {
+  if (!els.rewriteStatus) return;
+  els.rewriteStatus.hidden = false;
+  if (isRewriteConfirmed()) {
+    els.rewriteStatus.className = "wz-template-status wz-success";
+    els.rewriteStatus.textContent = REWRITE_CONFIRMED_MESSAGE;
+    els.rewriteStatus.classList.remove("empty-line");
     return;
   }
-  els.templateStatus.hidden = false;
-  els.templateStatus.className = "wz-template-status wz-info";
-  els.templateStatus.textContent = branchNodes().length > 1
-    ? "请完成全部裂变子节点后，点击「保存模板」。"
-    : "填写完成后点击「保存模板」，保存后将进入第四步。";
-  els.templateStatus.classList.remove("empty-line");
+  els.rewriteStatus.className = "wz-template-status wz-info";
+  els.rewriteStatus.textContent = branchNodes().length > 1
+    ? "填写全部裂变子节点信息后点击「确认信息」，即可进入批次估算；保存模板为可选项。"
+    : "填写产品改写信息后点击「确认信息」，即可进入批次估算；保存模板为可选项。";
+  els.rewriteStatus.classList.remove("empty-line");
+  if (els.rewriteConfirmHint) {
+    els.rewriteConfirmHint.textContent = isUpstreamWorkflowLocked()
+      ? "Seedance 已提交生成，第 1–4 步内容已锁定。"
+      : isRewriteConfirmed()
+        ? "产品信息已确认，仍可继续修改第 3 节内容；修改后建议重新估算。"
+        : "确认后将上传素材并校验必填项；确认后仍可继续修改第 3 节内容。";
+  }
+  if (els.confirmRewriteBtn && !els.confirmRewriteBtn.dataset.originalText) {
+    els.confirmRewriteBtn.textContent = isRewriteConfirmed() ? "重新确认信息" : "确认信息";
+  }
+}
+
+function renderTemplateSaveStatus() {
+  const nodes = templateSaveStatusNodes();
+  if (!nodes.length) return;
+  let message = branchNodes().length > 1
+    ? "保存模板是可选项；需要复用全部裂变子节点时再点击「保存模板」。"
+    : "保存模板是可选项，不保存也可以估算并生成批次。";
+  if (isTemplateCommitted()) {
+    const name = state.selectedTemplate?.draft?.displayName || state.selectedTemplate?.templateId || "当前模板";
+    message = `${TEMPLATE_SAVED_MESSAGE}（${name}）`;
+  } else if (state.selectedTemplate?.templateId) {
+    const nextVersion = (Number(state.selectedTemplate?.versionNumber) || 0) + 1;
+    message = `正在编辑已保存模板，再次保存将写入新版本 v${nextVersion}。`;
+  }
+  for (const node of nodes) {
+    node.textContent = message;
+  }
 }
 
 function unlockTemplateEditing() {
   if (!state.templateCommitted) return;
-  const nextVersion = (Number(state.selectedTemplate?.versionNumber) || 0) + 1;
   state.templateCommitted = false;
-  setTemplateFormLocked(false);
-  if (els.templateStatus && state.selectedTemplate?.templateId) {
-    els.templateStatus.hidden = false;
-    els.templateStatus.className = "wz-template-status wz-warning";
-    els.templateStatus.textContent = `正在编辑已保存模板，再次保存将写入新版本 v${nextVersion}。`;
-  }
-  renderBatchReadiness();
-  syncDecompositionControls();
+  setSaveTemplateButtonsDisabled(false);
+  renderTemplateSaveStatus();
+  persistWorkflowSession();
 }
 
 function markTemplateDirtyFromEdit() {
+  if (isUpstreamWorkflowLocked()) return;
   if (state.suppressTemplateUnlock || !state.templateCommitted) return;
   unlockTemplateEditing();
+}
+
+function markRewriteDirtyFromEdit() {
+  if (isUpstreamWorkflowLocked()) return;
+  invalidateEstimateFromEdit();
 }
 
 function fillBranchDraft(node, draft = {}, index = 0) {
@@ -1133,9 +1966,11 @@ function fillBranchDraft(node, draft = {}, index = 0) {
   setFieldValue(node, "productLink", draft.productLink);
   setFieldValue(node, "cta", draft.cta);
   setFieldValue(node, "language", draft.language);
+  setFieldValue(node, "languages", Array.isArray(draft.languages) ? draft.languages.join(",") : (draft.language || draft.languages));
   setFieldValue(node, "targetChannel", draft.targetChannels?.[0] || draft.targetChannel);
   setFieldValue(node, "targetRegion", draft.regions?.[0] || draft.targetRegion);
-  setFieldValue(node, "materialDirection", draft.materialDirection);
+  setFieldValue(node, "targetRegions", Array.isArray(draft.regions) ? draft.regions.join(",") : (draft.targetRegions || draft.targetRegion));
+  setMaterialDirectionValue(node, draft.materialDirection);
   setFieldValue(node, "voiceoverStyle", draft.voiceoverStyle);
   setFieldValue(node, "promiseLevel", draft.promiseLevel);
   setFieldValue(node, "projectName", draft.projectName);
@@ -1150,12 +1985,24 @@ function fillBranchDraft(node, draft = {}, index = 0) {
   setFieldValue(node, "variantPrompt", draft.variantPrompt);
   setFieldValue(node, "customPrompt", draft.customPrompt);
   setFieldValue(node, "negativePrompt", draft.negativePrompt);
+  setFieldValue(node, "disclaimerPreset", draft.disclaimerPreset || draft.disclaimerPresetId || "auto");
+  setFieldValue(node, "disclaimer", draft.disclaimer || "");
+  setFieldValue(node, "disclaimerOverlayPosition", draft.disclaimerOverlay?.position || "bottom_center");
+  setFieldValue(node, "disclaimerOverlayFontSize", String(draft.disclaimerOverlay?.fontSize ?? 26));
+  setFieldValue(node, "disclaimerOverlayBoxHeight", String(draft.disclaimerOverlay?.boxHeight ?? 170));
+  setFieldValue(node, "disclaimerOverlayOpacity", String(draft.disclaimerOverlay?.opacity ?? 0.58));
+  syncMaterialDirectionForNode(node);
   for (const [assetKey, field] of assetInputKeys) {
     const input = branchField(node, field);
     if (!input) continue;
     input.dataset.uploadedFileName = draft.assetFileNames?.[assetKey] || "";
     input.dataset.storageUrl = draft.assetUrls?.[assetKey] || "";
     input.dataset.storageKey = draft.assetStorageKeys?.[assetKey] || "";
+    input.dataset.storedPath = draft.assetStoredPaths?.[assetKey] || "";
+    input.dataset.assetId = draft.assetReviews?.[assetKey]?.assetId || "";
+    input.dataset.reviewStatus = draft.assetReviews?.[assetKey]?.status || "";
+    input.dataset.reviewReason = draft.assetReviews?.[assetKey]?.reviewReason || "";
+    syncAssetInputMeta(input);
   }
   for (const input of node.querySelectorAll("[data-truth-field]")) {
     input.value = draft.truthRules?.[input.dataset.truthField] || "";
@@ -1194,10 +2041,15 @@ async function uploadBranchAssets() {
         })
       });
       const asset = data.asset || {};
+      const review = asset.review || {};
       input.dataset.uploadedFileName = asset.fileName || file.name;
       input.dataset.storageUrl = asset.storageUrl || asset.previewUrl || "";
       input.dataset.storageKey = asset.storageKey || "";
       input.dataset.storedPath = asset.storedPath || "";
+      input.dataset.assetId = review.assetId || "";
+      input.dataset.reviewStatus = review.status || "pending";
+      input.dataset.reviewReason = review.reviewReason || "";
+      syncAssetInputMeta(input);
     }
   }
 }
@@ -1216,6 +2068,11 @@ function draftFromForm() {
     || fieldValue(node, "targetChannel")
     || els.templateChannel?.value
     || "meta_ads";
+  const languages = splitMultiValue(
+    fieldValue(node, "languages") || fieldValue(node, "language") || els.languages?.value || els.language?.value,
+    ["en-US"]
+  );
+  const disclaimerFields = disclaimerRequestFields();
   return {
     displayName: fieldValue(node, "displayName") || els.displayName?.value.trim() || "",
     productName: fieldValue(node, "productName") || els.productName?.value.trim() || "",
@@ -1223,15 +2080,17 @@ function draftFromForm() {
     cta: fieldValue(node, "cta") || els.cta?.value.trim() || "",
     ending: fieldValue(node, "ending") || els.ending?.value.trim() || "",
     currencySymbol: fieldValue(node, "currencySymbol") || els.currencySymbol?.value.trim() || "",
-    language: fieldValue(node, "language") || els.language?.value.trim() || "",
+    language: languages[0] || "en-US",
+    languages,
     regions: parseRegions(node),
     targetChannels: [targetChannel],
-    defaultOutputRatio: "9:16",
+    defaultOutputRatio: els.outputRatio?.value || "9:16",
     defaultDurationSec: Number(fieldValue(node, "defaultDuration") || els.defaultDuration?.value || 15),
     promiseLevel: fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable",
     assetFileNames: primaryBranch.assetFileNames || {},
     assetUrls: primaryBranch.assetUrls || {},
     assetStorageKeys: primaryBranch.assetStorageKeys || {},
+    assetReviews: primaryBranch.assetReviews || {},
     llmConfig: {
       provider: els.llmProvider.value.trim(),
       model: els.llmModel.value.trim(),
@@ -1241,10 +2100,12 @@ function draftFromForm() {
     knowledgeNotes: els.knowledgeNotes.value.trim(),
     variantPrompt: fieldValue(node, "variantPrompt") || els.variantPrompt?.value.trim() || "",
     seedanceModel: els.seedanceModel.value.trim(),
-    materialDirection: fieldValue(node, "materialDirection") || els.materialDirection?.value || "",
+    materialDirection: selectedMaterialDirection() || fieldValue(node, "materialDirection") || "",
+    materialDirectionCustom: fieldValue(node, "materialDirectionCustom") || els.materialDirectionCustom?.value.trim() || "",
     voiceoverStyle: fieldValue(node, "voiceoverStyle") || els.voiceoverStyle?.value.trim() || "",
     customPrompt: fieldValue(node, "customPrompt") || els.customPrompt?.value.trim() || "",
     negativePrompt: fieldValue(node, "negativePrompt") || els.negativePrompt?.value.trim() || "",
+    ...disclaimerFields,
     truthRules,
     branches
   };
@@ -1266,23 +2127,28 @@ function selectedTemplateNameChanged(draft = {}) {
 function applyTemplate(template) {
   state.suppressTemplateUnlock = true;
   state.selectedTemplate = template || null;
+  clearRewriteProgress();
   const draft = template?.draft;
   if (!draft) {
     state.suppressTemplateUnlock = false;
     return;
   }
-  els.displayName.value = draft.displayName || "";
-  els.productName.value = draft.productName || "";
-  els.productLink.value = draft.productLink || "";
-  els.cta.value = draft.cta || "";
-  els.ending.value = draft.ending || "";
-  els.currencySymbol.value = draft.currencySymbol || "$";
-  els.language.value = draft.language || "en-US";
-  els.regions.value = Array.isArray(draft.regions) ? draft.regions.join(",") : "";
-  els.templateChannel.value = draft.targetChannels?.[0] || "meta_ads";
+  const primary = Array.isArray(draft.branches) && draft.branches.length ? draft.branches[0] : draft;
+  els.displayName.value = primary.displayName || draft.displayName || "";
+  els.productName.value = primary.productName || draft.productName || "";
+  els.productLink.value = primary.productLink || draft.productLink || "";
+  els.cta.value = primary.cta || draft.cta || "";
+  els.ending.value = primary.ending || draft.ending || "";
+  els.currencySymbol.value = primary.currencySymbol || draft.currencySymbol || "$";
+  setOptionalValue(els.language, draft.language || draft.languages?.[0] || "en-US");
+  setOptionalValue(els.languages, Array.isArray(draft.languages) ? draft.languages.join(",") : (draft.language || "en-US"));
+  setOptionalValue(els.regions, Array.isArray(draft.regions) ? draft.regions.join(",") : "");
+  setOptionalValue(els.targetRegions, Array.isArray(draft.regions) ? draft.regions.join(",") : "");
+  setOptionalValue(els.templateChannel, draft.targetChannels?.[0] || "meta_ads");
   els.targetChannel.value = draft.targetChannels?.[0] || "meta_ads";
-  els.defaultDuration.value = String(draft.defaultDurationSec || 15);
+  setOptionalValue(els.defaultDuration, String(draft.defaultDurationSec || 15));
   els.duration.value = String(draft.defaultDurationSec || 15);
+  setOptionalValue(els.outputRatio, draft.defaultOutputRatio || "9:16");
   els.promiseLevel.value = draft.promiseLevel || "stable";
   els.llmProvider.value = draft.llmConfig?.provider || "";
   els.llmModel.value = draft.llmConfig?.model || "";
@@ -1291,10 +2157,19 @@ function applyTemplate(template) {
   els.knowledgeNotes.value = draft.knowledgeNotes || "";
   els.variantPrompt.value = draft.variantPrompt || "";
   els.seedanceModel.value = draft.seedanceModel || els.modelSelect.value || "";
-  els.materialDirection.value = draft.materialDirection || "余额刺激";
-  els.voiceoverStyle.value = draft.voiceoverStyle || "Natural local host";
-  els.customPrompt.value = draft.customPrompt || "";
-  els.negativePrompt.value = draft.negativePrompt || "";
+  setMaterialDirectionValue(primaryBranchNode(), primary.materialDirection || draft.materialDirection || "跟随竞品");
+  els.voiceoverStyle.value = primary.voiceoverStyle || draft.voiceoverStyle || "遵循竞品";
+  els.customPrompt.value = primary.customPrompt || draft.customPrompt || "";
+  els.negativePrompt.value = primary.negativePrompt || draft.negativePrompt || "";
+  if (els.disclaimerPreset) {
+    els.disclaimerPreset.value = draft.disclaimerPreset || draft.disclaimerLanguage || "auto";
+  }
+  setOptionalValue(els.disclaimer, draft.disclaimer || "");
+  if (els.disclaimerOverlayPosition) els.disclaimerOverlayPosition.value = draft.disclaimerOverlay?.position || "bottom_center";
+  if (els.disclaimerOverlayFontSize) els.disclaimerOverlayFontSize.value = String(draft.disclaimerOverlay?.fontSize ?? 26);
+  if (els.disclaimerOverlayBoxHeight) els.disclaimerOverlayBoxHeight.value = String(draft.disclaimerOverlay?.boxHeight ?? 170);
+  if (els.disclaimerOverlayOpacity) els.disclaimerOverlayOpacity.value = String(draft.disclaimerOverlay?.opacity ?? 0.58);
+  applyDisclaimerPreset({ force: !draft.disclaimer && els.disclaimerPreset?.value !== "other" });
   for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
     input.value = draft.truthRules?.[input.dataset.truthField] || "";
   }
@@ -1303,25 +2178,34 @@ function applyTemplate(template) {
   state.suppressTemplateUnlock = false;
 }
 
-function renderTemplates() {
+function renderTemplates({ applySelection = true } = {}) {
+  const emptyOption = `<option value="">不选择模板，直接填写本次批次</option>`;
   if (!state.templates.length) {
-    els.templateSelect.innerHTML = `<option value="">暂无模板，保存当前草稿后继续</option>`;
+    for (const select of templateSelectFields()) {
+      select.innerHTML = emptyOption;
+    }
     state.selectedTemplate = null;
     applyLlmConfigDefaults();
     syncMetrics();
     return;
   }
-  els.templateSelect.innerHTML = state.templates.map((template) => `
-    <option value="${escapeHtml(template.versionId)}">
-      ${escapeHtml(template.draft?.displayName || template.templateId)} v${escapeHtml(template.versionNumber)}
-      ${template.isDefault ? " 默认" : ""}
-    </option>
-  `).join("");
-  const selected = state.templates.find((item) => item.versionId === els.templateSelect.value)
-    || state.templates.find((item) => item.isDefault)
-    || state.templates[0];
-  els.templateSelect.value = selected.versionId;
-  applyTemplate(selected);
+  const optionsHtml = `
+    ${emptyOption}
+    ${state.templates.map((template) => `
+      <option value="${escapeHtml(template.versionId)}">
+        ${escapeHtml(template.draft?.displayName || template.templateId)} v${escapeHtml(template.versionNumber)}${template.isDefault ? " 默认" : ""}
+      </option>
+    `).join("")}
+  `;
+  for (const select of templateSelectFields()) {
+    select.innerHTML = optionsHtml;
+  }
+  const selectedVersionId = state.selectedTemplate?.versionId || els.templateSelect?.value || "";
+  syncTemplateSelectValues(selectedVersionId);
+  const selected = state.templates.find((item) => item.versionId === selectedVersionId);
+  if (applySelection && selected) applyTemplate(selected);
+  else state.selectedTemplate = selected || null;
+  applyLlmConfigDefaults();
   syncMetrics();
 }
 
@@ -1359,17 +2243,29 @@ async function loadLlmConfig() {
   applyLlmConfigDefaults();
 }
 
-function renderRules(response = {}) {
+function rulesBoxes(node = null) {
+  if (node) {
+    const box = node.querySelector(".wz-branch-rules");
+    return box ? [box] : [];
+  }
+  const boxes = [...document.querySelectorAll(".wz-branch-rules")];
+  return boxes.length ? boxes : (els.rulesBox ? [els.rulesBox] : []);
+}
+
+function renderRules(response = {}, targetNode = null) {
   state.channelRules = response.rules || [];
-  const warnings = response.warnings || [];
+  state.rulesWarnings = response.warnings || [];
+  const warnings = state.rulesWarnings;
+  const boxes = rulesBoxes(targetNode);
   if (!state.channelRules.length) {
-    els.rulesBox.className = "wz-list empty-line";
-    els.rulesBox.textContent = "没有命中渠道规则";
+    for (const box of boxes) {
+      box.className = "wz-list empty-line wz-branch-rules";
+      box.textContent = "没有命中渠道规则";
+    }
     syncMetrics();
     return;
   }
-  els.rulesBox.className = "wz-list wz-rule-list";
-  els.rulesBox.innerHTML = `
+  const html = `
     ${warnings.map((item) => `<div class="wz-warning">${escapeHtml(item.message)}</div>`).join("")}
     ${state.channelRules.map((rule) => `
       <article class="wz-row wz-rule-row">
@@ -1394,6 +2290,10 @@ function renderRules(response = {}) {
       </article>
     `).join("")}
   `;
+  for (const box of boxes) {
+    box.className = "wz-list wz-rule-list wz-branch-rules";
+    box.innerHTML = html;
+  }
   syncMetrics();
 }
 
@@ -1453,7 +2353,7 @@ function renderReference() {
 }
 
 async function draftReferenceVideoDecomposition() {
-  if (!state.referenceVideo || isDecompositionConfirmed()) return;
+  if (!state.referenceVideo || isDecompositionConfirmed() || isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
   state.decomposition = null;
   state.estimate = null;
@@ -1524,15 +2424,15 @@ function renderEstimate() {
   const estimate = state.estimate?.estimate;
   if (!estimate) {
     els.estimateBox.className = "wz-estimate empty-line";
-    if (isTemplateCommitted() && isDecompositionConfirmed()) {
-      els.estimateBox.textContent = "拆解与模板已就绪，请点击「估算本批任务」查看任务数和消耗。";
+    if (isDecompositionConfirmed() && isRewriteConfirmed()) {
+      els.estimateBox.textContent = "前置步骤已完成，可直接估算本批任务；需要复用时可在 3.1.1 保存模板。";
       if (els.estimateHint) els.estimateHint.textContent = "前置步骤已完成，可以估算";
     } else if (isDecompositionConfirmed()) {
-      els.estimateBox.textContent = "脚本已确认，请先完成第三步产品改写并保存模板，再估算本批任务。";
-      if (els.estimateHint) els.estimateHint.textContent = "请先保存模板";
+      els.estimateBox.textContent = "脚本已确认，请在第 3 步填写产品信息并点击「确认信息」。";
+      if (els.estimateHint) els.estimateHint.textContent = "需先确认产品改写信息";
     } else {
       els.estimateBox.textContent = "完成前两步后，在此估算本批任务规模。";
-      if (els.estimateHint) els.estimateHint.textContent = "需先完成拆解与模板";
+      if (els.estimateHint) els.estimateHint.textContent = "需先完成拆解";
     }
     syncBatchActionButtons();
     if (els.planBox) {
@@ -1559,14 +2459,16 @@ function renderEstimate() {
         ["估算编号", estimate.estimateId],
         ["变体数", estimate.variantCount],
         ["输出时长", `${estimate.durationSec}s`],
+        ["尺寸", estimate.outputRatio || "-"],
         ["拼接任务", estimate.stitchTaskCount],
         ["生图任务", estimate.imageTaskCount],
-        ["并发", estimate.requestedConcurrency],
+        ["同时生成数", estimate.requestedConcurrency],
         ["重试上限", estimate.maxRetryPerTask],
         ["二次确认", estimate.confirmationRequired ? "需要" : "不需要"]
       ])}
     </div>
     ${estimate.models?.length ? `<div class="wz-chipline">${estimate.models.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${renderEstimateReferencePreview()}
   `;
   if (els.estimateHint) {
     els.estimateHint.textContent = estimate.confirmationRequired
@@ -1574,7 +2476,7 @@ function renderEstimate() {
       : "估算完成，可生成 Seedance 预案";
   }
   els.confirmLimits.checked = !estimate.confirmationRequired;
-  els.confirmLimits.disabled = !estimate.confirmationRequired;
+  els.confirmLimits.disabled = isUpstreamWorkflowLocked() || !estimate.confirmationRequired;
   renderPlanPreview(state.batchDetail?.batch);
   syncBatchActionButtons();
   syncEstimateButtonLabel();
@@ -1635,11 +2537,118 @@ function renderPlanPreview(batch) {
           ["合规提示", Array.isArray(plan.complianceNotes) ? plan.complianceNotes.join(" · ") : "-"]
         ])}
       </div>
+      ${renderPlanReferencePreview(batch, plan)}
     </div>
   `).join("");
   syncBatchActionButtons();
   renderBatchStepProgress();
   syncFlowHints();
+}
+
+function isPlanPreviewVideoUrl(url = "") {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(String(url));
+}
+
+function renderPlanReferencePreview(batch, plan) {
+  const branch = (Array.isArray(batch?.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === plan.branchId);
+  if (!branch) return "";
+  let imageIndex = 0;
+  let videoIndex = 0;
+  const entries = [];
+  for (const key of PLAN_REFERENCE_ASSET_ORDER) {
+    const url = String(branch.assetUrls?.[key] || "").trim();
+    if (!url) continue;
+    const isVideo = isPlanPreviewVideoUrl(url);
+    const orderLabel = isVideo ? `视频${++videoIndex}` : `图片${++imageIndex}`;
+    entries.push({
+      branch: { branchLabel: plan.branchLabel || branch.branchLabel || plan.branchId },
+      key,
+      url,
+      isVideo,
+      orderLabel
+    });
+  }
+  if (!entries.length) return `<div class="wz-plan-reference-empty">未上传参考图，不走素材审核与参考图映射。</div>`;
+  return `
+    <div class="wz-plan-reference-panel">
+      <div class="wz-plan-reference-head">参考图位置确认</div>
+      ${renderReferenceCanvasGrid(entries, { showReviewMeta: false })}
+    </div>
+  `;
+}
+
+function collectEstimateReferenceEntries() {
+  const entries = [];
+  for (const branch of collectAllBranchDrafts()) {
+    let imageIndex = 0;
+    let videoIndex = 0;
+    for (const key of PLAN_REFERENCE_ASSET_ORDER) {
+      const url = String(branch.assetUrls?.[key] || "").trim();
+      if (!url) continue;
+      const isVideo = isPlanPreviewVideoUrl(url);
+      const orderLabel = isVideo ? `视频${++videoIndex}` : `图片${++imageIndex}`;
+      entries.push({
+        branch,
+        key,
+        url,
+        isVideo,
+        orderLabel,
+        review: branch.assetReviews?.[key] || {}
+      });
+    }
+  }
+  return entries;
+}
+
+function renderReferenceThumb(entry = {}, { showReviewMeta = false } = {}) {
+  const { branch, key, url, isVideo, orderLabel, review = {} } = entry;
+  const title = [
+    branch?.branchLabel || branch?.displayName || branch?.branchId || "",
+    orderLabel,
+    assetLabel(key)
+  ].filter(Boolean).join(" · ");
+  const reviewClass = normalizeAssetReviewStatus(review.status) === "approved"
+    ? "is-approved"
+    : isAssetReviewFailureStatus(review.status)
+      ? "is-failed"
+      : "is-pending";
+  return `
+    <figure class="wz-plan-reference-thumb" title="${escapeHtml(title)}">
+      <span class="wz-plan-reference-badge">${escapeHtml(orderLabel)}</span>
+      ${isVideo
+        ? `<video src="${escapeHtml(url)}" controls preload="metadata" playsinline></video>`
+        : `<img src="${escapeHtml(url)}" alt="${escapeHtml(title)}" loading="lazy" />`}
+      ${showReviewMeta && review.status
+        ? `<span class="wz-plan-reference-review ${reviewClass}" title="${escapeHtml(formatAssetReviewStatus(review.status, review.reviewReason))}"></span>`
+        : ""}
+    </figure>
+  `;
+}
+
+function renderReferenceCanvasGrid(entries = [], { showReviewMeta = false } = {}) {
+  const visible = (Array.isArray(entries) ? entries : []).slice(0, SEEDANCE_REFERENCE_CANVAS.slots);
+  if (!visible.length) return "";
+  return `
+    <div class="wz-plan-reference-grid wz-reference-canvas">
+      ${visible.map((entry) => renderReferenceThumb(entry, { showReviewMeta })).join("")}
+    </div>
+  `;
+}
+
+function renderEstimateReferencePreview() {
+  const entries = collectEstimateReferenceEntries();
+  return `
+    <div class="wz-plan-reference-panel wz-estimate-reference-panel">
+      <div class="wz-plan-reference-toolbar">
+        <div class="wz-plan-reference-head">Seedance 参考素材顺序确认</div>
+        <button type="button" class="mini" data-action="upload-seedance-assets"${isUpstreamWorkflowLocked() ? " disabled" : ""}>上传 Seedance 素材并审核</button>
+      </div>
+      ${renderReferenceCanvasGrid(entries, { showReviewMeta: true })}
+      ${entries.length
+        ? `<div class="wz-plan-reference-empty">缩略图按 5 列排列，超过 5 个自动换到第二行；确认预案并生成视频前需完成审核并获得 assetId。</div>`
+        : `<div class="wz-plan-reference-empty">尚未上传参考素材；可先上传并审核，未上传时不走素材审核与参考图映射。</div>`}
+    </div>
+  `;
 }
 
 function collectEditablePlans() {
@@ -1685,7 +2694,7 @@ function renderBatch() {
     ...batchStatusLabels,
     [batch.status]: batchStatusDisplayLabel(batch)
   });
-  if (els.estimateBtn) els.estimateBtn.disabled = isQcBatchPending(batch);
+  if (els.estimateBtn) els.estimateBtn.disabled = isQcBatchPending(batch) || isUpstreamWorkflowLocked();
   els.stopBatchBtn.disabled = terminalBatchStatus(batch.status);
   els.stopBatchBtn.textContent = isQcBatchPending(batch) ? "放弃批次" : "停止任务";
   els.retryStitchBtn.hidden = batch.status !== "partial_failed";
@@ -1712,7 +2721,7 @@ function renderBatch() {
     ${batch.status === "qc" ? `<div class="wz-warning">视频已生成完成，下一步请运行视频质检；如不再交付本批次，可选择放弃批次。</div>` : ""}
     ${generationActive ? `<div class="wz-generation-panel is-live"><div class="wz-generation-head"><strong>Seedance 视频生成中</strong><span class="wz-badge neutral">实时刷新</span></div><p class="wz-generation-note">页面每 2 秒轮询一次上游任务状态；下方卡片展示每个分段的提交模式、上游任务 ID 与当前阶段。</p><div class="wz-generation-tasks">${renderGenerationTaskCards(tasks)}</div></div>` : ""}
     ${renderFailureReasons({ batch, tasks, outputs, providerJob: batch.providerJob })}
-    <div class="wz-info">产品素材已在第 3 步上传至对象存储；确认预案后会把素材 URL 作为 <code>omni_reference</code> 引用提交 Seedance（与 OMS 先审后用的 asset_id 链路不同）。过程追踪文件见批次目录 <code>00-brief.json</code> ~ <code>05-video-tasks.json</code>。</div>
+    <div class="wz-info">生成 Seedance 预案不会校验参考素材 assetId；请先点击「上传 Seedance 素材并审核」，确认预案并生成视频时会校验 assetId 与审核状态。未上传参考图时不走素材审核。确认后会按 <code>omni_reference</code> 提交 Seedance，预案确认区会展示参考图顺序，方便核对 图片n / 视频n 映射。</div>
     ${inlineRetryHtml({
       message: batch.status === "failed"
         ? (qcRunnable
@@ -1725,8 +2734,8 @@ function renderBatch() {
     })}
     <article class="wz-row">
       <div>
-        <strong>${escapeHtml(batch.batchId)}</strong>
-        <small>${escapeHtml(batch.createdAt || "")} · ${tasks.length} 个任务 · ${escapeHtml(batch.estimate?.durationSec || "-")}s</small>
+        <strong>${escapeHtml(batchDisplayName(batch) || batch.batchId)}</strong>
+        <small>${escapeHtml(batch.batchId)} · ${escapeHtml(batch.createdAt || "")} · ${tasks.length} 个任务 · ${escapeHtml(batch.estimate?.durationSec || "-")}s</small>
       </div>
       ${badge(batch.status, {
         ...batchStatusLabels,
@@ -1759,8 +2768,10 @@ function renderBatch() {
   els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
   renderPlanPreview(batch);
   syncMetrics();
+  renderBatchReadiness();
   renderBatchStepProgress();
   syncFlowHints();
+  syncStartNewTaskButton();
 }
 
 function renderGallery() {
@@ -1800,6 +2811,10 @@ function renderOutputPreview(item = {}) {
 }
 
 function renderStartError(error) {
+  if (error?.code === "asset_review_pending") {
+    applyAssetReviewFailureFromError(error);
+    return;
+  }
   renderError(els.globalError, error, "批次启动失败");
   showActiveLockFromError(lockHost(), error);
 }
@@ -1811,23 +2826,22 @@ async function loadTemplates() {
   renderTemplates();
 }
 
-async function loadRules() {
+async function loadRules(node = primaryBranchNode()) {
   const params = new URLSearchParams({
-    channel: els.targetChannel.value,
-    promiseLevel: els.promiseLevel.value
+    channel: fieldValue(node, "targetChannel") || els.targetChannel?.value || "meta_ads",
+    promiseLevel: fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable"
   });
-  renderRules(await apiEnvelope(`/api/wangzhuan/channel-rules?${params}`));
+  renderRules(await apiEnvelope(`/api/wangzhuan/channel-rules?${params}`), node);
 }
 
-async function saveTemplate() {
-  clearError(els.globalError);
-  if (isTemplateCommitted()) return;
-  const incompleteBranch = findIncompleteBranchDraft();
-  if (incompleteBranch) {
+function showBranchDraftValidationError(validation) {
+  if (!validation) return false;
+  if (validation.incompleteBranch) {
+    const { incompleteBranch } = validation;
     const branchMissing = incompleteBranch.missingFields;
     focusRewriteStep(incompleteBranch.kind === "required" ? branchMissing : []);
     if (incompleteBranch.kind === "strong") {
-      els.truthDetails.open = true;
+      incompleteBranch.node?.querySelector(".wz-truth-details")?.setAttribute("open", "");
       renderError(els.globalError, {
         code: "strong_rule_missing",
         message: `改写 3.${incompleteBranch.index + 1} 强承诺需要补齐真实收益规则`,
@@ -1842,57 +2856,105 @@ async function saveTemplate() {
     }
     incompleteBranch.node?.classList.remove("collapsed");
     incompleteBranch.node?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-    return;
+    return true;
   }
-  const draft = draftFromForm();
-  const missingStrong = missingStrongFields(draft);
-  if (missingStrong.length) {
+  if (validation.missingStrong?.length) {
     focusRewriteStep();
     els.truthDetails.open = true;
     renderError(els.globalError, {
       code: "strong_rule_missing",
       message: "强承诺需要补齐真实收益规则",
-      data: { missingFields: missingStrong }
+      data: { missingFields: validation.missingStrong }
     }, "模板校验");
-    return;
+    return true;
   }
-  setBusy(els.createTemplateBtn, true, "上传素材");
+  return false;
+}
+
+function resolveBranchDraftValidationError() {
+  const incompleteBranch = findIncompleteBranchDraft();
+  if (incompleteBranch) return { incompleteBranch, missingStrong: null };
+  const missingStrong = missingStrongFields(draftFromForm());
+  if (missingStrong.length) return { incompleteBranch: null, missingStrong };
+  return null;
+}
+
+async function confirmRewriteInfo() {
+  if (isUpstreamWorkflowLocked()) return;
+  clearError(els.globalError);
+  if (showBranchDraftValidationError(resolveBranchDraftValidationError())) return;
+  setBusy(els.confirmRewriteBtn, true, "上传素材");
   try {
     await uploadBranchAssets();
   } catch (error) {
-    setBusy(els.createTemplateBtn, false);
+    setBusy(els.confirmRewriteBtn, false);
     renderError(els.globalError, error, "产品素材上传失败");
     return;
   }
-  setBusy(els.createTemplateBtn, true, "保存中");
   try {
+    invalidateEstimateFromEdit();
+    const draft = draftFromForm();
+    await saveDraftBatch({
+      status: "checking",
+      sourceStep: "rewrite_confirmed",
+      templateSnapshot: { draft },
+      branches: draft.branches || [],
+      decomposition: state.decomposition
+    });
+    setRewriteConfirmed(true);
+    focusBatchStep();
+    showToast("产品信息已确认，可开始估算批次", { type: "success" });
+  } catch (error) {
+    renderError(els.globalError, error, "产品信息确认失败");
+  } finally {
+    setBusy(els.confirmRewriteBtn, false);
+  }
+}
+
+async function saveTemplate() {
+  if (isUpstreamWorkflowLocked()) return;
+  clearError(els.globalError);
+  if (isTemplateCommitted()) {
+    showToast("模板已保存；修改内容后会自动解锁再次保存", { type: "info" });
+    return;
+  }
+  if (showBranchDraftValidationError(resolveBranchDraftValidationError())) return;
+  setSaveTemplateButtonsBusy(true, "上传素材");
+  try {
+    await uploadBranchAssets();
+  } catch (error) {
+    setSaveTemplateButtonsBusy(false);
+    renderError(els.globalError, error, "产品素材上传失败");
+    return;
+  }
+  setSaveTemplateButtonsBusy(true, "保存中");
+  try {
+    const draft = draftFromForm();
     const body = state.selectedTemplate
       ? selectedTemplateNameChanged(draft)
         ? { mode: "copy", copyFromVersionId: state.selectedTemplate.versionId, draft }
         : { mode: "edit_new_version", templateId: state.selectedTemplate.templateId, draft }
       : { mode: "create", draft };
     const data = await apiEnvelope("/api/wangzhuan/templates", { method: "POST", body: JSON.stringify(body) });
-    state.selectedTemplate = data.template;
+    await saveDraftBatch({
+      status: "checking",
+      sourceStep: "template_saved",
+      templateSnapshot: { draft: data.template?.draft || draft },
+      branches: data.template?.draft?.branches || draft.branches || [],
+      decomposition: state.decomposition
+    });
     await loadTemplates();
-    els.templateSelect.value = data.template.versionId;
+    syncTemplateSelectValues(data.template.versionId);
     applyTemplate(data.template);
-    setTemplateFormLocked(true);
-    persistWorkflowSession();
-    focusBatchStep();
-    showToast("产品模板已保存，可开始估算批次", { type: "success" });
+    setTemplateCommitted(true, data.template);
+    showToast("产品模板已保存，可在后续批次中复用", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
     const serverMissing = Array.isArray(error?.data?.missingFields) ? error.data.missingFields : [];
     if (serverMissing.length) focusRewriteStep(serverMissing);
     renderError(els.globalError, error, "模板保存失败");
   } finally {
-    setBusy(els.createTemplateBtn, false);
-    if (isTemplateCommitted()) {
-      if (els.createTemplateBtn) {
-        els.createTemplateBtn.disabled = true;
-        els.createTemplateBtn.textContent = "模板已保存";
-      }
-    }
+    setSaveTemplateButtonsBusy(false);
   }
 }
 
@@ -1924,10 +2986,16 @@ async function checkReferenceVideo() {
     });
     state.referenceVideo = data.referenceVideo;
     clearDecompositionDraft();
+    await saveDraftBatch({
+      status: "checking",
+      sourceStep: "reference_checked",
+      referenceVideo: data.referenceVideo,
+      decomposition: null
+    });
     persistWorkflowSession();
     clearReferenceObjectUrl();
     renderReference();
-    showToast("参考视频信息已读取", { type: "success" });
+    showToast("参考视频信息已读取，请确认后进入脚本拆解", { type: "success" });
   } catch (error) {
     if (error.code === "unauthenticated") showLogin(els.loginModal);
     if (els.referenceUploadStatus) {
@@ -1941,7 +3009,7 @@ async function checkReferenceVideo() {
 }
 
 async function decomposeReferenceVideo() {
-  if (!state.referenceVideo || isDecompositionConfirmed()) return;
+  if (!state.referenceVideo || isDecompositionConfirmed() || isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
   const draft = collectDecompositionFromForm();
   const missingFields = DECOMPOSITION_REQUIRED_FIELDS.filter((field) => !draft[field]);
@@ -1965,6 +3033,11 @@ async function decomposeReferenceVideo() {
     });
     state.decomposition = data.decomposition;
     state.estimate = null;
+    await saveDraftBatch({
+      status: "checking",
+      sourceStep: "decomposition_confirmed",
+      decomposition: data.decomposition
+    });
     renderDecompositionForm(data.decomposition || draft);
     renderReference();
     renderEstimate();
@@ -1982,25 +3055,71 @@ async function decomposeReferenceVideo() {
   }
 }
 
+async function inspectStorePage(node = primaryBranchNode()) {
+  clearError(els.globalError);
+  const url = fieldValue(node, "productLink") || els.productLink?.value.trim();
+  if (!url) {
+    renderError(els.globalError, { code: "validation_error", message: "请先填写产品链接" }, "商店页读取失败");
+    return;
+  }
+  const button = node?.querySelector(".wz-inspect-store-btn") || els.inspectStoreBtn;
+  setBusy(button, true, "读取中");
+  try {
+    state.storeInspection = await apiEnvelope("/api/wangzhuan/store-page/inspect", {
+      method: "POST",
+      body: JSON.stringify({ url })
+    });
+    renderStoreCandidates(node);
+    showToast("商店页候选信息已读取", { type: "success" });
+  } catch (error) {
+    renderError(els.globalError, error, "商店页读取失败");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+function branchNodeFromEvent(event) {
+  return event.target instanceof Element ? event.target.closest(".wz-node-branch") : null;
+}
+
 function estimateRequest() {
   const template = state.selectedTemplate;
+  const node = primaryBranchNode();
+  const languages = splitMultiValue(
+    fieldValue(node, "languages")
+      || fieldValue(node, "language")
+      || els.languages?.value
+      || els.language?.value,
+    ["en-US"]
+  );
+  const targetRegions = splitMultiValue(
+    fieldValue(node, "targetRegions")
+      || fieldValue(node, "regions")
+      || fieldValue(node, "targetRegion")
+      || els.targetRegions?.value
+      || els.regions?.value,
+    ["US"]
+  );
+  const disclaimerFields = disclaimerRequestFields();
   return {
     templateId: template?.templateId,
     versionId: template?.versionId,
     projectName: els.projectName.value.trim(),
-    batchName: els.batchName.value.trim(),
+    batchName: ensureUserBatchNameForSubmit(),
     generationMode: els.generationMode.value,
     model: els.modelSelect.value,
     seedanceModel: els.seedanceModel.value.trim(),
     referenceVideoId: state.referenceVideo?.referenceVideoId,
     targetChannel: els.targetChannel.value,
-    targetRegion: els.targetRegion.value.trim() || "US",
-    language: els.language.value.trim() || "en-US",
+    targetRegion: targetRegions[0] || "US",
+    targetRegions,
+    language: languages[0] || "en-US",
+    languages,
     promiseLevel: els.promiseLevel.value,
     durationSec: Number(els.duration.value),
     variantCount: Number(els.variantCount.value),
     requestedConcurrency: Number(els.concurrency.value),
-    outputRatio: "9:16",
+    outputRatio: els.outputRatio?.value || "9:16",
     branches: collectBranchDrafts(),
     templateSnapshot: {
       versionId: template?.versionId,
@@ -2013,26 +3132,103 @@ function estimateRequest() {
       temperature: Number(els.llmTemperature.value)
     },
     knowledgeNotes: els.knowledgeNotes.value.trim(),
-    variantPrompt: els.variantPrompt.value.trim()
+    variantPrompt: els.variantPrompt.value.trim(),
+    ...disclaimerFields
   };
 }
 
+function estimateRequestSignature() {
+  const request = estimateRequest();
+  delete request.templateSnapshot;
+  delete request.llmConfig;
+  return JSON.stringify(request);
+}
+
+function currentBatchId() {
+  return state.batchDetail?.batch?.batchId || "";
+}
+
+async function saveDraftBatch({ status, sourceStep = "", referenceVideo, decomposition, templateSnapshot, branches } = {}) {
+  const nextReferenceVideo = referenceVideo || state.referenceVideo;
+  if (!nextReferenceVideo?.referenceVideoId) return null;
+  const draft = draftFromForm();
+  const payload = {
+    batchId: currentBatchId() || undefined,
+    ...(status ? { status } : {}),
+    sourceStep,
+    batchName: ensureUserBatchNameForSubmit(),
+    productName: draft.productName || "",
+    productLink: draft.productLink || "",
+    knowledgeNotes: els.knowledgeNotes?.value.trim() || "",
+    llmConfig: {
+      provider: els.llmProvider.value.trim(),
+      model: els.llmModel.value.trim(),
+      endpoint: els.llmEndpoint.value.trim(),
+      temperature: Number(els.llmTemperature.value)
+    },
+    targetChannel: els.targetChannel?.value || "",
+    targetRegion: els.targetRegion?.value || "",
+    targetRegions: splitMultiValue(els.targetRegions?.value || els.regions?.value || "", []),
+    language: splitMultiValue(els.languages?.value || els.language?.value, ["en-US"])[0] || "en-US",
+    languages: splitMultiValue(els.languages?.value || els.language?.value, ["en-US"]),
+    promiseLevel: els.promiseLevel?.value || "",
+    durationSec: Number(els.duration?.value || 0) || undefined,
+    outputRatio: els.outputRatio?.value || "",
+    variantCount: Number(els.variantCount?.value || 0) || undefined,
+    requestedConcurrency: Number(els.concurrency?.value || 0) || undefined,
+    templateId: state.selectedTemplate?.templateId,
+    versionId: state.selectedTemplate?.versionId,
+    templateSnapshot: templateSnapshot ?? (isTemplateCommitted() ? { draft } : undefined),
+    branches: branches ?? draft.branches ?? [],
+    branchDrafts: branches ?? draft.branches ?? [],
+    decomposition: decomposition ?? state.decomposition,
+    referenceVideo: nextReferenceVideo,
+    ...disclaimerRequestFields()
+  };
+  const detail = await apiEnvelope("/api/wangzhuan/batches/draft", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  if (detail?.batch?.batchId) {
+    state.batchDetail = detail;
+    renderBatch();
+  }
+  return detail;
+}
+
 async function estimateBatch() {
+  if (isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
-  if (!state.selectedTemplate || !state.referenceVideo || !state.decomposition) {
+  if (!state.referenceVideo || !state.decomposition) {
     renderError(els.globalError, {
       code: "validation_error",
-      message: "请先保存产品模板，上传参考视频并确认脚本拆解"
+      message: "请先上传参考视频并确认脚本拆解"
     }, "估算前置条件");
+    return;
+  }
+  if (!isRewriteConfirmed()) {
+    renderError(els.globalError, {
+      code: "validation_error",
+      message: "请先在第 3 步填写产品信息并点击「确认信息」"
+    }, "估算前置条件");
+    focusRewriteStep();
     return;
   }
   setBusy(els.estimateBtn, true, "估算中");
   try {
+    await saveDraftBatch({
+      status: "checking",
+      sourceStep: "estimate",
+      templateSnapshot: { draft: draftFromForm() },
+      branches: collectBranchDrafts(),
+      decomposition: state.decomposition
+    });
     const data = await apiEnvelope("/api/wangzhuan/batches/estimate", {
       method: "POST",
       body: JSON.stringify(estimateRequest())
     });
     state.estimate = data;
+    state.estimate.requestSignature = estimateRequestSignature();
     state.capabilities = data.capabilities || null;
     renderEstimate();
     showToast("批次估算完成", { type: "success" });
@@ -2087,6 +3283,18 @@ function startPolling() {
 }
 
 async function planBatch() {
+  if (isUpstreamWorkflowLocked()) return;
+  if (!isRewriteConfirmed()) {
+    renderError(els.globalError, {
+      code: "validation_error",
+      message: "请先在第 3 步填写产品信息并点击「确认信息」"
+    }, "生成预案前置条件");
+    focusRewriteStep();
+    return;
+  }
+  if (!state.estimate?.estimate || state.estimate.requestSignature !== estimateRequestSignature()) {
+    await estimateBatch();
+  }
   const estimate = state.estimate?.estimate;
   if (!estimate) return;
   if (estimate.confirmationRequired && !els.confirmLimits.checked) {
@@ -2105,6 +3313,7 @@ async function planBatch() {
       method: "POST",
       body: JSON.stringify({
         idempotencyKey: idempotencyKey("batch_plan"),
+        ...(currentBatchId() ? { batchId: currentBatchId() } : {}),
         estimateId: estimate.estimateId,
         llmConfig: {
           provider: els.llmProvider.value.trim() || llmDefaults.provider || "skylink",
@@ -2139,10 +3348,23 @@ async function confirmPlanBatch() {
   const batchId = state.batchDetail?.batch?.batchId;
   const plans = state.batchDetail?.batch?.plans || [];
   if (!batchId || !plans.length) return;
+  if (isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
   setBusy(els.confirmPlanBtn, true, "确认中");
   try {
-    const data = await confirmBatchPlanRequest(batchId, collectEditablePlans());
+    try {
+      await uploadBranchAssets();
+    } catch (error) {
+      renderError(els.globalError, error, "产品素材上传失败");
+      return;
+    }
+    await saveDraftBatch({
+      sourceStep: "seedance_assets_reviewed",
+      templateSnapshot: { draft: draftFromForm() },
+      branches: collectBranchDrafts(),
+      decomposition: state.decomposition
+    });
+    const data = await confirmBatchPlanRequest(batchId, collectEditablePlans(), "", collectBranchDrafts());
     if (data.batch?.batchId) {
       state.batchDetail = await loadBatchDetail();
     } else {
@@ -2157,6 +3379,10 @@ async function confirmPlanBatch() {
     focusLogStep();
     showToast("批次已提交 Seedance 生成，正在轮询上游进度", { type: "success" });
   } catch (error) {
+    if (error?.code === "asset_review_pending") {
+      applyAssetReviewFailureFromError(error);
+      return;
+    }
     renderError(els.globalError, error, "确认预案失败");
   } finally {
     setBusy(els.confirmPlanBtn, false);
@@ -2288,27 +3514,108 @@ async function downloadPackage() {
   }
 }
 
+function handleTemplateSelectChange(versionId = els.templateSelect?.value || "") {
+  unlockTemplateEditing();
+  syncTemplateSelectValues(versionId);
+  const selected = state.templates.find((item) => item.versionId === versionId);
+  if (selected) applyTemplate(selected);
+  else state.selectedTemplate = null;
+  loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败"));
+}
+
 function bindEvents() {
+  els.branches?.addEventListener("change", (event) => {
+    const select = event.target.closest('[data-branch-field="templateSelect"]');
+    if (!select) return;
+    handleTemplateSelectChange(select.value);
+  });
   els.templateSelect.addEventListener("change", () => {
-    unlockTemplateEditing();
-    applyTemplate(state.templates.find((item) => item.versionId === els.templateSelect.value));
-    loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败"));
+    handleTemplateSelectChange(els.templateSelect.value);
   });
   els.promiseLevel.addEventListener("change", () => {
     els.truthDetails.open = els.promiseLevel.value === "strong_commitment";
     loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败"));
   });
   els.targetChannel.addEventListener("change", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
-  els.createTemplateBtn.addEventListener("click", saveTemplate);
+  els.materialDirection?.addEventListener("change", syncMaterialDirectionCustom);
   els.branches?.addEventListener("click", (event) => {
-    if (!event.target.closest(".wz-save-branch")) return;
-    saveTemplate();
+    if (!(event.target instanceof Element)) return;
+    const node = branchNodeFromEvent(event);
+    if (event.target.closest(".wz-save-template-btn")) {
+      saveTemplate();
+      return;
+    }
+    if (event.target.closest(".wz-inspect-store-btn") && node) {
+      inspectStorePage(node);
+      return;
+    }
+    if (event.target.closest(".wz-load-rules-btn") && node) {
+      loadRules(node).catch((error) => renderError(els.globalError, error, "规则刷新失败"));
+      return;
+    }
+    const storeApply = event.target.closest("[data-store-apply]");
+    if (storeApply && node) {
+      applyStoreCandidate(storeApply.dataset.storeApply, node);
+    }
   });
-  els.branches?.addEventListener("input", markTemplateDirtyFromEdit, true);
-  els.branches?.addEventListener("change", markTemplateDirtyFromEdit, true);
-  window.addEventListener("wz:branch-created", () => {
-    unlockTemplateEditing();
-    renderTemplateStatus();
+  els.branches?.addEventListener("change", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const node = branchNodeFromEvent(event);
+    if (!node) return;
+    if (event.target.matches('[data-branch-field="materialDirection"]')) {
+      syncMaterialDirectionForNode(node);
+    }
+    if (event.target.matches('[data-branch-field="promiseLevel"]')) {
+      node.querySelector(".wz-truth-details")?.toggleAttribute("open", event.target.value === "strong_commitment");
+    }
+    if (event.target.matches('[data-branch-field="disclaimerPreset"]')) {
+      applyDisclaimerPresetForNode(node, { force: true });
+    }
+    if (event.target.matches('[data-branch-field="languages"], [data-branch-field="language"]')) {
+      const preset = branchField(node, "disclaimerPreset");
+      if (preset?.value === "auto") applyDisclaimerPresetForNode(node);
+    }
+  });
+  els.inspectStoreBtn?.addEventListener("click", () => inspectStorePage(primaryBranchNode()));
+  els.storeCandidates?.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("[data-store-apply]");
+    if (!button) return;
+    applyStoreCandidate(button.dataset.storeApply, primaryBranchNode());
+  });
+  els.disclaimerPreset?.addEventListener("change", () => {
+    applyDisclaimerPreset({ force: true });
+    markTemplateDirtyFromEdit();
+  });
+  els.languages?.addEventListener("change", () => {
+    if (els.disclaimerPreset?.value === "auto") applyDisclaimerPreset();
+  });
+  els.createTemplateBtn?.addEventListener("click", saveTemplate);
+  els.confirmRewriteBtn?.addEventListener("click", confirmRewriteInfo);
+  els.branches?.addEventListener("input", (event) => {
+    markTemplateDirtyFromEdit();
+    markRewriteDirtyFromEdit();
+  }, true);
+  els.branches?.addEventListener("change", (event) => {
+    markTemplateDirtyFromEdit();
+    markRewriteDirtyFromEdit();
+  }, true);
+  window.addEventListener("wz:branch-created", (event) => {
+    const node = event.detail?.node;
+    markBranchFields();
+    if (node) {
+      renderTruthFieldsForBranch(node);
+      syncMaterialDirectionForNode(node);
+      if (state.channelRules?.length || state.rulesWarnings?.length) {
+        renderRules({ rules: state.channelRules, warnings: state.rulesWarnings }, node);
+      } else {
+        loadRules(node).catch(() => {});
+      }
+    }
+    renderTemplates({ applySelection: false });
+    setSaveTemplateButtonsDisabled(isTemplateCommitted());
+    renderTemplateSaveStatus();
+    renderRewriteStatus();
   });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
   els.useSampleVideoBtn?.addEventListener("click", () => {
@@ -2319,9 +3626,14 @@ function bindEvents() {
     els.referenceFile.value = "";
     els.referenceFile.click();
   });
+  els.confirmReferenceBtn?.addEventListener("click", () => {
+    if (!state.referenceVideo || state.referenceVideo.status === "fail") return;
+    focusDecomposeStep();
+  });
   els.referenceFile.addEventListener("change", () => {
     state.referenceVideo = null;
-    clearWorkflowSession();
+    clearWorkflowSession({ preserveBatchName: true });
+    clearRewriteProgress();
     clearDecompositionDraft();
     els.draftDecompositionBtn.disabled = true;
     els.decompositionStatus.className = "wz-info";
@@ -2346,10 +3658,24 @@ function bindEvents() {
   els.draftDecompositionBtn.addEventListener("click", draftReferenceVideoDecomposition);
   els.decomposeBtn.addEventListener("click", decomposeReferenceVideo);
   els.estimateBtn.addEventListener("click", estimateBatch);
+  els.estimateBox?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action=upload-seedance-assets]")) {
+      uploadSeedanceAssetsForReview().catch((error) => renderError(els.globalError, error, "Seedance 素材上传失败"));
+    }
+  });
   els.confirmLimits.addEventListener("change", renderEstimate);
   els.planBatchBtn.addEventListener("click", planBatch);
   els.confirmPlanBtn.addEventListener("click", confirmPlanBatch);
   els.stopBatchBtn.addEventListener("click", stopBatch);
+  els.startNewTaskBtn?.addEventListener("click", () => {
+    startNewTask().catch((error) => renderError(els.globalError, error, "开始新任务失败"));
+  });
+  els.batchName?.addEventListener("input", () => {
+    writeWorkflowSession({ batchName: els.batchName.value.trim() });
+  });
+  els.batchName?.addEventListener("change", () => {
+    writeWorkflowSession({ batchName: els.batchName.value.trim() });
+  });
   els.runQcBtn.addEventListener("click", runVideoQc);
   els.retryStitchBtn.addEventListener("click", retryStitch);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
@@ -2379,18 +3705,23 @@ async function loadInitialData() {
     await restoreWorkflowSession();
   }
   if (!state.batchDetail) await loadGallerySafely();
+  restoreUserBatchName();
   renderBatchReadiness();
+  syncStartNewTaskButton();
   syncMetrics();
 }
 
 async function init() {
-  resetTransientFormState();
+  bootstrapWorkbenchUi();
+  syncMaterialDirectionCustom();
   renderTruthFields();
   ensureDecompositionForm();
   renderDecompositionForm({});
-  renderTemplateStatus();
+  renderRewriteStatus();
+  renderTemplateSaveStatus();
   renderBatchReadiness();
   renderReference();
+  syncStartNewTaskButton();
   bindEvents();
   await bindLogin({
     modal: els.loginModal,

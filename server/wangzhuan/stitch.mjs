@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -22,6 +22,13 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded", "succeeded"]);
 const execFileAsync = promisify(execFile);
 const DEFAULT_STITCH_TIMEOUT_MS = 120000;
+const DEFAULT_OVERLAY_TIMEOUT_MS = 120000;
+const DISCLAIMER_FONT_CANDIDATES = Object.freeze([
+  "/System/Library/Fonts/PingFang.ttc",
+  "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+  "/Library/Fonts/Arial Unicode.ttf",
+  "/System/Library/Fonts/Supplemental/Arial.ttf"
+]);
 
 function ffmpegAvailableSync() {
   try {
@@ -58,6 +65,149 @@ function userRelative(context, fullPath) {
 function safeErrorMessage(error) {
   const raw = error?.message || "拼接失败";
   return raw.replace(/[A-Za-z]:[\\/][^\s]+/g, "[path]").replace(/\/[^\s]+/g, "[path]");
+}
+
+function cleanString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = cleanString(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function wrapDisclaimerText(text, maxUnits = 28) {
+  const source = cleanString(text);
+  if (!source) return "";
+  const lines = [];
+  let line = "";
+  let units = 0;
+  for (const char of source) {
+    const weight = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/u.test(char) ? 2 : 1;
+    if (line && units + weight > maxUnits) {
+      lines.push(line);
+      line = char;
+      units = weight;
+      continue;
+    }
+    line += char;
+    units += weight;
+  }
+  if (line) lines.push(line);
+  return lines.join("\n");
+}
+
+function pickDisclaimerFont() {
+  return DISCLAIMER_FONT_CANDIDATES.find((candidate) => existsSync(candidate)) || "";
+}
+
+function resolveDisclaimerOverlay(batch, branchDraft = null) {
+  const request = batch?.request || batch?.estimate?.request || {};
+  const draft = batch?.templateSnapshot?.draft || {};
+  const text = firstNonEmptyString(
+    branchDraft?.disclaimer,
+    request.disclaimer,
+    draft.disclaimer
+  );
+  if (!text) return { applied: false, text: "" };
+  return {
+    applied: true,
+    text,
+    preset: firstNonEmptyString(branchDraft?.disclaimerPreset, request.disclaimerPreset, draft.disclaimerPreset),
+    language: firstNonEmptyString(branchDraft?.disclaimerLanguage, request.disclaimerLanguage, draft.disclaimerLanguage),
+    position: firstNonEmptyString(branchDraft?.disclaimerOverlay?.position, request.disclaimerOverlay?.position, draft.disclaimerOverlay?.position) || "bottom_center",
+    fontSize: Number(branchDraft?.disclaimerOverlay?.fontSize || request.disclaimerOverlay?.fontSize || draft.disclaimerOverlay?.fontSize || 26),
+    boxHeight: Number(branchDraft?.disclaimerOverlay?.boxHeight || request.disclaimerOverlay?.boxHeight || draft.disclaimerOverlay?.boxHeight || 170),
+    opacity: Number(branchDraft?.disclaimerOverlay?.opacity || request.disclaimerOverlay?.opacity || draft.disclaimerOverlay?.opacity || 0.58)
+  };
+}
+
+async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeoutMs = DEFAULT_OVERLAY_TIMEOUT_MS } = {}) {
+  if (!overlay?.applied || !cleanString(overlay.text)) {
+    return { applied: false, targetPath: sourcePath };
+  }
+  if (!ffmpegAvailableSync()) {
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法写入免责声明贴片");
+  }
+  if (!existsSync(sourcePath)) {
+    throw new WangzhuanError("missing_required_file", "免责声明贴片所需的视频文件不存在", { sourcePath });
+  }
+  const tmpDir = await mkdtemp(join(tmpdir(), "wz-disclaimer-"));
+  try {
+    const imagePath = join(tmpDir, "disclaimer.png");
+    const wrappedText = wrapDisclaimerText(overlay.text);
+    await mkdir(dirname(targetPath), { recursive: true });
+    const boxHeight = Math.max(80, Number(overlay.boxHeight || 170));
+    const fontSize = Math.max(18, Number(overlay.fontSize || 26));
+    const opacity = Math.min(0.9, Math.max(0.2, Number(overlay.opacity || 0.58)));
+    const alignLeft = overlay.position === "bottom_left";
+    const fontFile = pickDisclaimerFont();
+    const pythonScript = [
+      "from PIL import Image, ImageDraw, ImageFont",
+      "import sys",
+      "target, font_path, text, font_size, box_h, align_left = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), sys.argv[6] == '1'",
+      "lines = text.split('\\n') if text else ['']",
+      "font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()",
+      "canvas = Image.new('RGBA', (720, box_h), (0, 0, 0, 0))",
+      "draw = ImageDraw.Draw(canvas)",
+      "line_gap = 10",
+      "line_heights = []",
+      "line_widths = []",
+      "for line in lines:",
+      "    bbox = draw.textbbox((0, 0), line, font=font)",
+      "    line_widths.append(max(0, bbox[2] - bbox[0]))",
+      "    line_heights.append(max(0, bbox[3] - bbox[1]))",
+      "total_h = sum(line_heights) + line_gap * max(0, len(lines) - 1)",
+      "y = max(16, (box_h - total_h) // 2)",
+      "for idx, line in enumerate(lines):",
+      "    width = line_widths[idx]",
+      "    height = line_heights[idx]",
+      "    x = 24 if align_left else max(16, (720 - width) // 2)",
+      "    draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))",
+      "    y += height + line_gap",
+      "canvas.save(target)"
+    ].join("\n");
+    await execFileAsync("python3", [
+      "-c",
+      pythonScript,
+      imagePath,
+      fontFile,
+      wrappedText,
+      String(fontSize),
+      String(boxHeight),
+      alignLeft ? "1" : "0"
+    ], {
+      timeout: 30000,
+      windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024
+    });
+    const colorAlpha = opacity.toFixed(2);
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i", sourcePath,
+      "-i", imagePath,
+      "-filter_complex", `[0:v]drawbox=x=0:y=ih-${boxHeight}:w=iw:h=${boxHeight}:color=black@${colorAlpha}:t=fill[base];[base][1:v]overlay=0:H-h[vout]`,
+      "-map", "[vout]",
+      "-map", "0:a?",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "18",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
+      "-movflags", "+faststart",
+      targetPath
+    ], {
+      timeout: timeoutMs,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    return { applied: true, targetPath };
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function readBatch(context, batchId) {
@@ -242,12 +392,21 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
       const outputId = takeOutputId(batch, sequenceState);
       const target = segmentOutputPath(context, batch.batchId, outputId);
       const filePath = userRelative(context, target);
+      const disclaimerOverlay = Number(batch.estimate?.durationSec) === 15
+        ? resolveDisclaimerOverlay(batch, entry.script.branchDraft)
+        : { applied: false, text: "" };
       const taskSource = entry.task.outputPath
         ? join(context.userProjectRoot, entry.task.outputPath)
         : "";
       if (taskSource && existsSync(taskSource)) {
         await mkdir(dirname(target), { recursive: true });
         await copyFile(taskSource, target);
+        if (disclaimerOverlay.applied) {
+          const overlayTarget = `${target}.overlay.mp4`;
+          await applyDisclaimerOverlay(target, overlayTarget, disclaimerOverlay);
+          await rm(target, { force: true });
+          await rename(overlayTarget, target);
+        }
       } else {
         throw new WangzhuanError("missing_required_file", "分段视频文件缺失，无法生成分段产出", {
           batchId: batch.batchId,
@@ -274,7 +433,8 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         qcStatus: "not_started",
         downloadEligible: false,
         visualPreviewRequired: false,
-        previewConfirmed: false
+        previewConfirmed: false,
+        disclaimerOverlay
       });
     }
   }
@@ -287,7 +447,7 @@ function hasTwoSubmittedSegments(group) {
   });
 }
 
-function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "" }) {
+function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null }) {
   return {
     schemaVersion: "stitch_report.v1",
     outputId,
@@ -298,6 +458,7 @@ function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode 
       version: preflight.version,
       preflightStatus: preflight.status
     },
+    disclaimerOverlay: disclaimerOverlay || { applied: false, text: "" },
     errorCode,
     errorMessage,
     createdAt: new Date().toISOString()
@@ -366,7 +527,6 @@ async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAU
 async function createSucceededStitchOutput(context, batch, group, segmentOutputs, preflight, sequenceState) {
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
-  const filePath = userRelative(context, target);
   const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
   try {
     await concatSegmentVideos(target, segmentPaths);
@@ -376,12 +536,21 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       segmentOutputIds: segmentOutputs.map((output) => output.outputId)
     });
   }
+  const disclaimerOverlay = resolveDisclaimerOverlay(batch, group.entries[0]?.script?.branchDraft);
+  if (disclaimerOverlay.applied) {
+    const overlayTarget = `${target}.overlay.mp4`;
+    await applyDisclaimerOverlay(target, overlayTarget, disclaimerOverlay);
+    await rm(target, { force: true });
+    await rename(overlayTarget, target);
+  }
+  const filePath = userRelative(context, target);
   const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video", { required: true });
   const report = buildReport({
     outputId,
     segmentOutputIds: segmentOutputs.map((output) => output.outputId),
     preflight,
-    status: "succeeded"
+    status: "succeeded",
+    disclaimerOverlay
   });
   const reportPath = await writeReport(context, batch.batchId, report);
   return {
@@ -403,7 +572,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       downloadEligible: false,
       visualPreviewRequired: false,
       previewConfirmed: false,
-      stitchReportPath: reportPath
+      stitchReportPath: reportPath,
+      disclaimerOverlay
     },
     report: {
       ...report,

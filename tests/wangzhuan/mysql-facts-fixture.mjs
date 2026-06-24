@@ -197,13 +197,14 @@ export function fakePool() {
         return [{ affectedRows: job ? 1 : 0 }];
       }
       if (sql.includes("INSERT INTO resource_locks")) {
+        const runRow = state.runRows.get(params[3]);
         state.resourceLocks.set(params[0], {
           lock_key: params[0],
           lock_type: "upstream_generation",
           status: "active",
           run_uid: [...state.runs.entries()].find(([, id]) => id === params[3])?.[0] || "",
-          run_type: state.runRows.get(params[3])?.run_type || "pipeline",
-          run_status: "running",
+          run_type: runRow?.run_type || "pipeline",
+          run_status: runRow?.status || "running",
           expires_at: "2026-06-18 02:00:00.000"
         });
         return [{ affectedRows: 1 }];

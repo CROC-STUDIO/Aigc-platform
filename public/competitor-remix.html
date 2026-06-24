@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Touka AI素材中台 - 竞品素材快速改造</title>
+    <title>Touka AI素材中台 - 竞品素材处理任务</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="wz-body">
@@ -38,211 +38,344 @@
         </a>
         <a class="platform-nav-item active" href="/competitor-remix.html">
           <span>◇</span>
-          <b>竞品素材改造</b>
+          <b>竞品素材处理</b>
         </a>
       </nav>
       <div class="sidebar-foot">
         <span>Touka AI素材中台</span>
-        <small>Remix</small>
+        <small>Video Ops</small>
       </div>
     </aside>
 
-    <main class="app wz-app wz-workbench" autocomplete="off">
+    <main class="app wz-app wz-workbench video-ops-workbench" autocomplete="off">
       <section class="operation-pane">
         <div id="remixActiveLockActions" class="wz-lock-actions" hidden>
           <span id="remixActiveLockText"></span>
         </div>
 
-        <nav class="wz-canvas-toolbar" id="remixStepbar" aria-label="流程步骤导航">
-          <a class="wz-stepbar-item" href="#remixNodeSource" data-step="1">
+        <nav class="wz-canvas-toolbar" id="remixStepbar" aria-label="任务步骤导航">
+          <a class="wz-stepbar-item" href="#remixNodeTask" data-step="1">
             <span class="wz-stepbar-no">1</span>
-            <span class="wz-stepbar-label">源素材输入</span>
+            <span class="wz-stepbar-label">选择任务</span>
           </a>
-          <a class="wz-stepbar-item" href="#remixNodeMask" data-step="2">
+          <a class="wz-stepbar-item" href="#remixNodeInput" data-step="2">
             <span class="wz-stepbar-no">2</span>
-            <span class="wz-stepbar-label">功能识别与处理</span>
+            <span class="wz-stepbar-label">输入与参数</span>
           </a>
-          <a class="wz-stepbar-item" href="#remixNodeDelivery" data-step="3">
+          <a class="wz-stepbar-item" href="#remixNodeJob" data-step="3">
             <span class="wz-stepbar-no">3</span>
-            <span class="wz-stepbar-label">预览与交付</span>
+            <span class="wz-stepbar-label">队列与结果</span>
           </a>
-          <div class="wz-stepbar-metrics" aria-label="改造概览">
-            <div><strong id="remixTemplateCount">0</strong><span>源素材</span></div>
-            <div><strong id="remixRegionCount">0</strong><span>区域</span></div>
-            <div><strong id="remixOutputCount">0</strong><span>输出</span></div>
-            <div><strong id="remixDownloadCount">0</strong><span>可下载</span></div>
+          <div class="wz-stepbar-metrics" aria-label="任务概览">
+            <div><strong id="remixTaskTypeMetric">-</strong><span>任务类型</span></div>
+            <div><strong id="remixJobStatusMetric">未提交</strong><span>状态</span></div>
+            <div><strong id="remixQueueMetric">-</strong><span>排队</span></div>
+            <div><strong id="remixOutputMetric">0</strong><span>结果</span></div>
           </div>
         </nav>
 
         <div class="wz-canvas-scroll">
-          <div class="wz-canvas" id="remixCanvas" aria-label="竞品素材快速改造工作流">
+          <div class="wz-canvas video-ops-canvas" id="remixCanvas" aria-label="video-content-ops 任务工作台">
             <svg class="wz-canvas-links" id="remixCanvasLinks" aria-hidden="true"></svg>
 
-            <!-- 列1：源素材输入 -->
             <div class="wz-col" data-step="1">
-              <div class="wz-col-label"><b>1</b> 源素材输入</div>
-              <section class="wz-node" id="remixNodeSource" data-node="source" data-port-out="1">
+              <div class="wz-col-label"><b>1</b> 任务选择</div>
+              <section class="wz-node" id="remixNodeTask" data-node="task" data-port-out="1">
                 <div class="panel-head">
-                  <h2>上传源素材</h2>
-                  <span>选择后自动上传并进入区域编辑</span>
+                  <h2>真实可接入任务</h2>
+                  <span>基于 video-content-ops job_type</span>
                 </div>
                 <div class="wz-node-body">
-                  <input id="remixSourceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg" multiple />
-                  <div id="remixSourceUploadPanel" class="wz-upload-panel">
-                    <div class="wz-upload-copy">
-                      <span class="wz-upload-kicker">VIDEO / IMAGE</span>
-                      <strong>上传竞品源素材</strong>
-                      <small id="remixSourceUploadStatus">选中文件后会自动上传、校验并生成可框选预览。</small>
-                    </div>
-                    <button id="remixUploadBtn" class="wz-upload-button" type="button">选择并上传</button>
-                  </div>
-                  <div class="remix-prototype-toolbar">
-                    <label class="wz-check"><input id="remixPrototypeReviewOnly" type="checkbox" /> 只看需复核</label>
-                    <button id="remixPrototypeSeedBtn" class="mini ghost" type="button">载入示例素材</button>
-                  </div>
-                  <div id="remixSourceBox" class="wz-list empty-line">未上传源素材</div>
-                  <div id="remixPrototypeSourceList" class="remix-prototype-source-list" aria-label="批量素材列表"></div>
+                  <div id="videoOpsTaskGrid" class="video-ops-task-grid" aria-label="任务类型列表"></div>
+                  <div class="wz-warning video-ops-boundary">当前页面只提交 video-content-ops 文档已开放的异步任务；未开放的局部文案级替换不会作为可执行任务展示。</div>
                 </div>
               </section>
             </div>
 
-            <!-- 列2：功能识别与处理（能力计划 + 可选 Mask 编辑 + 预览） -->
             <div class="wz-col wz-col-wide" data-step="2">
-              <div class="wz-col-label"><b>2</b> 功能识别与处理</div>
-              <section class="wz-node" id="remixNodeMask" data-node="mask" data-port-in="1" data-port-out="1">
+              <div class="wz-col-label"><b>2</b> 输入与参数</div>
+              <section class="wz-node" id="remixNodeInput" data-node="input" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
-                  <h2>单素材功能处理</h2>
-                  <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
+                  <h2 id="videoOpsSelectedTitle">一键去标识</h2>
+                  <span id="videoOpsSelectedJobType">seedance_ai_remove</span>
                 </div>
                 <div class="wz-node-body">
-                  <div class="wz-warning">先识别素材需要做什么：文案、CTA、字幕、ending 可走自动 OCR/ASR/尾帧检测；Logo、水印、手机界面等局部画面处理才需要用户框选或点选定位。</div>
-                  <label>处理功能
-                    <select id="remixCapabilitySelect">
-                      <option value="auto_all" selected>自动识别建议</option>
-                      <option value="product_name">产品名替换</option>
-                      <option value="cta">CTA 文案替换</option>
-                      <option value="subtitle">字幕处理</option>
-                      <option value="ending">Ending 检测</option>
-                      <option value="logo_icon">Logo/Icon 去除</option>
-                      <option value="watermark">水印遮挡</option>
-                      <option value="phone_ui">手机界面区域</option>
-                    </select>
-                  </label>
-                  <div id="remixMaskEditor" class="wz-region-canvas remix-mask-editor" aria-label="Mask 编辑窗口，方向键移动选中区域，Shift 加方向键调整大小" tabindex="0">
-                    <div id="remixMaskMediaLayer" class="remix-mask-media" aria-hidden="true"></div>
-                    <div class="remix-mask-empty" data-mask-empty>上传源素材后，可按需要框选 Logo、水印、手机界面等区域</div>
-                    <div id="remixMaskLayer" class="remix-mask-layer"></div>
-                  </div>
-                  &lt;div class="remix-mask-upload" aria-label="Mask上传"&gt;
-                    &lt;label&gt;上传Mask图片 (PNG):&lt;/label&gt;
-                    &lt;input id="remixMaskFile" type="file" accept="image/png" disabled&gt;
-                    &lt;button id="remixUploadMaskBtn" type="button" disabled&gt;上传Mask&lt;/button&gt;
-                  &lt;/div&gt;
-                  &lt;div class="wz-warning"&gt;区域类功能会合成 mask 预览图；自动类功能不需要用户选区域，提交时由后端识别文字、字幕或 ending。&lt;/div&gt;
-                  <label>改造类型
-                    <select id="remixOperationType">
-                      <option value="watermark_cover">水印区域遮挡</option>
-                      <option value="logo_icon_cover_or_replace">Logo/Icon 区域遮挡或替换</option>
-                      <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
-                    </select>
-                  </label>
-                  <label>跟踪方式
-                    <select id="remixTrackingMode">
-                      <option value="manual_mask">框选 mask</option>
-                      <option value="auto_interaction">点选跟踪</option>
-                    </select>
-                  </label>
-                  <label id="remixInteractionPromptWrap" class="remix-interaction-prompt" hidden>点选跟踪提示
-                    <textarea id="remixInteractionPrompt" rows="3" placeholder="例如：跟踪左上角 Logo，贯穿全片去除，不影响人物和手机界面。"></textarea>
-                  </label>
-                  <label>文字描述选区
-                    <textarea id="remixDescriptionRegion" rows="3" placeholder="例如：右上角 icon 替换为我方 icon，贯穿全片。"></textarea>
-                  </label>
-                  <div class="remix-prototype-toolbar">
-                    <button id="remixDetectBtn" class="ghost" type="button">识别候选区域</button>
-                    <button id="remixAddDescriptionRegionBtn" class="ghost" type="button">添加描述区域</button>
-                  </div>
-                  <section class="wz-subflow" aria-label="识别结果">
-                    <div class="panel-head">
-                      <h3>识别结果</h3>
-                      <span id="remixDetectionStatus">未识别</span>
+                  <section id="videoOpsMediaInput" class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>输入素材</strong>
+                      <span id="videoOpsInputModeLabel">视频 URL 或上传文件</span>
                     </div>
-                    <div id="remixDetectionSummary" class="wz-list empty-line">暂无识别结果</div>
-                  </section>
-                  <div class="remix-prototype-toolbar">
-                    <button id="remixPrototypeApplyRegionsBtn" class="ghost" type="button" disabled>应用当前区域到选中素材</button>
-                    <button id="remixPrototypeConfirmReviewBtn" class="ghost" type="button" disabled>确认当前素材复核</button>
-                    <button id="remixPrototypeGenerateTasksBtn" type="button" disabled>生成草稿任务</button>
-                  </div>
-                  <div id="remixPrototypeCapabilityPlan" class="remix-prototype-capability-grid" aria-label="能力映射预览"></div>
-                  <section class="wz-subflow" aria-label="执行计划预览">
-                    <div class="panel-head">
-                      <h3>执行计划预览</h3>
-                      <span id="remixPlanStatus">未生成</span>
+                    <div class="video-ops-source-toggle" role="radiogroup" aria-label="输入方式">
+                      <label><input type="radio" name="videoOpsSourceMode" value="url" checked /> 视频 URL</label>
+                      <label><input type="radio" name="videoOpsSourceMode" value="file" /> 上传视频</label>
                     </div>
-                    <div id="remixPlanSummary" class="wz-list empty-line">暂无执行计划</div>
+                    <label id="videoOpsUrlWrap">视频 URL
+                      <input id="videoOpsSourceUrl" type="url" placeholder="https://example.com/video.mp4" autocomplete="off" />
+                    </label>
+                    <label id="videoOpsFileWrap" hidden>上传视频
+                      <input id="videoOpsSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime" />
+                      <span class="wz-field-hint">单个视频不超过 300 MB</span>
+                    </label>
+                    <div id="videoOpsFileStatus" class="video-ops-file-status empty-line">未选择文件</div>
+                    <video id="videoOpsVideo" class="video-ops-video" controls preload="metadata" playsinline hidden></video>
                   </section>
-                </div>
-              </section>
 
-              <section class="wz-node" id="remixNodeMaskPreview" data-node="mask-preview" data-port-in="1" data-port-out="1">
-                <div class="panel-head">
-                  <h2>Mask 区域预览</h2>
-                  <span id="remixMaskSummary">未生成</span>
-                </div>
-                <div class="wz-node-body">
-                  <div class="remix-mask-preview">
-                    <canvas id="remixMaskPreviewCanvas" width="720" height="1280" aria-label="合成 mask 预览图"></canvas>
-                  </div>
-                  <div class="modal-actions wz-actions">
-                    <button id="remixMaskConfirmBtn" type="button" disabled>确认并调用接口</button>
-                  </div>
+                  <section id="videoOpsReportInput" class="video-ops-panel" hidden>
+                    <div class="video-ops-section-head">
+                      <strong>分析文本</strong>
+                      <span>material_analysis 使用 report_text 输入</span>
+                    </div>
+                    <label>报告文本
+                      <textarea id="videoOpsReportText" rows="8" placeholder="粘贴素材表现数据、投放复盘或分析材料"></textarea>
+                    </label>
+                  </section>
+
+                  <section id="videoOpsParams" class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>任务参数</strong>
+                      <span id="videoOpsParamHint">不需要用户处理 mask</span>
+                    </div>
+
+                    <div id="seedanceParams" class="video-ops-param-group" data-param-for="seedance_ai_remove">
+                      <label>处理提示
+                        <textarea id="seedancePrompt" rows="3">Remove visible app icon, logo, watermark, and overlay brand marks. Keep the original scene, timing, motion, and camera movement.</textarea>
+                      </label>
+                      <div class="video-ops-form-grid">
+                        <label>比例
+                          <select id="seedanceRatio">
+                            <option value="auto">auto</option>
+                            <option value="9:16">9:16</option>
+                            <option value="16:9">16:9</option>
+                            <option value="1:1">1:1</option>
+                          </select>
+                        </label>
+                        <label>分辨率
+                          <select id="seedanceResolution">
+                            <option value="720p">720p</option>
+                            <option value="1080p">1080p</option>
+                          </select>
+                        </label>
+                        <label>切片秒数
+                          <input id="seedanceSegmentSeconds" type="number" min="1" max="30" step="1" value="15" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="autoRemoveParams" class="video-ops-param-group" data-param-for="ai_remove_auto" hidden>
+                      <label>mask_threshold
+                        <input id="autoRemoveMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                      </label>
+                    </div>
+
+                    <div id="interactiveParams" class="video-ops-param-group" data-param-for="auto_ai_remove" hidden>
+                      <div class="video-ops-kframe-layout">
+                        <div class="video-ops-frame-box" id="videoOpsFrameBox" aria-label="K 帧点选框选区域">
+                          <canvas id="videoOpsFrameCanvas" width="360" height="640"></canvas>
+                          <div id="videoOpsPromptLayer" class="video-ops-prompt-layer"></div>
+                        </div>
+                        <div class="video-ops-kframe-controls">
+                          <div class="video-ops-form-grid">
+                            <label>帧号
+                              <input id="interactiveFrameIndex" type="number" min="0" step="1" value="0" />
+                            </label>
+                            <label>当前时间秒
+                              <input id="interactiveFrameTime" type="number" min="0" step="0.01" value="0" />
+                            </label>
+                            <label>Prompt 类型
+                              <select id="interactivePromptType">
+                                <option value="box">Box Prompt</option>
+                                <option value="point">Point Prompt</option>
+                              </select>
+                            </label>
+                            <label>点类型
+                              <select id="interactivePointLabel">
+                                <option value="positive">positive</option>
+                                <option value="negative">negative</option>
+                              </select>
+                            </label>
+                          </div>
+                          <input id="interactiveFrameSlider" class="remix-frame-slider" type="range" min="0" max="0" step="1" value="0" />
+                          <div class="video-ops-actions">
+                            <button id="captureCurrentFrameBtn" class="ghost" type="button">使用播放器当前帧</button>
+                            <button id="clearPromptBtn" class="ghost" type="button">清除点选/框选</button>
+                          </div>
+                          <div class="video-ops-form-grid">
+                            <label>sample_fps
+                              <input id="interactiveSampleFps" type="number" min="0" max="10" step="0.1" value="1" />
+                            </label>
+                            <label>max_frames
+                              <input id="interactiveMaxFrames" type="number" min="1" max="1000" step="1" value="20" />
+                            </label>
+                            <label>removal_engine
+                              <select id="interactiveRemovalEngine">
+                                <option value="configured">configured</option>
+                                <option value="lama">lama</option>
+                                <option value="fallback_blur">fallback_blur</option>
+                              </select>
+                            </label>
+                            <label>mask_threshold
+                              <input id="interactiveMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                            </label>
+                          </div>
+                          <div id="interactivePromptSummary" class="wz-list empty-line">尚未点选或框选</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div id="manualMaskParams" class="video-ops-param-group" data-param-for="ai_remove_manual" hidden>
+                      <label>上传 mask 图片
+                        <input id="manualMaskFile" type="file" accept="image/png,image/jpeg,image/webp" />
+                      </label>
+                      <div id="manualMaskStatus" class="video-ops-file-status empty-line">未上传 mask</div>
+                      <div class="video-ops-form-grid">
+                        <label>start_ms
+                          <input id="manualStartMs" type="number" min="0" step="1" value="0" />
+                        </label>
+                        <label>end_ms
+                          <input id="manualEndMs" type="number" min="1" step="1" value="15000" />
+                        </label>
+                        <label>mask_threshold
+                          <input id="manualMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="maskEditParams" class="video-ops-param-group" data-param-for="mask_edit" hidden>
+                      <div class="video-ops-region-layout">
+                        <div id="videoOpsRegionBox" class="video-ops-region-box" aria-label="区域框选画布">
+                          <video id="videoOpsRegionVideo" muted playsinline preload="metadata"></video>
+                          <div id="videoOpsRegionOverlay" class="video-ops-region-overlay"></div>
+                        </div>
+                        <div>
+                          <div class="video-ops-actions">
+                            <button id="useCurrentRegionFrameBtn" class="ghost" type="button">同步当前视频帧</button>
+                            <button id="clearRegionBtn" class="ghost" type="button">清除区域</button>
+                          </div>
+                          <div id="regionSummary" class="wz-list empty-line">拖拽画面框选遮挡或模糊区域</div>
+                        </div>
+                      </div>
+                      <div class="video-ops-form-grid">
+                        <label>blur_sigma
+                          <input id="maskBlurSigma" type="number" min="0" max="200" step="1" value="40" />
+                        </label>
+                        <label>mask_threshold
+                          <input id="maskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                        </label>
+                        <label>fill_color
+                          <input id="maskFillColor" type="color" value="#000000" />
+                        </label>
+                        <label>fill_opacity
+                          <input id="maskFillOpacity" type="number" min="0" max="1" step="0.05" value="1" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="endTrimParams" class="video-ops-param-group" data-param-for="end_trim_detection" hidden>
+                      <div class="video-ops-form-grid">
+                        <label>检测尾段秒数
+                          <input id="tailDetectSeconds" type="number" min="1" max="30" step="1" value="15" />
+                        </label>
+                        <label>review_threshold
+                          <input id="reviewThreshold" type="number" min="0" max="1" step="0.01" value="0.55" />
+                        </label>
+                        <label>trim_mode
+                          <select id="trimMode">
+                            <option value="fast">fast</option>
+                            <option value="precise">precise</option>
+                          </select>
+                        </label>
+                        <label>safe_trim_margin_ms
+                          <input id="safeTrimMarginMs" type="number" min="0" max="5000" step="50" value="300" />
+                        </label>
+                      </div>
+                      <label>导流关键词，一行一个
+                        <textarea id="competitorKeywords" rows="3" placeholder="download now&#10;install app"></textarea>
+                      </label>
+                      <label class="wz-check"><input id="allowReencode" type="checkbox" /> 允许重编码</label>
+                    </div>
+
+                    <div id="copyTranslateParams" class="video-ops-param-group" data-param-for="video_copy_translate" hidden>
+                      <div class="video-ops-form-grid">
+                        <label>target_language
+                          <input id="copyTargetLanguage" type="text" value="en" />
+                        </label>
+                        <label>source_mode
+                          <input id="copySourceMode" type="text" value="auto" />
+                        </label>
+                        <label>render_mode
+                          <input id="copyRenderMode" type="text" value="subtitle_band" />
+                        </label>
+                        <label>subtitle_roi_mode
+                          <input id="copySubtitleRoiMode" type="text" value="auto" />
+                        </label>
+                        <label>subtitle_removal_mode
+                          <input id="copySubtitleRemovalMode" type="text" value="band" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="languageRewriteParams" class="video-ops-param-group" data-param-for="language_rewrite" hidden>
+                      <label>target_language
+                        <input id="rewriteTargetLanguage" type="text" value="en" />
+                      </label>
+                    </div>
+
+                    <div id="materialAnalysisParams" class="video-ops-param-group" data-param-for="material_analysis" hidden>
+                      <label class="wz-check"><input id="materialUseLlm" type="checkbox" checked /> 使用 LLM 分析</label>
+                    </div>
+                  </section>
+
+                  <section class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>提交设置</strong>
+                      <span>创建后进入异步队列</span>
+                    </div>
+                    <label>优先级
+                      <input id="videoOpsPriority" type="number" min="0" max="10" step="1" value="0" />
+                    </label>
+                    <details class="video-ops-payload-preview">
+                      <summary>Payload 预览</summary>
+                      <pre id="videoOpsPayloadPreview">{}</pre>
+                    </details>
+                    <div id="videoOpsFormError" class="wz-warning" hidden></div>
+                    <div class="modal-actions wz-actions">
+                      <button id="videoOpsSubmitBtn" type="button">提交任务</button>
+                      <button id="videoOpsResetBtn" class="ghost" type="button">重置</button>
+                    </div>
+                  </section>
                 </div>
               </section>
             </div>
 
-            <!-- 列3：预览与交付 -->
             <div class="wz-col" data-step="3">
-              <div class="wz-col-label"><b>3</b> 预览与交付</div>
-              <section class="wz-node" id="remixNodeDelivery" data-node="delivery" data-port-in="1">
+              <div class="wz-col-label"><b>3</b> 队列与结果</div>
+              <section class="wz-node" id="remixNodeJob" data-node="job" data-port-in="1">
                 <div class="panel-head">
-                  <h2>处理状态与预览确认</h2>
-                  <span id="remixStatusBadge">未开始</span>
+                  <h2>任务状态</h2>
+                  <span id="videoOpsStatusBadge">未提交</span>
                 </div>
                 <div class="wz-node-body">
-                  <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
-                  <section class="wz-subflow" aria-label="自动质检摘要">
-                    <div class="panel-head">
-                      <h3>自动质检摘要</h3>
-                      <span id="remixQcStatus">未开始</span>
-                    </div>
-                    <div id="remixQcSummary" class="wz-list empty-line">暂无质检结果</div>
-                  </section>
-                  <div class="remix-prototype-toolbar">
-                    <button id="remixPrototypeSubmitTasksBtn" type="button" disabled>提交真实队列</button>
-                    <button id="remixPrototypeAdvanceTasksBtn" class="ghost" type="button" disabled>刷新队列</button>
-                  </div>
-                  <div id="remixPrototypeTaskQueue" class="remix-prototype-task-list" aria-label="异步任务队列"></div>
-                  <div class="modal-actions wz-actions">
-                    <button id="remixConfirmBtn" type="button" disabled>确认预览通过</button>
-                    <button id="remixStopBtn" class="ghost" type="button" hidden>停止改造</button>
-                    <button id="remixDownloadBtn" class="ghost" type="button" disabled>下载交付包</button>
+                  <div id="videoOpsJobSummary" class="wz-list empty-line">暂无任务</div>
+                  <div class="video-ops-actions">
+                    <button id="videoOpsRefreshBtn" class="ghost" type="button" disabled>刷新状态</button>
+                    <button id="videoOpsResultBtn" class="ghost" type="button" disabled>读取结果</button>
+                    <button id="videoOpsDownloadBtn" class="ghost" type="button" disabled>下载输出</button>
+                    <button id="videoOpsCancelBtn" class="ghost" type="button" disabled>取消</button>
+                    <button id="videoOpsRetryBtn" class="ghost" type="button" disabled>重试</button>
                   </div>
                 </div>
               </section>
 
-              <section class="wz-node" id="remixNodeGallery" data-node="gallery">
+              <section class="wz-node" id="remixNodeResult" data-node="result">
                 <div class="panel-head">
-                  <h2>改造图库</h2>
-                  <button id="remixRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+                  <h2>结果与诊断</h2>
+                  <span id="videoOpsResultStatus">未读取</span>
                 </div>
                 <div class="wz-node-body">
-                  <div id="remixGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
-                  <div id="remixPrototypeGallery" class="remix-prototype-output-grid" aria-label="批次输出预览"></div>
+                  <div id="videoOpsResultBox" class="wz-list empty-line">任务成功后可读取 result、stage_timings、engine_trace。</div>
                 </div>
               </section>
             </div>
-
           </div>
         </div>
       </section>
@@ -251,7 +384,7 @@
     <div id="remixLoginModal" class="modal-backdrop login-backdrop" hidden>
       <div class="modal-panel login-panel">
         <h2>登录 Touka AI素材中台</h2>
-        <p>登录后可上传源素材并创建竞品快速改造任务。</p>
+        <p>登录后可提交 video-content-ops 任务。</p>
         <label>账号 <input id="wangzhuanLoginUsername" type="text" autocomplete="username" /></label>
         <label>密码 <input id="wangzhuanLoginPassword" type="password" autocomplete="current-password" /></label>
         <div class="login-status"></div>

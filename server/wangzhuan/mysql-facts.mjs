@@ -171,6 +171,8 @@ const TASK_STATUSES = Object.freeze([
 ]);
 
 const STATE_TRANSITION_RULES = Object.freeze([
+  ["workflow_run", "__new__", "draft", "batch_draft_saved", null, 0],
+  ["workflow_run", "__new__", "checking", "batch_draft_saved", null, 0],
   ["workflow_run", "__new__", "queued", "batch_created", null, 0],
   ["workflow_run", "__new__", "preview_required", "batch_created", null, 0],
   ["workflow_run", "__new__", "queued", "remix_write", null, 0],
@@ -178,6 +180,12 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "__new__", "preview_required", "remix_write", null, 0],
   ["workflow_run", "__new__", "failed", "remix_write", null, 1],
   ["workflow_run", "draft", "checking", "validate_inputs", null, 0],
+  ["workflow_run", "draft", "draft", "batch_draft_saved", null, 0],
+  ["workflow_run", "draft", "checking", "batch_draft_saved", null, 0],
+  ["workflow_run", "checking", "checking", "batch_draft_saved", null, 0],
+  ["workflow_run", "checking", "draft", "batch_draft_saved", null, 0],
+  ["workflow_run", "checking", "queued", "batch_created", null, 0],
+  ["workflow_run", "checking", "preview_required", "batch_created", null, 0],
   ["workflow_run", "checking", "queued", "estimate_accepted", null, 0],
   ["workflow_run", "queued", "running", "worker_started", null, 0],
   ["workflow_run", "queued", "running", "batch_write", null, 0],
@@ -1464,6 +1472,22 @@ export async function verifyEstimateConfirmationTokenFromMysql(context, estimate
 
 export async function syncRemixFacts(context, remix, triggerName = "remix_write") {
   if (!remix?.remixId) return { skipped: true };
+  const remixRequest = {
+    ...(remix.request || {}),
+    sourceId: remix.request?.sourceId || remix.sourceId || remix.source?.sourceId,
+    operationType: remix.request?.operationType || remix.operationType,
+    targetChannel: remix.request?.targetChannel || remix.targetChannel,
+    regions: Array.isArray(remix.request?.regions)
+      ? remix.request.regions
+      : Array.isArray(remix.regions)
+        ? remix.regions
+        : [],
+    autoDetect: Boolean(remix.request?.autoDetect || remix.autoDetect),
+    capabilityKey: remix.request?.capabilityKey || remix.capabilityKey || "",
+    jobType: remix.request?.jobType || remix.jobType || "",
+    keyframe: remix.request?.keyframe || remix.keyframe || null,
+    executionPlan: remix.request?.executionPlan || remix.executionPlan || null
+  };
   const batchLike = {
     batchId: remix.remixId,
     type: "remix",
@@ -1471,12 +1495,7 @@ export async function syncRemixFacts(context, remix, triggerName = "remix_write"
     estimate: remix.estimate || {},
     sourceId: remix.sourceId,
     source: remix.source,
-    request: remix.request || {
-      sourceId: remix.sourceId || remix.source?.sourceId,
-      operationType: remix.operationType,
-      targetChannel: remix.targetChannel,
-      regions: Array.isArray(remix.regions) ? remix.regions : []
-    },
+    request: remixRequest,
     operationType: remix.operationType,
     targetChannel: remix.targetChannel,
     regions: Array.isArray(remix.regions) ? remix.regions : [],
@@ -2018,6 +2037,8 @@ async function loadBatchByRunRow(conn, facts, run) {
   delete estimate.confirmationToken;
   const batch = {
     batchId: run.run_uid,
+    userBatchName: request.batchName || "",
+    displayBatchName: request.batchName || "",
     type: "pipeline",
     status: run.status,
     userId: facts.username || "mysql",
@@ -2161,6 +2182,11 @@ async function loadRemixByRunRow(conn, facts, run) {
     operationType: run.operation_type || request.operationType || "",
     targetChannel: run.target_channel || request.targetChannel || "",
     regions: regions.length ? regions : (Array.isArray(request.regions) ? request.regions : []),
+    autoDetect: Boolean(request.autoDetect),
+    capabilityKey: request.capabilityKey || "",
+    jobType: request.jobType || "",
+    keyframe: request.keyframe || null,
+    executionPlan: request.executionPlan || null,
     templateSnapshot: parseJsonValue(run.template_snapshot_json, null),
     capability,
     providerJob: providerJobFromRunAndTasks(run, tasks),
@@ -2382,6 +2408,7 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
         wr.status AS run_status,
         wr.target_channel,
         wr.template_snapshot_json,
+        wr.request_json,
         wr.created_at AS run_created_at,
         wr.updated_at AS run_updated_at,
         wo.output_uid,
@@ -2406,9 +2433,12 @@ export async function loadGalleryItemsFromMysql(context, query = {}) {
     );
     const items = rows.map((row) => {
       const template = parseJsonValue(row.template_snapshot_json, {});
+      const request = parseJsonValue(row.request_json, {});
       const output = outputRowToOutput({ ...row, run_uid: row.run_uid }, []);
       return {
         ...output,
+        userBatchName: request.batchName || "",
+        displayBatchName: request.batchName || "",
         ...(row.run_type === "remix" ? { remixStatus: row.run_status } : { batchStatus: row.run_status }),
         ...(row.run_type === "remix" ? { remixId: row.run_uid } : { batchId: row.run_uid }),
         templateId: template?.templateId,
@@ -2809,6 +2839,7 @@ function requestSnapshot(batch) {
     };
   }
   return {
+    ...(batch.request || {}),
     estimateId: batch.estimate?.estimateId,
     estimate: sanitizedEstimateRecord({ estimate: batch.estimate || {} }),
     durationSec: batch.estimate?.durationSec,

@@ -622,7 +622,7 @@ export function renderOutputPreviewCards(outputs = [], { emptyText = "暂无输�
             </div>
             <div class="wz-output-card-body">
               <div>
-                <strong>${escapeHtml(output.outputId || `输出 ${index + 1}`)}</strong>
+                <strong>${escapeHtml(output.displayBatchName || output.userBatchName || output.outputId || `输出 ${index + 1}`)}</strong>
                 ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
               </div>
               ${badge(output.qcStatus || "not_started", statusMap)}
@@ -876,7 +876,7 @@ export async function stopWorkflowTask(type, id, reason = "frontend_stop") {
   });
 }
 
-export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes = "") {
+export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes = "", branchDrafts = []) {
   return apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/confirm-plan`, {
     method: "POST",
     body: JSON.stringify({
@@ -896,6 +896,7 @@ export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes 
         mediaRefs: plan.mediaRefs,
         complianceNotes: plan.complianceNotes
       })),
+      branchDrafts: Array.isArray(branchDrafts) ? branchDrafts : [],
       confirmationNotes
     })
   });

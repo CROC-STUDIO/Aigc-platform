@@ -9,11 +9,13 @@ import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import {
   estimateBatch,
   loadEstimate,
+  prepareBatchPlanFromEstimate,
   startBatchFromEstimate
 } from "../../server/wangzhuan/estimates.mjs";
 import {
   closeWangzhuanFactsPool,
   loadBatchDetailFromMysql,
+  syncBatchFacts,
   setWangzhuanFactsPoolForTest
 } from "../../server/wangzhuan/mysql-facts.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
@@ -148,6 +150,128 @@ test("estimates a 15s batch and persists limits, capabilities, and snapshot", as
     assert.equal(loaded.templateSnapshot.versionId, fx.template.versionId);
     assert.equal(loaded.referenceVideo.referenceVideoId, fx.referenceVideoId);
     assert.equal(loaded.decomposition.schemaVersion, "video_decomposition.v1");
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("estimates a batch from inline launch draft without saved template", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-est-inline-"));
+  try {
+    ensureFactsPool();
+    const ctx = context(root);
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    await decomposeReferenceVideo(ctx, {
+      idempotencyKey: "idem_decompose_inline",
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      decomposition: decomposition()
+    });
+
+    const result = await estimateBatch(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      projectName: "Inline Project",
+      batchName: "inline_batch",
+      targetChannel: "tiktok_ads",
+      targetRegion: "BR",
+      targetRegions: ["BR", "PT"],
+      language: "pt-BR",
+      languages: ["pt-BR", "en-US"],
+      promiseLevel: "strong_conversion",
+      durationSec: 15,
+      variantCount: 2,
+      requestedConcurrency: 2,
+      outputRatio: "16:9",
+      disclaimer: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
+      disclaimerPresetId: "auto",
+      disclaimerPreset: "auto",
+      disclaimerLanguage: "pt",
+      disclaimerOverlay: {
+        position: "bottom_left",
+        fontSize: 24,
+        boxHeight: 156,
+        opacity: 0.66
+      },
+      templateSnapshot: {
+        draft: {
+          projectName: "Inline Project",
+          batchName: "inline_batch",
+          displayName: "Inline Draft",
+          productName: "Lucky Cash",
+          productLink: "https://play.google.com/store/apps/details?id=perkplay",
+          cta: "Install now",
+          ending: "Claim rewards today",
+          currencySymbol: "R$",
+          materialDirection: "本地奖励场景",
+          voiceoverStyle: "Brazilian creator",
+          promiseLevel: "strong_conversion",
+          regions: ["BR", "PT"],
+          languages: ["pt-BR", "en-US"],
+          targetChannels: ["tiktok_ads"]
+        }
+      },
+      branches: [
+        {
+          branchId: "branch_inline",
+          branchLabel: "Inline Draft",
+          productName: "Lucky Cash",
+          productLink: "https://play.google.com/store/apps/details?id=perkplay",
+          cta: "Install now",
+          language: "pt-BR,en-US",
+          regions: ["BR", "PT"],
+          targetChannel: "tiktok_ads",
+          materialDirection: "本地奖励场景",
+          voiceoverStyle: "Brazilian creator",
+          promiseLevel: "strong_conversion",
+          ending: "Claim rewards today",
+          currencySymbol: "R$"
+        }
+      ]
+    });
+
+    assert.equal(result.estimate.durationSec, 15);
+    assert.equal(result.estimate.outputRatio, "16:9");
+    assert.equal(result.estimate.branchCount, 1);
+    assert.equal(result.estimate.scriptCount, 2);
+    assert.equal(result.estimate.targetRegions.includes("BR"), true);
+    assert.equal(result.estimate.languages.includes("pt-BR"), true);
+
+    const loaded = await loadEstimate(ctx, result.estimate.estimateId);
+    assert.equal(loaded.request.templateId, undefined);
+    assert.equal(loaded.request.templateSnapshot.draft.productName, "Lucky Cash");
+    assert.equal(loaded.request.disclaimer, "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos");
+    assert.equal(loaded.request.disclaimerPresetId, "auto");
+    assert.equal(loaded.request.disclaimerPreset, "auto");
+    assert.equal(loaded.request.disclaimerLanguage, "pt");
+    assert.equal(loaded.request.disclaimerByLanguage["pt-BR"], "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos");
+    assert.equal(loaded.request.disclaimerByLanguage["en-US"], "Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.");
+    assert.equal(loaded.request.disclaimerOverlay.position, "bottom_left");
+    assert.equal(loaded.request.disclaimerOverlay.fontSize, 24);
+    assert.equal(loaded.request.disclaimerOverlay.boxHeight, 156);
+    assert.equal(loaded.request.disclaimerOverlay.opacity, 0.66);
+    assert.deepEqual(loaded.request.targetRegions, ["BR", "PT"]);
+    assert.deepEqual(loaded.request.languages, ["pt-BR", "en-US"]);
+
+    const planned = await prepareBatchPlanFromEstimate({
+      ...ctx,
+      callWangzhuanLlm: async () => JSON.stringify({
+        hook: "Earn with daily tasks",
+        body: "Show a believable phone reward flow",
+        voiceover: "Show the reward flow clearly",
+        imagePrompt: "Vertical first frame with phone and reward UI",
+        seedancePrompt: "Create a vertical reward ad with uploaded references",
+        negativePrompt: "No competitor branding",
+        cta: "Install now",
+        complianceNotes: ["Keep claims realistic"]
+      })
+    }, {
+      idempotencyKey: "idem_plan_inline_estimate_hash",
+      estimateId: result.estimate.estimateId,
+      llmConfig: { provider: "mock", model: "gpt-5.4", endpoint: "http://localhost/mock", temperature: 0.2 },
+      knowledgeNotes: ""
+    });
+    assert.equal(planned.batch.status, "preview_required");
+    assert.ok(planned.plans.length > 0);
   } finally {
     await resetFactsPool();
     await rm(root, { recursive: true, force: true });
@@ -326,6 +450,60 @@ test("estimates and starts every configured branch with its own prompt inputs", 
     assert.match(walletPrompt, /Material direction: 提现按钮/);
     assert.match(walletPrompt, /Product icon URL: https:\/\/cdn\.example\.com\/wangzhuan\/wallet-icon\.png/);
     assert.match(walletPrompt, /Additional user prompt: Focus on a wallet dashboard and withdrawal button\./);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("plan reuses an existing draft batch id so earlier steps remain resumable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-plan-draft-reuse-"));
+  try {
+    await resetFactsPool();
+    ensureFactsPool();
+    const fx = await fixture(root);
+    const draftBatchId = "wzb_20260624193000_abcd";
+    await syncBatchFacts(fx.ctx, {
+      batchId: draftBatchId,
+      status: "checking",
+      userId: "alice",
+      referenceVideo: { referenceVideoId: fx.referenceVideoId, fileName: "demo.mp4", status: "pass" },
+      decomposition: decomposition(),
+      request: {
+        sourceStep: "decomposition_confirmed",
+        referenceVideoId: fx.referenceVideoId
+      },
+      tasks: []
+    }, "batch_draft_saved");
+
+    const estimated = await estimateBatch(fx.ctx, request(fx, {
+      variantCount: 1
+    }));
+    const { prepareBatchPlanFromEstimate } = await import("../../server/wangzhuan/estimates.mjs");
+    const planned = await prepareBatchPlanFromEstimate({
+      ...fx.ctx,
+      callWangzhuanLlm: async () => JSON.stringify({
+        hook: "Earn with daily tasks",
+        body: "Show a believable phone reward flow with clear in-app progression",
+        voiceover: "Show the reward flow clearly",
+        imagePrompt: "Vertical first frame with phone, reward UI, and a clear task state",
+        seedancePrompt: "Create a vertical reward ad with the uploaded references",
+        negativePrompt: "No competitor branding",
+        cta: "Install now",
+        complianceNotes: ["Keep claims realistic"]
+      })
+    }, {
+      idempotencyKey: "idem_plan_reuse_draft",
+      batchId: draftBatchId,
+      estimateId: estimated.estimate.estimateId,
+      llmConfig: { provider: "mock", model: "gpt-5.4", endpoint: "http://localhost/mock", temperature: 0.2 },
+      knowledgeNotes: ""
+    });
+
+    assert.equal(planned.batch.batchId, draftBatchId);
+    const loaded = await loadBatchDetailFromMysql(fx.ctx, draftBatchId);
+    assert.equal(loaded?.batch?.batchId, draftBatchId);
+    assert.equal(loaded?.batch?.status, "preview_required");
   } finally {
     await resetFactsPool();
     await rm(root, { recursive: true, force: true });

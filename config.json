@@ -1,19 +1,4 @@
 {
-  "projectRoot": "../project-data/PROJECT_ROOT_P",
-  "projects": [
-    {
-      "name": "三国",
-      "path": "../project-data/PROJECT_ROOT_P 三国"
-    },
-    {
-      "name": "包包4",
-      "path": "../project-data/PROJECT_ROOT_P"
-    },
-    {
-      "name": "puzzle",
-      "path": "../project-data/puzzle"
-    }
-  ],
   "wangzhuan": {
     "llm": {
       "provider": "skylink",
@@ -39,6 +24,10 @@
           "logo_icon_cover_or_replace",
           "text_cta_ending_replace"
         ]
+      },
+      "stitcher": {
+        "status": "available",
+        "provider": "ffmpeg"
       }
     },
     "remixProvider": {
@@ -57,8 +46,23 @@
       "timeoutMs": 600000,
       "ratio": "9:16",
       "resolution": "720p",
-      "generateAudio": false,
+      "generateAudio": true,
       "watermark": false
     }
-  }
+  },
+  "projectRoot": "../project-data/PROJECT_ROOT_P",
+  "projects": [
+    {
+      "name": "三国",
+      "path": "../project-data/PROJECT_ROOT_P 三国"
+    },
+    {
+      "name": "puzzle",
+      "path": "../project-data/puzzle"
+    },
+    {
+      "name": "包包4",
+      "path": "../project-data/PROJECT_ROOT_P"
+    }
+  ]
 }

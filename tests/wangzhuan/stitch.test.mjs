@@ -156,10 +156,53 @@ test("ffmpeg stitch writes segment outputs, a stitched output, and a succeeded s
     assert.equal(report.segmentOutputIds.length, 2);
     assert.equal(report.tool.provider, "ffmpeg");
     assert.equal(report.tool.preflightStatus, "supported");
+    assert.equal(stitched.disclaimerOverlay?.applied, false);
+    assert.equal(report.disclaimerOverlay?.applied, false);
 
     const taskMapText = await readFile(join(wangzhuanPaths(ctx).batchesDir, batch.batchId, "task-map", "task-id-map.csv"), "utf8");
     assert.match(taskMapText, /out_[a-f0-9]{4}_\d{3}/);
     assert.doesNotMatch(taskMapText, /remoteUrl|remote_url/);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stitch overlays disclaimer on final 30s output only", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-stitch-disclaimer-"));
+  try {
+    const { ctx, started } = await thirtySecondFixture(root, {
+      suffix: "disclaimer",
+      draft: {
+        ...baseDraft,
+        disclaimer: "Rewards vary by user eligibility and regional availability.",
+        disclaimerOverlay: {
+          position: "bottom_left",
+          fontSize: 24,
+          boxHeight: 156,
+          opacity: 0.66
+        }
+      }
+    });
+    await submitPendingGenerationTasks(ctx, started.batch.batchId);
+    const polled = await pollUpstreamBatch(ctx, started.batch.batchId);
+    const batch = polled.batch;
+
+    const segments = batch.outputs.filter((output) => output.kind === "segment_video");
+    const stitched = batch.outputs.find((output) => output.kind === "stitched_video");
+    assert.ok(stitched);
+    assert.equal(segments.every((output) => output.disclaimerOverlay?.applied === false), true);
+    assert.equal(stitched.disclaimerOverlay?.applied, true);
+    assert.match(stitched.disclaimerOverlay?.text || "", /Rewards vary by user eligibility/);
+    assert.equal(stitched.disclaimerOverlay?.position, "bottom_left");
+    assert.equal(stitched.disclaimerOverlay?.fontSize, 24);
+    assert.equal(stitched.disclaimerOverlay?.boxHeight, 156);
+    assert.equal(stitched.disclaimerOverlay?.opacity, 0.66);
+
+    const report = JSON.parse(await readFile(join(ctx.userProjectRoot, stitched.stitchReportPath), "utf8"));
+    assert.equal(report.disclaimerOverlay?.applied, true);
+    assert.match(report.disclaimerOverlay?.text || "", /regional availability/);
+    assert.equal(report.disclaimerOverlay?.position, "bottom_left");
   } finally {
     await resetFactsPool();
     await rm(root, { recursive: true, force: true });

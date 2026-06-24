@@ -1,5 +1,9 @@
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { assetKeyToSlot, branchHasReferenceAsset, countReferencedAssets } from "./asset-review.mjs";
 import { configuredApiKey } from "./llm-config.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER, REFERENCE_VIDEO_ASSET_KEYS } from "./reference-assets.mjs";
 
 export const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
 
@@ -12,16 +16,6 @@ const SEEDANCE_720P_MODELS = new Set([
   "dreamina-seedance-2-0-260128",
   "dreamina-seedance-2-0-fast-260128"
 ]);
-const ASSET_KEY_ORDER = Object.freeze([
-  "productIcon",
-  "productScreenshot",
-  "rewardElement",
-  "productRecording",
-  "personAsset",
-  "endingAsset"
-]);
-const VIDEO_ASSET_KEYS = new Set(["productRecording", "personAsset", "endingAsset"]);
-
 function cleanString(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -31,8 +25,18 @@ function positiveNumber(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
-function isPublicMediaUrl(value) {
-  return /^https?:\/\//i.test(cleanString(value)) || /^asset:\/\//i.test(cleanString(value));
+function execTai(args, timeoutMs = 300000) {
+  return new Promise((resolve, reject) => {
+    execFile("tai", args, { maxBuffer: 1024 * 1024 * 20, timeout: timeoutMs }, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 }
 
 function normalizeResolution(model, resolution) {
@@ -44,47 +48,165 @@ function normalizeResolution(model, resolution) {
   return value;
 }
 
-function mediaItemFromUrl(assetKey, url) {
-  const type = VIDEO_ASSET_KEYS.has(assetKey) ? "video_url" : "image_url";
-  const role = type === "video_url" ? "reference_video" : "reference_image";
-  return { type, url, role, assetKey };
+function isApprovedAssetReview(review = {}) {
+  const status = String(review.status || "").toLowerCase();
+  return Boolean(cleanString(review.assetId) && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
+}
+
+function missingAssetReviewError(branch = {}, assetKey, review = {}) {
+  const assetId = cleanString(review.assetId);
+  const status = String(review.status || "").toLowerCase();
+  let reason = "请先点击「上传 Seedance 素材并审核」，获得 assetId 后再确认生成";
+  if (assetId && status && !isApprovedAssetReview(review)) {
+    reason = cleanString(review.reviewReason, `素材审核状态为 ${status || "pending"}，需审核通过后再提交 Seedance`);
+  } else if (!assetId) {
+    reason = "素材缺少 Seedance assetId，不能使用 S3 URL 直接提交";
+  }
+  return new WangzhuanError("asset_review_pending", reason, {
+    branchId: branch?.branchId || "",
+    branchLabel: branch?.branchLabel || "",
+    assetKey,
+    fileName: branch?.assetFileNames?.[assetKey] || "",
+    assetId,
+    status: review.status || "pending",
+    reviewReason: review.reviewReason || ""
+  });
+}
+
+function mediaItemFromReviewedAsset(assetKey, review = {}) {
+  const assetId = cleanString(review.assetId);
+  if (!assetId) return null;
+  const type = REFERENCE_VIDEO_ASSET_KEYS.has(assetKey) ? "video_asset" : "image_asset";
+  return {
+    type,
+    assetId,
+    assetKey,
+    assetRole: "reference"
+  };
+}
+
+export function mergeBranchMediaDraft(latest = {}, base = {}) {
+  return {
+    ...base,
+    ...latest,
+    assetFileNames: { ...(base.assetFileNames || {}), ...(latest.assetFileNames || {}) },
+    assetUrls: { ...(base.assetUrls || {}), ...(latest.assetUrls || {}) },
+    assetStorageKeys: { ...(base.assetStorageKeys || {}), ...(latest.assetStorageKeys || {}) },
+    assetStoredPaths: {
+      ...(base.assetStoredPaths || {}),
+      ...(latest.assetStoredPaths || {}),
+      ...(latest.assetRelativePaths || {})
+    },
+    assetReviews: { ...(base.assetReviews || {}), ...(latest.assetReviews || {}) }
+  };
+}
+
+export function resolveBranchForSeedanceMedia(batch = {}, task = {}) {
+  const draft = batch.templateSnapshot?.draft || {};
+  const script = (Array.isArray(batch.scripts) ? batch.scripts : []).find((item) => item.scriptId === task.scriptId);
+  const branchId = cleanString(task.branchId || script?.branchId);
+  const branchSources = [
+    ...(Array.isArray(batch.branchDrafts) ? batch.branchDrafts : []),
+    ...(Array.isArray(batch.request?.branchDrafts) ? batch.request.branchDrafts : []),
+    ...(Array.isArray(batch.request?.branches) ? batch.request.branches : [])
+  ];
+  const latestBranch = branchSources.find((item) => cleanString(item?.branchId) === branchId)
+    || branchSources[0]
+    || null;
+  const scriptBranch = script?.branchDraft || null;
+  if (latestBranch && scriptBranch) return mergeBranchMediaDraft(latestBranch, scriptBranch);
+  return latestBranch || scriptBranch || draft;
 }
 
 export function collectSeedanceMedia(batch = {}, task = {}) {
-  const draft = batch.templateSnapshot?.draft || {};
-  const script = (Array.isArray(batch.scripts) ? batch.scripts : []).find((item) => item.scriptId === task.scriptId);
-  const branch = script?.branchDraft
-    || (Array.isArray(batch.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === task.branchId)
-    || draft;
-  const urls = branch?.assetUrls && typeof branch.assetUrls === "object" ? branch.assetUrls : {};
+  const branch = resolveBranchForSeedanceMedia(batch, task);
+  const reviews = branch?.assetReviews && typeof branch.assetReviews === "object" ? branch.assetReviews : {};
+  const storedPaths = branch?.assetStoredPaths && typeof branch.assetStoredPaths === "object" ? branch.assetStoredPaths : {};
   const items = [];
   const seen = new Set();
-  for (const key of ASSET_KEY_ORDER) {
-    const url = cleanString(urls[key]);
-    if (!url || !isPublicMediaUrl(url) || seen.has(url)) continue;
-    seen.add(url);
-    items.push(mediaItemFromUrl(key, url));
+  for (const key of REFERENCE_ASSET_ORDER) {
+    const review = reviews[key] || {};
+    if (branchHasReferenceAsset(branch, key)) {
+      if (!isApprovedAssetReview(review)) {
+        throw missingAssetReviewError(branch, key, review);
+      }
+      const reviewed = mediaItemFromReviewedAsset(key, review);
+      if (!reviewed?.assetId || seen.has(`asset:${reviewed.assetId}`)) continue;
+      seen.add(`asset:${reviewed.assetId}`);
+      const storedPath = cleanString(storedPaths[key]);
+      if (storedPath) reviewed.storedPath = storedPath;
+      items.push(reviewed);
+    }
+  }
+  if (items.length > MAX_SEEDANCE_REFERENCE_ASSETS) {
+    throw new WangzhuanError("validation_error", "Seedance 参考素材不能超过 9 个，请减少后重试", {
+      maxAssets: MAX_SEEDANCE_REFERENCE_ASSETS,
+      assetCount: items.length,
+      branchId: branch?.branchId || task.branchId || ""
+    });
   }
   return items;
 }
 
+export function assertSeedanceReferenceAssetLimits(branchDrafts = []) {
+  for (const branch of branchDrafts) {
+    const assetCount = countReferencedAssets(branch);
+    if (assetCount > MAX_SEEDANCE_REFERENCE_ASSETS) {
+      throw new WangzhuanError("validation_error", "Seedance 参考素材不能超过 9 个，请减少后重试", {
+        maxAssets: MAX_SEEDANCE_REFERENCE_ASSETS,
+        assetCount,
+        branchId: branch.branchId || ""
+      });
+    }
+  }
+}
+
 function referenceTypeFromMediaItem(item = {}) {
+  if (item?.type === "video_asset") return "video_asset";
+  if (item?.type === "image_asset") return "image_asset";
   if (item?.type === "video_url") return "video";
   if (item?.type === "audio_url") return "audio";
   return "image";
 }
 
+function slotMetadataFromAssetKey(assetKey) {
+  const key = cleanString(assetKey);
+  if (!key) return null;
+  const slot = assetKeyToSlot(key);
+  return {
+    slot_key: slot.key,
+    slot_index: slot.index
+  };
+}
+
 function buildReferenceItems(media = []) {
   const items = [];
   for (const item of Array.isArray(media) ? media : []) {
+    const metadata = slotMetadataFromAssetKey(item?.assetKey);
+    const assetId = cleanString(item?.assetId);
+    if (assetId) {
+      const entry = {
+        type: referenceTypeFromMediaItem(item),
+        asset_id: assetId,
+        asset_role: cleanString(item?.assetRole, "reference")
+      };
+      if (metadata) entry.metadata = metadata;
+      const storedPath = cleanString(item?.storedPath);
+      if (storedPath) entry.stored_path = storedPath;
+      items.push(entry);
+      continue;
+    }
     const url = cleanString(item?.url);
     if (!url) continue;
     const reference = {
       type: referenceTypeFromMediaItem(item),
       url
     };
+    if (metadata) reference.metadata = metadata;
     const role = cleanString(item?.role);
     if (role) reference.role = role;
+    const storedPath = cleanString(item?.storedPath);
+    if (storedPath) reference.stored_path = storedPath;
     items.push(reference);
   }
   return items;
@@ -134,7 +256,7 @@ export function buildSeedanceGenerationPayload({
   if (ratio) payload.ratio = ratio;
   payload.watermark = watermark === undefined || watermark === null ? false : Boolean(watermark);
   payload.generate_audio = generateAudio === undefined || generateAudio === null ? true : Boolean(generateAudio);
-  if (references.length) payload.references = references;
+  if (references.length) payload.content = references;
   if (seed !== undefined && seed !== null && seed !== "") payload.seed = Number(seed);
   if (cameraFixed !== undefined && cameraFixed !== null) payload.camera_fixed = Boolean(cameraFixed);
   if (returnLastFrame !== undefined && returnLastFrame !== null) payload.return_last_frame = Boolean(returnLastFrame);
@@ -154,6 +276,7 @@ function configuredProvider(context = {}, capability = {}) {
     cleanString(config.apiKey, cleanString(process.env.WANGZHUAN_SEEDANCE_API_KEY, configuredApiKey({ apiKeyEnv, apiKey: config.apiKey })))
   );
   const timeoutMs = positiveNumber(capability.timeoutMs ?? config.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const useTai = Boolean(capability.useTai ?? config.useTai ?? false);
   return {
     provider: cleanString(capability.provider, cleanString(config.provider, "seedance")),
     endpoint: cleanString(capability.endpoint, cleanString(config.endpoint, cleanString(process.env.WANGZHUAN_SEEDANCE_ENDPOINT))).replace(/\/+$/, ""),
@@ -163,6 +286,7 @@ function configuredProvider(context = {}, capability = {}) {
     apiKeyEnv,
     apiKey,
     timeoutMs,
+    useTai,
     resolution: cleanString(capability.resolution, cleanString(config.resolution, "720p")),
     ratio: cleanString(capability.ratio, cleanString(config.ratio, "9:16")),
     generateAudio: capability.generateAudio ?? config.generateAudio ?? true,
@@ -424,9 +548,105 @@ export function hasRemoteSeedanceProvider(context = {}, capability = {}) {
   return Boolean(context.seedanceProviderClient || configuredProvider(context, capability).endpoint);
 }
 
+function createTaiSeedanceProviderClient(context = {}, capability = {}) {
+  const config = configuredProvider(context, capability);
+  function resolveLocalPath(storedPath) {
+    return storedPath ? join(context.userProjectRoot, storedPath) : "";
+  }
+  return {
+    provider: config.provider,
+    model: config.model,
+    config,
+    async createTask(payload) {
+      const args = ["aigc", "seedance"];
+      const mode = payload.mode || "omni_reference";
+      args.push("--mode", mode);
+      const model = payload.model || DEFAULT_SEEDANCE_MODEL;
+      args.push("--model", model);
+      if (payload.duration) { args.push("--duration"); args.push(String(payload.duration)); }
+      if (payload.ratio) { args.push("--ratio"); args.push(payload.ratio); }
+      if (payload.resolution) { args.push("--resolution"); args.push(payload.resolution); }
+      if (payload.watermark === false) args.push("--no-watermark");
+      if (payload.generate_audio === false) args.push("--no-audio");
+      const content = Array.isArray(payload.content) ? payload.content : [];
+      for (const item of content) {
+        const localPath = resolveLocalPath(cleanString(item.stored_path));
+        if (!localPath) continue;
+        const itemType = cleanString(item.type);
+        if (itemType.startsWith("video") || itemType === "video_asset") {
+          args.push("--video", localPath);
+        } else if (itemType === "audio") {
+          args.push("--audio", localPath);
+        } else {
+          args.push("--image", localPath);
+        }
+      }
+      if (payload.prompt) args.push(payload.prompt);
+      let stdout, stderr;
+      try {
+        const result = await execTai(args);
+        stdout = result.stdout;
+        stderr = result.stderr;
+      } catch (error) {
+        const msg = cleanString(error.stderr || error.stdout || error.message, "tai CLI 执行失败");
+        throw upstreamError(msg, {
+          provider: config.provider,
+          args: args.slice(0, 6).join(" "),
+          stderr: cleanString(error.stderr || "").slice(0, 1000)
+        });
+      }
+      const combined = (stdout || "") + (stderr || "");
+      const taskIdMatch = combined.match(/Task:\s*(cgt-\w+)/i)
+        || combined.match(/["']?task_id["']?\s*[:=]\s*["']?(\w+)["']?/i);
+      const taskId = taskIdMatch ? taskIdMatch[1].trim() : combined.trim();
+      if (!taskId || taskId.length < 5) {
+        throw upstreamError("tai CLI 未返回有效的任务 ID", {
+          provider: config.provider,
+          output: combined.slice(0, 1000)
+        });
+      }
+      return { taskId, status: "queued", responsePayload: { taskId, taiStdout: (stdout || "").slice(0, 2000), taiStderr: (stderr || "").slice(0, 2000) } };
+    },
+    async getTask(taskId) {
+      let stdout, stderr;
+      try {
+        const result = await execTai(["aigc", "seedance-status", taskId]);
+        stdout = result.stdout;
+        stderr = result.stderr;
+      } catch (error) {
+        return { taskId, status: "queued", videoUrl: "", responsePayload: { taskId, error: cleanString(error.stderr || error.message || "").slice(0, 500) } };
+      }
+      const combined = (stdout || "") + (stderr || "");
+      let parsed = null;
+      try { parsed = JSON.parse(stdout); } catch { /* not JSON, fall back to text parsing */ }
+      if (parsed) return parseSeedancePollResponse(parsed);
+      const lower = combined.toLowerCase();
+      let status = "queued";
+      if (/succeeded|completed|done|finished|success/i.test(lower)) status = "succeeded";
+      else if (/failed|error|canceled|cancelled/i.test(lower)) status = "failed";
+      else if (/running|processing|in_progress/i.test(lower)) status = "running";
+      const videoUrlMatch = combined.match(/https?:\/\/[^\s]+\.(mp4|webm|mov)(\?[^\s]*)?/i);
+      const videoUrl = videoUrlMatch ? videoUrlMatch[0] : "";
+      return { taskId, status, videoUrl, responsePayload: { taskId, raw: combined.slice(0, 2000) } };
+    },
+    async downloadVideo(videoUrl) {
+      const url = cleanString(videoUrl);
+      if (!/^https?:\/\//i.test(url)) throw upstreamError("Seedance 视频地址无效", { provider: config.provider });
+      const fetchImpl = context.fetch || globalThis.fetch;
+      if (typeof fetchImpl !== "function") throw upstreamError("当前 Node 运行时不支持 fetch", { provider: config.provider });
+      const response = await fetchWithTimeout(fetchImpl, url, { method: "GET" }, config.timeoutMs, config.provider);
+      if (!response.ok) throw upstreamError("Seedance 视频下载失败", { provider: config.provider, operation: "download_seedance_video", status: response.status });
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (isJpegBuffer(buffer)) throw upstreamError("Seedance 下载内容是 JPEG 预览图而非视频文件", { provider: config.provider, operation: "download_seedance_video", contentKind: "image/jpeg", bytes: buffer.length });
+      return buffer;
+    }
+  };
+}
+
 export function createSeedanceProviderClient(context = {}, capability = {}) {
   if (context.seedanceProviderClient) return context.seedanceProviderClient;
   const config = configuredProvider(context, capability);
+  if (config.useTai) return createTaiSeedanceProviderClient(context, capability);
   if (!config.endpoint) return null;
   if (!config.apiKey) {
     throw upstreamError(`未配置 Seedance API Key，请在环境变量 ${config.apiKeyEnv}、WANGZHUAN_SEEDANCE_API_KEY 或 LLM 共用 Skylink 密钥中配置后重启服务`, {
@@ -507,7 +727,8 @@ export function summarizeSeedanceRequest(payload, provider = {}) {
     generate_audio: payload?.generate_audio,
     watermark: payload?.watermark,
     prompt: payload?.prompt || "",
-    references: Array.isArray(payload?.references) ? payload.references : []
+    references: Array.isArray(payload?.references) ? payload.references : [],
+    content: Array.isArray(payload?.content) ? payload.content : []
   };
 }
 

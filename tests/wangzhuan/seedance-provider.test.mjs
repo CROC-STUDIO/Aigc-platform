@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildSeedanceGenerationPayload,
+  collectSeedanceMedia,
   createSeedanceProviderClient,
   extractSeedanceVideoUrl,
   parseSeedancePollResponse,
@@ -11,8 +12,9 @@ import {
   seedanceSubmitUrl,
   seedanceTaskUrl
 } from "../../server/wangzhuan/seedance-provider.mjs";
+import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
 
-test("builds Skylink Seedance payload with prompt and references", () => {
+test("builds Skylink Seedance payload with prompt and content", () => {
   const payload = buildSeedanceGenerationPayload({
     model: "doubao-seedance-2-0-fast-260128",
     prompt: "Generate a short product video",
@@ -36,7 +38,7 @@ test("builds Skylink Seedance payload with prompt and references", () => {
   assert.equal(payload.resolution, "720p");
   assert.equal(payload.generate_audio, false);
   assert.equal(payload.watermark, false);
-  assert.deepEqual(payload.references, [
+  assert.deepEqual(payload.content, [
     {
       type: "image",
       url: "https://cdn.example.com/news-icon.png",
@@ -50,6 +52,60 @@ test("builds Skylink Seedance payload with prompt and references", () => {
   ]);
 });
 
+test("builds Skylink Seedance payload with asset_id slot metadata from assetKey", () => {
+  const payload = buildSeedanceGenerationPayload({
+    model: "dreamina-seedance-2-0-260128",
+    prompt: "Product ad with icon and screenshot",
+    mode: "omni_reference",
+    media: [
+      {
+        type: "image_asset",
+        assetId: "asset_icon_001",
+        assetKey: "productIcon",
+        assetRole: "reference"
+      },
+      {
+        type: "image_asset",
+        assetId: "asset_screen_002",
+        assetKey: "productScreenshot",
+        assetRole: "reference"
+      },
+      {
+        type: "video_asset",
+        assetId: "asset_rec_003",
+        assetKey: "productRecording",
+        assetRole: "reference"
+      }
+    ],
+    ratio: "9:16",
+    duration: 15,
+    resolution: "720p",
+    generateAudio: false,
+    watermark: false
+  });
+
+  assert.deepEqual(payload.content, [
+    {
+      type: "image_asset",
+      asset_id: "asset_icon_001",
+      asset_role: "reference",
+      metadata: { slot_key: "product_icon", slot_index: 1 }
+    },
+    {
+      type: "image_asset",
+      asset_id: "asset_screen_002",
+      asset_role: "reference",
+      metadata: { slot_key: "product_screenshot", slot_index: 2 }
+    },
+    {
+      type: "video_asset",
+      asset_id: "asset_rec_003",
+      asset_role: "reference",
+      metadata: { slot_key: "product_recording", slot_index: 1 }
+    }
+  ]);
+});
+
 test("defaults Seedance generation payload to audio enabled for quality visibility", () => {
   const payload = buildSeedanceGenerationPayload({
     prompt: "Generate a reward app ad",
@@ -58,7 +114,55 @@ test("defaults Seedance generation payload to audio enabled for quality visibili
 
   assert.equal(payload.generate_audio, true);
   assert.equal(payload.mode, "omni_reference");
-  assert.equal(payload.references.length, 1);
+  assert.equal(payload.content.length, 1);
+});
+
+test("collectSeedanceMedia prefers latest batch branchDrafts with approved assetReviews", () => {
+  const batch = {
+    branchDrafts: [{
+      branchId: "branch_1",
+      assetUrls: {
+        productIcon: "https://cdn.example.com/icon.png",
+        productScreenshot: "https://cdn.example.com/screen.png"
+      },
+      assetReviews: {
+        productIcon: { assetId: "asset_icon_latest", status: "approved" },
+        productScreenshot: { assetId: "asset_screen_latest", status: "approved" }
+      }
+    }],
+    scripts: [{
+      scriptId: "script_1",
+      branchId: "branch_1",
+      branchDraft: {
+        branchId: "branch_1",
+        productName: "Lucky Cash",
+        assetUrls: {}
+      }
+    }]
+  };
+  const task = { scriptId: "script_1", branchId: "branch_1" };
+  const media = collectSeedanceMedia(batch, task);
+  assert.equal(media.length, 2);
+  assert.deepEqual(media.map((item) => item.assetId), [
+    "asset_icon_latest",
+    "asset_screen_latest"
+  ]);
+});
+
+test("collectSeedanceMedia rejects S3 or CDN URLs without approved assetId", () => {
+  const batch = {
+    branchDrafts: [{
+      branchId: "branch_1",
+      assetUrls: {
+        productIcon: "https://harpoons3.example.com/productIcon/400x400bb-75.webp"
+      }
+    }]
+  };
+  const task = { branchId: "branch_1" };
+  assert.throws(
+    () => collectSeedanceMedia(batch, task),
+    (error) => error instanceof WangzhuanError && error.code === "asset_review_pending"
+  );
 });
 
 test("builds Skylink Seedance 2.0 zone submit and poll URLs", () => {
@@ -126,6 +230,26 @@ test("resolveSeedanceModel prefers estimate and template overrides", () => {
   assert.equal(resolveSeedanceModel({
     templateSnapshot: { draft: { seedanceModel: "dreamina-seedance-2-0-260128" } }
   }), "dreamina-seedance-2-0-260128");
+});
+
+test("configured provider passes generateAudio from wangzhuan config", () => {
+  const client = createSeedanceProviderClient({
+    config: {
+      wangzhuan: {
+        seedanceProvider: {
+          endpoint: "https://skylink-gateway.com/api/v1",
+          apiKey: "test-key",
+          generateAudio: true
+        }
+      }
+    }
+  });
+  assert.equal(client.config.generateAudio, true);
+  const payload = buildSeedanceGenerationPayload({
+    prompt: "Ad with voiceover",
+    generateAudio: client.config.generateAudio
+  });
+  assert.equal(payload.generate_audio, true);
 });
 
 test("reuses LLM Skylink key fallbacks for Seedance provider", () => {

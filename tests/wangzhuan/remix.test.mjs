@@ -19,13 +19,16 @@ import {
   confirmRemixPreview,
   estimateRemix,
   getRemixDetail,
+  getRemixQcReport,
   startDirectMaskEdit,
   startRemix,
   stopRemix,
   uploadRemixSource
 } from "../../server/wangzhuan/remix.mjs";
 import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
+import { detectRemixRegions } from "../../server/wangzhuan/remix-detection.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
+import { buildRemixPlan } from "../../server/wangzhuan/remix-plan.mjs";
 import { wangzhuanPaths } from "../../server/wangzhuan/storage.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
@@ -399,6 +402,13 @@ test("remix direct mask-edit route submits one generated mask image to ai_remove
             job_type: payload.job_type,
             status: "queued"
           };
+        },
+        async getJob(jobId) {
+          return {
+            job_id: jobId,
+            job_type: "ai_remove",
+            status: "queued"
+          };
         }
       }
     });
@@ -412,6 +422,14 @@ test("remix direct mask-edit route submits one generated mask image to ai_remove
         idempotencyKey: "idem_s7_direct_mask_start",
         sourceId: uploaded.sourceId,
         regions: [region("logo"), region("watermark")],
+        keyframe: {
+          frameIndex: 73,
+          frameTimeSec: 2.43,
+          fps: 30,
+          actionMode: "replace_cover",
+          maskSource: "uploaded_mask",
+          uploadedMaskName: "logo-mask.png"
+        },
         maskDataUrl
       }),
       startRes,
@@ -425,6 +443,8 @@ test("remix direct mask-edit route submits one generated mask image to ai_remove
     assert.equal(started.data.remix.status, "queued");
     assert.equal(started.data.remix.operationType, "watermark_cover");
     assert.equal(started.data.remix.regions.length, 2);
+    assert.equal(started.data.remix.keyframe.frameIndex, 73);
+    assert.equal(started.data.remix.keyframe.actionMode, "replace_cover");
     assert.equal(started.data.remix.maskSource.sourceType, "base64_data_url");
     assert.match(started.data.remix.maskSource.storedPath, /mask\.png$/);
 
@@ -433,10 +453,152 @@ test("remix direct mask-edit route submits one generated mask image to ai_remove
     assert.equal(providerCalls[0].params.mode, "manual");
     assert.equal(providerCalls[0].params.mask_source_type, "base64_data_url");
     assert.equal(providerCalls[0].params.mask_source, maskDataUrl);
+    assert.equal(providerCalls[0].params.frame_index, 73);
+    assert.equal(providerCalls[0].params.frame_time_sec, 2.43);
+    assert.equal(providerCalls[0].params.action_mode, "replace_cover");
+    assert.equal(providerCalls[0].params.keyframe.maskSource, "uploaded_mask");
     assert.equal(providerCalls[0].params.mask_threshold, 1);
     assert.deepEqual(providerCalls[0].params.time_ranges, [{ start_ms: 0, end_ms: 4200 }]);
     assert.equal(providerCalls[0].params.operation_type, undefined);
     assert.equal(providerCalls[0].params.regions, undefined);
+
+    const detail = await getRemixDetail(ctx, started.data.remix.remixId);
+    const prompt = await readFile(join(ctx.userProjectRoot, detail.remix.tasks[0].promptPath), "utf8");
+    assert.match(prompt, /Seedance-style video edit instruction/);
+    assert.match(prompt, /删除元素/);
+    assert.match(prompt, /修改元素/);
+    assert.match(prompt, /增加元素/);
+    assert.match(prompt, /Preserve motion, camera, timing, background, and layout/);
+    assert.match(prompt, /Do not copy competitor branding/);
+    assert.match(prompt, /Key frame: 73 @ 2.43s/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix direct auto-detect tasks do not require user-selected regions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-auto-detect-"));
+  try {
+    const providerCalls = [];
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      remixProviderClient: {
+        async createJob(payload) {
+          providerCalls.push(payload);
+          return {
+            job_id: "job_auto_detect_001",
+            job_type: payload.job_type,
+            status: "queued"
+          };
+        }
+      }
+    });
+    const uploaded = await uploadRemixSource(ctx, sourceUpload());
+
+    const started = await startDirectMaskEdit(ctx, {
+      idempotencyKey: "idem_s7_auto_detect_start",
+      sourceId: uploaded.sourceId,
+      autoDetect: true,
+      capabilityKey: "cta",
+      jobType: "video_copy_translate",
+      regions: []
+    });
+
+    assert.equal(started.remix.status, "queued");
+    assert.equal(started.remix.autoDetect, true);
+    assert.equal(started.remix.capabilityKey, "cta");
+    assert.equal(started.remix.regions.length, 0);
+    assert.equal(started.remix.maskSource, null);
+    assert.equal(providerCalls.length, 1);
+    assert.notEqual(providerCalls[0].job_type, "ai_remove");
+    assert.equal(providerCalls[0].params?.mask_source, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("direct mask edit accepts description regions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-description-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["logo_icon_cover_or_replace"]
+        }
+      }
+    });
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const result = await startDirectMaskEdit(ctx, {
+      idempotencyKey: "idem_description_region",
+      sourceId: source.sourceId,
+      operationType: "logo_icon_cover_or_replace",
+      targetChannel: "generic",
+      autoDetect: false,
+      maskDataUrl: "data:image/png;base64,ZmFrZQ==",
+      regions: [{
+        regionId: "desc_1",
+        type: "description",
+        label: "右上角 icon",
+        capabilityKey: "logo_icon",
+        description: "右上角 icon 替换为我方 icon，贯穿全片"
+      }]
+    });
+    assert.equal(result.remix.regions[0].type, "description");
+    assert.equal(result.remix.regions[0].description, "右上角 icon 替换为我方 icon，贯穿全片");
+    assert.equal(result.remix.executionPlan.steps[0].jobType, "auto_ai_remove");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("qc-passed remix output becomes gallery-visible without preview-confirm", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-auto-gallery-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      },
+      mockRemixQcSignals: {
+        competitorResidueScore: 0.01,
+        replacementCoverageScore: 0.97,
+        visualIntegrityScore: 0.95
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_auto_gallery",
+      estimateId: estimated.estimateId
+    });
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(detail.remix.status, "succeeded");
+    assert.equal(detail.remix.outputs[0].qcStatus, "pass");
+    assert.equal(detail.remix.outputs[0].downloadEligible, true);
+    assert.equal(detail.remix.previewConfirmedBy, "system_auto_qc");
+    const report = await getRemixQcReport(ctx, started.remix.remixId);
+    assert.equal(report.qcStatus, "pass");
+    const gallery = await getGallery(ctx, { sourceType: "remix" });
+    assert.equal(gallery.items.some((item) => item.remixId === detail.remix.remixId), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -525,7 +687,7 @@ test("remix start creates preview-required output and preview confirm makes it d
     assert.equal(materialized.remix.status, "preview_required");
     assert.equal(materialized.remix.outputs.length, 1);
     assert.equal(materialized.remix.outputs[0].sourceType, "remix");
-    assert.equal(materialized.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(materialized.remix.outputs[0].qcStatus, "fail");
     assert.equal(materialized.remix.outputs[0].downloadEligible, false);
     assert.equal(materialized.downloadSummary.packageReady, false);
 
@@ -787,7 +949,7 @@ test("remix detail polls video platform job and materializes succeeded output", 
     assert.equal(detail.remix.providerJob.jobId, "job_mask_done");
     assert.equal(detail.remix.providerJob.status, "succeeded");
     assert.equal(detail.remix.outputs.length, 1);
-    assert.equal(detail.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(detail.remix.outputs[0].qcStatus, "fail");
     assert.equal(detail.remix.outputs[0].downloadEligible, false);
     assert.equal(detail.remix.tasks[0].status, "qc");
     assert.equal(detail.remix.tasks[0].providerJobId, "job_mask_done");
@@ -921,7 +1083,7 @@ test("remix detail keeps polling pending jobs and materializes review-required o
     assert.equal(review.remix.status, "preview_required");
     assert.equal(review.remix.providerJob.status, "review_required");
     assert.equal(review.remix.outputs.length, 1);
-    assert.equal(review.remix.outputs[0].qcStatus, "manual_required");
+    assert.equal(review.remix.outputs[0].qcStatus, "fail");
     assert.deepEqual(providerCalls.map((item) => item[0]), ["create", "detail", "detail", "download"]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -1202,6 +1364,205 @@ test("remix router endpoints return envelopes for upload, estimate, start, detai
     assert.equal(downloadRes.statusCode, 200);
     assert.equal(downloadRes.headers["Content-Type"], "application/zip");
     assert.equal(zipEntries(downloadRes.body).has("package-manifest.json"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("remix router exposes detect, plan, and qc-report endpoints", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-router-contract-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const routeCtx = routerContext(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+
+    const detectRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        sourceId: source.sourceId,
+        mockRegions: [{ capabilityKey: "watermark", bbox: { x: 0.7, y: 0.05, width: 0.1, height: 0.05 } }]
+      }),
+      detectRes,
+      new URL("http://localhost/api/wangzhuan/remix/detect"),
+      routeCtx
+    );
+    assert.equal(detectRes.statusCode, 200);
+    const detection = JSON.parse(detectRes.body.toString("utf8"));
+    assert.equal(detection.code, "ok");
+    assert.equal(detection.data.summary.watermark, 1);
+
+    const planRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        sourceId: source.sourceId,
+        regions: [{ capabilityKey: "watermark", type: "bbox", bbox: { x: 0.7, y: 0.05, width: 0.1, height: 0.05 } }]
+      }),
+      planRes,
+      new URL("http://localhost/api/wangzhuan/remix/plan"),
+      routeCtx
+    );
+    assert.equal(planRes.statusCode, 200);
+    const planPayload = JSON.parse(planRes.body.toString("utf8"));
+    assert.equal(planPayload.code, "ok");
+    assert.equal(planPayload.data.steps[0].jobType, "mask_edit");
+
+    const template = await templateFixture(ctx);
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_router_contract_start",
+      estimateId: estimated.estimateId
+    });
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+
+    const qcRes = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("GET"),
+      qcRes,
+      new URL(`http://localhost/api/wangzhuan/remix/${detail.remix.remixId}/qc-report`),
+      routeCtx
+    );
+    assert.equal(qcRes.statusCode, 200);
+    const qcPayload = JSON.parse(qcRes.body.toString("utf8"));
+    assert.equal(qcPayload.code, "ok");
+    assert.equal(qcPayload.data.sourceType, "remix");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("buildRemixPlan maps mixed capabilities to ordered provider steps", () => {
+  const plan = buildRemixPlan({
+    sourceId: "rsrc_demo",
+    regions: [
+      { regionId: "r1", capabilityKey: "logo_icon", type: "bbox", bbox: { x: 0.1, y: 0.1, width: 0.1, height: 0.1 } },
+      { regionId: "r2", capabilityKey: "product_name", type: "bbox", bbox: { x: 0.2, y: 0.2, width: 0.2, height: 0.1 }, text: "Lucky Cash" },
+      { regionId: "r3", capabilityKey: "ending", type: "description", description: "最后 3 秒 ending 替换为我方 ending" }
+    ]
+  });
+  assert.deepEqual(plan.steps.map((item) => item.jobType), ["auto_ai_remove", "language_rewrite", "end_trim_detection"]);
+});
+
+test("getRemixDetail persists executionPlan for estimate-based remix starts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-plan-persist-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover"]
+        }
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      regions: [region()],
+      targetChannel: "tiktok_ads"
+    });
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_plan_persist",
+      estimateId: estimated.estimateId
+    });
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(Array.isArray(detail.remix.executionPlan?.steps), true);
+    assert.equal(detail.remix.executionPlan.steps[0].jobType, "mask_edit");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("detectRemixRegions returns normalized summary for mock candidates", async () => {
+  const detection = await detectRemixRegions({}, {
+    sourceId: "rsrc_demo",
+    mockRegions: [
+      { capabilityKey: "cta", bbox: { x: 0.2, y: 0.8, width: 0.5, height: 0.1 } },
+      { capabilityKey: "cta", bbox: { x: 0.2, y: 0.7, width: 0.5, height: 0.1 } },
+      { capabilityKey: "watermark", bbox: { x: 0.8, y: 0.1, width: 0.1, height: 0.05 } }
+    ]
+  });
+  assert.equal(detection.summary.cta, 2);
+  assert.equal(detection.summary.watermark, 1);
+});
+
+test("competitor remix first-phase flow completes from upload to auto gallery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s7-phase1-closed-loop-"));
+  try {
+    const ctx = context(root, "alice", {
+      capabilities: {
+        remix: {
+          provider: "function_k",
+          status: "supported",
+          supportedOperations: ["watermark_cover", "logo_icon_cover_or_replace", "text_cta_ending_replace"]
+        }
+      },
+      mockRemixQcSignals: {
+        competitorResidueScore: 0.01,
+        replacementCoverageScore: 0.95,
+        visualIntegrityScore: 0.94
+      }
+    });
+    const template = await templateFixture(ctx);
+    const source = await uploadRemixSource(ctx, sourceUpload());
+    const detection = await detectRemixRegions(ctx, {
+      sourceId: source.sourceId,
+      mockRegions: [{
+        capabilityKey: "watermark",
+        label: "右上角水印",
+        bbox: { x: 0.7, y: 0.05, width: 0.1, height: 0.05 }
+      }]
+    });
+    assert.equal(detection.summary.watermark, 1);
+
+    const estimated = await estimateRemix(ctx, {
+      sourceId: source.sourceId,
+      templateId: template.templateId,
+      versionId: template.versionId,
+      operationType: "watermark_cover",
+      capabilityKey: "watermark",
+      regions: detection.regions,
+      targetChannel: "tiktok_ads"
+    });
+    const plan = buildRemixPlan({
+      sourceId: source.sourceId,
+      operationType: "watermark_cover",
+      capabilityKey: "watermark",
+      regions: detection.regions
+    });
+    assert.equal(plan.steps[0]?.capabilityKey, "watermark");
+
+    const started = await startRemix(ctx, {
+      idempotencyKey: "idem_phase1_closed_loop",
+      estimateId: estimated.estimateId
+    });
+    const detail = await getRemixDetail(ctx, started.remix.remixId);
+    assert.equal(detail.remix.status, "succeeded");
+    assert.equal(detail.remix.outputs[0].qcStatus, "pass");
+
+    const report = await getRemixQcReport(ctx, started.remix.remixId);
+    assert.equal(report.qcStatus, "pass");
+
+    const gallery = await getGallery(ctx, { sourceType: "remix" });
+    assert.equal(gallery.items.some((item) => item.remixId === detail.remix.remixId), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

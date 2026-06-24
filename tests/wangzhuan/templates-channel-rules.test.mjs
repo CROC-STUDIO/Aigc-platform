@@ -84,6 +84,22 @@ test("creates templates, appends immutable versions, and lists active templates"
   }
 });
 
+test("allows templates with empty cta and ending", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-template-optional-cta-ending-"));
+  ensureFactsPool();
+  try {
+    const created = await saveTemplate(context(root), {
+      mode: "create",
+      draft: { ...draft, cta: "", ending: "" }
+    });
+    assert.equal(created.template.draft.cta, "");
+    assert.equal(created.template.draft.ending, "");
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects strong commitment templates without user-maintained truth rules", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-strong-"));
   ensureFactsPool();

@@ -2,6 +2,7 @@ const ASSET_KEYS = Object.freeze([
   "productIcon",
   "productScreenshot",
   "productRecording",
+  "ctaAsset",
   "endingAsset",
   "personAsset",
   "rewardElement"
@@ -77,6 +78,11 @@ export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
       assetFileNames: mergeAssetMap(base.assetFileNames, branch.assetFileNames),
       assetUrls: mergeAssetMap(base.assetUrls, branch.assetUrls),
       assetStorageKeys: mergeAssetMap(base.assetStorageKeys, branch.assetStorageKeys),
+      assetStoredPaths: mergeAssetMap(base.assetStoredPaths, branch.assetStoredPaths),
+      assetReviews: {
+        ...(isObject(base.assetReviews) ? base.assetReviews : {}),
+        ...(isObject(branch.assetReviews) ? branch.assetReviews : {})
+      },
       truthRules: isObject(branch.truthRules) && Object.keys(branch.truthRules).length ? branch.truthRules : (base.truthRules || {})
     };
   }).filter((branch) => branch.productName || branch.cta || branch.materialDirection);

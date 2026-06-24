@@ -158,7 +158,10 @@ function requestMetadataProbe(request = {}) {
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+    return `{${Object.keys(value).sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -358,6 +361,7 @@ function validateRegions(request, limits) {
         type,
         label,
         ...(item.capabilityKey ? { capabilityKey: String(item.capabilityKey) } : {}),
+        ...(item.keyframe ? { keyframe: validateKeyframeRequest(item.keyframe) } : {}),
         bbox: { x: Number(bbox.x), y: Number(bbox.y), width: Number(bbox.width), height: Number(bbox.height) }
       };
     }
@@ -370,9 +374,25 @@ function validateRegions(request, limits) {
       type,
       label,
       ...(item.capabilityKey ? { capabilityKey: String(item.capabilityKey) } : {}),
+      ...(item.keyframe ? { keyframe: validateKeyframeRequest(item.keyframe) } : {}),
       description
     };
   });
+}
+
+function validateKeyframeRequest(raw = {}) {
+  const input = raw && typeof raw === "object" ? raw : {};
+  const frameIndex = Number(input.frameIndex);
+  const frameTimeSec = Number(input.frameTimeSec);
+  const fps = Number(input.fps);
+  return {
+    frameIndex: Number.isFinite(frameIndex) && frameIndex >= 0 ? Math.round(frameIndex) : 0,
+    frameTimeSec: Number.isFinite(frameTimeSec) && frameTimeSec >= 0 ? Math.round(frameTimeSec * 100) / 100 : 0,
+    fps: Number.isFinite(fps) && fps > 0 ? Math.round(fps * 1000) / 1000 : 30,
+    actionMode: input.actionMode === "replace_cover" ? "replace_cover" : "remove",
+    maskSource: input.maskSource === "uploaded_mask" ? "uploaded_mask" : "generated_mask",
+    uploadedMaskName: input.uploadedMaskName ? String(input.uploadedMaskName).slice(0, 160) : ""
+  };
 }
 
 function directTemplateSnapshot() {
@@ -413,7 +433,8 @@ function validateDirectMaskEditRequest(request, limits) {
     maskDataUrl: String(request.maskDataUrl || ""),
     autoDetect: Boolean(request.autoDetect),
     capabilityKey: String(request.capabilityKey || ""),
-    jobType: String(request.jobType || "")
+    jobType: String(request.jobType || ""),
+    keyframe: validateKeyframeRequest(request.keyframe)
   };
 }
 
@@ -440,7 +461,8 @@ function validateEstimateRequest(request, limits) {
     autoDetect,
     capabilityKey,
     jobType: String(request.jobType || ""),
-    maskDataUrl: String(request.maskDataUrl || "")
+    maskDataUrl: String(request.maskDataUrl || ""),
+    keyframe: validateKeyframeRequest(request.keyframe)
   };
 }
 
@@ -492,6 +514,8 @@ function promptText(record) {
     `Capability: ${record.request.capabilityKey || "region_mask"}`,
     `Job type: ${record.request.jobType || "mask_edit"}`,
     `Auto detect: ${record.request.autoDetect ? "yes" : "no"}`,
+    `Key frame: ${record.request.keyframe?.frameIndex ?? 0} @ ${record.request.keyframe?.frameTimeSec ?? 0}s`,
+    `Frame action: ${record.request.keyframe?.actionMode || "remove"}`,
     `Product: ${draft.productName || "Product"}`,
     `CTA: ${draft.cta || ""}`,
     `Ending: ${draft.ending || ""}`,
@@ -586,6 +610,10 @@ function providerPayload(record, source) {
       operation_type: record.request.operationType,
       target_channel: record.request.targetChannel,
       capability_key: record.request.capabilityKey || undefined,
+      keyframe: record.request.keyframe || undefined,
+      frame_index: record.request.keyframe?.frameIndex,
+      frame_time_sec: record.request.keyframe?.frameTimeSec,
+      action_mode: record.request.keyframe?.actionMode,
       regions: record.request.regions,
       ...(!autoDetect ? { mask_source: {
         mode: "manual",
@@ -619,6 +647,10 @@ function providerPayloadWithMask(record, source, maskDataUrl) {
       mode: "manual",
       mask_source_type: "base64_data_url",
       mask_source: maskDataUrl,
+      keyframe: record.request.keyframe || undefined,
+      frame_index: record.request.keyframe?.frameIndex,
+      frame_time_sec: record.request.keyframe?.frameTimeSec,
+      action_mode: record.request.keyframe?.actionMode,
       time_ranges: fullSourceTimeRange(record.source),
       mask_threshold: 1
     }
@@ -988,6 +1020,7 @@ export async function startDirectMaskEdit(context, request = {}) {
       autoDetect: normalized.autoDetect,
       capabilityKey: normalized.capabilityKey,
       jobType: normalized.jobType,
+      keyframe: normalized.keyframe,
       executionPlan: buildRemixPlan({
         sourceId: normalized.sourceId,
         operationType: normalized.operationType,
@@ -1015,6 +1048,7 @@ export async function startDirectMaskEdit(context, request = {}) {
     autoDetect: normalized.autoDetect,
     capabilityKey: normalized.capabilityKey,
     jobType: normalized.jobType,
+    keyframe: normalized.keyframe,
     executionPlan: record.request.executionPlan,
     targetChannel: normalized.targetChannel,
     templateSnapshot: record.templateSnapshot,
@@ -1151,6 +1185,7 @@ export async function startRemix(context, request = {}) {
     autoDetect: Boolean(record.request.autoDetect),
     capabilityKey: record.request.capabilityKey || "",
     jobType: record.request.jobType || "",
+    keyframe: record.request.keyframe || validateKeyframeRequest(),
     executionPlan,
     targetChannel: record.request.targetChannel,
     templateSnapshot: record.templateSnapshot,

@@ -36,6 +36,12 @@
       "apiKeyEnv": "VIDEO_AIGC_API_KEY",
       "timeoutMs": 30000
     },
+    "videoOpsProvider": {
+      "provider": "video_aigc",
+      "endpoint": "https://video-aigc.skylink-gateway.com/api/v1",
+      "apiKeyEnv": "VIDEO_AIGC_API_KEY",
+      "timeoutMs": 30000
+    },
     "seedanceProvider": {
       "provider": "seedance",
       "endpoint": "https://skylink-gateway.com/api/v1",
@@ -46,7 +52,7 @@
       "timeoutMs": 600000,
       "ratio": "9:16",
       "resolution": "720p",
-      "generateAudio": false,
+      "generateAudio": true,
       "watermark": false
     }
   }

@@ -56,6 +56,17 @@ export function testSeedanceProviderClient(options = {}) {
   };
 }
 
+export async function testGeneratedVideoProbe({ output } = {}) {
+  return {
+    durationSec: Number(output?.durationSec || 15),
+    width: 720,
+    height: 1280,
+    formatName: "mov,mp4,m4a,3gp,3g2,mj2",
+    canExtractFrame: true,
+    status: "pass"
+  };
+}
+
 export async function prepareDownloadedSegmentsWithoutStitch(ctx, batchId) {
   const { syncBatchFacts, loadBatchDetailFromMysql } = await import("../../server/wangzhuan/mysql-facts.mjs");
   const { submitPendingGenerationTasks } = await import("../../server/wangzhuan/pipeline.mjs");

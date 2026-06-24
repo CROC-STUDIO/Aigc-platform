@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 
+import { reviewSeedanceAsset } from "./asset-review.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 
@@ -8,6 +9,7 @@ const PRODUCT_ASSET_KEYS = new Set([
   "productIcon",
   "productScreenshot",
   "productRecording",
+  "ctaAsset",
   "endingAsset",
   "personAsset",
   "rewardElement"
@@ -82,17 +84,29 @@ export async function uploadProductAsset(context, request = {}) {
   await writeFile(target, buffer);
   const storage = await syncWangzhuanAsset(context, target, `product_${assetKey}`, { required: true });
   const storedPath = toProjectRelative(context.userProjectRoot, target);
+  const normalizedMimeType = mimeType || [...allowedMimes][0] || "application/octet-stream";
+  const review = await reviewSeedanceAsset(context, {
+    branchId,
+    assetKey,
+    fileName,
+    mimeType: normalizedMimeType,
+    buffer,
+    storageUrl: storage.storageUrl,
+    storageKey: storage.storageKey,
+    storedPath
+  });
   return {
     asset: {
       branchId,
       assetKey,
       fileName,
-      mimeType: mimeType || [...allowedMimes][0] || "application/octet-stream",
+      mimeType: normalizedMimeType,
       sizeBytes: buffer.length,
       storedPath,
       previewUrl: storage.storageUrl,
       storageKey: storage.storageKey,
-      storageUrl: storage.storageUrl
+      storageUrl: storage.storageUrl,
+      review
     }
   };
 }

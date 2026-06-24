@@ -9,6 +9,7 @@ import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { llmSupportsVideoUrl, resolveQcLlmConfig } from "./llm-config.mjs";
 import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
+import { ffprobeMediaFile } from "./reference-videos.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { buildPublicUrl } from "../object-storage.mjs";
@@ -97,6 +98,13 @@ function check(checkId, status, message, field = "") {
     severity: status === "pass" ? "info" : status,
     message,
     ...(field ? { field } : {})
+  };
+}
+
+function checkWithData(checkId, status, message, field = "", data = {}) {
+  return {
+    ...check(checkId, status, message, field),
+    ...(data && Object.keys(data).length ? { data } : {})
   };
 }
 
@@ -509,6 +517,103 @@ function taskIdPresenceCheck(tasks) {
   return check("task_id_presence", "pass", "上游 task_id 已记录");
 }
 
+function expectedOutputRatio(batch, output) {
+  return output.outputRatio
+    || batch.estimate?.request?.outputRatio
+    || batch.estimate?.outputRatio
+    || batch.templateSnapshot?.draft?.defaultOutputRatio
+    || "9:16";
+}
+
+function ratioDimensions(ratio) {
+  const [w, h] = String(ratio || "9:16").split(":").map((item) => Number(item));
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { width: 9, height: 16 };
+  return { width: w, height: h };
+}
+
+function minResolutionForRatio(ratio) {
+  const dims = ratioDimensions(ratio);
+  if (dims.width === 1 && dims.height === 1) return { width: 720, height: 720 };
+  if (dims.width > dims.height) return { width: 1280, height: 720 };
+  return { width: 720, height: 1280 };
+}
+
+async function outputMediaProbe(context, output) {
+  const filePath = resolveUserPath(context, output.filePath);
+  const timeoutMs = numberOrZero(context.config?.wangzhuan?.ffprobe?.timeoutMs) || 15000;
+  if (typeof context.probeGeneratedVideo === "function") {
+    return context.probeGeneratedVideo({ filePath, output });
+  }
+  return ffprobeMediaFile(filePath, { timeoutMs, mediaLabel: "生成视频" });
+}
+
+async function deterministicVideoChecks(context, batch, output) {
+  const checks = [];
+  const expectedDuration = Number(output.durationSec || batch.estimate?.durationSec || 0);
+  const expectedRatio = expectedOutputRatio(batch, output);
+  const minResolution = minResolutionForRatio(expectedRatio);
+  const filePath = resolveUserPath(context, output.filePath);
+  let probe = output.probe || output.mediaProbe || null;
+  if (!probe) {
+    try {
+      probe = await outputMediaProbe(context, output);
+    } catch (error) {
+      probe = null;
+      checks.push(checkWithData("ffprobe_readable", "warn", cleanText(error?.message || "ffprobe 无法读取生成视频", 600), "filePath", {
+        reason: error?.data?.reason || error?.code || "probe_failed"
+      }));
+    }
+  }
+  if (probe) {
+    checks.push(checkWithData("ffprobe_readable", "pass", "ffprobe 可读取生成视频", "", {
+      durationSec: probe.durationSec,
+      width: probe.width,
+      height: probe.height,
+      formatName: probe.formatName || ""
+    }));
+  }
+
+  const width = numberOrZero(probe?.width ?? output.width);
+  const height = numberOrZero(probe?.height ?? output.height);
+  if (width && height) {
+    const resolutionOk = width >= minResolution.width && height >= minResolution.height;
+    checks.push(checkWithData(
+      "resolution_spec",
+      resolutionOk ? "pass" : "fail",
+      resolutionOk ? `分辨率满足 ${expectedRatio} 最低规格` : `分辨率低于 ${expectedRatio} 最低规格`,
+      "resolution",
+      { expectedRatio, minWidth: minResolution.width, minHeight: minResolution.height, width, height }
+    ));
+  } else {
+    checks.push(checkWithData("resolution_spec", "warn", "缺少可验证的分辨率信息", "resolution", { expectedRatio, minResolution }));
+  }
+
+  const actualDuration = numberOrZero(probe?.durationSec ?? output.actualDurationSec ?? output.durationSec);
+  const tolerance = Number(expectedDuration) === 30 ? 2 : 1.5;
+  if (expectedDuration && actualDuration) {
+    const delta = Math.abs(actualDuration - expectedDuration);
+    checks.push(checkWithData(
+      "duration_tolerance",
+      delta <= tolerance ? "pass" : "fail",
+      delta <= tolerance ? "输出时长在允许误差内" : "输出时长偏离请求时长",
+      "durationSec",
+      { expectedDuration, actualDuration, toleranceSec: tolerance }
+    ));
+  } else {
+    checks.push(checkWithData("duration_tolerance", "warn", "缺少可验证的时长信息", "durationSec", { expectedDuration, actualDuration }));
+  }
+
+  const fileExists = existsSync(filePath);
+  checks.push(checkWithData(
+    "download_status",
+    fileExists ? "pass" : "fail",
+    fileExists ? "输出文件已落盘，可进入下载判断" : "输出文件未落盘，不能下载",
+    "filePath",
+    { filePath: output.filePath, storageKey: output.storageKey || "" }
+  ));
+  return checks;
+}
+
 function videoSpecCheck(context, output) {
   if (![15, 30].includes(Number(output.durationSec)) || !output.kind) {
     return check("video_spec", "fail", "输出缺少时长或类型记录", "output");
@@ -560,6 +665,54 @@ function textForPolicy(batch, tasks) {
     .map((script) => scriptPolicyText(script))
     .join("\n")
     .toLowerCase();
+}
+
+function normalizedNeedle(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function outputRecognizedText(output) {
+  const fields = [
+    output.ocrText,
+    output.recognizedText,
+    output.transcript,
+    output.qcText,
+    output.probe?.ocrText,
+    output.probe?.recognizedText
+  ];
+  return fields.filter(Boolean).join("\n").toLowerCase();
+}
+
+function competitorResidueOcrCheck(batch, output) {
+  const draft = batch.templateSnapshot?.draft || {};
+  const competitors = [
+    draft.competitorName,
+    draft.competitorProductName,
+    ...(Array.isArray(draft.competitorNames) ? draft.competitorNames : []),
+    ...(Array.isArray(batch.referenceVideo?.competitorNames) ? batch.referenceVideo.competitorNames : [])
+  ].map(normalizedNeedle).filter(Boolean);
+  if (!competitors.length) return check("competitor_residue_ocr", "pass", "未配置竞品词，跳过竞品词残留命中");
+  const text = outputRecognizedText(output);
+  if (!text) return check("competitor_residue_ocr", "manual_required", "缺少 OCR 文本，竞品残留需人工或模型复核", "ocrText");
+  const matched = competitors.filter((name) => text.includes(name));
+  if (matched.length) {
+    return checkWithData("competitor_residue_ocr", "fail", `OCR 命中竞品残留：${matched.join(", ")}`, "ocrText", { matched });
+  }
+  return check("competitor_residue_ocr", "pass", "OCR 未命中配置的竞品词残留");
+}
+
+function ctaProductPresenceCheck(batch, tasks, output) {
+  const draft = batch.templateSnapshot?.draft || {};
+  const text = [textForPolicy(batch, tasks), outputRecognizedText(output)].filter(Boolean).join("\n");
+  const productName = normalizedNeedle(draft.productName);
+  const cta = normalizedNeedle(draft.cta);
+  const missing = [];
+  if (productName && !text.includes(productName)) missing.push("productName");
+  if (cta && !text.includes(cta)) missing.push("cta");
+  if (missing.length) {
+    return checkWithData("cta_product_presence", "warn", `未明显检测到：${missing.join(",")}`, "templateSnapshot.draft", { missing });
+  }
+  return check("cta_product_presence", "pass", "产品名和 CTA 已在脚本或可识别文本中出现");
 }
 
 function scriptReviewSummary(scripts = []) {
@@ -657,6 +810,12 @@ function buildGeneratedVideoQcMessages(batch, output, tasks, scripts, llmConfig,
     "3. 判断是否体现脚本要求的产品名、收益/奖励反馈、CTA、口播/字幕/镜头节奏等核心转化点。",
     "4. 判断是否明显偏离 Seedance prompt、裂变子节点配置、目标语言/地区/渠道规则。",
     "5. 如出现空画面、严重穿帮、主体缺失、文案不符、产品或奖励反馈缺失、过度夸大收益、疑似侵权复刻，应判为不通过。",
+    "",
+    "Seedance prompt execution checks:",
+    "- 字幕/画面文字：目标语言、位置、层级、可读性和脚本含义必须匹配；不得出现竞品原字幕或乱码。",
+    "- CTA/Ending：如果脚本或上传素材要求 CTA/Ending，必须检查是否出现、是否过早/缺失、是否误生成了不相关结尾。",
+    "- 免责声明只应作为后处理底部贴片；如果生成画面内部出现免责声明文字、遮挡主体或和后处理冲突，应标记问题。",
+    "- 不得复刻竞品品牌、水印、UI、原文案、原人物身份或独有包装；只允许复用节奏、镜头功能和转化结构。",
     "",
     "只返回 JSON 对象，字段：",
     JSON.stringify({
@@ -1012,7 +1171,20 @@ async function channelRuleCheck(context, batch, tasks) {
   const hit = forbidden.find((term) => term && text.includes(String(term).toLowerCase()));
   if (hit) return check("channel_rule", "fail", `触发渠道禁用词：${hit}`, "channelRule");
   const requiredDisclaimers = [...new Set(rules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
-  const missingDisclaimer = requiredDisclaimers.find((item) => item && !text.includes(String(item).toLowerCase()));
+  const configuredDisclaimers = [
+    draft.disclaimer,
+    batch.estimate?.request?.disclaimer,
+    ...(draft.disclaimerByLanguage ? Object.values(draft.disclaimerByLanguage) : []),
+    ...(batch.estimate?.request?.disclaimerByLanguage ? Object.values(batch.estimate.request.disclaimerByLanguage) : [])
+  ]
+    .map((item) => String(item || "").toLowerCase().trim())
+    .filter(Boolean);
+  const missingDisclaimer = requiredDisclaimers.find((item) => {
+    const needle = String(item || "").toLowerCase().trim();
+    if (!needle) return false;
+    if (text.includes(needle)) return false;
+    return !configuredDisclaimers.some((configured) => configured.includes(needle) || needle.includes(configured));
+  });
   if (missingDisclaimer) {
     return check("channel_rule", "fail", `缺少渠道免责声明：${missingDisclaimer}`, "channelRule.requiredDisclaimers");
   }
@@ -1048,6 +1220,9 @@ async function qcReportForOutput(context, batch, output) {
     taskIdPresenceCheck(tasks),
     videoSpecCheck(context, output)
   ];
+  checks.push(...await deterministicVideoChecks(context, batch, output));
+  checks.push(competitorResidueOcrCheck(batch, output));
+  checks.push(ctaProductPresenceCheck(batch, tasks, output));
   const stitchCheck = await stitchReportPresenceCheck(context, batch, output);
   if (stitchCheck) checks.push(stitchCheck);
   let modelReview = null;

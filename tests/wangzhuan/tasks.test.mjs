@@ -52,3 +52,22 @@ test("listTasks returns workflow summaries for the current user", async () => {
   const all = await listTasks(context, { scope: "all" });
   assert.ok(all.items.some((item) => item.batchId === "wzb_20260622090403_e393"));
 });
+
+test("listTasks includes draft and checking batches for resume-before-generation flows", async () => {
+  ensureFactsPool();
+  const context = scopedContext("alice");
+  await syncBatchFacts(context, {
+    batchId: "wzb_20260624190000_d001",
+    status: "checking",
+    userId: "alice",
+    referenceVideo: { referenceVideoId: "ref_20260624_001", fileName: "demo.mp4", status: "pass" },
+    request: {
+      sourceStep: "reference_checked",
+      batchName: "resume draft"
+    },
+    tasks: []
+  }, "batch_draft_saved");
+
+  const active = await listTasks(context, { scope: "active" });
+  assert.ok(active.items.some((item) => item.batchId === "wzb_20260624190000_d001"));
+});

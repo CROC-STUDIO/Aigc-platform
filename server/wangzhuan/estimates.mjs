@@ -7,12 +7,14 @@ import {
   REQUIRED_STRONG_TRUTH_FIELDS,
   TARGET_CHANNELS
 } from "./constants.mjs";
+import { buildDisclaimerByLanguage, resolveDisclaimerPreset, resolveDisclaimerText } from "./disclaimers.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeBatchId } from "./ids.mjs";
 import {
   findActiveResourceLock,
   hasWangzhuanFactsStore,
   loadActivePipelineRunFromMysql,
+  loadBatchDetailFromMysql,
   loadActiveRemixFromMysql,
   loadEstimateFromMysql,
   loadIdempotencyFactFromMysql,
@@ -26,6 +28,7 @@ import {
 } from "./mysql-facts.mjs";
 import { prepareBatchForPipeline } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
+import { assertSeedanceReferenceAssetLimits } from "./seedance-provider.mjs";
 import { DEFAULT_SEEDANCE_MODEL, resolveSeedanceModel } from "./seedance-provider.mjs";
 import { preflightStitcher } from "./stitch.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
@@ -56,6 +59,12 @@ function requireField(request, field) {
   return value;
 }
 
+function normalizeStringList(value, fallback = []) {
+  const source = Array.isArray(value) ? value : String(value || "").split(",");
+  const list = source.map((item) => String(item || "").trim()).filter(Boolean);
+  return list.length ? [...new Set(list)] : fallback;
+}
+
 function issue(code, field, message, severity = "error") {
   return { code, field, message, severity };
 }
@@ -63,7 +72,10 @@ function issue(code, field, message, severity = "error") {
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+    return `{${Object.keys(value).sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -108,9 +120,16 @@ function validateTemplateForPromise(template, promiseLevel) {
 }
 
 function validateEstimateRequest(request, limits) {
+  const hasSavedTemplate = Boolean(request.templateId && request.versionId);
+  const hasInlineDraft = Boolean(request.templateSnapshot?.draft);
+  if (!hasSavedTemplate && !hasInlineDraft) {
+    throw new WangzhuanError("validation_error", "templateSnapshot.draft 必填", { field: "templateSnapshot.draft" });
+  }
+  if (request.templateId || request.versionId) {
+    requireField(request, "templateId");
+    requireField(request, "versionId");
+  }
   const required = [
-    "templateId",
-    "versionId",
     "referenceVideoId",
     "targetChannel",
     "targetRegion",
@@ -135,10 +154,13 @@ function validateEstimateRequest(request, limits) {
   const requestedConcurrency = request.requestedConcurrency === undefined
     ? 1
     : normalizeInteger(request.requestedConcurrency, "requestedConcurrency", 1, limits.maxConcurrency);
-  if (request.outputRatio !== "9:16") {
-    throw new WangzhuanError("validation_error", "outputRatio 首期只支持 9:16", { field: "outputRatio" });
+  const supportedRatios = ["9:16", "1:1", "16:9"];
+  if (!supportedRatios.includes(request.outputRatio)) {
+    throw new WangzhuanError("validation_error", "outputRatio 不在支持范围内", { field: "outputRatio", supportedRatios });
   }
-  return { durationSec, variantCount, requestedConcurrency };
+  const targetRegions = normalizeStringList(request.targetRegions, normalizeStringList(request.targetRegion, ["US"]));
+  const languages = normalizeStringList(request.languages, normalizeStringList(request.language, ["en-US"]));
+  return { durationSec, variantCount, requestedConcurrency, targetRegions, languages };
 }
 
 function computeCounts(durationSec, variantCount, branchCount = 1) {
@@ -204,7 +226,16 @@ export async function estimateBatch(context, request = {}) {
     throw error;
   }
 
-  const template = await loadTemplateVersion(context, request.templateId, request.versionId);
+  const template = request.templateId && request.versionId
+    ? await loadTemplateVersion(context, request.templateId, request.versionId)
+    : {
+        schemaVersion: "template-inline-draft.v1",
+        templateId: undefined,
+        versionId: undefined,
+        versionNumber: 0,
+        status: "inline_draft",
+        draft: request.templateSnapshot.draft
+      };
   validateTemplateForPromise(template, request.promiseLevel);
   const referenceVideo = await loadReferenceVideoProbe(context, request.referenceVideoId);
   if (referenceVideo.status === "fail") {
@@ -235,20 +266,52 @@ export async function estimateBatch(context, request = {}) {
     seedanceSegmentCount: counts.seedanceSegmentCount
   } : {};
   const seedanceModel = resolveSeedanceModel({ templateSnapshot: template, estimate: { request: request } });
+  const disclaimerPresetId = String(request.disclaimerPresetId || request.disclaimerPreset || "auto").trim() || "auto";
+  const disclaimerLanguage = String(
+    request.disclaimerLanguage || resolveDisclaimerPreset(normalized.languages[0], disclaimerPresetId)
+  );
+  const disclaimer = String(
+    request.disclaimer || resolveDisclaimerText(normalized.languages[0], disclaimerPresetId)
+  );
+  const disclaimerByLanguage = request.disclaimerByLanguage && typeof request.disclaimerByLanguage === "object"
+    ? request.disclaimerByLanguage
+    : buildDisclaimerByLanguage(normalized.languages, disclaimerPresetId);
+  const disclaimerOverlay = request.disclaimerOverlay && typeof request.disclaimerOverlay === "object"
+    ? {
+      position: String(request.disclaimerOverlay.position || "bottom_center"),
+      fontSize: Number(request.disclaimerOverlay.fontSize || 26),
+      boxHeight: Number(request.disclaimerOverlay.boxHeight || 170),
+      opacity: Number(request.disclaimerOverlay.opacity || 0.58)
+    }
+    : {
+      position: "bottom_center",
+      fontSize: 26,
+      boxHeight: 170,
+      opacity: 0.58
+    };
   const normalizedRequest = {
     templateId: request.templateId,
     versionId: request.versionId,
     referenceVideoId: request.referenceVideoId,
     targetChannel: request.targetChannel,
-    targetRegion: String(request.targetRegion),
-    language: String(request.language),
+    targetRegion: normalized.targetRegions[0] || String(request.targetRegion),
+    targetRegions: normalized.targetRegions,
+    language: normalized.languages[0] || String(request.language),
+    languages: normalized.languages,
     promiseLevel: request.promiseLevel,
     durationSec: normalized.durationSec,
     variantCount: normalized.variantCount,
     requestedConcurrency: normalized.requestedConcurrency,
     outputRatio: request.outputRatio,
+    disclaimer,
+    disclaimerPresetId,
+    disclaimerPreset: disclaimerPresetId,
+    disclaimerLanguage,
+    disclaimerByLanguage,
+    disclaimerOverlay,
     seedanceModel,
-    branches
+    branches,
+    ...(request.templateSnapshot ? { templateSnapshot: request.templateSnapshot } : {})
   };
   const estimateHash = hashPayload(normalizedRequest);
   const estimateId = await nextEstimateId(context);
@@ -261,6 +324,9 @@ export async function estimateBatch(context, request = {}) {
     branchSummaries: branchSummaries(branches),
     ...counts,
     models: [MODEL_IMAGE, seedanceModel],
+    targetRegions: normalized.targetRegions,
+    languages: normalized.languages,
+    outputRatio: request.outputRatio,
     maxRetryPerTask: limits.maxRetryPerTask,
     requestedConcurrency: normalized.requestedConcurrency,
     confirmationRequired,
@@ -330,6 +396,20 @@ async function findActiveBatch(context) {
   return active?.batchId ? active : null;
 }
 
+async function loadDraftBatch(context, batchId) {
+  if (!batchId) return null;
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  return detail?.batch || null;
+}
+
+function sameEditableDraft(active, request = {}) {
+  const activeId = active?.batchId || active?.runId || "";
+  const activeStatus = active?.status || active?.runStatus || "";
+  if (!activeId || !request?.batchId) return false;
+  if (activeId !== request.batchId) return false;
+  return ["draft", "checking"].includes(String(activeStatus || ""));
+}
+
 async function findActiveRemix(context) {
   const detail = await loadActiveRemixFromMysql(context);
   return detail?.remix || null;
@@ -379,7 +459,14 @@ async function assertCanStartFromEstimate(context, record, request) {
     });
   }
   const activeMysqlLock = await findActiveResourceLock(context);
-  if (activeMysqlLock) {
+  const lockRunId = activeMysqlLock?.runId || activeMysqlLock?.batchId || "";
+  const lockStatus = String(activeMysqlLock?.runStatus || activeMysqlLock?.status || "");
+  const reusingSameEditableDraft = Boolean(
+    request?.batchId
+      && lockRunId === request.batchId
+      && ["draft", "checking"].includes(lockStatus)
+  );
+  if (activeMysqlLock && !reusingSameEditableDraft) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       runningResource: activeMysqlLock.runType || "mysql_resource_lock",
       batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
@@ -406,7 +493,7 @@ export async function startBatchFromEstimate(context, request = {}) {
     });
   }
   const active = await findActiveBatch(context);
-  if (active) {
+  if (active && !sameEditableDraft(active, request)) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       batchId: active.batchId,
       status: active.status
@@ -421,9 +508,12 @@ export async function startBatchFromEstimate(context, request = {}) {
     });
   }
 
+  const draftBatch = await loadDraftBatch(context, request.batchId);
   const now = new Date().toISOString();
   const batch = {
-    batchId: makeBatchId(),
+    batchId: draftBatch?.batchId || makeBatchId(),
+    userBatchName: record.request.batchName || draftBatch?.userBatchName || "",
+    displayBatchName: record.request.batchName || draftBatch?.displayBatchName || "",
     type: "pipeline",
     status: "queued",
     userId: currentUserId(context),
@@ -432,16 +522,17 @@ export async function startBatchFromEstimate(context, request = {}) {
     referenceVideo: record.referenceVideo,
     decomposition: record.decomposition,
     estimate: record.estimate,
+    request: record.request,
     scripts: [],
     tasks: [],
-    outputs: [],
-    qcSummary: {
+    outputs: draftBatch?.outputs || [],
+    qcSummary: draftBatch?.qcSummary || {
       total: 0,
       passed: 0,
       failed: 0,
       warnings: []
     },
-    createdAt: now,
+    createdAt: draftBatch?.createdAt || now,
     updatedAt: now
   };
   await saveBatch(context, batch);
@@ -475,6 +566,7 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
 
   const record = await loadEstimate(context, request.estimateId);
   await assertCanStartFromEstimate(context, record, request);
+  const branchDrafts = record.request?.branches || record.templateSnapshot?.draft?.branches || [];
   if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
     throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
       estimateId: record.estimate.estimateId,
@@ -482,7 +574,7 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
     });
   }
   const active = await findActiveBatch(context);
-  if (active) {
+  if (active && !sameEditableDraft(active, request)) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       batchId: active.batchId,
       status: active.status
@@ -497,9 +589,12 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
     });
   }
 
+  const draftBatch = await loadDraftBatch(context, request.batchId);
   const now = new Date().toISOString();
   const batch = {
-    batchId: makeBatchId(),
+    batchId: draftBatch?.batchId || makeBatchId(),
+    userBatchName: record.request.batchName || draftBatch?.userBatchName || "",
+    displayBatchName: record.request.batchName || draftBatch?.displayBatchName || "",
     type: "pipeline",
     status: "preview_required",
     previewType: "seedance_plan",
@@ -509,19 +604,25 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
     referenceVideo: record.referenceVideo,
     decomposition: record.decomposition,
     estimate: record.estimate,
+    request: {
+      ...record.request,
+      branches: branchDrafts
+    },
+    branchDrafts,
     scripts: [],
     tasks: [],
     plans: [],
-    outputs: [],
-    qcSummary: {
+    outputs: draftBatch?.outputs || [],
+    qcSummary: draftBatch?.qcSummary || {
       total: 0,
       passed: 0,
       failed: 0,
       warnings: []
     },
-    createdAt: now,
+    createdAt: draftBatch?.createdAt || now,
     updatedAt: now
   };
+  assertSeedanceReferenceAssetLimits(branchDrafts);
   await saveBatch(context, batch);
   const preparedBatch = await prepareBatchForPipeline(context, batch, {
     useLlmPlans: true,

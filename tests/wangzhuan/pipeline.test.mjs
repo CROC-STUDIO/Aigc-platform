@@ -93,6 +93,14 @@ function decomposition() {
   };
 }
 
+function approvedAssetReviews(keys, idPrefix = "asset") {
+  const reviews = {};
+  for (const key of keys) {
+    reviews[key] = { assetId: `${idPrefix}_${key}`, status: "approved" };
+  }
+  return reviews;
+}
+
 async function fixture(root, overrides = {}) {
   setWangzhuanFactsPoolForTest(fakePool());
   const ctx = context(root, overrides.context);
@@ -212,9 +220,10 @@ test("submit rejects when seedance provider is not configured", async () => {
   }
 });
 
-test("remote submit sends each branch asset URL in Seedance references payload", async () => {
+test("remote submit sends each branch asset_id in Seedance references payload", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-pipeline-seedance-"));
   const submissions = [];
+  const referenceKeys = ["productIcon", "productScreenshot"];
   try {
     const branchDraft = {
       ...baseDraft,
@@ -222,6 +231,7 @@ test("remote submit sends each branch asset URL in Seedance references payload",
         productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
         productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
       },
+      assetReviews: approvedAssetReviews(referenceKeys, "asset_news"),
       branches: [
         {
           branchId: "branch_news",
@@ -231,7 +241,8 @@ test("remote submit sends each branch asset URL in Seedance references payload",
           assetUrls: {
             productIcon: "https://cdn.example.com/wangzhuan/news-icon.png",
             productScreenshot: "https://cdn.example.com/wangzhuan/news-screen.png"
-          }
+          },
+          assetReviews: approvedAssetReviews(referenceKeys, "asset_news")
         },
         {
           branchId: "branch_wallet",
@@ -241,7 +252,8 @@ test("remote submit sends each branch asset URL in Seedance references payload",
           assetUrls: {
             productIcon: "https://cdn.example.com/wangzhuan/wallet-icon.png",
             productScreenshot: "https://cdn.example.com/wangzhuan/wallet-screen.png"
-          }
+          },
+          assetReviews: approvedAssetReviews(referenceKeys, "asset_wallet")
         }
       ]
     };
@@ -270,13 +282,13 @@ test("remote submit sends each branch asset URL in Seedance references payload",
     assert.equal(result.batch.tasks.map((task) => task.branchId).join(","), "branch_news,branch_wallet");
     assert.equal(submissions[0].payload.mode, "omni_reference");
     assert.match(submissions[0].payload.prompt, /News Cash|news/i);
-    assert.deepEqual(submissions[0].payload.references.map((item) => item.url), [
-      "https://cdn.example.com/wangzhuan/news-icon.png",
-      "https://cdn.example.com/wangzhuan/news-screen.png"
+    assert.deepEqual(submissions[0].payload.content.map((item) => item.asset_id), [
+      "asset_news_productIcon",
+      "asset_news_productScreenshot"
     ]);
-    assert.deepEqual(submissions[1].payload.references.map((item) => item.url), [
-      "https://cdn.example.com/wangzhuan/wallet-icon.png",
-      "https://cdn.example.com/wangzhuan/wallet-screen.png"
+    assert.deepEqual(submissions[1].payload.content.map((item) => item.asset_id), [
+      "asset_wallet_productIcon",
+      "asset_wallet_productScreenshot"
     ]);
     assert.equal(submissions[0].payload.model, "dreamina-seedance-2-0-260128");
     assert.equal(submissions[0].payload.ratio, "9:16");
@@ -284,9 +296,9 @@ test("remote submit sends each branch asset URL in Seedance references payload",
     assert.equal(submissions[0].payload.watermark, false);
     assert.equal(result.batch.tasks[0].seedanceTaskId, `remote_${result.batch.tasks[0].generationTaskId}`);
     assert.equal(result.batch.tasks[0].provider, "seedance");
-    assert.deepEqual(result.batch.tasks[0].requestSummary.references.map((item) => item.url), [
-      "https://cdn.example.com/wangzhuan/news-icon.png",
-      "https://cdn.example.com/wangzhuan/news-screen.png"
+    assert.deepEqual(result.batch.tasks[0].requestSummary.content.map((item) => item.asset_id), [
+      "asset_news_productIcon",
+      "asset_news_productScreenshot"
     ]);
   } finally {
     await resetFactsPool();
@@ -303,7 +315,8 @@ test("remote submit failure persists Seedance request summary for debugging", as
         ...baseDraft,
         assetUrls: {
           productIcon: "https://cdn.example.com/wangzhuan/news-icon.png"
-        }
+        },
+        assetReviews: approvedAssetReviews(["productIcon"], "asset_fail")
       },
       context: {
         seedanceProviderClient: {
@@ -332,8 +345,8 @@ test("remote submit failure persists Seedance request summary for debugging", as
     assert.equal(task.errorCode, "upstream_failed");
     assert.equal(task.responseSummary.upstreamCode, "InvalidParameter");
     assert.equal(task.requestSummary.mode, "omni_reference");
-    assert.deepEqual(task.requestSummary.references.map((item) => item.url), [
-      "https://cdn.example.com/wangzhuan/news-icon.png"
+    assert.deepEqual(task.requestSummary.content.map((item) => item.asset_id), [
+      "asset_fail_productIcon"
     ]);
   } finally {
     await resetFactsPool();

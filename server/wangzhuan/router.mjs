@@ -33,6 +33,14 @@ import { retryStitch } from "./stitch.mjs";
 import { inspectStorePage } from "./store-page.mjs";
 import { pollUpstreamBatch } from "./upstream-poll.mjs";
 import { adminTemplateAction, listTemplates, saveTemplate } from "./templates.mjs";
+import {
+  cancelVideoOpsJob,
+  createVideoOpsJob,
+  downloadVideoOpsJob,
+  getVideoOpsJob,
+  getVideoOpsJobResult,
+  retryVideoOpsJob
+} from "./video-ops.mjs";
 
 function buildContext(context) {
   return {
@@ -60,6 +68,12 @@ function remixRoute(pathname) {
   return { remixId: match[1], action: match[2] || "detail" };
 }
 
+function videoOpsRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/video-ops\/jobs(?:\/([^/]+)(?:\/(result|download|cancel|retry))?)?$/);
+  if (!match) return null;
+  return { jobId: match[1] ? decodeURIComponent(match[1]) : "", action: match[2] || (match[1] ? "detail" : "collection") };
+}
+
 function referenceVideoRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/(ref_\d{8}_\d{3})\/workflow-state$/);
   if (!match) return null;
@@ -75,6 +89,16 @@ function sendZip(res, zip, requestId) {
     "X-Request-Id": requestId
   });
   res.end(zip);
+}
+
+function sendBinary(res, buffer, requestId, fileName = "video-ops-output.bin") {
+  res.writeHead(200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Length": buffer.length,
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+    "X-Request-Id": requestId
+  });
+  res.end(buffer);
 }
 
 export async function handleWangzhuanRequest(req, res, url, context) {
@@ -155,6 +179,26 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "GET" && url.pathname === "/api/wangzhuan/remix/active") {
       return sendOk(res, await getActiveRemix(scoped), requestId);
+    }
+    const videoOps = videoOpsRoute(url.pathname);
+    if (videoOps && req.method === "POST" && videoOps.action === "collection") {
+      return sendOk(res, await createVideoOpsJob(scoped, await context.readJson(req)), requestId);
+    }
+    if (videoOps && req.method === "GET" && videoOps.action === "detail") {
+      return sendOk(res, await getVideoOpsJob(scoped, videoOps.jobId, queryObject(url)), requestId);
+    }
+    if (videoOps && req.method === "GET" && videoOps.action === "result") {
+      return sendOk(res, await getVideoOpsJobResult(scoped, videoOps.jobId, queryObject(url)), requestId);
+    }
+    if (videoOps && req.method === "GET" && videoOps.action === "download") {
+      const output = await downloadVideoOpsJob(scoped, videoOps.jobId);
+      return sendBinary(res, output, requestId, `video-ops-${videoOps.jobId}.bin`);
+    }
+    if (videoOps && req.method === "POST" && videoOps.action === "cancel") {
+      return sendOk(res, await cancelVideoOpsJob(scoped, videoOps.jobId), requestId);
+    }
+    if (videoOps && req.method === "POST" && videoOps.action === "retry") {
+      return sendOk(res, await retryVideoOpsJob(scoped, videoOps.jobId), requestId);
     }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {

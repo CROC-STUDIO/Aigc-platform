@@ -19,7 +19,7 @@ import { stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
 import { saveTemplate } from "../../server/wangzhuan/templates.mjs";
 import { fakePool } from "./mysql-facts-fixture.mjs";
 import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
-import { prepareDownloadedSegmentsWithoutStitch, testSeedanceProviderClient } from "./test-providers.mjs";
+import { prepareDownloadedSegmentsWithoutStitch, testGeneratedVideoProbe, testSeedanceProviderClient } from "./test-providers.mjs";
 
 let activePool = null;
 
@@ -80,6 +80,7 @@ function wangzhuanModuleContext(root, overrides = {}) {
     userId: "user",
     user: { userId: "user", username: "user", role: "user", isAdmin: false },
     mockReferenceProbe: true,
+    probeGeneratedVideo: testGeneratedVideoProbe,
     ...overrides
   };
   attachMockObjectStorage(ctx);
@@ -92,7 +93,8 @@ function tempContext(root, role = "user") {
     userProjectRoot: join(root, "user"),
     sharedProjectRoot: join(root, "shared"),
     userId: role,
-    mockReferenceProbe: true
+    mockReferenceProbe: true,
+    probeGeneratedVideo: testGeneratedVideoProbe
   };
   attachMockObjectStorage(ctx);
   return ctx;
@@ -190,7 +192,11 @@ async function failedThirtySecondStitchFixture(root) {
       targetChannels: ["meta_ads"],
       defaultOutputRatio: "9:16",
       defaultDurationSec: 30,
-      promiseLevel: "strong_conversion"
+      promiseLevel: "strong_conversion",
+      disclaimer: "Rewards vary by eligibility",
+      disclaimerByLanguage: {
+        "en-US": "Rewards vary by eligibility"
+      }
     }
   });
   const checked = await checkReferenceVideo(moduleContext, {
@@ -227,7 +233,11 @@ async function failedThirtySecondStitchFixture(root) {
     durationSec: 30,
     variantCount: 1,
     requestedConcurrency: 1,
-    outputRatio: "9:16"
+    outputRatio: "9:16",
+    disclaimer: "Rewards vary by eligibility",
+    disclaimerByLanguage: {
+      "en-US": "Rewards vary by eligibility"
+    }
   });
   const started = await startBatchFromEstimate(moduleContext, {
     idempotencyKey: "idem_start_router_retry",
@@ -476,6 +486,11 @@ test("product asset upload endpoint returns a reusable stored asset link for tem
     const res = captureRes();
     const ctx = {
       ...tempContext(root),
+      reviewProductAsset: async () => ({
+        assetId: "asset_seedance_icon_1",
+        status: "processing",
+        reviewReason: "素材已上传，Seedance 正在审核"
+      }),
       async syncWangzhuanAsset({ fullPath, assetKind }) {
         return {
           storageKey: `uploads/test/${assetKind}.png`,
@@ -506,7 +521,39 @@ test("product asset upload endpoint returns a reusable stored asset link for tem
     assert.match(payload.data.asset.previewUrl, /^https:\/\//);
     assert.match(payload.data.asset.storageUrl, /^https:\/\/harpoons3\.s3\.ap-southeast-1\.amazonaws\.com\//);
     assert.equal(payload.data.asset.previewUrl, payload.data.asset.storageUrl);
+    assert.equal(payload.data.asset.review.assetId, "asset_seedance_icon_1");
+    assert.equal(payload.data.asset.review.status, "processing");
+    assert.match(payload.data.asset.review.reviewReason, /Seedance 正在审核/);
     assert.equal(Object.hasOwn(payload.data.asset, "content"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("store page inspect endpoint returns parsed fallback candidates", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "wz-router-store-page-"));
+  try {
+    const res = captureRes();
+    await handleWangzhuanRequest(
+      jsonReq("POST", {
+        url: "https://play.google.com/store/apps/details?id=com.lucky.cash"
+      }),
+      res,
+      new URL("http://localhost/api/wangzhuan/store-page/inspect"),
+      tempContext(root)
+    );
+
+    assert.equal(res.statusCode, 200);
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.code, "ok");
+    assert.equal(payload.data.store, "google_play");
+    assert.equal(payload.data.candidates.productName, "cash");
+    assert.equal(payload.data.candidates.icon, null);
+    assert.deepEqual(payload.data.candidates.screenshots, []);
+    assert.match(payload.data.warnings[0], /链接解析兜底信息/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

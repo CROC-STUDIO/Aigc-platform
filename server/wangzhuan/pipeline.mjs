@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { normalizeBranchDrafts } from "./branches.mjs";
+import { ensureAssetReviewsApproved } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
@@ -16,6 +17,7 @@ import {
   collectSeedanceMedia,
   createSeedanceProviderClient,
   DEFAULT_SEEDANCE_MODEL,
+  mergeBranchMediaDraft,
   resolveSeedanceModel,
   summarizeSeedanceRequest,
   summarizeSeedanceResponse
@@ -815,8 +817,10 @@ async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, 
       nextScripts.push(script);
       continue;
     }
+    const branch = (Array.isArray(batch.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === script.branchId);
     const nextScript = {
       ...script,
+      ...(branch ? { branchDraft: mergeBranchMediaDraft(branch, script.branchDraft || {}) } : {}),
       hook: plan.hook,
       body: plan.body,
       voiceover: plan.voiceover,
@@ -874,7 +878,26 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
   if (unknownPlanIds.length) {
     throw new WangzhuanError("validation_error", "存在未知预案编号", { batchId, unknownPlanIds });
   }
-  const { nextPlans, nextScripts, confirmedAt } = await applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request);
+  const branchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
+    ? request.branchDrafts
+    : batch.branchDrafts || batch.request?.branches || [];
+  const review = await ensureAssetReviewsApproved(context, branchSource);
+  const reviewResult = review.reviewResult;
+  if (!reviewResult.ok) {
+    throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请上传 Seedance 素材并完成审核后再确认生成", {
+      failures: reviewResult.failures,
+      assetsByBranch: reviewResult.assetsByBranch
+    });
+  }
+  const reviewedBatch = {
+    ...batch,
+    branchDrafts: review.branches,
+    request: {
+      ...(batch.request || {}),
+      branches: review.branches
+    }
+  };
+  const { nextPlans, nextScripts, confirmedAt } = await applyConfirmedPlanEdits(context, reviewedBatch, plans, confirmedPlanIds, request);
   const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
     if (task.status !== "pending_preview") return task;
     if (!task.planId || !confirmedPlanIds.has(task.planId)) return task;
@@ -888,7 +911,7 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     });
   }
   const saved = await writeBatchWithTrigger(context, {
-    ...batch,
+    ...reviewedBatch,
     status: "queued",
     plans: nextPlans,
     scripts: nextScripts,
