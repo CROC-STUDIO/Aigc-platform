@@ -60,7 +60,7 @@
           </a>
           <a class="wz-stepbar-item" href="#remixNodeMask" data-step="2">
             <span class="wz-stepbar-no">2</span>
-            <span class="wz-stepbar-label">区域与能力</span>
+            <span class="wz-stepbar-label">功能识别与处理</span>
           </a>
           <a class="wz-stepbar-item" href="#remixNodeDelivery" data-step="3">
             <span class="wz-stepbar-no">3</span>
@@ -106,21 +106,39 @@
               </section>
             </div>
 
-            <!-- 列2：区域与能力（Mask 编辑 + 预览） -->
+            <!-- 列2：功能识别与处理（能力计划 + 可选 Mask 编辑 + 预览） -->
             <div class="wz-col wz-col-wide" data-step="2">
-              <div class="wz-col-label"><b>2</b> 区域与能力</div>
+              <div class="wz-col-label"><b>2</b> 功能识别与处理</div>
               <section class="wz-node" id="remixNodeMask" data-node="mask" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
-                  <h2>单素材可视化编辑</h2>
+                  <h2>单素材功能处理</h2>
                   <button id="remixClearMaskBtn" class="mini ghost" type="button">清空选择</button>
                 </div>
                 <div class="wz-node-body">
+                  <div class="wz-warning">先识别素材需要做什么：文案、CTA、字幕、ending 可走自动 OCR/ASR/尾帧检测；Logo、水印、手机界面等局部画面处理才需要用户框选或点选定位。</div>
+                  <label>处理功能
+                    <select id="remixCapabilitySelect">
+                      <option value="auto_all" selected>自动识别建议</option>
+                      <option value="product_name">产品名替换</option>
+                      <option value="cta">CTA 文案替换</option>
+                      <option value="subtitle">字幕处理</option>
+                      <option value="ending">Ending 检测</option>
+                      <option value="logo_icon">Logo/Icon 去除</option>
+                      <option value="watermark">水印遮挡</option>
+                      <option value="phone_ui">手机界面区域</option>
+                    </select>
+                  </label>
                   <div id="remixMaskEditor" class="wz-region-canvas remix-mask-editor" aria-label="Mask 编辑窗口，方向键移动选中区域，Shift 加方向键调整大小" tabindex="0">
                     <div id="remixMaskMediaLayer" class="remix-mask-media" aria-hidden="true"></div>
-                    <div class="remix-mask-empty" data-mask-empty>上传源素材后框选多个区域</div>
+                    <div class="remix-mask-empty" data-mask-empty>上传源素材后，可按需要框选 Logo、水印、手机界面等区域</div>
                     <div id="remixMaskLayer" class="remix-mask-layer"></div>
                   </div>
-                  <div class="wz-warning">框选区域会合成一张 mask 预览图；确认后提交视频处理平台 ai_remove 手动任务。</div>
+                  &lt;div class="remix-mask-upload" aria-label="Mask上传"&gt;
+                    &lt;label&gt;上传Mask图片 (PNG):&lt;/label&gt;
+                    &lt;input id="remixMaskFile" type="file" accept="image/png" disabled&gt;
+                    &lt;button id="remixUploadMaskBtn" type="button" disabled&gt;上传Mask&lt;/button&gt;
+                  &lt;/div&gt;
+                  &lt;div class="wz-warning"&gt;区域类功能会合成 mask 预览图；自动类功能不需要用户选区域，提交时由后端识别文字、字幕或 ending。&lt;/div&gt;
                   <label>改造类型
                     <select id="remixOperationType">
                       <option value="watermark_cover">水印区域遮挡</option>
@@ -128,12 +146,42 @@
                       <option value="text_cta_ending_replace">文字/CTA/ending 替换</option>
                     </select>
                   </label>
+                  <label>跟踪方式
+                    <select id="remixTrackingMode">
+                      <option value="manual_mask">框选 mask</option>
+                      <option value="auto_interaction">点选跟踪</option>
+                    </select>
+                  </label>
+                  <label id="remixInteractionPromptWrap" class="remix-interaction-prompt" hidden>点选跟踪提示
+                    <textarea id="remixInteractionPrompt" rows="3" placeholder="例如：跟踪左上角 Logo，贯穿全片去除，不影响人物和手机界面。"></textarea>
+                  </label>
+                  <label>文字描述选区
+                    <textarea id="remixDescriptionRegion" rows="3" placeholder="例如：右上角 icon 替换为我方 icon，贯穿全片。"></textarea>
+                  </label>
+                  <div class="remix-prototype-toolbar">
+                    <button id="remixDetectBtn" class="ghost" type="button">识别候选区域</button>
+                    <button id="remixAddDescriptionRegionBtn" class="ghost" type="button">添加描述区域</button>
+                  </div>
+                  <section class="wz-subflow" aria-label="识别结果">
+                    <div class="panel-head">
+                      <h3>识别结果</h3>
+                      <span id="remixDetectionStatus">未识别</span>
+                    </div>
+                    <div id="remixDetectionSummary" class="wz-list empty-line">暂无识别结果</div>
+                  </section>
                   <div class="remix-prototype-toolbar">
                     <button id="remixPrototypeApplyRegionsBtn" class="ghost" type="button" disabled>应用当前区域到选中素材</button>
                     <button id="remixPrototypeConfirmReviewBtn" class="ghost" type="button" disabled>确认当前素材复核</button>
                     <button id="remixPrototypeGenerateTasksBtn" type="button" disabled>生成草稿任务</button>
                   </div>
                   <div id="remixPrototypeCapabilityPlan" class="remix-prototype-capability-grid" aria-label="能力映射预览"></div>
+                  <section class="wz-subflow" aria-label="执行计划预览">
+                    <div class="panel-head">
+                      <h3>执行计划预览</h3>
+                      <span id="remixPlanStatus">未生成</span>
+                    </div>
+                    <div id="remixPlanSummary" class="wz-list empty-line">暂无执行计划</div>
+                  </section>
                 </div>
               </section>
 
@@ -163,9 +211,16 @@
                 </div>
                 <div class="wz-node-body">
                   <div id="remixDetailBox" class="wz-list empty-line">暂无改造任务</div>
+                  <section class="wz-subflow" aria-label="自动质检摘要">
+                    <div class="panel-head">
+                      <h3>自动质检摘要</h3>
+                      <span id="remixQcStatus">未开始</span>
+                    </div>
+                    <div id="remixQcSummary" class="wz-list empty-line">暂无质检结果</div>
+                  </section>
                   <div class="remix-prototype-toolbar">
-                    <button id="remixPrototypeSubmitTasksBtn" type="button" disabled>模拟提交队列</button>
-                    <button id="remixPrototypeAdvanceTasksBtn" class="ghost" type="button" disabled>模拟推进</button>
+                    <button id="remixPrototypeSubmitTasksBtn" type="button" disabled>提交真实队列</button>
+                    <button id="remixPrototypeAdvanceTasksBtn" class="ghost" type="button" disabled>刷新队列</button>
                   </div>
                   <div id="remixPrototypeTaskQueue" class="remix-prototype-task-list" aria-label="异步任务队列"></div>
                   <div class="modal-actions wz-actions">

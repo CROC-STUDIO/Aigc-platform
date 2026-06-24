@@ -4,11 +4,14 @@ import { getGallery } from "./gallery.mjs";
 import { listTasks } from "./tasks.mjs";
 import { WangzhuanError, requirePermission, sendErrorEnvelope, sendOk } from "./http.mjs";
 import { makeRequestId } from "./ids.mjs";
+import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
 import { confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
 import { uploadProductAsset } from "./product-assets.mjs";
 import { runBatchQc } from "./qc.mjs";
+import { detectRemixRegions } from "./remix-detection.mjs";
+import { buildRemixPlan } from "./remix-plan.mjs";
 import {
   checkReferenceVideo,
   decomposeReferenceVideo,
@@ -20,12 +23,14 @@ import {
   estimateRemix,
   getActiveRemix,
   getRemixDetail,
+  getRemixQcReport,
   startDirectMaskEdit,
   startRemix,
   stopRemix,
   uploadRemixSource
 } from "./remix.mjs";
 import { retryStitch } from "./stitch.mjs";
+import { inspectStorePage } from "./store-page.mjs";
 import { pollUpstreamBatch } from "./upstream-poll.mjs";
 import { adminTemplateAction, listTemplates, saveTemplate } from "./templates.mjs";
 
@@ -50,7 +55,7 @@ function batchRoute(pathname) {
 }
 
 function remixRoute(pathname) {
-  const match = pathname.match(/^\/api\/wangzhuan\/remix\/(rmx_\d{14}_[a-f0-9]{4})(?:\/(preview-confirm|stop))?$/);
+  const match = pathname.match(/^\/api\/wangzhuan\/remix\/(rmx_\d{14}_[a-f0-9]{4})(?:\/(preview-confirm|stop|qc-report))?$/);
   if (!match) return null;
   return { remixId: match[1], action: match[2] || "detail" };
 }
@@ -111,6 +116,12 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-assets/upload") {
       return sendOk(res, await uploadProductAsset(scoped, await context.readJson(req)), requestId);
     }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/draft") {
+      return sendOk(res, await saveBatchDraft(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/store-page/inspect") {
+      return sendOk(res, await inspectStorePage(scoped, await context.readJson(req)), requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/estimate") {
       return sendOk(res, await estimateBatch(scoped, await context.readJson(req)), requestId);
     }
@@ -127,8 +138,14 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/upload") {
       return sendOk(res, await uploadRemixSource(scoped, await context.readJson(req)), requestId);
     }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/detect") {
+      return sendOk(res, await detectRemixRegions(scoped, await context.readJson(req)), requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/estimate") {
       return sendOk(res, await estimateRemix(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/plan") {
+      return sendOk(res, buildRemixPlan(await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/remix/start") {
       return sendOk(res, await startRemix(scoped, await context.readJson(req)), requestId);
@@ -167,6 +184,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (remix && req.method === "POST" && remix.action === "preview-confirm") {
       return sendOk(res, await confirmRemixPreview(scoped, remix.remixId, await context.readJson(req)), requestId);
+    }
+    if (remix && req.method === "GET" && remix.action === "qc-report") {
+      return sendOk(res, await getRemixQcReport(scoped, remix.remixId), requestId);
     }
     if (req.method === "GET" && url.pathname === "/api/wangzhuan/tasks") {
       return sendOk(res, await listTasks(scoped, queryObject(url)), requestId);

@@ -6,6 +6,8 @@ import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import { effectiveLimits } from "./config.mjs";
 import { TARGET_CHANNELS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { buildRemixPlan } from "./remix-plan.mjs";
+import { evaluateRemixQc } from "./remix-qc.mjs";
 import { createRemixProviderClient, hasRemoteRemixProvider } from "./remix-provider.mjs";
 import { ffprobeMediaFile } from "./reference-videos.mjs";
 import {
@@ -50,6 +52,7 @@ const MATERIAL_MIME_TYPES = new Set([
   "image/jpg"
 ]);
 const REMIX_OPERATIONS = new Set(["text_cta_ending_replace", "logo_icon_cover_or_replace", "watermark_cover"]);
+const AUTO_DETECT_CAPABILITY_KEYS = new Set(["product_name", "cta", "subtitle", "ending"]);
 const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
 const STOPPABLE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
 const REMIX_MODEL_VIDEO = "function_k";
@@ -280,10 +283,10 @@ async function readRemix(context, remixId) {
   return remix;
 }
 
-async function writeRemix(context, remix) {
+async function writeRemix(context, remix, triggerName = "remix_write") {
   const now = new Date().toISOString();
   const next = { ...remix, updatedAt: now };
-  const synced = await syncRemixFacts(context, next, "remix_write");
+  const synced = await syncRemixFacts(context, next, triggerName);
   if (synced.skipped) {
     throw new WangzhuanError("database_unavailable", "MySQL 写入失败，改造任务未保存", { remixId: next.remixId });
   }
@@ -350,13 +353,25 @@ function validateRegions(request, limits) {
           throw new WangzhuanError("validation_error", "bbox 必须为 0-1 归一化坐标", { field: `regions[${index}].bbox.${field}` });
         }
       }
-      return { regionId, type, label, bbox: { x: Number(bbox.x), y: Number(bbox.y), width: Number(bbox.width), height: Number(bbox.height) } };
+      return {
+        regionId,
+        type,
+        label,
+        ...(item.capabilityKey ? { capabilityKey: String(item.capabilityKey) } : {}),
+        bbox: { x: Number(bbox.x), y: Number(bbox.y), width: Number(bbox.width), height: Number(bbox.height) }
+      };
     }
     const description = String(item.description || "").trim();
     if (!description) {
       throw new WangzhuanError("validation_error", "描述区域不能为空", { field: `regions[${index}].description` });
     }
-    return { regionId, type, label, description };
+    return {
+      regionId,
+      type,
+      label,
+      ...(item.capabilityKey ? { capabilityKey: String(item.capabilityKey) } : {}),
+      description
+    };
   });
 }
 
@@ -394,13 +409,16 @@ function validateDirectMaskEditRequest(request, limits) {
     sourceId: String(request.sourceId),
     operationType,
     targetChannel,
-    regions: validateRegions(request, limits),
-    maskDataUrl: String(request.maskDataUrl || "")
+    regions: request.autoDetect ? [] : validateRegions(request, limits),
+    maskDataUrl: String(request.maskDataUrl || ""),
+    autoDetect: Boolean(request.autoDetect),
+    capabilityKey: String(request.capabilityKey || ""),
+    jobType: String(request.jobType || "")
   };
 }
 
 function validateEstimateRequest(request, limits) {
-  for (const field of ["sourceId", "templateId", "versionId", "operationType", "targetChannel"]) {
+  for (const field of ["sourceId", "operationType", "targetChannel"]) {
     if (!request[field]) throw new WangzhuanError("validation_error", `${field} 必填`, { field });
   }
   if (!REMIX_OPERATIONS.has(request.operationType)) {
@@ -409,13 +427,20 @@ function validateEstimateRequest(request, limits) {
   if (!TARGET_CHANNELS.includes(request.targetChannel)) {
     throw new WangzhuanError("validation_error", "targetChannel 不在合同枚举内", { field: "targetChannel" });
   }
+  const autoDetect = Boolean(request.autoDetect);
+  const capabilityKey = String(request.capabilityKey || "");
+  const allowEmptyRegions = autoDetect && AUTO_DETECT_CAPABILITY_KEYS.has(capabilityKey);
   return {
     sourceId: String(request.sourceId),
-    templateId: String(request.templateId),
-    versionId: String(request.versionId),
+    templateId: request.templateId ? String(request.templateId) : "",
+    versionId: request.versionId ? String(request.versionId) : "",
     operationType: request.operationType,
     targetChannel: request.targetChannel,
-    regions: validateRegions(request, limits)
+    regions: allowEmptyRegions ? [] : validateRegions(request, limits),
+    autoDetect,
+    capabilityKey,
+    jobType: String(request.jobType || ""),
+    maskDataUrl: String(request.maskDataUrl || "")
   };
 }
 
@@ -464,11 +489,20 @@ function promptText(record) {
   return [
     `Provider: ${record.capability.provider}`,
     `Operation: ${record.request.operationType}`,
+    `Capability: ${record.request.capabilityKey || "region_mask"}`,
+    `Job type: ${record.request.jobType || "mask_edit"}`,
+    `Auto detect: ${record.request.autoDetect ? "yes" : "no"}`,
     `Product: ${draft.productName || "Product"}`,
     `CTA: ${draft.cta || ""}`,
     `Ending: ${draft.ending || ""}`,
     `Channel: ${record.request.targetChannel}`,
-    "Replace or cover only the requested competitor areas. Preserve pacing and layout, but do not copy competitor branding.",
+    "Seedance-style video edit instruction:",
+    "删除元素：删除指定区域的竞品元素，视频其他内容保持不变。",
+    "修改元素：将指定区域替换为我方产品、CTA、logo 或下载引导，动作和运镜不变。",
+    "增加元素：在指定时间/空间位置增加我方元素，不遮挡主体、不破坏原画面节奏。",
+    "Preserve motion, camera, timing, background, and layout.",
+    "Replace or cover only the requested competitor areas.",
+    "Do not copy competitor branding, watermark, UI details, original subtitles, voiceover copy, or unique character identity.",
     regionText
   ].join("\n");
 }
@@ -536,8 +570,9 @@ function remixFailureFromError(error) {
 
 function providerPayload(record, source) {
   const draft = record.templateSnapshot?.draft || {};
+  const autoDetect = Boolean(record.request.autoDetect);
   return {
-    job_type: "mask_edit",
+    job_type: autoDetect ? (record.request.jobType || "auto_detect") : "mask_edit",
     input: {
       source_type: "base64_data_url",
       source
@@ -547,14 +582,15 @@ function providerPayload(record, source) {
       priority: 0
     },
     params: {
-      mode: "manual",
+      mode: autoDetect ? "auto_detect" : "manual",
       operation_type: record.request.operationType,
       target_channel: record.request.targetChannel,
+      capability_key: record.request.capabilityKey || undefined,
       regions: record.request.regions,
-      mask_source: {
+      ...(!autoDetect ? { mask_source: {
         mode: "manual",
         regions: record.request.regions
-      },
+      } } : {}),
       product_context: {
         product_name: draft.productName || "",
         cta: draft.cta || "",
@@ -650,13 +686,14 @@ function assertRemoteRemixProvider(context, capability) {
 }
 
 async function writeQcReport(context, remix, output, qcStatus) {
+  const autoQc = output.autoQc || null;
   const report = {
     schemaVersion: "qc_report.v1",
     outputId: output.outputId,
     sourceType: "remix",
     remixId: remix.remixId,
     qcStatus,
-    visualPreviewRequired: true,
+    visualPreviewRequired: Boolean(output.visualPreviewRequired),
     previewConfirmed: Boolean(output.previewConfirmed),
     checks: [
       {
@@ -679,12 +716,17 @@ async function writeQcReport(context, remix, output, qcStatus) {
       },
       {
         checkId: "visual_preview_gate",
-        status: output.previewConfirmed ? "pass" : "manual_required",
-        severity: output.previewConfirmed ? "info" : "manual_required",
-        message: output.previewConfirmed ? "人工预览已确认" : "remix 需要人工预览确认"
+        status: output.previewConfirmed ? "pass" : (output.visualPreviewRequired ? "manual_required" : "pass"),
+        severity: output.previewConfirmed || !output.visualPreviewRequired ? "info" : "manual_required",
+        message: output.previewConfirmed
+          ? "人工预览已确认"
+          : output.visualPreviewRequired
+            ? "remix 需要人工预览确认"
+            : "自动质检路径无需人工预览"
       }
     ],
-    summary: output.previewConfirmed ? "Preview confirmed" : "Preview confirmation required",
+    ...(autoQc ? { autoQc } : {}),
+    summary: autoQc?.summary || (output.previewConfirmed ? "Preview confirmed" : output.visualPreviewRequired ? "Preview confirmation required" : "Automatic QC passed"),
     createdAt: new Date().toISOString()
   };
   const target = join(remixDir(context, remix.remixId), "qc", `${output.outputId}.json`);
@@ -720,9 +762,9 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
     promptPath: task?.promptPath || "",
     promptStorageKey: task?.promptStorageKey || "",
     promptStorageUrl: task?.promptStorageUrl || "",
-    qcStatus: "manual_required",
+    qcStatus: "qc_running",
     downloadEligible: false,
-    visualPreviewRequired: true,
+    visualPreviewRequired: false,
     previewConfirmed: false
   };
   const nextTask = {
@@ -735,24 +777,69 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
     outputStorageUrl: storage?.storageUrl || "",
     finishedAt: new Date().toISOString()
   };
-  const nextRemix = {
+  const qc = await evaluateRemixQc({
+    output,
+    executionPlan: remix.executionPlan || { steps: [] },
+    mockSignals: context.mockRemixQcSignals || {}
+  });
+  const qcPassed = qc.qcStatus === "pass";
+  const pendingOutput = {
+    ...output,
+    qcStatus: qcPassed ? "manual_required" : "fail",
+    downloadEligible: false,
+    visualPreviewRequired: true,
+    previewConfirmed: false,
+    autoQc: qc
+  };
+  const pendingRemix = {
     ...remix,
     status: "preview_required",
     providerJob: jobSnapshot,
     tasks: [nextTask],
-    outputs: [output],
+    outputs: [pendingOutput],
     qcSummary: {
       total: 1,
-      passed: 0,
-      failed: 1,
-      warnings: [{ outputId, qcStatus: "manual_required" }]
+      passed: qcPassed ? 1 : 0,
+      failed: qcPassed ? 0 : 1,
+      warnings: qcPassed ? [] : [{ outputId, qcStatus: "fail", summary: qc.summary }]
     }
   };
-  const qcReportPath = await writeQcReport(context, nextRemix, output, "manual_required");
-  return {
-    ...nextRemix,
-    outputs: [{ ...output, ...qcReportPath }]
+  if (!qcPassed) {
+    const qcReportPath = await writeQcReport(context, pendingRemix, pendingOutput, qc.qcStatus);
+    return writeRemix(context, {
+      ...pendingRemix,
+      outputs: [{ ...pendingOutput, ...qcReportPath }]
+    }, "remix_write");
+  }
+
+  const autoConfirmedAt = new Date().toISOString();
+  const savedPending = await writeRemix(context, pendingRemix, "remix_write");
+  const confirmedOutput = {
+    ...(savedPending.outputs?.[0] || pendingOutput),
+    qcStatus: "pass",
+    downloadEligible: true,
+    visualPreviewRequired: false,
+    previewConfirmed: true,
+    autoQc: qc
   };
+  const confirmedRemix = {
+    ...savedPending,
+    status: "succeeded",
+    outputs: [confirmedOutput],
+    previewConfirmedBy: "system_auto_qc",
+    previewConfirmedAt: autoConfirmedAt,
+    qcSummary: {
+      total: 1,
+      passed: 1,
+      failed: 0,
+      warnings: []
+    }
+  };
+  const qcReportPath = await writeQcReport(context, confirmedRemix, confirmedOutput, "pass");
+  return writeRemix(context, {
+    ...confirmedRemix,
+    outputs: [{ ...confirmedOutput, ...qcReportPath }]
+  }, "preview_confirm");
 }
 
 async function findActiveRemix(context) {
@@ -873,28 +960,40 @@ export async function startDirectMaskEdit(context, request = {}) {
   if (capability.status !== "supported" && capability.status !== "degraded") {
     throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
   }
-  const maskBuffer = parseMaskDataUrl(normalized.maskDataUrl);
   const remixId = makeRemixId();
   const now = new Date().toISOString();
-  const targetDir = remixDir(context, remixId);
-  const maskTarget = join(targetDir, "regions", "mask.png");
-  await mkdir(dirname(maskTarget), { recursive: true });
-  await writeFile(maskTarget, maskBuffer);
-  const maskAsset = await syncRelativeAsset(context, maskTarget, "remix_mask");
-  const maskSource = {
-    sourceType: "base64_data_url",
-    mimeType: "image/png",
-    storedPath: maskAsset.storedPath,
-    storageKey: maskAsset.storageKey,
-    storageUrl: maskAsset.storageUrl
-  };
+  let maskSource = null;
+  if (!normalized.autoDetect) {
+    const maskBuffer = parseMaskDataUrl(normalized.maskDataUrl);
+    const targetDir = remixDir(context, remixId);
+    const maskTarget = join(targetDir, "regions", "mask.png");
+    await mkdir(dirname(maskTarget), { recursive: true });
+    await writeFile(maskTarget, maskBuffer);
+    const maskAsset = await syncRelativeAsset(context, maskTarget, "remix_mask");
+    maskSource = {
+      sourceType: "base64_data_url",
+      mimeType: "image/png",
+      storedPath: maskAsset.storedPath,
+      storageKey: maskAsset.storageKey,
+      storageUrl: maskAsset.storageUrl
+    };
+  }
   const record = {
     schemaVersion: "remix-direct-mask-edit.v1",
     request: {
       sourceId: normalized.sourceId,
       operationType: normalized.operationType,
       targetChannel: normalized.targetChannel,
-      regions: normalized.regions
+      regions: normalized.regions,
+      autoDetect: normalized.autoDetect,
+      capabilityKey: normalized.capabilityKey,
+      jobType: normalized.jobType,
+      executionPlan: buildRemixPlan({
+        sourceId: normalized.sourceId,
+        operationType: normalized.operationType,
+        capabilityKey: normalized.capabilityKey,
+        regions: normalized.regions
+      })
     },
     source,
     templateSnapshot: directTemplateSnapshot(),
@@ -903,7 +1002,7 @@ export async function startDirectMaskEdit(context, request = {}) {
     createdAt: now
   };
   assertRemoteRemixProvider(context, capability);
-  const materialized = await materializeProviderSubmission(context, record, remixId, capability, { maskDataUrl: normalized.maskDataUrl });
+  const materialized = await materializeProviderSubmission(context, record, remixId, capability, { maskDataUrl: normalized.autoDetect ? "" : normalized.maskDataUrl });
   let remix = {
     remixId,
     type: "remix",
@@ -913,6 +1012,10 @@ export async function startDirectMaskEdit(context, request = {}) {
     source,
     operationType: normalized.operationType,
     regions: normalized.regions,
+    autoDetect: normalized.autoDetect,
+    capabilityKey: normalized.capabilityKey,
+    jobType: normalized.jobType,
+    executionPlan: record.request.executionPlan,
     targetChannel: normalized.targetChannel,
     templateSnapshot: record.templateSnapshot,
     capability,
@@ -942,7 +1045,9 @@ export async function estimateRemix(context, request = {}) {
   const limits = effectiveLimits(context.config || {});
   const normalized = validateEstimateRequest(request, limits);
   const source = await loadSourceProbe(context, normalized.sourceId);
-  const templateSnapshot = await loadTemplateVersion(context, normalized.templateId, normalized.versionId);
+  const templateSnapshot = normalized.templateId && normalized.versionId
+    ? await loadTemplateVersion(context, normalized.templateId, normalized.versionId)
+    : directTemplateSnapshot();
   const capability = preflightRemixProvider(context, normalized.operationType);
   if (capability.status !== "supported" && capability.status !== "degraded") {
     throw new WangzhuanError("unsupported_capability", "当前处理能力不支持该改造类型", { capability });
@@ -1019,8 +1124,21 @@ export async function startRemix(context, request = {}) {
 
   const remixId = makeRemixId();
   const now = new Date().toISOString();
+  const executionPlan = buildRemixPlan({
+    sourceId: record.source.sourceId,
+    operationType: record.request.operationType,
+    capabilityKey: record.request.capabilityKey,
+    regions: record.request.regions
+  });
   assertRemoteRemixProvider(context, capability);
-  const materialized = await materializeProviderSubmission(context, { ...record, capability }, remixId, capability);
+  const materialized = await materializeProviderSubmission(context, {
+    ...record,
+    capability,
+    request: {
+      ...record.request,
+      executionPlan
+    }
+  }, remixId, capability, { maskDataUrl: record.request.maskDataUrl || "" });
   let remix = {
     remixId,
     type: "remix",
@@ -1030,6 +1148,10 @@ export async function startRemix(context, request = {}) {
     source: record.source,
     operationType: record.request.operationType,
     regions: record.request.regions,
+    autoDetect: Boolean(record.request.autoDetect),
+    capabilityKey: record.request.capabilityKey || "",
+    jobType: record.request.jobType || "",
+    executionPlan,
     targetChannel: record.request.targetChannel,
     templateSnapshot: record.templateSnapshot,
     capability,
@@ -1077,7 +1199,11 @@ export async function getRemixDetail(context, remixId) {
           const outputBuffer = jobSnapshot.downloadUrl && client.downloadUrl
             ? await client.downloadUrl(jobSnapshot.downloadUrl)
             : await client.downloadJob(jobSnapshot.jobId);
-          nextRemix = await materializeProviderOutput(context, nextRemix, jobSnapshot, outputBuffer);
+          const saved = await materializeProviderOutput(context, nextRemix, jobSnapshot, outputBuffer);
+          return {
+            remix: saved,
+            downloadSummary: downloadSummary(saved)
+          };
         } catch (error) {
           const failure = remixFailureFromError(error);
           nextRemix = {
@@ -1132,6 +1258,13 @@ export async function getRemixDetail(context, remixId) {
 export async function getActiveRemix(context) {
   const detail = await loadActiveRemixFromMysql(context);
   return detail || { remix: null, downloadSummary: downloadSummary({ outputs: [] }) };
+}
+
+export async function getRemixQcReport(context, remixId) {
+  const remix = await readRemix(context, remixId);
+  const output = Array.isArray(remix.outputs) ? remix.outputs[0] : null;
+  if (!output?.qcReportPath) return null;
+  return JSON.parse(await readFile(resolveUserPath(context, output.qcReportPath), "utf8"));
 }
 
 export async function stopRemix(context, remixId, request = {}) {
@@ -1220,7 +1353,7 @@ export async function confirmRemixPreview(context, remixId, request = {}) {
   const saved = await writeRemix(context, {
     ...nextRemix,
     outputs: nextRemix.outputs.map((item) => item.outputId === outputId ? { ...nextOutput, ...qcReportPath } : item)
-  });
+  }, "preview_confirm");
   await recordTelemetryEvent(context, "competitor_preview_confirmed", {
     remixId: saved.remixId,
     outputId,

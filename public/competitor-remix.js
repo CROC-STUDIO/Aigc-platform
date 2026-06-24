@@ -44,6 +44,17 @@ const els = {
   activeLockActions: $("#remixActiveLockActions"),
   activeLockText: $("#remixActiveLockText"),
   operationType: $("#remixOperationType"),
+  capabilitySelect: $("#remixCapabilitySelect"),
+  trackingMode: $("#remixTrackingMode"),
+  interactionPrompt: $("#remixInteractionPrompt"),
+  interactionPromptWrap: $("#remixInteractionPromptWrap"),
+  descriptionRegion: $("#remixDescriptionRegion"),
+  detectBtn: $("#remixDetectBtn"),
+  addDescriptionRegionBtn: $("#remixAddDescriptionRegionBtn"),
+  detectionStatus: $("#remixDetectionStatus"),
+  detectionSummary: $("#remixDetectionSummary"),
+  planStatus: $("#remixPlanStatus"),
+  planSummary: $("#remixPlanSummary"),
   sourceCount: $("#remixTemplateCount"),
   regionCount: $("#remixRegionCount"),
   outputCount: $("#remixOutputCount"),
@@ -62,6 +73,8 @@ const els = {
   maskConfirmBtn: $("#remixMaskConfirmBtn"),
   statusBadge: $("#remixStatusBadge"),
   detailBox: $("#remixDetailBox"),
+  qcStatus: $("#remixQcStatus"),
+  qcSummary: $("#remixQcSummary"),
   confirmBtn: $("#remixConfirmBtn"),
   stopBtn: $("#remixStopBtn"),
   downloadBtn: $("#remixDownloadBtn"),
@@ -83,8 +96,11 @@ const els = {
 const state = {
   user: null,
   source: null,
+  detection: null,
+  plan: null,
   regions: [],
   detail: null,
+  qcReport: null,
   gallery: null,
   galleryPage: 1,
   galleryPageSize: 20,
@@ -112,14 +128,16 @@ function resetWorkshopState() {
   window.clearTimeout(state.pollTimer);
   state.pollTimer = 0;
   state.source = null;
+  state.detection = null;
+  state.plan = null;
   state.regions = [];
   state.selectedRegionId = "";
   state.actualMediaCache = null;
   state.detail = null;
+  state.qcReport = null;
   state.submitBlocked = false;
   state.maskDrag = null;
   resetBrowserRestoredInputs();
-  if (PROTOTYPE_MODE && !state.prototype.sources.length) seedPrototypeSources();
   renderPrototypeAll();
   renderDetail();
 }
@@ -131,6 +149,10 @@ function resetBrowserRestoredInputs() {
     || [...els.operationType.options].find((option) => option.value === DEFAULT_DIRECT_OPERATION)
     || els.operationType.options[0];
   els.operationType.value = defaultOption?.value || DEFAULT_DIRECT_OPERATION;
+  if (els.capabilitySelect) els.capabilitySelect.value = "auto_all";
+  if (els.trackingMode) els.trackingMode.value = "manual_mask";
+  if (els.interactionPrompt) els.interactionPrompt.value = "";
+  if (els.descriptionRegion) els.descriptionRegion.value = "";
 }
 
 const MIN_MASK_SIZE = 0.03;
@@ -141,16 +163,16 @@ const DEFAULT_DIRECT_OPERATION = "watermark_cover";
 const ACTIVE_REMIX_STATUSES = new Set(["queued", "running", "qc", "preview_required"]);
 const SOURCE_SUBMIT_LOCKED_STATUSES = new Set([...ACTIVE_REMIX_STATUSES, "succeeded"]);
 const PROVIDER_RUNNING_STATUSES = new Set(["submitting", "pending", "running"]);
-const PROTOTYPE_MODE = true;
 const PROTOTYPE_CAPABILITIES = {
-  logo_icon: { label: "Logo/Icon 去除", jobType: "auto_ai_remove", detail: "框选或点选后传播 mask" },
-  watermark: { label: "水印遮挡", jobType: "mask_edit", detail: "区域遮挡或模糊" },
-  product_name: { label: "产品名替换", jobType: "language_rewrite", detail: "OCR 后生成覆盖计划" },
-  cta: { label: "CTA 文案替换", jobType: "video_copy_translate", detail: "字幕/画面文字回写" },
-  subtitle: { label: "字幕处理", jobType: "video_copy_translate", detail: "OCR/ASR 时间轴处理" },
-  phone_ui: { label: "手机界面区域", jobType: "mask_edit", detail: "标记需人工确认" },
-  ending: { label: "Ending 检测", jobType: "end_trim_detection", detail: "尾部导流检测/裁切" }
+  logo_icon: { label: "Logo/Icon 去除", jobType: "auto_ai_remove", detail: "点选跟踪或框选后传播 mask", requiresRegion: true },
+  watermark: { label: "水印遮挡", jobType: "mask_edit", detail: "定位区域后遮挡或模糊", requiresRegion: true },
+  product_name: { label: "产品名替换", jobType: "language_rewrite", detail: "OCR 自动识别竞品词并替换为我方产品", requiresRegion: false },
+  cta: { label: "CTA 文案替换", jobType: "video_copy_translate", detail: "OCR/字幕自动识别 CTA 并重写", requiresRegion: false },
+  subtitle: { label: "字幕处理", jobType: "video_copy_translate", detail: "ASR/OCR 自动处理字幕时间轴", requiresRegion: false },
+  phone_ui: { label: "手机界面区域", jobType: "mask_edit", detail: "需要定位后人工确认界面替换范围", requiresRegion: true },
+  ending: { label: "Ending 检测", jobType: "end_trim_detection", detail: "自动检测尾部导流段或落版", requiresRegion: false }
 };
+const DEFAULT_AUTO_CAPABILITY_KEYS = ["product_name", "cta", "subtitle", "ending"];
 const PROTOTYPE_STATUS_LABELS = {
   draft: "草稿",
   queued: "排队中",
@@ -183,11 +205,58 @@ function isSourceSubmitLocked() {
 }
 
 function isPrototypeMirroredSource() {
-  return Boolean(PROTOTYPE_MODE && state.source?.prototypeOnly);
+  return Boolean(state.source?.prototypeOnly);
 }
 
 function selectedOperationType() {
   return els.operationType?.value || DEFAULT_DIRECT_OPERATION;
+}
+
+function selectedCapabilityKey() {
+  const key = els.capabilitySelect?.value || "auto_all";
+  return key === "auto_all" || PROTOTYPE_CAPABILITIES[key] ? key : "auto_all";
+}
+
+function selectedTrackingMode() {
+  return els.trackingMode?.value === "auto_interaction" ? "auto_interaction" : "manual_mask";
+}
+
+function isAutoInteractionTracking() {
+  return selectedTrackingMode() === "auto_interaction";
+}
+
+function capabilityRequiresRegion(capabilityKey) {
+  return Boolean(PROTOTYPE_CAPABILITIES[capabilityKey]?.requiresRegion);
+}
+
+function nextDescriptionRegionId() {
+  return `desc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function autoCapabilityKeysForSource(source = {}) {
+  const explicit = Array.isArray(source.capabilityKeys) ? source.capabilityKeys.filter((key) => PROTOTYPE_CAPABILITIES[key]) : [];
+  return [...new Set([...explicit, ...DEFAULT_AUTO_CAPABILITY_KEYS])];
+}
+
+function operationCapabilityKey() {
+  const operation = selectedOperationType();
+  if (operation === "logo_icon_cover_or_replace") return "logo_icon";
+  if (operation === "text_cta_ending_replace") return "product_name";
+  return "watermark";
+}
+
+function capabilityKeyForNewRegion() {
+  const selected = selectedCapabilityKey();
+  if (selected !== "auto_all" && capabilityRequiresRegion(selected)) return selected;
+  const mapped = operationCapabilityKey();
+  return capabilityRequiresRegion(mapped) ? mapped : "watermark";
+}
+
+function taskableCapabilityKeysForSource(source = activePrototypeSource()) {
+  if (!source) return [];
+  const selected = selectedCapabilityKey();
+  if (selected !== "auto_all") return [selected];
+  return [...new Set([...autoCapabilityKeysForSource(source), ...capabilityKeysForRegions(source.regions || [])])];
 }
 
 function prototypeSourceStatus(source) {
@@ -205,12 +274,12 @@ function prototypeSourceStatusLabel(source) {
   return PROTOTYPE_STATUS_LABELS[prototypeSourceStatus(source)] || "草稿";
 }
 
-function createMockSourceFromFile(file, index = state.prototype.sources.length) {
+function createBatchSourceFromFile(file, index = state.prototype.sources.length, options = {}) {
   const safeIndex = Number.isFinite(Number(index)) ? Number(index) : state.prototype.sources.length;
   const fileName = file?.name || `competitor-demo-${safeIndex + 1}.mp4`;
   const mimeType = file?.type || "video/mp4";
   const kind = String(mimeType).startsWith("image/") ? "image" : "video";
-  const sourceId = `prototype_source_${safeIndex + 1}`;
+  const sourceId = options.sourceId || `queue_source_${Date.now()}_${safeIndex + 1}`;
   const regions = (file?.regions || []).map((region, regionIndex) => ({
     regionId: region.regionId || `mask_${regionIndex + 1}`,
     type: "bbox",
@@ -221,10 +290,11 @@ function createMockSourceFromFile(file, index = state.prototype.sources.length) 
   return {
     sourceId,
     fileName,
+    file: file instanceof File ? file : null,
     status: file?.status || "draft",
     reviewRequired: Boolean(file?.reviewRequired),
     selected: Boolean(file?.selected),
-    capabilityKeys: Array.isArray(file?.capabilityKeys) ? [...file.capabilityKeys] : [],
+    capabilityKeys: Array.isArray(file?.capabilityKeys) && file.capabilityKeys.length ? [...file.capabilityKeys] : [...DEFAULT_AUTO_CAPABILITY_KEYS],
     regions,
     previewUrl: file?.previewUrl || "",
     probe: {
@@ -241,6 +311,12 @@ function createMockSourceFromFile(file, index = state.prototype.sources.length) 
   };
 }
 
+function createMockSourceFromFile(file, index = state.prototype.sources.length) {
+  const source = createBatchSourceFromFile(file, index, { sourceId: `prototype_source_${index + 1}` });
+  source.prototypeOnly = true;
+  return source;
+}
+
 function seedPrototypeSources() {
   state.prototype.tasks = [];
   state.prototype.outputs = [];
@@ -249,7 +325,7 @@ function seedPrototypeSources() {
       name: "competitor-logo-watermark-demo.mp4",
       type: "video/mp4",
       durationSec: 18,
-      capabilityKeys: ["logo_icon", "watermark", "cta"],
+      capabilityKeys: ["logo_icon", "watermark", "cta", "product_name"],
       selected: true,
       regions: [
         { regionId: "mask_1", label: "Logo/Icon", capabilityKey: "logo_icon", bbox: { x: 0.06, y: 0.05, width: 0.2, height: 0.1 } },
@@ -260,7 +336,7 @@ function seedPrototypeSources() {
       name: "competitor-product-name-demo.mp4",
       type: "video/mp4",
       durationSec: 22,
-      capabilityKeys: ["product_name", "subtitle", "phone_ui"],
+      capabilityKeys: ["product_name", "subtitle", "cta", "phone_ui"],
       reviewRequired: true,
       regions: [
         { regionId: "mask_1", label: "产品名", capabilityKey: "product_name", bbox: { x: 0.16, y: 0.16, width: 0.68, height: 0.08 } },
@@ -271,7 +347,7 @@ function seedPrototypeSources() {
       name: "competitor-ending-demo.mp4",
       type: "video/mp4",
       durationSec: 12,
-      capabilityKeys: ["ending", "watermark"],
+      capabilityKeys: ["ending", "subtitle", "watermark"],
       regions: [
         { regionId: "mask_1", label: "Ending", capabilityKey: "ending", bbox: { x: 0.1, y: 0.72, width: 0.8, height: 0.18 } }
       ]
@@ -292,7 +368,6 @@ function activePrototypeSource() {
 }
 
 function syncPrototypeActiveSourceToLegacyState() {
-  if (!PROTOTYPE_MODE) return;
   const source = activePrototypeSource();
   if (!source) {
     state.source = null;
@@ -330,6 +405,16 @@ function syncMetrics() {
   const prototypeOnly = isPrototypeMirroredSource();
   const activePrototype = activePrototypeSource();
   const hasPrototypeRegions = Boolean(activePrototype?.regions?.length);
+  const selectedCapability = selectedCapabilityKey();
+  const selectedNeedsRegion = selectedCapability === "auto_all"
+    ? false
+    : capabilityRequiresRegion(selectedCapability);
+  const hasTaskableCapability = Boolean(activePrototype && (
+    hasPrototypeRegions
+    || selectedCapability === "auto_all"
+    || !selectedNeedsRegion
+    || autoCapabilityKeysForSource(activePrototype).some((key) => !capabilityRequiresRegion(key))
+  ));
   const uploading = Boolean(els.uploadBtn?.dataset.originalText);
   const fileReady = Boolean(els.sourceFile?.files?.[0]);
   const unavailable = state.initFailed;
@@ -343,7 +428,7 @@ function syncMetrics() {
   const canSubmitPrototype = Boolean(
     prototypeOnly
     && activePrototype
-    && hasPrototypeRegions
+    && hasTaskableCapability
     && !activePrototype.reviewRequired
     && !activePrototype.rejected
   );
@@ -364,6 +449,10 @@ function syncMetrics() {
   }
   els.clearMaskBtn.disabled = unavailable || activeRemix;
   els.operationType.disabled = unavailable || activeRemix;
+  if (els.capabilitySelect) els.capabilitySelect.disabled = unavailable || activeRemix;
+  if (els.trackingMode) els.trackingMode.disabled = unavailable || activeRemix;
+  if (els.interactionPrompt) els.interactionPrompt.disabled = unavailable || activeRemix || !isAutoInteractionTracking();
+  if (els.interactionPromptWrap) els.interactionPromptWrap.hidden = !isAutoInteractionTracking();
   els.stopBtn.hidden = !activeRemix;
   els.stopBtn.disabled = unavailable || !activeRemix;
   els.maskEditor?.setAttribute("aria-busy", activeRemix ? "true" : "false");
@@ -374,7 +463,7 @@ function syncMetrics() {
     els.prototypeConfirmReviewBtn.disabled = unavailable || !activePrototype?.reviewRequired;
   }
   if (els.prototypeGenerateTasksBtn) {
-    els.prototypeGenerateTasksBtn.disabled = unavailable || !hasPrototypeRegions || activePrototype?.reviewRequired || activePrototype?.rejected;
+    els.prototypeGenerateTasksBtn.disabled = unavailable || !hasTaskableCapability || activePrototype?.reviewRequired || activePrototype?.rejected;
   }
   syncFlowHints();
 }
@@ -405,11 +494,11 @@ function syncFlowHints() {
       ? "当前素材已有任务或已完成改造，暂不可重复提交"
       : !state.source
         ? "需先上传源素材"
-        : !state.regions.length
-          ? "请在 Mask 编辑窗口框选至少一个区域"
+        : !state.regions.length && capabilityRequiresRegion(selectedCapabilityKey())
+          ? "当前处理功能需要定位，请在编辑窗口框选或点选区域"
           : state.submitBlocked
             ? "当前能力不可用，请检查改造类型"
-            : "确认后将提交视频处理平台任务",
+            : "确认后将按功能生成草稿任务",
     { tone: unavailable || submitLocked || state.submitBlocked ? "warn" : "muted" }
   );
   const remix = state.detail?.remix;
@@ -486,23 +575,150 @@ function normalizeBbox(bbox = {}) {
 }
 
 function normalizedRegions() {
-  return state.regions.map((region, index) => ({
-    regionId: region.regionId || `mask_${index + 1}`,
-    type: "bbox",
-    label: region.label || `mask_${index + 1}`,
-    capabilityKey: region.capabilityKey || "",
-    bbox: normalizeBbox(region.bbox)
-  }));
+  return state.regions.flatMap((region, index) => {
+    if (region?.type === "description") {
+      const description = String(region.description || "").trim();
+      if (!description) return [];
+      return [{
+        regionId: region.regionId || `desc_${index + 1}`,
+        type: "description",
+        label: region.label || `desc_${index + 1}`,
+        capabilityKey: region.capabilityKey || "",
+        description
+      }];
+    }
+    return [{
+      regionId: region.regionId || `mask_${index + 1}`,
+      type: "bbox",
+      label: region.label || `mask_${index + 1}`,
+      capabilityKey: region.capabilityKey || "",
+      bbox: normalizeBbox(region.bbox)
+    }];
+  });
+}
+
+function detectionSummaryRows(summary = {}) {
+  return Object.entries(summary)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([key, count]) => [PROTOTYPE_CAPABILITIES[key]?.label || key, count]);
+}
+
+function renderDetection() {
+  const detection = state.detection;
+  if (!els.detectionStatus || !els.detectionSummary) return;
+  if (!detection) {
+    els.detectionStatus.textContent = "未识别";
+    els.detectionSummary.className = "wz-list empty-line";
+    els.detectionSummary.textContent = "暂无识别结果";
+    return;
+  }
+  els.detectionStatus.textContent = detection.status || "已完成";
+  const rows = detectionSummaryRows(detection.summary || {});
+  els.detectionSummary.className = "wz-list";
+  els.detectionSummary.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(detection.detectionId || "-")}</strong>
+        <small>${escapeHtml(detection.sourceId || "-")} · ${escapeHtml(detection.status || "-")}</small>
+      </div>
+      ${badge(detection.status, { succeeded: "识别完成", failed: "识别失败" })}
+    </article>
+    ${rows.length ? `<div class="wz-kv-grid">${renderKeyValues(rows)}</div>` : `<div class="empty-line">未发现可识别区域</div>`}
+  `;
+}
+
+function renderPlan() {
+  const plan = state.plan;
+  if (!els.planStatus || !els.planSummary) return;
+  if (!plan) {
+    els.planStatus.textContent = "未生成";
+    els.planSummary.className = "wz-list empty-line";
+    els.planSummary.textContent = "暂无执行计划";
+    return;
+  }
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  els.planStatus.textContent = `${steps.length} 步`;
+  els.planSummary.className = "wz-list";
+  els.planSummary.innerHTML = steps.length
+    ? steps.map((step) => `
+      <article class="wz-row">
+        <div>
+          <strong>${escapeHtml(PROTOTYPE_CAPABILITIES[step.capabilityKey]?.label || step.capabilityKey || step.stepId)}</strong>
+          <small>${escapeHtml(step.jobType || "-")} · ${(Array.isArray(step.regions) ? step.regions.length : 0)} 个区域</small>
+        </div>
+        ${badge(step.capabilityKey || "step", { [step.capabilityKey]: "待执行", step: "待执行" })}
+      </article>
+    `).join("")
+    : "暂无执行步骤";
+}
+
+function renderQcReport() {
+  if (!els.qcStatus || !els.qcSummary) return;
+  const report = state.qcReport;
+  if (!report) {
+    els.qcStatus.textContent = "未开始";
+    els.qcSummary.className = "wz-list empty-line";
+    els.qcSummary.textContent = "暂无质检结果";
+    return;
+  }
+  els.qcStatus.innerHTML = badge(report.qcStatus, { pass: "通过", fail: "失败", manual_required: "待确认" });
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  els.qcSummary.className = "wz-list";
+  els.qcSummary.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>${escapeHtml(report.outputId || "-")}</strong>
+        <small>${escapeHtml(report.summary || "-")}</small>
+      </div>
+      ${badge(report.qcStatus, { pass: "自动通过", fail: "自动失败", manual_required: "待确认" })}
+    </article>
+    ${checks.length ? checks.map((check) => `
+      <article class="wz-row">
+        <div>
+          <strong>${escapeHtml(check.checkId || "-")}</strong>
+          <small>${escapeHtml(check.message || "-")}</small>
+        </div>
+        ${badge(check.status, { pass: "通过", fail: "失败", manual_required: "待确认" })}
+      </article>
+    `).join("") : `<div class="empty-line">暂无质检检查项</div>`}
+  `;
+}
+
+function interactionPromptFromRegions(regions = normalizedRegions()) {
+  const explicit = String(els.interactionPrompt?.value || "").trim();
+  if (explicit) return explicit;
+  return [
+    "Track and remove the selected competitor elements across the full video.",
+    ...regions.map((region, index) => {
+      if (region.type === "description") {
+        return `${region.label || `desc_${index + 1}`}: ${region.description}`;
+      }
+      const bbox = normalizeBbox(region.bbox);
+      return `${region.label || `mask_${index + 1}`}: bbox x=${bbox.x}, y=${bbox.y}, width=${bbox.width}, height=${bbox.height}`;
+    }),
+    "Preserve people, phone UI, motion, and pacing outside selected elements."
+  ].join("\n");
 }
 
 function clonePrototypeRegions(regions = []) {
-  return regions.map((region, index) => ({
-    regionId: region.regionId || `mask_${index + 1}`,
-    type: region.type || "bbox",
-    label: region.label || `mask_${index + 1}`,
-    capabilityKey: region.capabilityKey || "",
-    bbox: normalizeBbox(region.bbox)
-  }));
+  return regions.map((region, index) => {
+    if (region.type === "description") {
+      return {
+        regionId: region.regionId || `desc_${index + 1}`,
+        type: "description",
+        label: region.label || `desc_${index + 1}`,
+        capabilityKey: region.capabilityKey || "",
+        description: String(region.description || "")
+      };
+    }
+    return {
+      regionId: region.regionId || `mask_${index + 1}`,
+      type: region.type || "bbox",
+      label: region.label || `mask_${index + 1}`,
+      capabilityKey: region.capabilityKey || "",
+      bbox: normalizeBbox(region.bbox)
+    };
+  });
 }
 
 function nextRegionId() {
@@ -516,6 +732,19 @@ function selectedBboxRegion() {
   return state.regions.find((item) => item.regionId === state.selectedRegionId && item.bbox)
     || state.regions.find((item) => item.bbox)
     || null;
+}
+
+function createDescriptionRegion(text) {
+  const capabilityKey = selectedCapabilityKey() === "auto_all"
+    ? operationCapabilityKey()
+    : selectedCapabilityKey();
+  return {
+    regionId: nextDescriptionRegionId(),
+    type: "description",
+    label: "描述区域",
+    capabilityKey,
+    description: String(text || "").trim()
+  };
 }
 
 function mediaDimensionsFromProbe(probe = {}) {
@@ -658,7 +887,7 @@ function renderMaskPreview() {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
-  const regions = normalizedRegions();
+  const regions = normalizedRegions().filter((region) => region.type === "bbox");
   ctx.fillStyle = "#ffffff";
   for (const region of regions) {
     const box = region.bbox;
@@ -685,8 +914,10 @@ function renderMaskEditor(forceMedia = false) {
   syncMaskLayerViewport();
   const empty = els.maskEditor.querySelector("[data-mask-empty]");
   if (empty) empty.hidden = Boolean(state.source?.previewUrl);
-  const bboxRegions = normalizedRegions();
-  state.regions = bboxRegions;
+  const normalized = normalizedRegions();
+  const bboxRegions = normalized.filter((region) => region.type === "bbox");
+  const descriptionRegions = normalized.filter((region) => region.type === "description");
+  state.regions = [...bboxRegions, ...descriptionRegions];
   if (!bboxRegions.some((region) => region.regionId === state.selectedRegionId)) {
     state.selectedRegionId = bboxRegions[0]?.regionId || "";
   }
@@ -850,7 +1081,7 @@ function renderPrototypeCapabilityPlan() {
   if (!els.prototypeCapabilityPlan) return;
   const source = activePrototypeSource();
   const regions = source?.regions || [];
-  const capabilityKeys = capabilityKeysForRegions(regions);
+  const capabilityKeys = taskableCapabilityKeysForSource(source);
   if (!source || !capabilityKeys.length) {
     els.prototypeCapabilityPlan.className = "remix-prototype-capability-grid empty-line";
     els.prototypeCapabilityPlan.textContent = "请选择素材后配置能力";
@@ -860,13 +1091,15 @@ function renderPrototypeCapabilityPlan() {
   els.prototypeCapabilityPlan.innerHTML = capabilityKeys.map((key) => {
     const capability = PROTOTYPE_CAPABILITIES[key];
     const count = regions.filter((region) => region.capabilityKey === key).length;
+    const requiresRegion = capabilityRequiresRegion(key);
+    const ready = !requiresRegion || count > 0;
     return `
       <article class="wz-row remix-prototype-capability">
         <div>
           <strong>${escapeHtml(capability.label)}</strong>
-          <small>${escapeHtml(capability.detail)} · ${escapeHtml(capability.jobType)} · ${escapeHtml(count)} 个区域</small>
+          <small>${escapeHtml(capability.detail)} · ${escapeHtml(capability.jobType)} · ${requiresRegion ? `${count} 个区域` : "自动识别，无需选区"}</small>
         </div>
-        ${badge(key, { [key]: "已配置" })}
+        ${badge(ready ? key : "review_required", { [key]: requiresRegion ? "已定位" : "自动处理", review_required: "待定位" })}
       </article>
     `;
   }).join("");
@@ -903,74 +1136,138 @@ function prototypeTaskLog(task, message) {
 
 function generatePrototypeDraftTasks() {
   const source = activePrototypeSource();
-  if (!source || source.rejected || source.reviewRequired || !source.regions?.length) return;
+  if (!source || source.rejected || source.reviewRequired) return;
   const existing = new Set(state.prototype.tasks.map((task) => `${task.sourceId}:${task.capabilityKey}`));
-  const capabilityKeys = capabilityKeysForRegions(source.regions);
+  const capabilityKeys = taskableCapabilityKeysForSource(source);
+  let skippedForRegion = 0;
+  let created = 0;
   for (const capabilityKey of capabilityKeys) {
     if (existing.has(`${source.sourceId}:${capabilityKey}`)) continue;
     const capability = PROTOTYPE_CAPABILITIES[capabilityKey];
+    const regions = source.regions.filter((region) => region.capabilityKey === capabilityKey);
+    if (capability.requiresRegion && !regions.length) {
+      skippedForRegion += 1;
+      continue;
+    }
+    const jobType = capabilityKey === "logo_icon" && isAutoInteractionTracking()
+      ? "auto_ai_remove"
+      : capability.jobType;
     state.prototype.tasks.push({
-      taskId: `prototype_task_${state.prototype.tasks.length + 1}`,
+      taskId: `remix_queue_${state.prototype.tasks.length + 1}`,
       sourceId: source.sourceId,
       sourceName: source.fileName,
       capabilityKey,
-      jobType: capability.jobType,
+      jobType,
+      regions,
+      trackingMode: selectedTrackingMode(),
+      interactionPrompt: jobType === "auto_ai_remove" && regions.length ? interactionPromptFromRegions(regions) : "",
       status: "draft",
       failureReason: "",
+      remixId: "",
       log: [`已生成 ${capability.label} 草稿任务`]
     });
     existing.add(`${source.sourceId}:${capabilityKey}`);
+    created += 1;
   }
   renderPrototypeAll();
-}
-
-function nextPrototypeTaskStatus(task) {
-  if (!task) return "";
-  if (task.status === "draft") return "queued";
-  if (task.status === "queued") return "running";
-  if (task.status === "running") return task.capabilityKey === "phone_ui" ? "failed" : "review_required";
-  if (task.status === "review_required") return "succeeded";
-  return task.status;
-}
-
-function prototypeOutputForTask(task) {
-  const capability = PROTOTYPE_CAPABILITIES[task.capabilityKey] || {};
-  return {
-    outputId: `prototype_output_${task.taskId}`,
-    taskId: task.taskId,
-    sourceId: task.sourceId,
-    sourceName: task.sourceName,
-    kind: capability.label || task.jobType,
-    qcStatus: "pass"
-  };
-}
-
-function appendPrototypeOutputForTask(task) {
-  const outputId = `prototype_output_${task.taskId}`;
-  if (state.prototype.outputs.some((output) => output.outputId === outputId)) return;
-  state.prototype.outputs.push(prototypeOutputForTask(task));
-}
-
-function advancePrototypeTask(taskId = "") {
-  const tasks = taskId
-    ? state.prototype.tasks.filter((task) => task.taskId === taskId)
-    : state.prototype.tasks.filter((task) => !prototypeTaskIsTerminal(task));
-  for (const task of tasks) {
-    if (prototypeTaskIsTerminal(task)) continue;
-    const nextStatus = nextPrototypeTaskStatus(task);
-    if (nextStatus === task.status) continue;
-    task.status = nextStatus;
-    if (nextStatus === "failed" && task.capabilityKey === "phone_ui") {
-      task.failureReason = "手机界面区域需要人工复核";
-      prototypeTaskLog(task, task.failureReason);
-    } else if (nextStatus === "succeeded") {
-      task.failureReason = "";
-      appendPrototypeOutputForTask(task);
-      prototypeTaskLog(task, "mock 输出已生成");
-    } else {
-      prototypeTaskLog(task, `状态更新为 ${PROTOTYPE_STATUS_LABELS[nextStatus] || nextStatus}`);
-    }
+  if (!created && skippedForRegion) {
+    showToast("当前功能需要先框选或点选定位区域", { type: "warn" });
   }
+}
+
+async function uploadSourceForQueue(source) {
+  if (source.uploadedSource) return source.uploadedSource;
+  if (!source.file) {
+    throw new Error("当前素材不是本地文件，不能提交真实后端任务");
+  }
+  const content = await dataUrlFromFile(source.file);
+  const uploaded = await apiEnvelope("/api/wangzhuan/remix/upload", {
+    method: "POST",
+    body: JSON.stringify({
+      fileName: source.file.name,
+      mimeType: source.file.type || "application/octet-stream",
+      content
+    })
+  });
+  source.uploadedSource = uploaded;
+  source.sourceId = uploaded.sourceId || source.sourceId;
+  source.previewUrl = uploaded.previewUrl || source.previewUrl;
+  source.probe = { ...source.probe, ...(uploaded.probe || uploaded), sourceId: source.sourceId };
+  return uploaded;
+}
+
+async function submitRealQueueTask(task) {
+  const source = state.prototype.sources.find((item) => item.sourceId === task.sourceId || item.fileName === task.sourceName);
+  if (!source) throw new Error("找不到任务对应的源素材");
+  task.status = "running";
+  task.failureReason = "";
+  prototypeTaskLog(task, "开始上传源素材并提交真实改造任务");
+  renderPrototypeTaskQueue();
+  const uploaded = await uploadSourceForQueue(source);
+  const autoTracking = task.jobType === "auto_ai_remove" || task.trackingMode === "auto_interaction";
+  const requiresRegion = capabilityRequiresRegion(task.capabilityKey);
+  const regions = Array.isArray(task.regions) ? task.regions : [];
+  if (requiresRegion && !regions.length) {
+    throw new Error("当前功能需要先定位区域");
+  }
+  const estimatePayload = {
+    sourceId: uploaded.sourceId,
+    operationType: selectedOperationType(),
+    targetChannel: "generic",
+    capabilityKey: task.capabilityKey,
+    jobType: task.jobType,
+    autoDetect: !requiresRegion,
+    regions
+  };
+  // Keep the auto-detect contract explicit for text/subtitle/ending style tasks.
+  if (!requiresRegion) estimatePayload.autoDetect = true;
+  if (requiresRegion) {
+    estimatePayload.maskDataUrl = maskPreviewDataUrl();
+  }
+  const estimated = await apiEnvelope("/api/wangzhuan/remix/estimate", {
+    method: "POST",
+    body: JSON.stringify(estimatePayload)
+  });
+  const detail = await apiEnvelope("/api/wangzhuan/remix/start", {
+    method: "POST",
+    body: JSON.stringify({
+      idempotencyKey: idempotencyKey(`remix_queue_${task.taskId}`),
+      estimateId: estimated.estimateId
+    })
+  });
+  task.remixId = detail?.remix?.remixId || "";
+  task.status = detail?.remix?.status || "queued";
+  prototypeTaskLog(task, task.remixId ? `真实任务已提交：${task.remixId}` : "真实任务已提交");
+  state.detail = detail;
+  renderDetail();
+  startPolling();
+}
+
+async function submitRealBatchQueue(taskId = "") {
+  clearError(els.globalError);
+  const tasks = state.prototype.tasks.filter((task) => {
+    if (taskId && task.taskId !== taskId) return false;
+    return task.status === "draft" || task.status === "failed";
+  });
+  if (!tasks.length) return;
+  setBusy(els.prototypeSubmitTasksBtn, true, "提交中");
+  for (const task of tasks) {
+    try {
+      task.status = "queued";
+      renderPrototypeTaskQueue();
+      await submitRealQueueTask(task);
+    } catch (error) {
+      task.status = "failed";
+      task.failureReason = error?.message || "真实任务提交失败";
+      prototypeTaskLog(task, task.failureReason);
+      renderError(els.globalError, error, "真实队列提交失败");
+    } finally {
+      renderPrototypeAll();
+      await loadGallery().catch(() => {});
+    }
+    if (task.status === "failed") break;
+  }
+  setBusy(els.prototypeSubmitTasksBtn, false);
   renderPrototypeAll();
 }
 
@@ -985,9 +1282,9 @@ function stopPrototypeTask(taskId) {
 function retryPrototypeTask(taskId) {
   const task = state.prototype.tasks.find((item) => item.taskId === taskId);
   if (!task || task.status !== "failed") return;
-  task.status = "queued";
+  task.status = "draft";
   task.failureReason = "";
-  prototypeTaskLog(task, "失败任务已重新排队");
+  prototypeTaskLog(task, "失败任务已回到草稿，可重新提交真实队列");
   renderPrototypeAll();
 }
 
@@ -1014,12 +1311,12 @@ function renderPrototypeTaskQueue() {
       <article class="remix-prototype-task ${escapeHtml(task.status)}">
         <div>
           <strong>${escapeHtml(task.taskId)}</strong>
-          <small>${escapeHtml(task.sourceName)} · ${escapeHtml(task.jobType)}</small>
+          <small>${escapeHtml(task.sourceName)} · ${escapeHtml(task.jobType)}${task.remixId ? ` · ${escapeHtml(task.remixId)}` : ""}</small>
           ${task.failureReason ? `<p>${escapeHtml(task.failureReason)}</p>` : ""}
         </div>
         ${badge(task.status, PROTOTYPE_STATUS_LABELS)}
         <div class="wz-row-actions remix-prototype-task-actions">
-          <button type="button" class="ghost" data-prototype-task-advance="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>推进</button>
+          <button type="button" class="ghost" data-prototype-task-submit="${escapeHtml(task.taskId)}" ${task.status === "draft" || task.status === "failed" ? "" : "disabled"}>提交</button>
           <button type="button" class="ghost" data-prototype-task-retry="${escapeHtml(task.taskId)}" ${task.status === "failed" ? "" : "disabled"}>重试</button>
           <button type="button" class="ghost" data-prototype-task-stop="${escapeHtml(task.taskId)}" ${terminal ? "disabled" : ""}>停止</button>
         </div>
@@ -1033,7 +1330,7 @@ function renderPrototypeGallery() {
   const outputs = state.prototype.outputs;
   if (!outputs.length) {
     els.prototypeGallery.className = "wz-list empty-line";
-    els.prototypeGallery.textContent = "暂无 mock 输出";
+    els.prototypeGallery.textContent = "真实输出会进入上方改造图库";
     return;
   }
   els.prototypeGallery.className = "wz-list";
@@ -1055,6 +1352,8 @@ function renderPrototypeGallery() {
 function renderPrototypeAll() {
   syncPrototypeActiveSourceToLegacyState();
   renderSource();
+  renderDetection();
+  renderPlan();
   renderPrototypeSources();
   renderPrototypeCapabilityPlan();
   if (typeof renderPrototypeTaskQueue === "function") renderPrototypeTaskQueue();
@@ -1178,6 +1477,7 @@ function bindMaskEditor() {
           regionId: drag.regionId,
           type: "bbox",
           label: `mask_${state.regions.length + 1}`,
+          capabilityKey: capabilityKeyForNewRegion(),
           bbox: normalizeBbox({ x: drag.startPoint.x, y: drag.startPoint.y, width: MIN_MASK_SIZE, height: MIN_MASK_SIZE })
         };
         state.regions.push(newRegion);
@@ -1255,6 +1555,7 @@ function renderDetail() {
     els.detailBox.textContent = "暂无改造任务";
     els.confirmBtn.disabled = true;
     els.downloadBtn.disabled = true;
+    renderQcReport();
     syncMetrics();
     syncFlowHints();
     return;
@@ -1307,6 +1608,7 @@ function renderDetail() {
     ${renderOutputPreviewCards(outputs, { emptyText: "改造输出生成后会显示在这里", confirmable: true })}
   `;
   restorePreviewPlayback(previewPlayback, els.detailBox);
+  renderQcReport();
   syncMetrics();
   syncFlowHints();
 }
@@ -1365,6 +1667,9 @@ async function uploadSource() {
       })
     });
     state.source = data;
+    state.detection = null;
+    state.plan = null;
+    state.qcReport = null;
     state.regions = [];
     state.selectedRegionId = "";
     state.actualMediaCache = null;
@@ -1382,6 +1687,75 @@ async function uploadSource() {
     setBusy(els.uploadBtn, false);
     syncMetrics();
   }
+}
+
+async function detectSourceRegions() {
+  clearError(els.globalError);
+  if (!state.source?.sourceId) {
+    renderError(els.globalError, {
+      code: "validation_error",
+      message: "请先上传源素材"
+    }, "识别失败");
+    return;
+  }
+  setBusy(els.detectBtn, true, "识别中");
+  try {
+    const data = await apiEnvelope("/api/wangzhuan/remix/detect", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceId: state.source.sourceId,
+        mockRegions: normalizedRegions()
+      })
+    });
+    state.detection = data;
+    const detectedRegions = Array.isArray(data.regions) ? data.regions : [];
+    if (detectedRegions.length) {
+      const manualDescriptions = state.regions.filter((region) => region.type === "description");
+      state.regions = [
+        ...detectedRegions.map((region) => region.type === "description" ? region : {
+          regionId: region.regionId,
+          type: "bbox",
+          label: region.label,
+          capabilityKey: region.capabilityKey || "",
+          bbox: normalizeBbox(region.bbox)
+        }),
+        ...manualDescriptions
+      ];
+      state.selectedRegionId = state.regions.find((region) => region.type === "bbox")?.regionId || "";
+      if (isPrototypeMirroredSource()) {
+        const source = activePrototypeSource();
+        if (source) persistPrototypeSourceRegions(source, state.regions, { reviewRequired: false });
+      }
+      renderMaskEditor();
+    }
+    await refreshExecutionPlan();
+    renderDetection();
+    showToast("识别完成，可继续调整区域和描述", { type: "success" });
+  } catch (error) {
+    renderError(els.globalError, error, "识别失败");
+  } finally {
+    setBusy(els.detectBtn, false);
+  }
+}
+
+async function refreshExecutionPlan() {
+  if (!state.source?.sourceId) {
+    state.plan = null;
+    renderPlan();
+    return null;
+  }
+  const data = await apiEnvelope("/api/wangzhuan/remix/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      sourceId: state.source.sourceId,
+      operationType: selectedOperationType(),
+      capabilityKey: selectedCapabilityKey() === "auto_all" ? "" : selectedCapabilityKey(),
+      regions: normalizedRegions()
+    })
+  });
+  state.plan = data;
+  renderPlan();
+  return data;
 }
 
 async function startMaskEdit() {
@@ -1419,6 +1793,7 @@ async function startMaskEdit() {
   renderDetail();
   setBusy(els.maskConfirmBtn, true, "提交中");
   try {
+    const autoTracking = isAutoInteractionTracking();
     state.detail = await apiEnvelope("/api/wangzhuan/remix/mask-edit", {
       method: "POST",
       body: JSON.stringify({
@@ -1427,7 +1802,10 @@ async function startMaskEdit() {
         operationType: selectedOperationType(),
         targetChannel: "generic",
         regions,
-        maskDataUrl: maskPreviewDataUrl()
+        trackingMode: autoTracking ? "auto" : "manual_mask",
+        ...(autoTracking
+          ? { interactionPrompt: interactionPromptFromRegions(regions) }
+          : { maskDataUrl: maskPreviewDataUrl() })
       })
     });
     renderDetail();
@@ -1451,6 +1829,11 @@ async function loadRemixDetail() {
   const remixId = state.detail?.remix?.remixId;
   if (!remixId) return null;
   state.detail = await apiEnvelope(`/api/wangzhuan/remix/${encodeURIComponent(remixId)}`);
+  try {
+    state.qcReport = await apiEnvelope(`/api/wangzhuan/remix/${encodeURIComponent(remixId)}/qc-report`);
+  } catch {
+    state.qcReport = null;
+  }
   renderDetail();
   return state.detail;
 }
@@ -1549,8 +1932,19 @@ async function loadActiveRemix() {
     : null;
   state.regions = Array.isArray(detail.remix.regions) ? detail.remix.regions : [];
   state.selectedRegionId = state.regions[0]?.regionId || "";
+  try {
+    state.qcReport = await apiEnvelope(`/api/wangzhuan/remix/${encodeURIComponent(detail.remix.remixId)}/qc-report`);
+  } catch {
+    state.qcReport = null;
+  }
   if (els.operationType && detail.remix.operationType) {
     els.operationType.value = detail.remix.operationType;
+  }
+  if (els.trackingMode && detail.remix.trackingMode) {
+    els.trackingMode.value = detail.remix.trackingMode;
+  }
+  if (els.interactionPrompt && detail.remix.interactionPrompt) {
+    els.interactionPrompt.value = detail.remix.interactionPrompt;
   }
   renderSource();
   renderDetail();
@@ -1596,19 +1990,30 @@ function bindEvents() {
       renderPrototypeAll();
       return;
     }
-    if (PROTOTYPE_MODE) {
-      const baseIndex = state.prototype.sources.length;
-      const mockSources = files.map((file, index) => createMockSourceFromFile(file, baseIndex + index));
-      state.prototype.sources.push(...mockSources);
-      if (!state.prototype.activeSourceId) state.prototype.activeSourceId = mockSources[0]?.sourceId || "";
-      mockSources.forEach((source) => state.prototype.selectedSourceIds.add(source.sourceId));
-      renderPrototypeAll();
-      showToast("已加入 mock 批量素材，原型阶段不会上传真实文件", { type: "success" });
-      return;
-    }
-    const file = files[0];
-    renderSelectedSource(file);
-    uploadSource();
+    const baseIndex = state.prototype.sources.length;
+    const queueSources = files.map((file, index) => createBatchSourceFromFile(file, baseIndex + index));
+    state.prototype.sources.push(...queueSources);
+    state.prototype.activeSourceId = queueSources[0]?.sourceId || state.prototype.activeSourceId;
+    queueSources.forEach((source) => state.prototype.selectedSourceIds.add(source.sourceId));
+    renderPrototypeAll();
+    showToast(`已加入 ${queueSources.length} 个真实批量素材，可直接生成自动类任务；区域类功能再框选定位`, { type: "success" });
+  });
+  els.capabilitySelect?.addEventListener("change", () => {
+    renderPrototypeCapabilityPlan();
+    refreshExecutionPlan().catch(() => {});
+    syncMetrics();
+  });
+  els.operationType?.addEventListener("change", () => {
+    renderPrototypeCapabilityPlan();
+    refreshExecutionPlan().catch(() => {});
+    syncMetrics();
+  });
+  els.trackingMode?.addEventListener("change", () => {
+    renderPrototypeCapabilityPlan();
+    syncMetrics();
+  });
+  els.detectBtn?.addEventListener("click", () => {
+    detectSourceRegions();
   });
   els.clearMaskBtn.addEventListener("click", () => {
     if (isActiveRemixStatus(state.detail?.remix?.status)) return;
@@ -1621,15 +2026,31 @@ function bindEvents() {
     renderMaskEditor();
     renderPrototypeSources();
     renderPrototypeCapabilityPlan();
+    refreshExecutionPlan().catch(() => {});
     syncMetrics();
   });
-  els.maskConfirmBtn.addEventListener("click", () => {
-    if (PROTOTYPE_MODE) {
-      generatePrototypeDraftTasks();
-      showToast("已生成原型草稿任务，未调用真实后端", { type: "success" });
+  els.addDescriptionRegionBtn?.addEventListener("click", () => {
+    const text = String(els.descriptionRegion?.value || "").trim();
+    if (!text) {
+      showToast("请先输入描述区域", { type: "warn" });
       return;
     }
-    startMaskEdit();
+    state.regions.push(createDescriptionRegion(text));
+    const source = isPrototypeMirroredSource() ? activePrototypeSource() : null;
+    if (source) {
+      persistPrototypeSourceRegions(source, state.regions, { reviewRequired: false });
+    }
+    if (els.descriptionRegion) els.descriptionRegion.value = "";
+    renderSource();
+    renderPrototypeSources();
+    renderPrototypeCapabilityPlan();
+    refreshExecutionPlan().catch(() => {});
+    syncMetrics();
+    showToast("描述区域已添加", { type: "success" });
+  });
+  els.maskConfirmBtn.addEventListener("click", () => {
+    generatePrototypeDraftTasks();
+    showToast("已按处理功能生成草稿任务，可提交真实队列", { type: "success" });
   });
   els.detailBox?.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-inline-retry]");
@@ -1672,18 +2093,16 @@ function bindEvents() {
   els.prototypeApplyRegionsBtn?.addEventListener("click", copyRegionsToSelectedPrototypeSources);
   els.prototypeConfirmReviewBtn?.addEventListener("click", confirmPrototypeSourceReview);
   els.prototypeGenerateTasksBtn?.addEventListener("click", generatePrototypeDraftTasks);
-  els.prototypeSubmitTasksBtn?.addEventListener("click", () => {
-    state.prototype.tasks = state.prototype.tasks.map((task) => (
-      task.status === "draft" ? { ...task, status: "queued" } : task
-    ));
-    renderPrototypeAll();
+  els.prototypeSubmitTasksBtn?.addEventListener("click", () => submitRealBatchQueue());
+  els.prototypeAdvanceTasksBtn?.addEventListener("click", () => {
+    loadRemixDetail().catch((error) => renderError(els.globalError, error, "队列刷新失败"));
+    loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败"));
   });
-  els.prototypeAdvanceTasksBtn?.addEventListener("click", () => advancePrototypeTask());
   els.prototypeTaskQueue?.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    const advanceBtn = event.target.closest("[data-prototype-task-advance]");
-    if (advanceBtn && !advanceBtn.disabled) {
-      advancePrototypeTask(advanceBtn.dataset.prototypeTaskAdvance);
+    const submitBtn = event.target.closest("[data-prototype-task-submit]");
+    if (submitBtn && !submitBtn.disabled) {
+      submitRealBatchQueue(submitBtn.dataset.prototypeTaskSubmit);
       return;
     }
     const retryBtn = event.target.closest("[data-prototype-task-retry]");
@@ -1736,10 +2155,10 @@ function bindPageLifecycle() {
 async function init() {
   resetBrowserRestoredInputs();
   renderMaskEditor();
-  if (PROTOTYPE_MODE && !state.prototype.sources.length) {
-    seedPrototypeSources();
-    renderPrototypeAll();
-  }
+  renderPrototypeAll();
+  renderDetection();
+  renderPlan();
+  renderQcReport();
   bindMaskEditor();
   bindEvents();
   bindPageLifecycle();
@@ -1754,10 +2173,6 @@ async function init() {
       });
     }
   });
-  if (PROTOTYPE_MODE && !authenticated && els.loginModal) {
-    els.loginModal.hidden = true;
-    requestAnimationFrame(() => window.wzFocusNode?.("remixNodeSource", { center: false }));
-  }
 }
 
 init();
