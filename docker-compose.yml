@@ -4,55 +4,42 @@ services:
     container_name: aigc-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${AIGC_MYSQL_ROOT_PASSWORD:-aigc_root_dev_only}
-      MYSQL_DATABASE: ${AIGC_MYSQL_DATABASE:-aigc_platform}
-      MYSQL_USER: ${AIGC_MYSQL_USER:-aigc_app}
-      MYSQL_PASSWORD: ${AIGC_MYSQL_PASSWORD:-aigc_app_dev_only}
-      TZ: UTC
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --default-time-zone=+00:00
+      MYSQL_ROOT_PASSWORD: aigc_root_dev_only
+      MYSQL_DATABASE: aigc_platform
+      MYSQL_USER: aigc_app
+      MYSQL_PASSWORD: aigc_app_dev_only
     ports:
-      - "127.0.0.1:${AIGC_MYSQL_HOST_PORT:-3307}:3306"
+      - "127.0.0.1:3307:3306"
     volumes:
-      - ./mysql-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      - /opt/ad-picture-web-codex/mysql-data:/var/lib/mysql
 
   app:
     build:
-      context: .
-      dockerfile: ./Dockerfile
-    image: ad-picture-web-codex-app
+      context: /opt/ad-picture-web-codex
+      dockerfile: /opt/ad-picture-web-codex/Dockerfile
     container_name: aigc-app
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
+      - mysql
     env_file:
-      - ./.env
+      - /opt/ad-picture-web-codex/.env
     ports:
-      - "${AIGC_HOST_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
-      HOST: 0.0.0.0
       PORT: 8000
-      AIGC_DB_HOST: mysql
-      AIGC_DB_PORT: 3306
-      AIGC_DB_NAME: ${AIGC_MYSQL_DATABASE:-aigc_platform}
-      AIGC_DB_USER: ${AIGC_MYSQL_USER:-aigc_app}
-      AIGC_DB_PASSWORD: ${AIGC_MYSQL_PASSWORD:-aigc_app_dev_only}
+      HOST: 0.0.0.0
       AIGC_CONFIG_PATH: /data/app/config.json
       AIGC_USERS_PATH: /data/users/users.json
       AIGC_PROJECT_ROOT: /data/project-data
-      AIGC_SESSION_COOKIE_NAME: ${AIGC_SESSION_COOKIE_NAME:-ad_session_codex}
-      AIGC_PROJECT_ROOT_COOKIE_NAME: ${AIGC_PROJECT_ROOT_COOKIE_NAME:-ad_project_root_codex}
+      AIGC_DB_HOST: mysql
+      AIGC_DB_PORT: 3306
+      AIGC_DB_NAME: aigc_platform
+      AIGC_DB_USER: aigc_app
+      AIGC_DB_PASSWORD: aigc_app_dev_only
+      AIGC_SESSION_COOKIE_NAME: ad_session_codex
+      AIGC_PROJECT_ROOT_COOKIE_NAME: ad_project_root_codex
       TAI_ENTRY: /usr/local/lib/node_modules/tai-ai/dist/tai.min.js
     volumes:
-      - ./config.json:/data/app/config.json:ro
-      - /opt/ad-picture-web/users.json:/data/users/users.json:ro
-      - /opt/ad-picture-web-data/cwz:/data/project-data
+      - /opt/ad-picture-web-codex/config.json:/data/app/config.json
+      - /opt/ad-picture-web/users.json:/data/users/users.json
+      - /opt/ad-picture-web-data:/data/project-data

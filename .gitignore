@@ -10,6 +10,7 @@ server-start.log
 users.json
 .learnings/
 .understand-anything/
+.tmp/
 .tmp-*/
 .tmp-*.png
 C:*

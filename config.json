@@ -36,6 +36,12 @@
       "apiKeyEnv": "VIDEO_AIGC_API_KEY",
       "timeoutMs": 30000
     },
+    "videoOpsProvider": {
+      "provider": "video_aigc",
+      "endpoint": "https://video-aigc.skylink-gateway.com/api/v1",
+      "apiKeyEnv": "VIDEO_AIGC_API_KEY",
+      "timeoutMs": 30000
+    },
     "seedanceProvider": {
       "provider": "seedance",
       "endpoint": "https://skylink-gateway.com/api/v1",
@@ -53,16 +59,16 @@
   "projectRoot": "../project-data/PROJECT_ROOT_P",
   "projects": [
     {
-      "name": "三国",
-      "path": "../project-data/PROJECT_ROOT_P 三国"
-    },
-    {
       "name": "puzzle",
       "path": "../project-data/puzzle"
     },
     {
       "name": "包包4",
       "path": "../project-data/PROJECT_ROOT_P"
+    },
+    {
+      "name": "三国",
+      "path": "../project-data/PROJECT_ROOT_P 三国"
     }
   ]
 }
