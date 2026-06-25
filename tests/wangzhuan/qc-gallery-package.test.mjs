@@ -329,6 +329,31 @@ test("QC calls the model via /responses with generated video S3 URL and blocks f
   }
 });
 
+test("QC ignores compliance notes when scanning for forbidden channel terms", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-channel-rule-"));
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "channelrule");
+    const detail = await loadBatchDetailFromMysql(ctx, stitched.batch.batchId);
+    const poisonedBatch = {
+      ...detail.batch,
+      scripts: detail.batch.scripts.map((script) => ({
+        ...script,
+        complianceNotes: ["Do not say guaranteed income"]
+      }))
+    };
+    assert.equal((await syncBatchFacts(ctx, poisonedBatch, "batch_write")).skipped, false);
+
+    const result = await runBatchQc(ctx, stitched.batch.batchId);
+    const reports = result.reports;
+
+    assert.equal(reports.every((report) => report.qcStatus === "pass"), true);
+    assert.equal(reports.every((report) => report.checks.some((check) => check.checkId === "channel_rule" && check.status === "pass")), true);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("QC falls back to inline local video when frame extract fails and URL input is disabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-inline-"));
   try {

@@ -652,8 +652,7 @@ function scriptPolicyText(script = {}) {
     script.ending,
     script.rewardExpression,
     script.voiceover,
-    ...(Array.isArray(script.subtitles) ? script.subtitles : []),
-    ...(Array.isArray(script.complianceNotes) ? script.complianceNotes : [])
+    ...(Array.isArray(script.subtitles) ? script.subtitles : [])
   ].filter(Boolean).join("\n");
 }
 

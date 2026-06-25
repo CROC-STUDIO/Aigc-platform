@@ -239,6 +239,9 @@ test("estimates a batch from inline launch draft without saved template", async 
     assert.equal(result.estimate.languages.includes("pt-BR"), true);
 
     const loaded = await loadEstimate(ctx, result.estimate.estimateId);
+    assert.equal(loaded.templateSnapshot?.templateId, undefined);
+    assert.equal(loaded.templateSnapshot?.versionId, undefined);
+    assert.equal(loaded.templateSnapshot?.draft?.productName, "Lucky Cash");
     assert.equal(loaded.request.templateId, undefined);
     assert.equal(loaded.request.templateSnapshot.draft.productName, "Lucky Cash");
     assert.equal(loaded.request.disclaimer, "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos");
@@ -255,6 +258,86 @@ test("estimates a batch from inline launch draft without saved template", async 
     assert.deepEqual(loaded.request.targetRegions, ["BR", "PT"]);
     assert.deepEqual(loaded.request.languages, ["pt-BR", "en-US"]);
 
+    const started = await startBatchFromEstimate(ctx, {
+      idempotencyKey: "idem_start_inline_estimate_hash",
+      estimateId: result.estimate.estimateId
+    });
+    assert.equal(started.batch.templateSnapshot?.draft?.productName, "Lucky Cash");
+
+    const detail = await loadBatchDetailFromMysql(ctx, started.batch.batchId);
+    assert.equal(detail.batch.templateSnapshot?.draft?.productName, "Lucky Cash");
+    assert.equal(detail.batch.templateSnapshot?.templateId, undefined);
+    assert.equal(detail.batch.templateSnapshot?.versionId, undefined);
+
+    await syncBatchFacts(ctx, {
+      ...detail.batch,
+      status: "stopped",
+      stoppedAt: new Date().toISOString()
+    }, "user_stop");
+
+    const replanned = await estimateBatch(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      projectName: "Inline Project",
+      batchName: "inline_batch",
+      targetChannel: "tiktok_ads",
+      targetRegion: "BR",
+      targetRegions: ["BR", "PT"],
+      language: "pt-BR",
+      languages: ["pt-BR", "en-US"],
+      promiseLevel: "strong_conversion",
+      durationSec: 15,
+      variantCount: 2,
+      requestedConcurrency: 2,
+      outputRatio: "16:9",
+      disclaimer: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
+      disclaimerPresetId: "auto",
+      disclaimerPreset: "auto",
+      disclaimerLanguage: "pt",
+      disclaimerOverlay: {
+        enabled: true,
+        position: "bottom_left",
+        fontSize: 24,
+        boxHeight: 156,
+        bottomMargin: 72,
+        horizontalMargin: 48
+      },
+      templateSnapshot: {
+        draft: {
+          projectName: "Inline Project",
+          batchName: "inline_batch",
+          displayName: "Inline Draft",
+          productName: "Lucky Cash",
+          productLink: "https://play.google.com/store/apps/details?id=perkplay",
+          cta: "Install now",
+          ending: "Claim rewards today",
+          currencySymbol: "R$",
+          materialDirection: "本地奖励场景",
+          voiceoverStyle: "Brazilian creator",
+          promiseLevel: "strong_conversion",
+          regions: ["BR", "PT"],
+          languages: ["pt-BR", "en-US"],
+          targetChannels: ["tiktok_ads"]
+        }
+      },
+      branches: [
+        {
+          branchId: "branch_inline",
+          branchLabel: "Inline Draft",
+          productName: "Lucky Cash",
+          productLink: "https://play.google.com/store/apps/details?id=perkplay",
+          cta: "Install now",
+          language: "pt-BR,en-US",
+          regions: ["BR", "PT"],
+          targetChannel: "tiktok_ads",
+          materialDirection: "本地奖励场景",
+          voiceoverStyle: "Brazilian creator",
+          promiseLevel: "strong_conversion",
+          ending: "Claim rewards today",
+          currencySymbol: "R$"
+        }
+      ]
+    });
+
     const planned = await prepareBatchPlanFromEstimate({
       ...ctx,
       callWangzhuanLlm: async () => JSON.stringify({
@@ -269,7 +352,7 @@ test("estimates a batch from inline launch draft without saved template", async 
       })
     }, {
       idempotencyKey: "idem_plan_inline_estimate_hash",
-      estimateId: result.estimate.estimateId,
+      estimateId: replanned.estimate.estimateId,
       llmConfig: { provider: "mock", model: "gpt-5.4", endpoint: "http://localhost/mock", temperature: 0.2 },
       knowledgeNotes: ""
     });

@@ -1321,6 +1321,24 @@ function templateSnapshotFromEstimateRow(row) {
   };
 }
 
+function inlineTemplateSnapshotFromRequest(request = {}) {
+  const snapshot = request?.templateSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const draft = snapshot.draft;
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) return null;
+  return {
+    ...(snapshot.templateId ? { templateId: snapshot.templateId } : {}),
+    ...(snapshot.versionId ? { versionId: snapshot.versionId } : {}),
+    ...(snapshot.versionNumber !== undefined ? { versionNumber: snapshot.versionNumber } : {}),
+    ...(snapshot.status ? { status: snapshot.status } : {}),
+    ...(snapshot.isDefault !== undefined ? { isDefault: Boolean(snapshot.isDefault) } : {}),
+    draft,
+    ...(snapshot.createdBy ? { createdBy: snapshot.createdBy } : {}),
+    ...(snapshot.createdAt ? { createdAt: snapshot.createdAt } : {}),
+    ...(snapshot.updatedAt ? { updatedAt: snapshot.updatedAt } : {})
+  };
+}
+
 function referenceSnapshotFromEstimateRow(row) {
   if (!row.reference_video_uid) return null;
   const probe = parseJsonValue(row.reference_probe_json, {});
@@ -1422,13 +1440,14 @@ export async function loadEstimateFromMysql(context, estimateId) {
         }
       : null;
     if (confirmation) delete confirmation.confirmationToken;
+    const requestPayload = parseJsonValue(row.request_json, {});
     return {
       schemaVersion: row.estimate_type === "remix" ? "remix-estimate.v1" : "batch-estimate.v1",
       estimate,
-      request: parseJsonValue(row.request_json, {}),
+      request: requestPayload,
       estimateHash: row.request_hash,
       confirmation,
-      templateSnapshot: templateSnapshotFromEstimateRow(row),
+      templateSnapshot: templateSnapshotFromEstimateRow(row) || inlineTemplateSnapshotFromRequest(requestPayload),
       referenceVideo: referenceSnapshotFromEstimateRow(row),
       source: remixSourceSnapshotFromEstimateRow(row),
       decomposition: parseJsonValue(row.decomposition_json, null),
