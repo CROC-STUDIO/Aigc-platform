@@ -1,12 +1,14 @@
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makePlanId } from "./ids.mjs";
-import { resolveLlmConfig } from "./llm-config.mjs";
+import { llmUsesGeminiCompat, resolveLlmConfig } from "./llm-config.mjs";
 import {
   buildReferenceAssetSlotGuide,
   formatReferenceAssetSlotGuide
 } from "./reference-assets.mjs";
-import { callOpenAiCompatibleLlm, parseLlmJsonContent } from "./reference-videos.mjs";
+import { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, parseLlmJsonContent } from "./reference-videos.mjs";
+import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { join } from "node:path";
 
 const REQUIRED_PLAN_FIELDS = Object.freeze([
   "hook",
@@ -334,13 +336,25 @@ async function callPlanLlm(context, messages, llmConfig) {
       planGeneration: true
     });
   }
-  return callOpenAiCompatibleLlm(llmConfig, messages);
+  const dumpRequest = async (dump) => {
+    const batchId = String(context?.currentBatchId || "").trim();
+    const requestId = String(context?.requestId || "").trim();
+    if (!batchId || !requestId || !context?.userProjectRoot) return;
+    const target = join(wangzhuanPaths(context).batchesDir, batchId, `llm-request-plan-${requestId}.json`);
+    await writeAtomicJson(target, dump);
+  };
+  return llmUsesGeminiCompat(llmConfig)
+    ? callGeminiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest })
+    : callOpenAiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest });
 }
 
 export async function generateSeedancePlan(context, input = {}) {
   const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
   const messages = buildSeedancePlanMessages(input);
-  const content = await callPlanLlm(context, messages, llmConfig);
+  const content = await callPlanLlm({
+    ...context,
+    currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+  }, messages, llmConfig);
   const parsed = validateSeedancePlan(parseLlmJsonContent(content), {
     branchId: input.branch?.branchId,
     branchVariantIndex: input.branchVariantIndex,

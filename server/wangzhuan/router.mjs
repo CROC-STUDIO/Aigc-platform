@@ -103,7 +103,7 @@ function sendBinary(res, buffer, requestId, fileName = "video-ops-output.bin") {
 
 export async function handleWangzhuanRequest(req, res, url, context) {
   const requestId = makeRequestId();
-  const scoped = buildContext(context);
+  const scoped = { ...buildContext(context), requestId };
   try {
     requirePermission(scoped.user, "wangzhuan:view");
     if (req.method === "GET" && url.pathname === "/api/wangzhuan/templates") {

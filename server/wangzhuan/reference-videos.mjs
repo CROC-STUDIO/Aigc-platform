@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { resolveLlmConfig } from "./llm-config.mjs";
+import { llmUsesGeminiCompat, resolveLlmConfig } from "./llm-config.mjs";
 import {
   hasWangzhuanFactsStore,
   loadReferenceVideoProbeFromMysql,
@@ -749,12 +749,96 @@ function modelInputMode(messages = []) {
 
 function redactedModelRequestBody(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  if (Array.isArray(body.contents)) return body;
   if (Array.isArray(body.input)) return body;
   if (!Array.isArray(body.messages)) return body;
   return {
     ...body,
     input: responsesInputFromMessages(body.messages)
   };
+}
+
+function geminiGenerateContentUrl(endpoint, model) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  if (clean.endsWith("/v1beta")) return `${clean}/models/${encodeURIComponent(String(model || "").trim())}:generateContent`;
+  if (clean.endsWith("/api")) return `${clean}/v1beta/models/${encodeURIComponent(String(model || "").trim())}:generateContent`;
+  if (clean.endsWith("/v1")) return `${clean}beta/models/${encodeURIComponent(String(model || "").trim())}:generateContent`;
+  return `${clean}/v1beta/models/${encodeURIComponent(String(model || "").trim())}:generateContent`;
+}
+
+function geminiPartsFromMessages(messages = []) {
+  const systemParts = [];
+  const contents = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const role = String(message.role || "").toLowerCase();
+    const sourceParts = Array.isArray(message.content)
+      ? message.content
+      : [{ type: "text", text: String(message.content || "") }];
+    const parts = [];
+    for (const part of sourceParts) {
+      if (!part || typeof part !== "object") continue;
+      if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+        parts.push({ text: part.text });
+        continue;
+      }
+      if (part.type === "image_url" && typeof part.image_url?.url === "string") {
+        const match = part.image_url.url.match(/^data:([^;,]+);base64,(.+)$/);
+        if (match) {
+          parts.push({
+            inlineData: {
+              mimeType: match[1],
+              data: match[2]
+            }
+          });
+        }
+        continue;
+      }
+      if (part.type === "file") {
+        const fileData = String(part.file?.file_data || "");
+        const fileUrl = String(part.file?.file_url || "").trim();
+        const dataMatch = fileData.match(/^data:([^;,]+);base64,(.+)$/);
+        if (dataMatch) {
+          parts.push({
+            inlineData: {
+              mimeType: dataMatch[1],
+              data: dataMatch[2]
+            }
+          });
+        } else if (fileUrl) {
+          parts.push({
+            fileData: {
+              mimeType: "video/mp4",
+              fileUri: fileUrl
+            }
+          });
+        }
+      }
+    }
+    if (!parts.length) continue;
+    if (role === "system") {
+      systemParts.push(...parts);
+    } else {
+      contents.push({
+        role: role === "assistant" ? "model" : "user",
+        parts
+      });
+    }
+  }
+  return {
+    ...(systemParts.length ? { systemInstruction: { parts: systemParts } } : {}),
+    contents
+  };
+}
+
+function llmResponseTextFromGemini(payload = {}) {
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    const text = parts.map((part) => typeof part?.text === "string" ? part.text : "").filter(Boolean).join("\n").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 function redactedModelRequest({ requestId, inputMode, url, headers, body }) {
@@ -813,6 +897,9 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
   };
   const inputMode = modelInputMode(messages);
   const hasFileUrlInput = inputMode === "file_url";
+  const forceChatForFileUrl = hasFileUrlInput
+    && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
+    && /^gpt-5\.4(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
   // gpt-5.4 /responses rejects input_file.file_url (probe 2026-06-22); chat/completions
   // accepts { type: "file", file: { file_url } } together with frame image_url parts.
   const chatMessages = messages;
@@ -822,7 +909,7 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
     temperature: llmConfig.temperature,
     response_format: { type: "json_object" }
   };
-  const useResponses = canUseResponsesInput(messages) && !hasFileUrlInput;
+  const useResponses = canUseResponsesInput(messages) && !forceChatForFileUrl;
   const initialUrl = useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint);
   if (typeof options.dumpRequest === "function") {
     await options.dumpRequest(redactedModelRequest({
@@ -873,6 +960,75 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
   return llmResponseText(payload);
 }
 
+async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
+  if (!llmConfig.apiKey) {
+    const apiKeyEnv = llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY";
+    throw new WangzhuanError("model_failed", "未配置网赚拆解模型 API Key", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      apiKeyEnv,
+      upstreamMessage: `未配置模型 API Key，请在环境变量 ${apiKeyEnv} 中配置后重启服务`
+    });
+  }
+  const controller = new AbortController();
+  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || DEFAULT_LLM_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const body = {
+    ...geminiPartsFromMessages(messages),
+    generationConfig: {
+      temperature: llmConfig.temperature
+    }
+  };
+  const url = geminiGenerateContentUrl(llmConfig.endpoint, llmConfig.model);
+  const headers = {
+    "Content-Type": "application/json",
+    "x-goog-api-key": llmConfig.apiKey
+  };
+  if (typeof options.dumpRequest === "function") {
+    await options.dumpRequest(redactedModelRequest({
+      requestId: options.requestId,
+      inputMode: "gemini_contents",
+      url,
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": `<REDACTED:${llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY"}>`
+      },
+      body
+    }));
+  }
+  let response;
+  let payload = {};
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    payload = await response.json().catch(() => ({}));
+  } catch (error) {
+    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      inputMode: "gemini_contents",
+      reason
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    throw new WangzhuanError("model_failed", "模型拆解请求失败", {
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      status: response.status,
+      inputMode: "gemini_contents",
+      upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
+    });
+  }
+  return llmResponseTextFromGemini(payload);
+}
+
 export async function draftReferenceVideoDecomposition(context, request = {}, options = {}) {
   const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
   if (probe.status === "fail") {
@@ -900,10 +1056,15 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
       },
       visionInputs
     })
-    : await callOpenAiCompatibleLlm(llmConfig, messages, {
-      requestId: options.requestId,
-      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
-    });
+    : await (llmUsesGeminiCompat(llmConfig)
+      ? callGeminiCompatibleLlm(llmConfig, messages, {
+        requestId: options.requestId,
+        dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+      })
+      : callOpenAiCompatibleLlm(llmConfig, messages, {
+        requestId: options.requestId,
+        dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+      }));
   const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
   if (decomposition.missingFields.length) {
     throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {
@@ -984,4 +1145,4 @@ export async function decomposeReferenceVideo(context, request = {}) {
   };
 }
 
-export { callOpenAiCompatibleLlm, parseLlmJsonContent };
+export { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, parseLlmJsonContent };

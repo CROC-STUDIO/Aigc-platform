@@ -7,9 +7,9 @@ import { promisify } from "node:util";
 import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { llmSupportsVideoUrl, resolveQcLlmConfig } from "./llm-config.mjs";
+import { llmSupportsVideoUrl, llmUsesGeminiCompat, resolveQcLlmConfig } from "./llm-config.mjs";
 import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
-import { ffprobeMediaFile } from "./reference-videos.mjs";
+import { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, ffprobeMediaFile } from "./reference-videos.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { buildPublicUrl } from "../object-storage.mjs";
@@ -184,6 +184,15 @@ function generatedFrameTimestamps(durationSec, frameCount) {
     const raw = start + ((end - start) * index) / Math.max(1, frameCount - 1);
     return Math.round(raw * 100) / 100;
   });
+}
+
+async function dumpQcModelRequest(context, batchId, outputId, dump) {
+  const safeBatchId = String(batchId || "").trim();
+  const safeOutputId = String(outputId || "").trim();
+  const requestId = String(context?.requestId || "").trim();
+  if (!safeBatchId || !safeOutputId || !requestId || !context?.userProjectRoot) return;
+  const target = join(wangzhuanPaths(context).batchesDir, safeBatchId, `llm-request-qc-${safeOutputId}-${requestId}.json`);
+  await writeAtomicJson(target, dump);
 }
 
 function usableVisionFrames(frames = []) {
@@ -486,8 +495,12 @@ async function scriptSchemaCheck(context, batch, output, tasks) {
 
 function templateSnapshotCheck(batch) {
   const draft = batch.templateSnapshot?.draft || {};
-  if (!batch.templateSnapshot?.templateId || !batch.templateSnapshot?.versionId || !draft.productName) {
+  if (!draft.productName) {
     return check("template_snapshot", "fail", "模板快照缺少 templateId/versionId/productName", "templateSnapshot");
+  }
+  const hasSavedTemplateIdentity = Boolean(batch.templateSnapshot?.templateId && batch.templateSnapshot?.versionId);
+  if (!hasSavedTemplateIdentity) {
+    return check("template_snapshot", "pass", "模板快照为 inline draft");
   }
   return check("template_snapshot", "pass", "模板快照完整");
 }
@@ -955,80 +968,6 @@ function modelInputMode(messages = []) {
   return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
 }
 
-async function callOpenAiCompatibleLlm(llmConfig, messages) {
-  if (!llmConfig.apiKey) {
-    const apiKeyEnv = llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY";
-    throw new WangzhuanError("model_failed", "未配置视频质检模型 API Key", {
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      apiKeyEnv,
-      upstreamMessage: `未配置模型 API Key，请在环境变量 ${apiKeyEnv} 中配置后重启服务`
-    });
-  }
-  const controller = new AbortController();
-  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || DEFAULT_LLM_TIMEOUT_MS;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  let payload = {};
-  const headers = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${llmConfig.apiKey}`
-  };
-  const responsesPayload = {
-    model: llmConfig.model,
-    input: responsesInputFromMessages(messages),
-    temperature: llmConfig.temperature,
-    text: { format: { type: "json_object" } }
-  };
-  const chatMessages = canUseResponsesInput(messages) ? dropFileParts(messages) : messages;
-  const chatPayload = {
-    model: llmConfig.model,
-    messages: chatMessages,
-    temperature: llmConfig.temperature,
-    response_format: { type: "json_object" }
-  };
-  const useResponses = canUseResponsesInput(messages);
-  const inputMode = modelInputMode(messages);
-  try {
-    response = await fetch(useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint), {
-      method: "POST",
-      headers,
-      body: JSON.stringify(useResponses ? responsesPayload : chatPayload),
-      signal: controller.signal
-    });
-    payload = await response.json().catch(() => ({}));
-    if (useResponses && ([400, 404, 415, 422].includes(response.status) || response.status >= 500)) {
-      response = await fetch(chatCompletionsUrl(llmConfig.endpoint), {
-        method: "POST",
-        headers,
-        body: JSON.stringify(chatPayload),
-        signal: controller.signal
-      });
-      payload = await response.json().catch(() => ({}));
-    }
-  } catch (error) {
-    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
-    throw new WangzhuanError("model_failed", reason === "timeout" ? "视频质检模型请求超时" : "视频质检模型请求失败", {
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      inputMode,
-      reason
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    throw new WangzhuanError("model_failed", "视频质检模型请求失败", {
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      status: response.status,
-      inputMode,
-      upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
-    });
-  }
-  return llmResponseText(payload);
-}
-
 function normalizeModelReview(raw = {}, llmConfig = {}, visionInputs = {}, warnings = []) {
   const score = Math.max(0, Math.min(1, Number(raw.score ?? raw.matchScore ?? 0)));
   const threshold = DEFAULT_MODEL_QC_THRESHOLD;
@@ -1124,11 +1063,19 @@ async function runModelVideoQc(context, batch, output, tasks, scripts, options =
         },
         visionInputs,
         output,
-        batch,
-        tasks,
-        scripts
-      })
-      : await callOpenAiCompatibleLlm(llmConfig, messages);
+      batch,
+      tasks,
+      scripts
+    })
+    : await (llmUsesGeminiCompat(llmConfig)
+        ? callGeminiCompatibleLlm(llmConfig, messages, {
+          requestId: context?.requestId,
+          dumpRequest: (dump) => dumpQcModelRequest(context, batch.batchId, output.outputId, dump)
+        })
+        : callOpenAiCompatibleLlm(llmConfig, messages, {
+          requestId: context?.requestId,
+          dumpRequest: (dump) => dumpQcModelRequest(context, batch.batchId, output.outputId, dump)
+        }));
   return normalizeModelReview(parseLlmJsonContent(content), publicLlmConfig, visionInputs, visionInputs.warnings || []);
 }
 

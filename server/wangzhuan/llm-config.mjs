@@ -1,7 +1,7 @@
 export const DEFAULT_LLM_CONFIG = Object.freeze({
   provider: "skylink",
   endpoint: "https://skylink-gateway.com/api/v1",
-  model: "gpt-5.4",
+  model: "gemini-3.5-flash",
   temperature: 0.2,
   timeoutMs: 180000
 });
@@ -37,6 +37,14 @@ function normalizeModel(provider, model) {
     return cleanModel.toLowerCase();
   }
   return cleanModel;
+}
+
+export function llmUsesGeminiCompat(llmConfig = {}) {
+  const provider = cleanString(llmConfig.provider).toLowerCase();
+  const model = cleanString(llmConfig.model).toLowerCase();
+  return provider === "gemini"
+    || provider === "google"
+    || model.startsWith("gemini-");
 }
 
 export function configuredApiKey(llm = {}) {
@@ -79,6 +87,7 @@ function mergeLlmSection(config = {}, sectionKey, defaults, overrides = {}) {
 }
 
 export function llmSupportsVideoUrl(llmConfig = {}) {
+  if (llmUsesGeminiCompat(llmConfig)) return false;
   return llmConfig.preferVideoUrl === true;
 }
 

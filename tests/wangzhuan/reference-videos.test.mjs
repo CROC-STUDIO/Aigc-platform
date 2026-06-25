@@ -403,6 +403,63 @@ test("draft decomposition sends S3 video URL and sampled frames to the model gat
   }
 });
 
+test("draft decomposition sends Gemini-compatible contents when model is gemini", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gemini-contents-"));
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), body, headers: options.headers });
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            role: "model",
+            parts: [{
+              text: JSON.stringify(validDecomposition({
+                scene: "Gemini saw frames",
+                subject: "Gemini subject"
+              }))
+            }]
+          }
+        }]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,Z2VtaW5pLWZyYW1l" }
+      ]
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    const result = await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "gemini-3.5-flash",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "test-key"
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://skylink-gateway.com/api/v1beta/models/gemini-3.5-flash:generateContent");
+    assert.equal(calls[0].headers["x-goog-api-key"], "test-key");
+    assert.equal(Array.isArray(calls[0].body.contents), true);
+    const userParts = calls[0].body.contents.find((item) => item.role === "user").parts;
+    assert.equal(userParts.some((part) => typeof part.text === "string" && part.text.includes("Seedance decomposition dimensions")), true);
+    assert.equal(userParts.some((part) => part.inlineData?.mimeType === "video/mp4" || part.fileData?.mimeType === "video/mp4"), true);
+    assert.equal(userParts.some((part) => part.inlineData?.mimeType === "image/jpeg"), true);
+    assert.equal(result.decomposition.scene, "Gemini saw frames");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("draft decomposition converts relative proxy storage URL into a direct S3 URL", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gateway-s3-direct-"));
   const previousFetch = globalThis.fetch;
@@ -571,6 +628,52 @@ test("draft decomposition dumps the redacted model request by request id", async
     const content = dump.request.body.messages.find((item) => item.role === "user").content;
     assert.equal(content.some((part) => part.type === "file" && part.file?.file_url === s3VideoUrl), true);
     assert.equal(content.some((part) => part.type === "image_url" && part.image_url?.url === "data:image/jpeg;base64,ZHVtcC1mcmFtZQ=="), true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("draft decomposition dumps Gemini request bodies with redacted api key header", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-gemini-dump-"));
+  const previousFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          role: "model",
+          parts: [{ text: JSON.stringify(validDecomposition({ scene: "Gemini dump scene" })) }]
+        }
+      }]
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+    const ctx = {
+      ...context(root),
+      extractReferenceFrames: async () => []
+    };
+    const checked = await checkReferenceVideo(ctx, validUpload());
+    await draftReferenceVideoDecomposition(ctx, {
+      referenceVideoId: checked.referenceVideo.referenceVideoId,
+      llmConfig: {
+        provider: "skylink",
+        model: "gemini-3.5-flash",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        apiKey: "gemini-secret-key",
+        apiKeyEnv: "WANGZHUAN_LLM_API_KEY"
+      }
+    }, {
+      requestId: "req_20260625150000_abcd"
+    });
+
+    const dumpPath = join(ctx.userProjectRoot, dirname(checked.referenceVideo.storedPath), "llm-request-req_20260625150000_abcd.json");
+    const dump = JSON.parse(await readFile(dumpPath, "utf8"));
+    assert.equal(dump.inputMode, "gemini_contents");
+    assert.equal(dump.request.url, "https://skylink-gateway.com/api/v1beta/models/gemini-3.5-flash:generateContent");
+    assert.equal(dump.request.headers["x-goog-api-key"], "<REDACTED:WANGZHUAN_LLM_API_KEY>");
+    assert.equal(JSON.stringify(dump).includes("gemini-secret-key"), false);
+    assert.equal(Array.isArray(dump.request.body.contents), true);
   } finally {
     globalThis.fetch = previousFetch;
     await rm(root, { recursive: true, force: true });

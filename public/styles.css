@@ -6179,6 +6179,24 @@ button.mini {
   gap: 10px;
 }
 
+.wz-panel-head-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+}
+
+.wz-panel-head-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.wz-panel-head-actions button {
+  white-space: nowrap;
+}
+
 .wz-node .panel-head h2 {
   font-size: 14px;
 }
@@ -6186,7 +6204,7 @@ button.mini {
 .wz-node .panel-head span {
   color: #9fa6ba;
   font-size: 11px;
-  text-align: right;
+  text-align: left;
   overflow-wrap: anywhere;
 }
 
@@ -6278,6 +6296,20 @@ button.mini {
 }
 
 @media (max-width: 760px) {
+  .wz-node .panel-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .wz-panel-head-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .wz-panel-head-actions button {
+    width: 100%;
+  }
+
   .wz-upload-panel {
     grid-template-columns: 1fr;
     min-height: 0;

@@ -354,6 +354,31 @@ test("QC ignores compliance notes when scanning for forbidden channel terms", as
   }
 });
 
+test("QC accepts inline draft template snapshots without templateId/versionId", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-s6-inline-template-qc-"));
+  try {
+    const { ctx, stitched } = await thirtySecondStitchedFixture(root, "inline-template-qc");
+    const detail = await loadBatchDetailFromMysql(ctx, stitched.batch.batchId);
+    const inlineBatch = {
+      ...detail.batch,
+      templateSnapshot: {
+        draft: structuredClone(detail.batch.templateSnapshot?.draft || {})
+      }
+    };
+    assert.equal((await syncBatchFacts(ctx, inlineBatch, "batch_write")).skipped, false);
+
+    const result = await runBatchQc(ctx, stitched.batch.batchId);
+    assert.equal(result.reports.every((report) => report.qcStatus === "pass"), true);
+    assert.equal(
+      result.reports.every((report) => report.checks.some((check) => check.checkId === "template_snapshot" && check.status === "pass")),
+      true
+    );
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("QC falls back to inline local video when frame extract fails and URL input is disabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-s6-model-qc-inline-"));
   try {

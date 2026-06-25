@@ -95,8 +95,13 @@
               <div class="wz-col-label"><b>1</b> 上传参考</div>
               <section class="wz-node" id="wzNodeUpload" data-node="upload" data-port-out="1">
                 <div class="panel-head">
-                  <h2>参考视频输入</h2>
-                  <span>选择后自动上传并读取视频信息</span>
+                  <div class="wz-panel-head-copy">
+                    <h2>参考视频输入</h2>
+                    <span>选择后自动上传并读取视频信息</span>
+                  </div>
+                  <div class="wz-panel-head-actions">
+                    <button id="wzConfirmReferenceBtn" type="button" disabled>确认进入脚本拆解</button>
+                  </div>
                 </div>
                 <div class="wz-node-body">
                   <input id="wzReferenceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime" />
@@ -120,9 +125,6 @@
                     </div>
                   </section>
                   <div id="wzReferenceBox" class="wz-list empty-line">未上传参考视频</div>
-                  <div class="modal-actions wz-actions">
-                    <button id="wzConfirmReferenceBtn" type="button" disabled>确认进入脚本拆解</button>
-                  </div>
                 </div>
               </section>
             </div>
@@ -132,8 +134,13 @@
               <div class="wz-col-label"><b>2</b> 模型拆解</div>
               <section class="wz-node" id="wzNodeDecompose" data-node="decompose" data-port-in="1" data-port-out="1">
                 <div class="panel-head">
-                  <h2>AI 拆解脚本</h2>
-                  <span>分析参考视频，提取镜头与脚本结构</span>
+                  <div class="wz-panel-head-copy">
+                    <h2>AI 拆解脚本</h2>
+                    <span>分析参考视频，提取镜头与脚本结构</span>
+                  </div>
+                  <div class="wz-panel-head-actions">
+                    <button id="wzDecomposeBtn" class="ghost" type="button" disabled>确认脚本拆解</button>
+                  </div>
                 </div>
                 <div class="wz-node-body">
                   <div id="wzDecompositionStatus" class="wz-info">先上传参考视频，再点击「开始解析」生成脚本草稿。</div>
@@ -144,7 +151,6 @@
                   </label>
                   <div class="modal-actions wz-actions">
                     <button id="wzDraftDecompositionBtn" type="button" disabled>开始解析</button>
-                    <button id="wzDecomposeBtn" class="ghost" type="button" disabled>确认脚本拆解</button>
                   </div>
                   <p id="wzDecompositionHint" class="wz-field-hint wz-decomposition-hint">解析结果会以表单展示，确认前可直接修改；确认后将锁定并进入第三步。</p>
                   <div id="wzDecompositionForm" class="wz-decomposition-form empty-line" hidden aria-live="polite"></div>
@@ -172,7 +178,12 @@
               <div class="wz-branches" id="wzBranches">
                 <section class="wz-node wz-node-branch" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
                   <div class="panel-head">
-                    <h2 class="wz-branch-title">改写 3.1</h2>
+                    <div class="wz-panel-head-copy">
+                      <h2 class="wz-branch-title">改写 3.1</h2>
+                    </div>
+                    <div class="wz-panel-head-actions">
+                      <button id="wzConfirmRewriteBtn" type="button">确认信息</button>
+                    </div>
                   </div>
                   <div class="wz-node-body">
                     <div class="wz-subflow">
@@ -338,9 +349,6 @@
                     </div>
                   </div>
                 </section>
-              </div>
-              <div class="modal-actions wz-actions wz-rewrite-actions">
-                <button id="wzConfirmRewriteBtn" type="button">确认信息</button>
               </div>
               <p id="wzRewriteConfirmHint" class="wz-field-hint">确认后将上传素材并校验必填项；确认后仍可继续修改第 3 节内容。</p>
             </div>

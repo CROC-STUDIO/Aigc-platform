@@ -21,6 +21,14 @@ test("normalizes Skylink GPT model ids to the lowercase ids returned by /models"
   assert.equal(publicLlmConfig(config).llmConfig.apiKeyEnv, "WANGZHUAN_LLM_API_KEY");
 });
 
+test("defaults reference-video decomposition llm to Gemini 3.5 Flash", () => {
+  const resolved = resolveLlmConfig({});
+  assert.equal(resolved.provider, "skylink");
+  assert.equal(resolved.endpoint, "https://skylink-gateway.com/api/v1");
+  assert.equal(resolved.model, "gemini-3.5-flash");
+  assert.equal(publicLlmConfig({}).llmConfig.model, "gemini-3.5-flash");
+});
+
 test("keeps non-Skylink model ids case-sensitive", () => {
   const config = {
     wangzhuan: {
