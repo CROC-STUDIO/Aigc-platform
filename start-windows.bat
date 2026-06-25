@@ -8,7 +8,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo Starting Seedance Ad Picture Web UI...
-echo Open http://localhost:5177/ on this computer.
-echo LAN users can open http://YOUR-LAN-IP:5177/ after Windows Firewall allows Node.js.
+echo Open http://localhost:5182/ on this computer.
+echo LAN users can open http://YOUR-LAN-IP:5182/ after Windows Firewall allows Node.js.
 node server.mjs
 pause

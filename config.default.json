@@ -3,7 +3,7 @@
     "llm": {
       "provider": "skylink",
       "endpoint": "https://skylink-gateway.com/api/v1",
-      "model": "gemini-3.5-flash",
+      "model": "gpt-5.4",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 180000
     },
@@ -55,40 +55,5 @@
       "generateAudio": true,
       "watermark": false
     }
-  },
-  "projectRoot": "/opt/ad-picture-web-data/cwz",
-  "projects": [
-    {
-      "name": "网赚业务",
-      "path": "/opt/ad-picture-web-data/cwz"
-    },
-    {
-      "name": "KaKaPic",
-      "path": "/opt/ad-picture-web-data/KaKaPic"
-    },
-    {
-      "name": "hoshi",
-      "path": "/opt/ad-picture-web-data/hoshi"
-    },
-    {
-      "name": "ad-picture-web-data",
-      "path": "/opt/ad-picture-web-data"
-    },
-    {
-      "name": "超休",
-      "path": "/opt/ad-picture-web-data/超休"
-    },
-    {
-      "name": "包包4",
-      "path": "/opt/ad-picture-web-data/包包4"
-    },
-    {
-      "name": "puzzle",
-      "path": "../project-data/puzzle"
-    },
-    {
-      "name": "三国",
-      "path": "../project-data/PROJECT_ROOT_P 三国"
-    }
-  ]
+  }
 }

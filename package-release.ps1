@@ -29,6 +29,7 @@ Copy-Item -LiteralPath $appDir -Destination $dest -Recurse -Force
 
 Remove-Item -LiteralPath (Join-Path $dest "server-start.log") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $dest "server-error.log") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $dest "env.export.txt") -Force -ErrorAction SilentlyContinue
 
 @'
 {

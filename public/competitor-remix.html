@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 竞品素材处理任务</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="wz-body">
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <a class="topbar-link" href="/wangzhuan.html">网赚素材管线</a>
+      </nav>
+      <div class="topbar-account">
+        <a class="topbar-account-link" href="/wangzhuan-tasks.html">任务管理</a>
+        <span id="remixCurrentUserBadge">未登录</span>
+        <button id="remixLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/wangzhuan.html">
+          <span>▣</span>
+          <b>网赚素材管线</b>
+        </a>
+        <a class="platform-nav-item active" href="/competitor-remix.html">
+          <span>◇</span>
+          <b>竞品素材处理</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>Video Ops</small>
+      </div>
+    </aside>
+
+    <main class="app wz-app wz-workbench video-ops-workbench" autocomplete="off">
+      <section class="operation-pane">
+        <div id="remixActiveLockActions" class="wz-lock-actions" hidden>
+          <span id="remixActiveLockText"></span>
+        </div>
+
+        <nav class="wz-canvas-toolbar" id="remixStepbar" aria-label="任务步骤导航">
+          <a class="wz-stepbar-item" href="#remixNodeTask" data-step="1">
+            <span class="wz-stepbar-no">1</span>
+            <span class="wz-stepbar-label">选择任务</span>
+          </a>
+          <a class="wz-stepbar-item" href="#remixNodeInput" data-step="2">
+            <span class="wz-stepbar-no">2</span>
+            <span class="wz-stepbar-label">输入与参数</span>
+          </a>
+          <a class="wz-stepbar-item" href="#remixNodeJob" data-step="3">
+            <span class="wz-stepbar-no">3</span>
+            <span class="wz-stepbar-label">队列与结果</span>
+          </a>
+          <div class="wz-stepbar-metrics" aria-label="任务概览">
+            <div><strong id="remixTaskTypeMetric">-</strong><span>任务类型</span></div>
+            <div><strong id="remixJobStatusMetric">未提交</strong><span>状态</span></div>
+            <div><strong id="remixQueueMetric">-</strong><span>排队</span></div>
+            <div><strong id="remixOutputMetric">0</strong><span>结果</span></div>
+          </div>
+        </nav>
+
+        <div class="wz-canvas-scroll">
+          <div class="wz-canvas video-ops-canvas" id="remixCanvas" aria-label="video-content-ops 任务工作台">
+            <svg class="wz-canvas-links" id="remixCanvasLinks" aria-hidden="true"></svg>
+
+            <div class="wz-col" data-step="1">
+              <div class="wz-col-label"><b>1</b> 任务选择</div>
+              <section class="wz-node" id="remixNodeTask" data-node="task" data-port-out="1">
+                <div class="panel-head">
+                  <h2>真实可接入任务</h2>
+                  <span>基于 video-content-ops job_type</span>
+                </div>
+                <div class="wz-node-body">
+                  <div id="videoOpsTaskGrid" class="video-ops-task-grid" aria-label="任务类型列表"></div>
+                  <div class="wz-warning video-ops-boundary">当前页面只提交 video-content-ops 文档已开放的异步任务；未开放的局部文案级替换不会作为可执行任务展示。</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="wz-col wz-col-wide" data-step="2">
+              <div class="wz-col-label"><b>2</b> 输入与参数</div>
+              <section class="wz-node" id="remixNodeInput" data-node="input" data-port-in="1" data-port-out="1">
+                <div class="panel-head">
+                  <h2 id="videoOpsSelectedTitle">一键去标识</h2>
+                  <span id="videoOpsSelectedJobType">seedance_ai_remove</span>
+                </div>
+                <div class="wz-node-body">
+                  <section id="videoOpsMediaInput" class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>输入素材</strong>
+                      <span id="videoOpsInputModeLabel">视频 URL 或上传文件</span>
+                    </div>
+                    <div class="video-ops-source-toggle" role="radiogroup" aria-label="输入方式">
+                      <label><input type="radio" name="videoOpsSourceMode" value="url" checked /> 视频 URL</label>
+                      <label><input type="radio" name="videoOpsSourceMode" value="file" /> 上传视频</label>
+                    </div>
+                    <label id="videoOpsUrlWrap">视频 URL
+                      <input id="videoOpsSourceUrl" type="url" placeholder="https://example.com/video.mp4" autocomplete="off" />
+                    </label>
+                    <label id="videoOpsFileWrap" hidden>上传视频
+                      <input id="videoOpsSourceFile" type="file" accept="video/mp4,video/webm,video/quicktime" />
+                      <span class="wz-field-hint">单个视频不超过 300 MB</span>
+                    </label>
+                    <div id="videoOpsFileStatus" class="video-ops-file-status empty-line">未选择文件</div>
+                    <video id="videoOpsVideo" class="video-ops-video" controls preload="metadata" playsinline hidden></video>
+                  </section>
+
+                  <section id="videoOpsReportInput" class="video-ops-panel" hidden>
+                    <div class="video-ops-section-head">
+                      <strong>分析文本</strong>
+                      <span>material_analysis 使用 report_text 输入</span>
+                    </div>
+                    <label>报告文本
+                      <textarea id="videoOpsReportText" rows="8" placeholder="粘贴素材表现数据、投放复盘或分析材料"></textarea>
+                    </label>
+                  </section>
+
+                  <section id="videoOpsParams" class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>任务参数</strong>
+                      <span id="videoOpsParamHint">不需要用户处理 mask</span>
+                    </div>
+
+                    <div id="seedanceParams" class="video-ops-param-group" data-param-for="seedance_ai_remove">
+                      <label>处理提示
+                        <textarea id="seedancePrompt" rows="3">Remove visible app icon, logo, watermark, and overlay brand marks. Keep the original scene, timing, motion, and camera movement.</textarea>
+                      </label>
+                      <div class="video-ops-form-grid">
+                        <label>比例
+                          <select id="seedanceRatio">
+                            <option value="auto">auto</option>
+                            <option value="9:16">9:16</option>
+                            <option value="16:9">16:9</option>
+                            <option value="1:1">1:1</option>
+                          </select>
+                        </label>
+                        <label>分辨率
+                          <select id="seedanceResolution">
+                            <option value="720p">720p</option>
+                            <option value="1080p">1080p</option>
+                          </select>
+                        </label>
+                        <label>切片秒数
+                          <input id="seedanceSegmentSeconds" type="number" min="1" max="30" step="1" value="15" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="autoRemoveParams" class="video-ops-param-group" data-param-for="ai_remove_auto" hidden>
+                      <label>mask_threshold
+                        <input id="autoRemoveMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                      </label>
+                    </div>
+
+                    <div id="interactiveParams" class="video-ops-param-group" data-param-for="auto_ai_remove" hidden>
+                      <div class="video-ops-kframe-layout">
+                        <div class="video-ops-frame-box" id="videoOpsFrameBox" aria-label="K 帧点选框选区域">
+                          <canvas id="videoOpsFrameCanvas" width="360" height="640"></canvas>
+                          <div id="videoOpsPromptLayer" class="video-ops-prompt-layer"></div>
+                        </div>
+                        <div class="video-ops-kframe-controls">
+                          <div class="video-ops-form-grid">
+                            <label>帧号
+                              <input id="interactiveFrameIndex" type="number" min="0" step="1" value="0" />
+                            </label>
+                            <label>当前时间秒
+                              <input id="interactiveFrameTime" type="number" min="0" step="0.01" value="0" />
+                            </label>
+                            <label>Prompt 类型
+                              <select id="interactivePromptType">
+                                <option value="box">Box Prompt</option>
+                                <option value="point">Point Prompt</option>
+                              </select>
+                            </label>
+                            <label>点类型
+                              <select id="interactivePointLabel">
+                                <option value="positive">positive</option>
+                                <option value="negative">negative</option>
+                              </select>
+                            </label>
+                          </div>
+                          <input id="interactiveFrameSlider" class="remix-frame-slider" type="range" min="0" max="0" step="1" value="0" />
+                          <div class="video-ops-actions">
+                            <button id="captureCurrentFrameBtn" class="ghost" type="button">使用播放器当前帧</button>
+                            <button id="clearPromptBtn" class="ghost" type="button">清除点选/框选</button>
+                          </div>
+                          <div id="interactiveFramePreview" class="video-ops-kframe-preview empty" aria-live="polite">
+                            <div class="video-ops-section-head">
+                              <strong>已选 K 帧预览</strong>
+                              <span id="interactiveFramePreviewMeta">尚未选择帧</span>
+                            </div>
+                            <img id="interactiveFramePreviewImage" alt="已选 K 帧画面" hidden />
+                            <div id="interactiveFramePreviewEmpty" class="video-ops-kframe-empty">上传视频或填写可预览的视频 URL 后，拖动帧滑块、填写帧号，或点击「使用播放器当前帧」显示对应画面。</div>
+                          </div>
+                          <div class="video-ops-form-grid">
+                            <label>sample_fps
+                              <input id="interactiveSampleFps" type="number" min="0" max="10" step="0.1" value="1" />
+                            </label>
+                            <label>max_frames
+                              <input id="interactiveMaxFrames" type="number" min="1" max="1000" step="1" value="20" />
+                            </label>
+                            <label>removal_engine
+                              <select id="interactiveRemovalEngine">
+                                <option value="configured">configured</option>
+                                <option value="lama">lama</option>
+                                <option value="fallback_blur">fallback_blur</option>
+                              </select>
+                            </label>
+                            <label>mask_threshold
+                              <input id="interactiveMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                            </label>
+                          </div>
+                          <div id="interactivePromptSummary" class="wz-list empty-line">尚未点选或框选</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div id="manualMaskParams" class="video-ops-param-group" data-param-for="ai_remove_manual" hidden>
+                      <label>上传 mask 图片
+                        <input id="manualMaskFile" type="file" accept="image/png,image/jpeg,image/webp" />
+                      </label>
+                      <div id="manualMaskStatus" class="video-ops-file-status empty-line">未上传 mask</div>
+                      <div class="video-ops-form-grid">
+                        <label>start_ms
+                          <input id="manualStartMs" type="number" min="0" step="1" value="0" />
+                        </label>
+                        <label>end_ms
+                          <input id="manualEndMs" type="number" min="1" step="1" value="15000" />
+                        </label>
+                        <label>mask_threshold
+                          <input id="manualMaskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="maskEditParams" class="video-ops-param-group" data-param-for="mask_edit" hidden>
+                      <div class="video-ops-region-layout">
+                        <div id="videoOpsRegionBox" class="video-ops-region-box" aria-label="区域框选画布">
+                          <video id="videoOpsRegionVideo" muted playsinline preload="metadata"></video>
+                          <div id="videoOpsRegionOverlay" class="video-ops-region-overlay"></div>
+                        </div>
+                        <div>
+                          <div class="video-ops-actions">
+                            <button id="useCurrentRegionFrameBtn" class="ghost" type="button">同步当前视频帧</button>
+                            <button id="clearRegionBtn" class="ghost" type="button">清除区域</button>
+                          </div>
+                          <div id="regionSummary" class="wz-list empty-line">拖拽画面框选遮挡或模糊区域</div>
+                        </div>
+                      </div>
+                      <div class="video-ops-form-grid">
+                        <label>blur_sigma
+                          <input id="maskBlurSigma" type="number" min="0" max="200" step="1" value="40" />
+                        </label>
+                        <label>mask_threshold
+                          <input id="maskThreshold" type="number" min="0" max="255" step="1" value="1" />
+                        </label>
+                        <label>fill_color
+                          <input id="maskFillColor" type="color" value="#000000" />
+                        </label>
+                        <label>fill_opacity
+                          <input id="maskFillOpacity" type="number" min="0" max="1" step="0.05" value="1" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="endTrimParams" class="video-ops-param-group" data-param-for="end_trim_detection" hidden>
+                      <div class="video-ops-form-grid">
+                        <label>检测尾段秒数
+                          <input id="tailDetectSeconds" type="number" min="1" max="30" step="1" value="15" />
+                        </label>
+                        <label>review_threshold
+                          <input id="reviewThreshold" type="number" min="0" max="1" step="0.01" value="0.55" />
+                        </label>
+                        <label>trim_mode
+                          <select id="trimMode">
+                            <option value="fast">fast</option>
+                            <option value="precise">precise</option>
+                          </select>
+                        </label>
+                        <label>safe_trim_margin_ms
+                          <input id="safeTrimMarginMs" type="number" min="0" max="5000" step="50" value="300" />
+                        </label>
+                      </div>
+                      <label>导流关键词，一行一个
+                        <textarea id="competitorKeywords" rows="3" placeholder="download now&#10;install app"></textarea>
+                      </label>
+                      <label class="wz-check"><input id="allowReencode" type="checkbox" /> 允许重编码</label>
+                    </div>
+
+                    <div id="copyTranslateParams" class="video-ops-param-group" data-param-for="video_copy_translate" hidden>
+                      <div class="video-ops-form-grid">
+                        <label>target_language
+                          <input id="copyTargetLanguage" type="text" value="en" />
+                        </label>
+                        <label>source_mode
+                          <input id="copySourceMode" type="text" value="auto" />
+                        </label>
+                        <label>render_mode
+                          <input id="copyRenderMode" type="text" value="subtitle_band" />
+                        </label>
+                        <label>subtitle_roi_mode
+                          <input id="copySubtitleRoiMode" type="text" value="auto" />
+                        </label>
+                        <label>subtitle_removal_mode
+                          <input id="copySubtitleRemovalMode" type="text" value="band" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div id="languageRewriteParams" class="video-ops-param-group" data-param-for="language_rewrite" hidden>
+                      <label>target_language
+                        <input id="rewriteTargetLanguage" type="text" value="en" />
+                      </label>
+                    </div>
+
+                    <div id="materialAnalysisParams" class="video-ops-param-group" data-param-for="material_analysis" hidden>
+                      <label class="wz-check"><input id="materialUseLlm" type="checkbox" checked /> 使用 LLM 分析</label>
+                    </div>
+                  </section>
+
+                  <section class="video-ops-panel">
+                    <div class="video-ops-section-head">
+                      <strong>提交设置</strong>
+                      <span>创建后进入异步队列</span>
+                    </div>
+                    <label>优先级
+                      <input id="videoOpsPriority" type="number" min="0" max="10" step="1" value="0" />
+                    </label>
+                    <details class="video-ops-payload-preview">
+                      <summary>Payload 预览</summary>
+                      <pre id="videoOpsPayloadPreview">{}</pre>
+                    </details>
+                    <div id="videoOpsFormError" class="wz-warning" hidden></div>
+                    <div class="modal-actions wz-actions">
+                      <button id="videoOpsSubmitBtn" type="button">提交任务</button>
+                      <button id="videoOpsResetBtn" class="ghost" type="button">重置</button>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </div>
+
+            <div class="wz-col" data-step="3">
+              <div class="wz-col-label"><b>3</b> 队列与结果</div>
+              <section class="wz-node" id="remixNodeJob" data-node="job" data-port-in="1">
+                <div class="panel-head">
+                  <h2>任务状态</h2>
+                  <span id="videoOpsStatusBadge">未提交</span>
+                </div>
+                <div class="wz-node-body">
+                  <div id="videoOpsJobSummary" class="wz-list empty-line">暂无任务</div>
+                  <div class="video-ops-actions">
+                    <button id="videoOpsRefreshBtn" class="ghost" type="button" disabled>刷新状态</button>
+                    <button id="videoOpsResultBtn" class="ghost" type="button" disabled>读取结果</button>
+                    <button id="videoOpsDownloadBtn" class="ghost" type="button" disabled>下载输出</button>
+                    <button id="videoOpsCancelBtn" class="ghost" type="button" disabled>取消</button>
+                    <button id="videoOpsRetryBtn" class="ghost" type="button" disabled>重试</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="wz-node" id="remixNodeResult" data-node="result">
+                <div class="panel-head">
+                  <h2>结果与诊断</h2>
+                  <span id="videoOpsResultStatus">未读取</span>
+                </div>
+                <div class="wz-node-body">
+                  <div id="videoOpsResultBox" class="wz-list empty-line">任务成功后可读取 result、stage_timings、engine_trace。</div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="remixLoginModal" class="modal-backdrop login-backdrop" hidden>
+      <div class="modal-panel login-panel">
+        <h2>登录 Touka AI素材中台</h2>
+        <p>登录后可提交 video-content-ops 任务。</p>
+        <label>账号 <input id="wangzhuanLoginUsername" type="text" autocomplete="username" /></label>
+        <label>密码 <input id="wangzhuanLoginPassword" type="password" autocomplete="current-password" /></label>
+        <div class="login-status"></div>
+        <div class="modal-actions">
+          <button id="wangzhuanLoginBtn" type="button">登录</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/remix-canvas.js" defer></script>
+    <script src="/competitor-remix.js" type="module"></script>
+  </body>
+</html>

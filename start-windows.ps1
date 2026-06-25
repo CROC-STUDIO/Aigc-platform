@@ -6,6 +6,6 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   exit 1
 }
 Write-Host "Starting Seedance Ad Picture Web UI..."
-Write-Host "Open http://localhost:5177/ on this computer."
-Write-Host "LAN users can open http://YOUR-LAN-IP:5177/ after Windows Firewall allows Node.js."
+Write-Host "Open http://localhost:5182/ on this computer."
+Write-Host "LAN users can open http://YOUR-LAN-IP:5182/ after Windows Firewall allows Node.js."
 node server.mjs
