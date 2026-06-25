@@ -105,11 +105,13 @@ const els = {
   materialDirectionCustomWrap: $("#wzMaterialDirectionCustomWrap"),
   voiceoverStyle: $("#wzVoiceoverStyle"),
   disclaimerPreset: $("#wzDisclaimerPreset"),
+  disclaimerEnabled: $("#wzDisclaimerEnabled"),
   disclaimer: $("#wzDisclaimer"),
   disclaimerOverlayPosition: $("#wzDisclaimerOverlayPosition"),
   disclaimerOverlayFontSize: $("#wzDisclaimerOverlayFontSize"),
   disclaimerOverlayBoxHeight: $("#wzDisclaimerOverlayBoxHeight"),
-  disclaimerOverlayOpacity: $("#wzDisclaimerOverlayOpacity"),
+  disclaimerOverlayBottomMargin: $("#wzDisclaimerOverlayBottomMargin"),
+  disclaimerOverlayHorizontalMargin: $("#wzDisclaimerOverlayHorizontalMargin"),
   llmProvider: $("#wzLlmProvider"),
   llmModel: $("#wzLlmModel"),
   llmEndpoint: $("#wzLlmEndpoint"),
@@ -241,11 +243,13 @@ const branchFieldIds = {
   customPrompt: "wzCustomPrompt",
   negativePrompt: "wzNegativePrompt",
   disclaimerPreset: "wzDisclaimerPreset",
+  disclaimerEnabled: "wzDisclaimerEnabled",
   disclaimer: "wzDisclaimer",
   disclaimerOverlayPosition: "wzDisclaimerOverlayPosition",
   disclaimerOverlayFontSize: "wzDisclaimerOverlayFontSize",
   disclaimerOverlayBoxHeight: "wzDisclaimerOverlayBoxHeight",
-  disclaimerOverlayOpacity: "wzDisclaimerOverlayOpacity"
+  disclaimerOverlayBottomMargin: "wzDisclaimerOverlayBottomMargin",
+  disclaimerOverlayHorizontalMargin: "wzDisclaimerOverlayHorizontalMargin"
 };
 
 const DISCLAIMER_PRESETS = {
@@ -1270,11 +1274,14 @@ function applyDisclaimerPreset(options = {}) {
 
 function disclaimerRequestFields(node = primaryBranchNode()) {
   const presetSelect = branchField(node, "disclaimerPreset") || els.disclaimerPreset;
+  const enabledInput = branchField(node, "disclaimerEnabled") || els.disclaimerEnabled;
   const disclaimerInput = branchField(node, "disclaimer") || els.disclaimer;
   const overlayPositionInput = branchField(node, "disclaimerOverlayPosition") || els.disclaimerOverlayPosition;
   const overlayFontSizeInput = branchField(node, "disclaimerOverlayFontSize") || els.disclaimerOverlayFontSize;
   const overlayBoxHeightInput = branchField(node, "disclaimerOverlayBoxHeight") || els.disclaimerOverlayBoxHeight;
-  const overlayOpacityInput = branchField(node, "disclaimerOverlayOpacity") || els.disclaimerOverlayOpacity;
+  const overlayBottomMarginInput = branchField(node, "disclaimerOverlayBottomMargin") || els.disclaimerOverlayBottomMargin;
+  const overlayHorizontalMarginInput = branchField(node, "disclaimerOverlayHorizontalMargin") || els.disclaimerOverlayHorizontalMargin;
+  const enabled = enabledInput ? enabledInput.checked : true;
   const presetValue = presetSelect?.value || "auto";
   const presetKey = presetValue === "auto"
     ? disclaimerPresetForLanguage(fieldValue(node, "language") || fieldValue(node, "languages") || els.languages?.value || els.language?.value || "en-US")
@@ -1284,13 +1291,15 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
     ["en-US"]
   );
   const fallbackText = presetKey === "other" ? "" : (DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en);
-  const disclaimerText = disclaimerInput?.value.trim() || fallbackText;
+  const disclaimerText = enabled ? (disclaimerInput?.value.trim() || fallbackText) : "";
   const overlayPosition = overlayPositionInput?.value || "bottom_center";
-  const overlayFontSize = Number(overlayFontSizeInput?.value || 26);
-  const overlayBoxHeight = Number(overlayBoxHeightInput?.value || 170);
-  const overlayOpacity = Number(overlayOpacityInput?.value || 0.58);
+  const overlayFontSize = Number(overlayFontSizeInput?.value || 22);
+  const overlayBoxHeight = Number(overlayBoxHeightInput?.value || 88);
+  const overlayBottomMargin = Number(overlayBottomMarginInput?.value || 64);
+  const overlayHorizontalMargin = Number(overlayHorizontalMarginInput?.value || 80);
   return {
     disclaimer: disclaimerText,
+    disclaimerEnabled: enabled,
     disclaimerPresetId: presetValue,
     disclaimerPreset: presetValue,
     disclaimerLanguage: presetKey,
@@ -1301,10 +1310,12 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
         : (DISCLAIMER_PRESETS[presetValue === "auto" ? disclaimerPresetForLanguage(language) : presetKey] || disclaimerText)
     ])),
     disclaimerOverlay: {
+      enabled,
       position: overlayPosition,
-      fontSize: Number.isFinite(overlayFontSize) ? overlayFontSize : 26,
-      boxHeight: Number.isFinite(overlayBoxHeight) ? overlayBoxHeight : 170,
-      opacity: Number.isFinite(overlayOpacity) ? overlayOpacity : 0.58
+      fontSize: Number.isFinite(overlayFontSize) ? overlayFontSize : 22,
+      boxHeight: Number.isFinite(overlayBoxHeight) ? overlayBoxHeight : 88,
+      bottomMargin: Number.isFinite(overlayBottomMargin) ? overlayBottomMargin : 64,
+      horizontalMargin: Number.isFinite(overlayHorizontalMargin) ? overlayHorizontalMargin : 80
     }
   };
 }
@@ -1490,6 +1501,10 @@ function fieldValue(node, field) {
 function setFieldValue(node, field, value) {
   const input = branchField(node, field);
   if (!input || value === undefined || value === null) return;
+  if (input.type === "checkbox") {
+    input.checked = value === true || value === "true" || value === "1";
+    return;
+  }
   input.value = Array.isArray(value) ? value.join(",") : String(value);
 }
 
@@ -1678,6 +1693,24 @@ function applyAssetReviewResultToInputs(branches = []) {
   }
 }
 
+function isApprovedAssetReview(review = {}) {
+  return normalizeAssetReviewStatus(review.status) === "approved" && Boolean(String(review.assetId || "").trim());
+}
+
+function hasConfirmedAssetReviews() {
+  const batch = state.batchDetail?.batch || {};
+  if (batch.assetReviewConfirmedAt || batch.request?.assetReviewConfirmed) return true;
+  const branches = Array.isArray(batch.branchDrafts) ? batch.branchDrafts : [];
+  const reviewedEntries = [];
+  for (const branch of branches) {
+    for (const [assetKey] of assetInputKeys) {
+      if (!branch.assetUrls?.[assetKey] && !branch.assetStorageKeys?.[assetKey] && !branch.assetStoredPaths?.[assetKey]) continue;
+      reviewedEntries.push(branch.assetReviews?.[assetKey]);
+    }
+  }
+  return reviewedEntries.length > 0 && reviewedEntries.every(isApprovedAssetReview);
+}
+
 function buildAssetReviewFailureMessage(error) {
   const failures = Array.isArray(error?.data?.failures) ? error.data.failures : [];
   if (!failures.length) return error?.message || "产品素材审核未通过";
@@ -1737,6 +1770,33 @@ async function uploadSeedanceAssetsForReview() {
     renderError(els.globalError, error, "Seedance 素材上传失败");
   } finally {
     setBusy(els.confirmPlanBtn, false);
+  }
+}
+
+async function confirmSeedanceAssetReviews() {
+  const batchId = state.batchDetail?.batch?.batchId;
+  if (!batchId || isUpstreamWorkflowLocked()) return;
+  clearError(els.globalError);
+  const button = els.planBox?.querySelector("[data-action=\"confirm-seedance-assets\"]");
+  setBusy(button, true, "确认中");
+  try {
+    const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/confirm-assets`, {
+      method: "POST",
+      body: JSON.stringify({ branchDrafts: collectBranchDrafts() })
+    });
+    applyAssetReviewResultToInputs(data.branches || data.batch?.branchDrafts || []);
+    state.batchDetail = data.batch ? { ...state.batchDetail, batch: data.batch } : await loadBatchDetail();
+    renderEstimate();
+    renderBatch();
+    showToast("Seedance 素材审核结果已确认", { type: "success" });
+  } catch (error) {
+    if (error?.code === "asset_review_pending") {
+      applyAssetReviewFailureFromError(error);
+      return;
+    }
+    renderError(els.globalError, error, "确认审核结果失败");
+  } finally {
+    setBusy(button, false);
   }
 }
 
@@ -1865,9 +1925,11 @@ function branchDraftToTemplateShape(branch, index = 0) {
     customPrompt: branch.customPrompt || "",
     negativePrompt: branch.negativePrompt || "",
     disclaimer: branch.disclaimer,
+    disclaimerEnabled: branch.disclaimerEnabled,
     disclaimerPreset: branch.disclaimerPreset,
     disclaimerLanguage: branch.disclaimerLanguage,
     disclaimerByLanguage: branch.disclaimerByLanguage,
+    disclaimerOverlay: branch.disclaimerOverlay,
     truthRules: branch.truthRules || {}
   };
 }
@@ -1994,11 +2056,13 @@ function fillBranchDraft(node, draft = {}, index = 0) {
   setFieldValue(node, "customPrompt", draft.customPrompt);
   setFieldValue(node, "negativePrompt", draft.negativePrompt);
   setFieldValue(node, "disclaimerPreset", draft.disclaimerPreset || draft.disclaimerPresetId || "auto");
+  setFieldValue(node, "disclaimerEnabled", draft.disclaimerEnabled === false || draft.disclaimerOverlay?.enabled === false ? "false" : "true");
   setFieldValue(node, "disclaimer", draft.disclaimer || "");
   setFieldValue(node, "disclaimerOverlayPosition", draft.disclaimerOverlay?.position || "bottom_center");
-  setFieldValue(node, "disclaimerOverlayFontSize", String(draft.disclaimerOverlay?.fontSize ?? 26));
-  setFieldValue(node, "disclaimerOverlayBoxHeight", String(draft.disclaimerOverlay?.boxHeight ?? 170));
-  setFieldValue(node, "disclaimerOverlayOpacity", String(draft.disclaimerOverlay?.opacity ?? 0.58));
+  setFieldValue(node, "disclaimerOverlayFontSize", String(draft.disclaimerOverlay?.fontSize ?? 22));
+  setFieldValue(node, "disclaimerOverlayBoxHeight", String(draft.disclaimerOverlay?.boxHeight ?? 88));
+  setFieldValue(node, "disclaimerOverlayBottomMargin", String(draft.disclaimerOverlay?.bottomMargin ?? 64));
+  setFieldValue(node, "disclaimerOverlayHorizontalMargin", String(draft.disclaimerOverlay?.horizontalMargin ?? 80));
   syncMaterialDirectionForNode(node);
   for (const [assetKey, field] of assetInputKeys) {
     const input = branchField(node, field);
@@ -2172,11 +2236,13 @@ function applyTemplate(template) {
   if (els.disclaimerPreset) {
     els.disclaimerPreset.value = draft.disclaimerPreset || draft.disclaimerLanguage || "auto";
   }
+  if (els.disclaimerEnabled) els.disclaimerEnabled.checked = draft.disclaimerEnabled !== false && draft.disclaimerOverlay?.enabled !== false;
   setOptionalValue(els.disclaimer, draft.disclaimer || "");
   if (els.disclaimerOverlayPosition) els.disclaimerOverlayPosition.value = draft.disclaimerOverlay?.position || "bottom_center";
-  if (els.disclaimerOverlayFontSize) els.disclaimerOverlayFontSize.value = String(draft.disclaimerOverlay?.fontSize ?? 26);
-  if (els.disclaimerOverlayBoxHeight) els.disclaimerOverlayBoxHeight.value = String(draft.disclaimerOverlay?.boxHeight ?? 170);
-  if (els.disclaimerOverlayOpacity) els.disclaimerOverlayOpacity.value = String(draft.disclaimerOverlay?.opacity ?? 0.58);
+  if (els.disclaimerOverlayFontSize) els.disclaimerOverlayFontSize.value = String(draft.disclaimerOverlay?.fontSize ?? 22);
+  if (els.disclaimerOverlayBoxHeight) els.disclaimerOverlayBoxHeight.value = String(draft.disclaimerOverlay?.boxHeight ?? 88);
+  if (els.disclaimerOverlayBottomMargin) els.disclaimerOverlayBottomMargin.value = String(draft.disclaimerOverlay?.bottomMargin ?? 64);
+  if (els.disclaimerOverlayHorizontalMargin) els.disclaimerOverlayHorizontalMargin.value = String(draft.disclaimerOverlay?.horizontalMargin ?? 80);
   applyDisclaimerPreset({ force: !draft.disclaimer && els.disclaimerPreset?.value !== "other" });
   for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
     input.value = draft.truthRules?.[input.dataset.truthField] || "";
@@ -2645,15 +2711,19 @@ function renderReferenceCanvasGrid(entries = [], { showReviewMeta = false } = {}
 
 function renderEstimateReferencePreview() {
   const entries = collectEstimateReferenceEntries();
+  const confirmed = hasConfirmedAssetReviews();
   return `
     <div class="wz-plan-reference-panel wz-estimate-reference-panel">
       <div class="wz-plan-reference-toolbar">
         <div class="wz-plan-reference-head">Seedance 参考素材顺序确认</div>
         <button type="button" class="mini" data-action="upload-seedance-assets"${isUpstreamWorkflowLocked() ? " disabled" : ""}>上传 Seedance 素材并审核</button>
+        ${entries.length
+          ? `<button type="button" class="mini" data-action="confirm-seedance-assets"${isUpstreamWorkflowLocked() || confirmed ? " disabled" : ""}>${confirmed ? "审核结果已确认" : "确认审核结果"}</button>`
+          : ""}
       </div>
       ${renderReferenceCanvasGrid(entries, { showReviewMeta: true })}
       ${entries.length
-        ? `<div class="wz-plan-reference-empty">缩略图按 5 列排列，超过 5 个自动换到第二行；确认预案并生成视频前需完成审核并获得 assetId。</div>`
+        ? `<div class="wz-plan-reference-empty">缩略图按 5 列排列，超过 5 个自动换到第二行；先确认审核结果拿到 assetId，再确认预案并生成视频。</div>`
         : `<div class="wz-plan-reference-empty">尚未上传参考素材；可先上传并审核，未上传时不走素材审核与参考图映射。</div>`}
     </div>
   `;
@@ -3090,7 +3160,7 @@ function branchNodeFromEvent(event) {
   return event.target instanceof Element ? event.target.closest(".wz-node-branch") : null;
 }
 
-function estimateRequest() {
+function estimateRequest(draft = draftFromForm()) {
   const template = state.selectedTemplate;
   const node = primaryBranchNode();
   const languages = splitMultiValue(
@@ -3109,6 +3179,15 @@ function estimateRequest() {
     ["US"]
   );
   const disclaimerFields = disclaimerRequestFields();
+  const targetChannel = draft.targetChannels?.[0]
+    || fieldValue(node, "targetChannel")
+    || els.targetChannel.value
+    || "meta_ads";
+  const promiseLevel = draft.promiseLevel
+    || fieldValue(node, "promiseLevel")
+    || els.promiseLevel.value
+    || "stable";
+  const branches = draft.branches || collectBranchDrafts();
   return {
     templateId: template?.templateId,
     versionId: template?.versionId,
@@ -3118,20 +3197,20 @@ function estimateRequest() {
     model: els.modelSelect.value,
     seedanceModel: els.seedanceModel.value.trim(),
     referenceVideoId: state.referenceVideo?.referenceVideoId,
-    targetChannel: els.targetChannel.value,
+    targetChannel,
     targetRegion: targetRegions[0] || "US",
     targetRegions,
     language: languages[0] || "en-US",
     languages,
-    promiseLevel: els.promiseLevel.value,
+    promiseLevel,
     durationSec: Number(els.duration.value),
     variantCount: Number(els.variantCount.value),
     requestedConcurrency: Number(els.concurrency.value),
     outputRatio: els.outputRatio?.value || "9:16",
-    branches: collectBranchDrafts(),
+    branches,
     templateSnapshot: {
       versionId: template?.versionId,
-      draft: draftFromForm()
+      draft
     },
     llmConfig: {
       provider: els.llmProvider.value.trim(),
@@ -3222,18 +3301,20 @@ async function estimateBatch() {
     focusRewriteStep();
     return;
   }
+  const draft = draftFromForm();
+  if (showBranchDraftValidationError(resolveBranchDraftValidationError())) return;
   setBusy(els.estimateBtn, true, "估算中");
   try {
     await saveDraftBatch({
       status: "checking",
       sourceStep: "estimate",
-      templateSnapshot: { draft: draftFromForm() },
-      branches: collectBranchDrafts(),
+      templateSnapshot: { draft },
+      branches: draft.branches || [],
       decomposition: state.decomposition
     });
     const data = await apiEnvelope("/api/wangzhuan/batches/estimate", {
       method: "POST",
-      body: JSON.stringify(estimateRequest())
+      body: JSON.stringify(estimateRequest(draft))
     });
     state.estimate = data;
     state.estimate.requestSignature = estimateRequestSignature();
@@ -3372,7 +3453,9 @@ async function confirmPlanBatch() {
       branches: collectBranchDrafts(),
       decomposition: state.decomposition
     });
-    const data = await confirmBatchPlanRequest(batchId, collectEditablePlans(), "", collectBranchDrafts());
+    const data = await confirmBatchPlanRequest(batchId, collectEditablePlans(), "", collectBranchDrafts(), {
+      assetReviewConfirmed: hasConfirmedAssetReviews()
+    });
     if (data.batch?.batchId) {
       state.batchDetail = await loadBatchDetail();
     } else {
@@ -3673,6 +3756,9 @@ function bindEvents() {
   els.estimateBox?.addEventListener("click", (event) => {
     if (event.target.closest("[data-action=upload-seedance-assets]")) {
       uploadSeedanceAssetsForReview().catch((error) => renderError(els.globalError, error, "Seedance 素材上传失败"));
+    }
+    if (event.target.closest("[data-action=confirm-seedance-assets]")) {
+      confirmSeedanceAssetReviews().catch((error) => renderError(els.globalError, error, "确认审核结果失败"));
     }
   });
   els.confirmLimits.addEventListener("change", renderEstimate);

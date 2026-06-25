@@ -1,6 +1,8 @@
 services:
   mysql:
-    image: mysql:8.4.6
+    image: mysql:8.0
+    container_name: aigc-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${AIGC_MYSQL_ROOT_PASSWORD:-aigc_root_dev_only}
       MYSQL_DATABASE: ${AIGC_MYSQL_DATABASE:-aigc_platform}
@@ -12,62 +14,45 @@ services:
       - --collation-server=utf8mb4_unicode_ci
       - --default-time-zone=+00:00
     ports:
-      - "${AIGC_MYSQL_HOST_PORT:-3306}:3306"
+      - "127.0.0.1:${AIGC_MYSQL_HOST_PORT:-3307}:3306"
     volumes:
-      - aigc_mysql_data:/var/lib/mysql
-      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+      - ./mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    restart: unless-stopped
 
-  aigc-platform:
+  app:
     build:
       context: .
-    image: touka-aigc-platform:local
+      dockerfile: ./Dockerfile
+    image: ad-picture-web-codex-app
+    container_name: aigc-app
+    restart: unless-stopped
     depends_on:
       mysql:
         condition: service_healthy
+    env_file:
+      - ./.env
     ports:
-      - "${AIGC_HOST_PORT:-5182}:5182"
+      - "${AIGC_HOST_PORT:-8000}:8000"
     environment:
       HOST: 0.0.0.0
-      PORT: 5182
+      PORT: 8000
       AIGC_DB_HOST: mysql
       AIGC_DB_PORT: 3306
       AIGC_DB_NAME: ${AIGC_MYSQL_DATABASE:-aigc_platform}
       AIGC_DB_USER: ${AIGC_MYSQL_USER:-aigc_app}
       AIGC_DB_PASSWORD: ${AIGC_MYSQL_PASSWORD:-aigc_app_dev_only}
-      AIGC_PROJECT_ROOT: /data/project-data/PROJECT_ROOT_P
-      AIGC_CONFIG_PATH: /data/state/config.json
-      AIGC_USERS_PATH: /data/state/users.json
-      VIDEO_AIGC_API_KEY: ${VIDEO_AIGC_API_KEY:-}
-      WANGZHUAN_SEEDANCE_ENDPOINT: ${WANGZHUAN_SEEDANCE_ENDPOINT:-https://skylink-gateway.com/api/v1}
-      WANGZHUAN_SEEDANCE_MODEL: ${WANGZHUAN_SEEDANCE_MODEL:-dreamina-seedance-2-0-260128}
-      WANGZHUAN_LLM_API_KEY: ${WANGZHUAN_LLM_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_KEY: ${OPENAI_KEY:-}
-      REVERSE_PROMPT_API_KEY: ${REVERSE_PROMPT_API_KEY:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-southeast-1}
-      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.ap-southeast-1.amazonaws.com}
-      S3_PREFIX: ${S3_PREFIX:-uploads}
-      S3_ACL: ${S3_ACL:-}
-      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
-      API_PREFIX: ${API_PREFIX:-/api}
-      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+      AIGC_CONFIG_PATH: /data/app/config.json
+      AIGC_USERS_PATH: /data/users/users.json
+      AIGC_PROJECT_ROOT: /data/project-data
+      AIGC_SESSION_COOKIE_NAME: ${AIGC_SESSION_COOKIE_NAME:-ad_session_codex}
+      AIGC_PROJECT_ROOT_COOKIE_NAME: ${AIGC_PROJECT_ROOT_COOKIE_NAME:-ad_project_root_codex}
+      TAI_ENTRY: /usr/local/lib/node_modules/tai-ai/dist/tai.min.js
     volumes:
-      - ../project-data:/data/project-data
-      - aigc_state:/data/state
-    restart: unless-stopped
-
-volumes:
-  aigc_state:
-  aigc_mysql_data:
+      - ./config.json:/data/app/config.json:ro
+      - /opt/ad-picture-web/users.json:/data/users/users.json:ro
+      - /opt/ad-picture-web-data/cwz:/data/project-data

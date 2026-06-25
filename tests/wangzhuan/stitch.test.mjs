@@ -177,10 +177,12 @@ test("stitch overlays disclaimer on final 30s output only", async () => {
         ...baseDraft,
         disclaimer: "Rewards vary by user eligibility and regional availability.",
         disclaimerOverlay: {
+          enabled: true,
           position: "bottom_left",
           fontSize: 24,
           boxHeight: 156,
-          opacity: 0.66
+          bottomMargin: 72,
+          horizontalMargin: 48
         }
       }
     });
@@ -197,7 +199,8 @@ test("stitch overlays disclaimer on final 30s output only", async () => {
     assert.equal(stitched.disclaimerOverlay?.position, "bottom_left");
     assert.equal(stitched.disclaimerOverlay?.fontSize, 24);
     assert.equal(stitched.disclaimerOverlay?.boxHeight, 156);
-    assert.equal(stitched.disclaimerOverlay?.opacity, 0.66);
+    assert.equal(stitched.disclaimerOverlay?.bottomMargin, 72);
+    assert.equal(stitched.disclaimerOverlay?.horizontalMargin, 48);
 
     const report = JSON.parse(await readFile(join(ctx.userProjectRoot, stitched.stitchReportPath), "utf8"));
     assert.equal(report.disclaimerOverlay?.applied, true);

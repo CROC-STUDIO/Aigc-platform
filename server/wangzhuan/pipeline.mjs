@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { normalizeBranchDrafts } from "./branches.mjs";
-import { ensureAssetReviewsApproved } from "./asset-review.mjs";
+import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
@@ -878,10 +878,15 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
   if (unknownPlanIds.length) {
     throw new WangzhuanError("validation_error", "存在未知预案编号", { batchId, unknownPlanIds });
   }
-  const branchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
-    ? request.branchDrafts
-    : batch.branchDrafts || batch.request?.branches || [];
-  const review = await ensureAssetReviewsApproved(context, branchSource);
+  const assetReviewAlreadyConfirmed = Boolean(request.assetReviewConfirmed && (batch.assetReviewConfirmedAt || batch.request?.assetReviewConfirmed));
+  const branchSource = assetReviewAlreadyConfirmed
+    ? batch.branchDrafts || batch.request?.branches || []
+    : Array.isArray(request.branchDrafts) && request.branchDrafts.length
+      ? request.branchDrafts
+      : batch.branchDrafts || batch.request?.branches || [];
+  const review = assetReviewAlreadyConfirmed
+    ? { branches: branchSource, reviewResult: validateAssetReviewState(branchSource) }
+    : await ensureAssetReviewsApproved(context, branchSource);
   const reviewResult = review.reviewResult;
   if (!reviewResult.ok) {
     throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请上传 Seedance 素材并完成审核后再确认生成", {
@@ -927,6 +932,43 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     idempotencyKey: request.idempotencyKey
   }, { audit: true });
   return { batch: saved, confirmedPlanIds: [...confirmedPlanIds] };
+}
+
+export async function confirmBatchAssets(context, batchId, request = {}) {
+  const batch = await readBatch(context, batchId);
+  if (batch.status !== "preview_required") {
+    throw new WangzhuanError("validation_error", "当前批次不在预案确认阶段，无法确认 Seedance 素材审核结果", {
+      batchId,
+      status: batch.status
+    });
+  }
+  const branchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
+    ? request.branchDrafts
+    : batch.branchDrafts || batch.request?.branches || [];
+  const review = await ensureAssetReviewsApproved(context, branchSource);
+  if (!review.reviewResult.ok) {
+    throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请等待审核通过后再确认结果", {
+      failures: review.reviewResult.failures,
+      assetsByBranch: review.reviewResult.assetsByBranch
+    });
+  }
+  const saved = await writeBatchWithTrigger(context, {
+    ...batch,
+    branchDrafts: review.branches,
+    request: {
+      ...(batch.request || {}),
+      branches: review.branches,
+      branchDrafts: review.branches,
+      assetReviewConfirmed: true
+    },
+    assetReviewConfirmedAt: new Date().toISOString(),
+    assetReviewConfirmedBy: currentUserId(context)
+  }, "seedance_assets_confirmed");
+  return {
+    batch: saved,
+    branches: review.branches,
+    reviewResult: review.reviewResult
+  };
 }
 
 function cleanConfirmationNotes(value) {

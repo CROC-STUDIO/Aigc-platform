@@ -12,6 +12,7 @@ import {
   resolvePlanLocaleContext
 } from "../../server/wangzhuan/plan-preview.mjs";
 import {
+  confirmBatchAssets,
   confirmBatchPlan,
   getBatchDetail,
   submitPendingGenerationTasks
@@ -391,6 +392,58 @@ test("confirm-plan promotes preview tasks and submits Seedance only after confir
 
     const prompt = await readFile(join(ctx.userProjectRoot, submitted.batch.tasks[0].promptPath), "utf8");
     assert.match(prompt, /^Seedance prompt 1/);
+  } finally {
+    await resetFactsPool();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("confirm-assets refreshes reviews once and confirm-plan can reuse confirmed asset ids", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-plan-confirm-assets-"));
+  let reviewCalls = 0;
+  try {
+    const draft = {
+      ...baseDraft,
+      assetStorageKeys: {
+        productIcon: "uploads/test/productIcon.png"
+      },
+      assetReviews: {
+        productIcon: { assetId: "asset_pending_icon", status: "pending" }
+      }
+    };
+    const { ctx, estimated } = await fixture(root, {
+      variantCount: 1,
+      draft,
+      context: {
+        getProductAssetReview: async () => {
+          reviewCalls += 1;
+          return { assetId: "asset_confirmed_icon", status: "approved" };
+        }
+      }
+    });
+    const planned = await prepareBatchPlanFromEstimate(ctx, {
+      idempotencyKey: "idem_plan_confirm_assets",
+      estimateId: estimated.estimate.estimateId
+    });
+
+    const confirmedAssets = await confirmBatchAssets(ctx, planned.batch.batchId, {
+      branchDrafts: planned.batch.branchDrafts || []
+    });
+
+    assert.equal(reviewCalls, 1);
+    assert.equal(confirmedAssets.batch.assetReviewConfirmedBy, "alice");
+    assert.equal(confirmedAssets.branches[0].assetReviews.productIcon.assetId, "asset_confirmed_icon");
+    assert.equal(confirmedAssets.branches[0].assetReviews.productIcon.status, "approved");
+
+    const confirmed = await confirmBatchPlan(ctx, planned.batch.batchId, {
+      idempotencyKey: "idem_confirm_after_assets",
+      confirmedPlanIds: planned.plans.map((plan) => plan.planId),
+      assetReviewConfirmed: true
+    });
+
+    assert.equal(reviewCalls, 1);
+    assert.equal(confirmed.batch.status, "queued");
+    assert.equal(confirmed.batch.branchDrafts[0].assetReviews.productIcon.assetId, "asset_confirmed_icon");
   } finally {
     await resetFactsPool();
     await rm(root, { recursive: true, force: true });

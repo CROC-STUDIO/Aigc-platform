@@ -7,7 +7,7 @@ import { makeRequestId } from "./ids.mjs";
 import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
-import { confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
+import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
 import { uploadProductAsset } from "./product-assets.mjs";
 import { runBatchQc } from "./qc.mjs";
 import { detectRemixRegions } from "./remix-detection.mjs";
@@ -57,7 +57,7 @@ function queryObject(url) {
 }
 
 function batchRoute(pathname) {
-  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch|qc|confirm-plan))?$/);
+  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch|qc|confirm-plan|confirm-assets))?$/);
   if (!match) return null;
   return { batchId: match[1], action: match[2] || "detail" };
 }
@@ -218,6 +218,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       const submitted = await submitPendingGenerationTasks(scoped, batch.batchId);
       const polled = await pollUpstreamBatch(scoped, batch.batchId);
       return sendOk(res, { ...submitted, batch: polled.batch, confirmedBatch: confirmed.batch }, requestId);
+    }
+    if (batch && req.method === "POST" && batch.action === "confirm-assets") {
+      return sendOk(res, await confirmBatchAssets(scoped, batch.batchId, await context.readJson(req)), requestId);
     }
     const remix = remixRoute(url.pathname);
     if (remix && req.method === "GET" && remix.action === "detail") {

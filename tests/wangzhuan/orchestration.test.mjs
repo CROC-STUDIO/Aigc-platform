@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { estimateBatch, startBatchFromEstimate } from "../../server/wangzhuan/estimates.mjs";
 import { getBatchDetail, submitPendingGenerationTasks } from "../../server/wangzhuan/pipeline.mjs";
@@ -16,6 +18,17 @@ import { attachMockObjectStorage } from "./object-storage-fixture.mjs";
 import { testSeedanceProviderClient } from "./test-providers.mjs";
 
 let activePool = null;
+const execFileAsync = promisify(execFile);
+
+async function probeDurationSec(filePath) {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1",
+    filePath
+  ], { windowsHide: true });
+  return Number(stdout.trim());
+}
 
 function ensureFactsPool() {
   if (!activePool) {
@@ -59,7 +72,7 @@ function context(root, overrides = {}) {
     user: { userId: "alice", username: "alice", role: "user", isAdmin: false },
     mockReferenceProbe: true,
     config: {},
-    seedanceProviderClient: testSeedanceProviderClient(),
+    seedanceProviderClient: testSeedanceProviderClient({ durationSec: 1 }),
     capabilities: { stitcher: { status: "available", provider: "ffmpeg", version: "test" } },
     ...overrides
   };
@@ -149,9 +162,20 @@ test("upstream poll overlays disclaimer on final 15s segment outputs", async () 
   const root = await mkdtemp(join(tmpdir(), "wz-orchestration-15-disclaimer-"));
   try {
     const { ctx, started } = await startedBatch(root, 15, {
+      context: {
+        seedanceProviderClient: testSeedanceProviderClient({ durationSec: 15 })
+      },
       draft: {
         ...baseDraft,
-        disclaimer: "Final reward details depend on in-app rules and task completion."
+        disclaimer: "Final reward details depend on in-app rules and task completion.",
+        disclaimerOverlay: {
+          enabled: true,
+          position: "bottom_center",
+          fontSize: 22,
+          boxHeight: 88,
+          bottomMargin: 64,
+          horizontalMargin: 80
+        }
       }
     });
     const polled = await pollUpstreamBatch(ctx, started.batch.batchId);
@@ -161,6 +185,10 @@ test("upstream poll overlays disclaimer on final 15s segment outputs", async () 
     assert.equal(polled.batch.outputs[0].kind, "segment_video");
     assert.equal(polled.batch.outputs[0].disclaimerOverlay?.applied, true);
     assert.match(polled.batch.outputs[0].disclaimerOverlay?.text || "", /task completion/);
+    assert.equal(polled.batch.outputs[0].disclaimerOverlay?.bottomMargin, 64);
+    assert.equal(polled.batch.outputs[0].disclaimerOverlay?.horizontalMargin, 80);
+    const durationSec = await probeDurationSec(join(ctx.userProjectRoot, polled.batch.outputs[0].filePath));
+    assert.ok(durationSec >= 14.5 && durationSec <= 15.5, `expected 15s output, got ${durationSec}s`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

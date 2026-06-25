@@ -278,16 +278,20 @@ export async function estimateBatch(context, request = {}) {
     : buildDisclaimerByLanguage(normalized.languages, disclaimerPresetId);
   const disclaimerOverlay = request.disclaimerOverlay && typeof request.disclaimerOverlay === "object"
     ? {
+      enabled: request.disclaimerOverlay.enabled !== false,
       position: String(request.disclaimerOverlay.position || "bottom_center"),
-      fontSize: Number(request.disclaimerOverlay.fontSize || 26),
-      boxHeight: Number(request.disclaimerOverlay.boxHeight || 170),
-      opacity: Number(request.disclaimerOverlay.opacity || 0.58)
+      fontSize: Number(request.disclaimerOverlay.fontSize || 22),
+      boxHeight: Number(request.disclaimerOverlay.boxHeight || 88),
+      bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 64),
+      horizontalMargin: Number(request.disclaimerOverlay.horizontalMargin || 80)
     }
     : {
+      enabled: true,
       position: "bottom_center",
-      fontSize: 26,
-      boxHeight: 170,
-      opacity: 0.58
+      fontSize: 22,
+      boxHeight: 88,
+      bottomMargin: 64,
+      horizontalMargin: 80
     };
   const normalizedRequest = {
     templateId: request.templateId,
@@ -304,6 +308,7 @@ export async function estimateBatch(context, request = {}) {
     requestedConcurrency: normalized.requestedConcurrency,
     outputRatio: request.outputRatio,
     disclaimer,
+    disclaimerEnabled: request.disclaimerEnabled !== false && disclaimerOverlay.enabled !== false,
     disclaimerPresetId,
     disclaimerPreset: disclaimerPresetId,
     disclaimerLanguage,

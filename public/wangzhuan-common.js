@@ -876,7 +876,7 @@ export async function stopWorkflowTask(type, id, reason = "frontend_stop") {
   });
 }
 
-export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes = "", branchDrafts = []) {
+export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes = "", branchDrafts = [], options = {}) {
   return apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/confirm-plan`, {
     method: "POST",
     body: JSON.stringify({
@@ -897,6 +897,7 @@ export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes 
         complianceNotes: plan.complianceNotes
       })),
       branchDrafts: Array.isArray(branchDrafts) ? branchDrafts : [],
+      assetReviewConfirmed: Boolean(options.assetReviewConfirmed),
       confirmationNotes
     })
   });

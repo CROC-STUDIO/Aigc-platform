@@ -107,6 +107,12 @@ function pickDisclaimerFont() {
 function resolveDisclaimerOverlay(batch, branchDraft = null) {
   const request = batch?.request || batch?.estimate?.request || {};
   const draft = batch?.templateSnapshot?.draft || {};
+  const branchEnabled = branchDraft?.disclaimerEnabled ?? branchDraft?.disclaimerOverlay?.enabled;
+  const requestEnabled = request.disclaimerEnabled ?? request.disclaimerOverlay?.enabled;
+  const draftEnabled = draft.disclaimerEnabled ?? draft.disclaimerOverlay?.enabled;
+  if (branchEnabled === false || requestEnabled === false || draftEnabled === false) {
+    return { applied: false, text: "" };
+  }
   const text = firstNonEmptyString(
     branchDraft?.disclaimer,
     request.disclaimer,
@@ -119,9 +125,10 @@ function resolveDisclaimerOverlay(batch, branchDraft = null) {
     preset: firstNonEmptyString(branchDraft?.disclaimerPreset, request.disclaimerPreset, draft.disclaimerPreset),
     language: firstNonEmptyString(branchDraft?.disclaimerLanguage, request.disclaimerLanguage, draft.disclaimerLanguage),
     position: firstNonEmptyString(branchDraft?.disclaimerOverlay?.position, request.disclaimerOverlay?.position, draft.disclaimerOverlay?.position) || "bottom_center",
-    fontSize: Number(branchDraft?.disclaimerOverlay?.fontSize || request.disclaimerOverlay?.fontSize || draft.disclaimerOverlay?.fontSize || 26),
-    boxHeight: Number(branchDraft?.disclaimerOverlay?.boxHeight || request.disclaimerOverlay?.boxHeight || draft.disclaimerOverlay?.boxHeight || 170),
-    opacity: Number(branchDraft?.disclaimerOverlay?.opacity || request.disclaimerOverlay?.opacity || draft.disclaimerOverlay?.opacity || 0.58)
+    fontSize: Number(branchDraft?.disclaimerOverlay?.fontSize || request.disclaimerOverlay?.fontSize || draft.disclaimerOverlay?.fontSize || 22),
+    boxHeight: Number(branchDraft?.disclaimerOverlay?.boxHeight || request.disclaimerOverlay?.boxHeight || draft.disclaimerOverlay?.boxHeight || 88),
+    bottomMargin: Number(branchDraft?.disclaimerOverlay?.bottomMargin || request.disclaimerOverlay?.bottomMargin || draft.disclaimerOverlay?.bottomMargin || 64),
+    horizontalMargin: Number(branchDraft?.disclaimerOverlay?.horizontalMargin || request.disclaimerOverlay?.horizontalMargin || draft.disclaimerOverlay?.horizontalMargin || 80)
   };
 }
 
@@ -140,15 +147,16 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
     const imagePath = join(tmpDir, "disclaimer.png");
     const wrappedText = wrapDisclaimerText(overlay.text);
     await mkdir(dirname(targetPath), { recursive: true });
-    const boxHeight = Math.max(80, Number(overlay.boxHeight || 170));
-    const fontSize = Math.max(18, Number(overlay.fontSize || 26));
-    const opacity = Math.min(0.9, Math.max(0.2, Number(overlay.opacity || 0.58)));
+    const boxHeight = Math.max(56, Number(overlay.boxHeight || 88));
+    const fontSize = Math.max(18, Number(overlay.fontSize || 22));
+    const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 64));
+    const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 80));
     const alignLeft = overlay.position === "bottom_left";
     const fontFile = pickDisclaimerFont();
     const pythonScript = [
       "from PIL import Image, ImageDraw, ImageFont",
       "import sys",
-      "target, font_path, text, font_size, box_h, align_left = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), sys.argv[6] == '1'",
+      "target, font_path, text, font_size, box_h, margin_x, align_left = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), sys.argv[7] == '1'",
       "lines = text.split('\\n') if text else ['']",
       "font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()",
       "canvas = Image.new('RGBA', (720, box_h), (0, 0, 0, 0))",
@@ -165,7 +173,7 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
       "for idx, line in enumerate(lines):",
       "    width = line_widths[idx]",
       "    height = line_heights[idx]",
-      "    x = 24 if align_left else max(16, (720 - width) // 2)",
+      "    x = max(0, margin_x) if align_left else max(0, (720 - width) // 2)",
       "    draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))",
       "    y += height + line_gap",
       "canvas.save(target)"
@@ -178,18 +186,20 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
       wrappedText,
       String(fontSize),
       String(boxHeight),
+      String(horizontalMargin),
       alignLeft ? "1" : "0"
     ], {
       timeout: 30000,
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024
     });
-    const colorAlpha = opacity.toFixed(2);
     await execFileAsync("ffmpeg", [
       "-y",
       "-i", sourcePath,
+      "-loop", "1",
+      "-framerate", "30",
       "-i", imagePath,
-      "-filter_complex", `[0:v]drawbox=x=0:y=ih-${boxHeight}:w=iw:h=${boxHeight}:color=black@${colorAlpha}:t=fill[base];[base][1:v]overlay=0:H-h[vout]`,
+      "-filter_complex", `[0:v][1:v]overlay=x=0:y=H-h-${bottomMargin}:format=auto:shortest=1[vout]`,
       "-map", "[vout]",
       "-map", "0:a?",
       "-c:v", "libx264",
@@ -197,6 +207,7 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
       "-crf", "18",
       "-pix_fmt", "yuv420p",
       "-c:a", "copy",
+      "-shortest",
       "-movflags", "+faststart",
       targetPath
     ], {

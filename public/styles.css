@@ -4400,12 +4400,18 @@ button.mini {
   display: grid;
   gap: 6px;
   width: 100%;
+  height: auto;
+  min-height: 118px;
   padding: 12px;
   text-align: left;
   color: var(--text);
   border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.48);
+  box-shadow: none;
+  align-items: start;
+  align-content: start;
+  justify-items: start;
 }
 
 .video-ops-task-card:hover,
@@ -4424,8 +4430,18 @@ button.mini {
   line-height: 1.45;
 }
 
+.video-ops-task-card span,
+.video-ops-task-card small,
+.video-ops-task-card strong,
+.video-ops-task-card b {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .video-ops-task-card strong {
   font-size: 15px;
+  line-height: 1.35;
 }
 
 .video-ops-task-card b {
@@ -4539,6 +4555,39 @@ button.mini {
 .video-ops-kframe-controls {
   display: grid;
   gap: 12px;
+}
+
+.video-ops-kframe-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.3);
+}
+
+.video-ops-kframe-preview img {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: #020617;
+  object-fit: contain;
+}
+
+.video-ops-kframe-empty {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.24);
 }
 
 .video-ops-payload-preview pre,

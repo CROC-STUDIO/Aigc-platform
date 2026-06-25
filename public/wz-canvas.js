@@ -200,7 +200,8 @@
     wzDisclaimerOverlayPosition: "disclaimerOverlayPosition",
     wzDisclaimerOverlayFontSize: "disclaimerOverlayFontSize",
     wzDisclaimerOverlayBoxHeight: "disclaimerOverlayBoxHeight",
-    wzDisclaimerOverlayOpacity: "disclaimerOverlayOpacity"
+    wzDisclaimerOverlayBottomMargin: "disclaimerOverlayBottomMargin",
+    wzDisclaimerOverlayHorizontalMargin: "disclaimerOverlayHorizontalMargin"
   };
 
   function ensureBranchTemplateSaveUi(node) {

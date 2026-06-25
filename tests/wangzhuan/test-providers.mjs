@@ -6,23 +6,24 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export async function writeMinimalMp4(target) {
+export async function writeMinimalMp4(target, { durationSec = 1 } = {}) {
   await mkdir(dirname(target), { recursive: true });
+  const duration = String(Math.max(0.1, Number(durationSec) || 1));
   await execFileAsync("ffmpeg", [
     "-y",
     "-f", "lavfi",
-    "-i", "color=c=black:s=720x1280:d=1",
-    "-t", "1",
+    "-i", `color=c=black:s=720x1280:d=${duration}`,
+    "-t", duration,
     "-pix_fmt", "yuv420p",
     target
   ], { windowsHide: true });
 }
 
-export async function minimalMp4Buffer() {
+export async function minimalMp4Buffer(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "wz-mp4-"));
   const target = join(dir, "segment.mp4");
   try {
-    await writeMinimalMp4(target);
+    await writeMinimalMp4(target, options);
     return await readFile(target);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -50,7 +51,7 @@ export function testSeedanceProviderClient(options = {}) {
       };
     },
     async downloadVideo() {
-      if (!videoBuffer) videoBuffer = await minimalMp4Buffer();
+      if (!videoBuffer) videoBuffer = await minimalMp4Buffer({ durationSec: options.durationSec || 1 });
       return videoBuffer;
     }
   };

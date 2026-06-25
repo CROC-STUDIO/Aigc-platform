@@ -238,8 +238,163 @@ docker compose logs --tail=120 mysql
 
 检查：
 
+## 8. 候选发布模式验证结论
+
+本项目已经验证过两类服务器，结论不要混用：
+
+- 目录型部署：例如直接运行 `/opt/ad-picture-web/server.mjs`，配置和运行态文件就在宿主机目录里。
+- 容器型部署：例如 `docker compose` 运行 `aigc-platform` 和 `mysql`，应用实际工作目录在容器 `/app`，运行态文件在 volume。
+
+### 8.1 目录型部署的候选发布
+
+适用条件：
+
+- 现网服务直接从宿主机目录启动。
+- `config.json`、`users.json`、`.env`、项目根目录都由宿主机文件管理。
+
+可行做法：
+
+1. 备份现网目录。
+2. 新建候选目录，例如 `/opt/ad-picture-web-release-candidate`。
+3. 把要发布的代码复制到候选目录。
+4. 保留现网 `config.json`、`users.json`，必要时保留 `.env`。
+5. 新起独立 service 和独立端口。
+6. 先验候选服务，再决定是否切换现网。
+
+关键经验：
+
+- 目录型部署必须优先确认代码版本和当前运行契约一致。
+- 如果新代码依赖 MySQL、S3 或额外环境变量，只复制前端文件或 `server.mjs` 不够。
+- 候选服务必须和现网隔离 cookie、端口和写入目录，避免互相污染。
+
+### 8.2 容器型部署的候选发布
+
+适用条件：
+
+- 现网由 Docker / Docker Compose 运行。
+- 现网应用和 MySQL 已经在独立容器里。
+
+可行做法：
+
+1. 基于当前服务器真实部署方式创建候选镜像，不直接改正在运行的容器。
+2. 新起独立候选容器，例如映射 `5183 -> 5182`。
+3. 需要时新起独立候选 MySQL，而不是默认复用现有 MySQL。
+4. 候选容器只复用必要的只读挂载或显式声明的状态文件。
+5. 候选容器通过独立端口完成验收，再决定是否替换现网容器。
+
+关键经验：
+
+- 容器型部署优先验证镜像能否构建，再验证运行契约是否兼容。
+- 不要把目录型发布步骤直接套到容器型服务器上。
+- `8000`、`5182` 这类端口必须先确认归属，避免误碰其他项目。
+
+推荐模板：
+
+1. 复制候选代码到独立目录，例如 `/home/dev/Aigc-platform-rc`。
+2. 在候选目录内构建独立镜像，例如：
+
+```bash
+docker build -t touka-aigc-platform:rc .
+```
+
+3. 新起独立候选 MySQL，避免直接复用现网 MySQL：
+
+```bash
+docker run -d --name aigc-platform-rc-mysql \
+  --network aigc-platform_default \
+  -e MYSQL_ROOT_PASSWORD=***
+  -e MYSQL_DATABASE=aigc_platform
+  -e MYSQL_USER=aigc_app
+  -e MYSQL_PASSWORD=***
+  -v aigc_platform_rc_mysql_data:/var/lib/mysql \
+  -v /home/dev/Aigc-platform-rc/database/migrations:/docker-entrypoint-initdb.d:ro \
+  mysql:8.4.6
+```
+
+4. 新起独立候选应用容器，例如映射 `5183 -> 5182`：
+
+```bash
+docker run -d --name aigc-platform-rc \
+  --network aigc-platform_default \
+  -p 5183:5182 \
+  -e HOST=0.0.0.0 \
+  -e PORT=5182 \
+  -e AIGC_DB_HOST=aigc-platform-rc-mysql \
+  -e AIGC_DB_PORT=3306 \
+  -e AIGC_DB_NAME=aigc_platform \
+  -e AIGC_DB_USER=aigc_app \
+  -e AIGC_DB_PASSWORD=*** \
+  -e AIGC_PROJECT_ROOT=/data/project-data/PROJECT_ROOT_P \
+  -e AIGC_CONFIG_PATH=/data/state/config.json \
+  -e AIGC_USERS_PATH=/data/state/users.json \
+  --volumes-from aigc-platform-aigc-platform-1 \
+  touka-aigc-platform:rc
+```
+
+5. 验收候选容器：
+
+```bash
+docker ps
+docker logs --tail 120 aigc-platform-rc
+curl -I http://127.0.0.1:5183/
+```
+
+注意：
+
+- `--volumes-from` 只适合复用明确的只读状态目录或项目数据目录，不能默认当成完整兼容方案。
+- 如果候选代码明显老于现网运行契约，应先补兼容层，再谈候选验收。
+
+### 8.3 `origin/main` 兼容性验证结果
+
+已验证结论：
+
+- `origin/main` 可以被单独归档为候选目录。
+- 如果补齐 `package.json`、`package-lock.json`、`Dockerfile`、`.dockerignore`，可以构建候选镜像。
+- 但 `origin/main` 不能直接在当前新版容器环境里稳定运行，原因不是 Docker、端口或网络，而是代码运行契约过旧。
+
+实际暴露出的兼容性问题：
+
+- `origin/main` 没有当前新版的环境变量约定。
+- 老版 `server.mjs` 把 `users.json` 固定写到 `/app/users.json`。
+- 当前容器运行用户无权写镜像内 `/app/users.json`，会直接报：
+
+```text
+EACCES: permission denied, open '/app/users.json'
+```
+
+结论：
+
+- “独立候选实例”这个模式本身可行。
+- “直接拿过老的 main 代码塞进当前正式容器环境”不可行。
+- 正式环境要安全合并功能，前提是候选代码必须和当前部署模型兼容。
+
+### 8.4 正式环境推荐路径
+
+目标是：不影响现有功能情况下合并功能，并让用户正常使用。
+
+推荐顺序：
+
+1. 先识别正式环境是目录型还是容器型部署。
+2. 选择与正式环境部署模型一致的代码基线。
+3. 创建独立候选实例：
+   - 独立目录或独立镜像
+   - 独立端口
+   - 独立 cookie / session 命名
+   - 独立数据库或独立状态存储
+4. 完成候选验收：
+   - 首页可访问
+   - 登录可用
+   - 关键业务页初始化正常
+   - 关键接口返回符合预期
+5. 验收通过后再切换现网入口或替换现网容器。
+
+不推荐：
+
+- 直接覆盖现网目录。
+- 在未确认部署模型前套用别的服务器发布步骤。
+- 用明显落后于现网运行契约的老代码直接进正式环境验证。
+
 - 是否有正在运行的批次或改造任务锁。
 - `VIDEO_AIGC_API_KEY` 是否配置。
 - `WANGZHUAN_LLM_API_KEY` 或模型网关配置是否可用。
 - S3/CDN 是否能从服务端访问。
-

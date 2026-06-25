@@ -269,7 +269,11 @@
                             <label>Ending <input id="wzEnding" type="text" value="" placeholder="可选，留空不影响视频生成" /></label>
                             <label>Ending 素材 <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
                           </div>
-                          <label class="wz-field-label">免责声明模板
+                          <label class="wz-field-label">
+                            <input id="wzDisclaimerEnabled" type="checkbox" checked />
+                            添加承诺规则贴片
+                          </label>
+                          <label class="wz-field-label">承诺规则模板
                             <select id="wzDisclaimerPreset">
                               <option value="auto" selected>按语言自动选择</option>
                               <option value="en">英文</option>
@@ -277,9 +281,9 @@
                               <option value="zh">中文</option>
                               <option value="other">其他</option>
                             </select>
-                            <span class="wz-field-hint">免责声明只作为最终视频后处理贴片，不会写入 Seedance prompt 或 payload。</span>
+                            <span class="wz-field-hint">承诺规则只作为最终视频透明后处理贴片，不会写入 Seedance prompt 或 payload。</span>
                           </label>
-                          <label class="wz-field-label">免责声明
+                          <label class="wz-field-label">承诺规则
                             <textarea id="wzDisclaimer" class="wz-json-box compact" spellcheck="false">Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.</textarea>
                           </label>
                           <div class="wz-inline-form wz-disclaimer-overlay-form">
@@ -290,13 +294,16 @@
                               </select>
                             </label>
                             <label>字号
-                              <input id="wzDisclaimerOverlayFontSize" type="number" min="18" max="42" step="1" value="26" />
+                              <input id="wzDisclaimerOverlayFontSize" type="number" min="18" max="42" step="1" value="22" />
                             </label>
-                            <label>底条高度
-                              <input id="wzDisclaimerOverlayBoxHeight" type="number" min="80" max="260" step="2" value="170" />
+                            <label>贴片高度
+                              <input id="wzDisclaimerOverlayBoxHeight" type="number" min="56" max="220" step="2" value="88" />
                             </label>
-                            <label>底条透明度
-                              <input id="wzDisclaimerOverlayOpacity" type="number" min="0.2" max="0.9" step="0.05" value="0.58" />
+                            <label>底部距离
+                              <input id="wzDisclaimerOverlayBottomMargin" type="number" min="0" max="260" step="2" value="64" />
+                            </label>
+                            <label>左右距离
+                              <input id="wzDisclaimerOverlayHorizontalMargin" type="number" min="0" max="220" step="2" value="80" />
                             </label>
                           </div>
                           <p class="wz-field-hint">这些设置只影响最终视频后处理贴片，业务可以按渠道或地区选择展示样式。</p>

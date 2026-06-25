@@ -199,6 +199,14 @@
                             <button id="captureCurrentFrameBtn" class="ghost" type="button">使用播放器当前帧</button>
                             <button id="clearPromptBtn" class="ghost" type="button">清除点选/框选</button>
                           </div>
+                          <div id="interactiveFramePreview" class="video-ops-kframe-preview empty" aria-live="polite">
+                            <div class="video-ops-section-head">
+                              <strong>已选 K 帧预览</strong>
+                              <span id="interactiveFramePreviewMeta">尚未选择帧</span>
+                            </div>
+                            <img id="interactiveFramePreviewImage" alt="已选 K 帧画面" hidden />
+                            <div id="interactiveFramePreviewEmpty" class="video-ops-kframe-empty">上传视频或填写可预览的视频 URL 后，拖动帧滑块、填写帧号，或点击「使用播放器当前帧」显示对应画面。</div>
+                          </div>
                           <div class="video-ops-form-grid">
                             <label>sample_fps
                               <input id="interactiveSampleFps" type="number" min="0" max="10" step="0.1" value="1" />

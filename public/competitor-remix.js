@@ -69,6 +69,10 @@ const els = {
   interactiveFrameSlider: $("#interactiveFrameSlider"),
   captureCurrentFrameBtn: $("#captureCurrentFrameBtn"),
   clearPromptBtn: $("#clearPromptBtn"),
+  interactiveFramePreview: $("#interactiveFramePreview"),
+  interactiveFramePreviewMeta: $("#interactiveFramePreviewMeta"),
+  interactiveFramePreviewImage: $("#interactiveFramePreviewImage"),
+  interactiveFramePreviewEmpty: $("#interactiveFramePreviewEmpty"),
   interactiveSampleFps: $("#interactiveSampleFps"),
   interactiveMaxFrames: $("#interactiveMaxFrames"),
   interactiveRemovalEngine: $("#interactiveRemovalEngine"),
@@ -123,6 +127,7 @@ const state = {
   fileDataUrl: "",
   fileObjectUrl: "",
   manualMaskDataUrl: "",
+  selectedFramePreviewDataUrl: "",
   job: null,
   result: null,
   pollTimer: 0,
@@ -232,6 +237,16 @@ function renderParamGroups() {
   if (els.paramHint) els.paramHint.textContent = hint;
 }
 
+function ensureInputNodeVisible({ center = false } = {}) {
+  const node = document.getElementById("remixNodeInput");
+  if (!node) return;
+  if (typeof window.wzFocusNode === "function") {
+    window.wzFocusNode(node, { center, collapseOthers: true });
+    return;
+  }
+  node.classList.remove("collapsed");
+}
+
 function renderSelection() {
   const task = selectedTask();
   if (els.selectedTitle) els.selectedTitle.textContent = task.title;
@@ -244,6 +259,7 @@ function renderSelection() {
   renderPrompt();
   renderRegion();
   renderPayloadPreview();
+  if (task.maskMode !== "none") ensureInputNodeVisible();
 }
 
 function sourceInputPayload() {
@@ -376,10 +392,9 @@ function renderPayloadPreview() {
 }
 
 function renderSubmitState() {
-  const running = state.job && RUNNING_STATUSES.has(state.job.status);
   const ready = validateSubmitReady();
   if (els.submitBtn) {
-    els.submitBtn.disabled = !state.user || state.submitting || running || !ready.ok;
+    els.submitBtn.disabled = !state.user || state.submitting || !ready.ok;
     els.submitBtn.title = ready.ok ? "" : ready.message;
   }
 }
@@ -469,7 +484,32 @@ function syncVideoPreviews() {
       video.hidden = true;
     }
   }
+  if (!show) {
+    state.selectedFramePreviewDataUrl = "";
+    renderSelectedFramePreview({ status: "上传视频或填写可预览的视频 URL 后再选择 K 帧" });
+  }
   updateFrameSlider();
+}
+
+function usableRect(target) {
+  if (!target) return null;
+  const rect = target.getBoundingClientRect();
+  if (rect.width > 1 && rect.height > 1) return rect;
+  const fallbackWidth = target.clientWidth || target.offsetWidth || target.scrollWidth || 0;
+  const fallbackHeight = target.clientHeight || target.offsetHeight || target.scrollHeight || 0;
+  if (fallbackWidth > 1 && fallbackHeight > 1) {
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: fallbackWidth,
+      height: fallbackHeight
+    };
+  }
+  const host = target.closest(".video-ops-frame-box, .video-ops-region-box");
+  if (!host) return null;
+  const hostRect = host.getBoundingClientRect();
+  if (hostRect.width > 1 && hostRect.height > 1) return hostRect;
+  return null;
 }
 
 function updateFrameSlider() {
@@ -479,7 +519,29 @@ function updateFrameSlider() {
   els.interactiveFrameSlider.value = String(Math.min(totalFrames, intValue(els.interactiveFrameIndex, 0)));
 }
 
-function captureCurrentFrame() {
+function renderSelectedFramePreview({ status = "" } = {}) {
+  if (!els.interactiveFramePreview) return;
+  const frameIndex = intValue(els.interactiveFrameIndex, 0);
+  const time = numberValue(els.interactiveFrameTime, 0);
+  const hasPreview = Boolean(state.selectedFramePreviewDataUrl);
+  els.interactiveFramePreview.classList.toggle("empty", !hasPreview);
+  if (els.interactiveFramePreviewMeta) {
+    els.interactiveFramePreviewMeta.textContent = hasPreview
+      ? `frame=${frameIndex} · ${time.toFixed(2)}s`
+      : status || "尚未选择帧";
+  }
+  if (els.interactiveFramePreviewImage) {
+    els.interactiveFramePreviewImage.hidden = !hasPreview;
+    if (hasPreview) els.interactiveFramePreviewImage.src = state.selectedFramePreviewDataUrl;
+    else els.interactiveFramePreviewImage.removeAttribute("src");
+  }
+  if (els.interactiveFramePreviewEmpty) {
+    els.interactiveFramePreviewEmpty.hidden = hasPreview;
+    if (!hasPreview && status) els.interactiveFramePreviewEmpty.textContent = status;
+  }
+}
+
+function captureCurrentFrame({ updateSelection = true } = {}) {
   if (!els.video || !els.frameCanvas) return;
   const canvas = els.frameCanvas;
   const ctx = canvas.getContext("2d");
@@ -498,14 +560,63 @@ function captureCurrentFrame() {
   }
   const time = Number(els.video.currentTime || 0);
   const frameIndex = Math.max(0, Math.round(time * 30));
+  if (updateSelection) {
+    if (els.interactiveFrameTime) els.interactiveFrameTime.value = time.toFixed(2);
+    if (els.interactiveFrameIndex) els.interactiveFrameIndex.value = String(frameIndex);
+    if (els.interactiveFrameSlider) els.interactiveFrameSlider.value = String(frameIndex);
+  }
+  try {
+    state.selectedFramePreviewDataUrl = canvas.toDataURL("image/jpeg", 0.86);
+  } catch {
+    state.selectedFramePreviewDataUrl = "";
+  }
+  renderSelectedFramePreview();
+  renderPayloadPreview();
+}
+
+function seekVideoToFrame(frameIndex, { capture = true } = {}) {
+  if (!els.video || !els.video.src) {
+    renderSelectedFramePreview({ status: "请先上传视频或填写可预览的视频 URL" });
+    return;
+  }
+  const frame = Math.max(0, Math.round(Number(frameIndex || 0)));
+  const time = frame / 30;
+  if (els.interactiveFrameIndex) els.interactiveFrameIndex.value = String(frame);
   if (els.interactiveFrameTime) els.interactiveFrameTime.value = time.toFixed(2);
-  if (els.interactiveFrameIndex) els.interactiveFrameIndex.value = String(frameIndex);
-  if (els.interactiveFrameSlider) els.interactiveFrameSlider.value = String(frameIndex);
+  if (els.interactiveFrameSlider) els.interactiveFrameSlider.value = String(frame);
+  if (capture && els.video.readyState < 1) {
+    renderSelectedFramePreview({ status: "视频元信息加载后会显示对应帧" });
+    return;
+  }
+  const doCapture = () => captureCurrentFrame({ updateSelection: true });
+  if (capture) {
+    els.video.addEventListener("seeked", doCapture, { once: true });
+  }
+  try {
+    els.video.currentTime = Math.min(Math.max(time, 0), Number(els.video.duration || time));
+  } catch {
+    if (capture) doCapture();
+  }
+  if (capture && Math.abs(Number(els.video.currentTime || 0) - time) < 0.03) {
+    requestAnimationFrame(doCapture);
+  }
+}
+
+function seekVideoToTime(timeValue, { capture = true } = {}) {
+  const time = Math.max(0, Number(timeValue || 0));
+  seekVideoToFrame(Math.round(time * 30), { capture });
 }
 
 function pointFromEvent(event, target) {
-  const rect = target.getBoundingClientRect();
-  return { x: clamp((event.clientX - rect.left) / rect.width), y: clamp((event.clientY - rect.top) / rect.height) };
+  const rect = usableRect(target);
+  const x = Number(event?.clientX);
+  const y = Number(event?.clientY);
+  if (!rect || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (rect.width <= 1 || rect.height <= 1) return null;
+  return {
+    x: clamp((x - rect.left) / rect.width),
+    y: clamp((y - rect.top) / rect.height)
+  };
 }
 
 function renderPrompt() {
@@ -538,10 +649,21 @@ function renderRegion() {
 }
 
 function setBoxFromDrag(kind, start, end) {
+  if (!start || !end) return;
+  if (![start.x, start.y, end.x, end.y].every(Number.isFinite)) return;
   const box = { x1: Math.min(start.x, end.x), y1: Math.min(start.y, end.y), x2: Math.max(start.x, end.x), y2: Math.max(start.y, end.y) };
   if (box.x2 - box.x1 < 0.01 || box.y2 - box.y1 < 0.01) return;
   if (kind === "prompt") state.prompt.box = box;
   if (kind === "region") state.region.box = box;
+}
+
+function ensureInteractiveSurfaceReady(kind = "prompt") {
+  ensureInputNodeVisible();
+  const target = kind === "region" ? els.regionOverlay : els.promptLayer;
+  const rect = usableRect(target);
+  if (rect) return true;
+  setFormError(kind === "region" ? "区域框选画布尚未完成布局，请稍后再试" : "K 帧画布尚未完成布局，请稍后再试");
+  return false;
 }
 
 async function handleFileChange(file) {
@@ -704,8 +826,10 @@ function resetTaskState() {
   state.prompt.box = null;
   state.region.box = null;
   state.manualMaskDataUrl = "";
+  state.selectedFramePreviewDataUrl = "";
   if (els.manualMaskFile) els.manualMaskFile.value = "";
   if (els.manualMaskStatus) els.manualMaskStatus.textContent = "未上传 mask";
+  renderSelectedFramePreview({ status: "尚未选择帧" });
   renderPrompt();
   renderRegion();
   renderJob();
@@ -723,18 +847,29 @@ function bindEvents() {
   for (const radio of els.sourceModeRadios) {
     radio.addEventListener("change", () => {
       state.sourceMode = radio.value;
+      ensureInputNodeVisible();
       renderInputMode();
       syncVideoPreviews();
       renderPayloadPreview();
     });
   }
   els.sourceUrl?.addEventListener("input", () => {
+    ensureInputNodeVisible();
     syncVideoPreviews();
     renderPayloadPreview();
   });
-  els.sourceFile?.addEventListener("change", () => handleFileChange(els.sourceFile.files?.[0]));
-  els.manualMaskFile?.addEventListener("change", () => handleManualMaskChange(els.manualMaskFile.files?.[0]));
-  els.video?.addEventListener("loadedmetadata", updateFrameSlider);
+  els.sourceFile?.addEventListener("change", () => {
+    ensureInputNodeVisible();
+    handleFileChange(els.sourceFile.files?.[0]);
+  });
+  els.manualMaskFile?.addEventListener("change", () => {
+    ensureInputNodeVisible();
+    handleManualMaskChange(els.manualMaskFile.files?.[0]);
+  });
+  els.video?.addEventListener("loadedmetadata", () => {
+    updateFrameSlider();
+    seekVideoToFrame(intValue(els.interactiveFrameIndex, 0), { capture: true });
+  });
   els.video?.addEventListener("timeupdate", () => {
     if (state.selectedTaskId !== "auto_ai_remove") return;
     const time = Number(els.video.currentTime || 0);
@@ -743,21 +878,31 @@ function bindEvents() {
     updateFrameSlider();
   });
   els.interactiveFrameSlider?.addEventListener("input", () => {
-    const frame = intValue(els.interactiveFrameSlider, 0);
-    const time = frame / 30;
-    if (els.interactiveFrameIndex) els.interactiveFrameIndex.value = String(frame);
-    if (els.interactiveFrameTime) els.interactiveFrameTime.value = time.toFixed(2);
-    if (els.video) els.video.currentTime = time;
-    renderPayloadPreview();
+    ensureInputNodeVisible();
+    seekVideoToFrame(intValue(els.interactiveFrameSlider, 0), { capture: true });
   });
-  els.captureCurrentFrameBtn?.addEventListener("click", captureCurrentFrame);
+  els.interactiveFrameIndex?.addEventListener("change", () => {
+    ensureInputNodeVisible();
+    seekVideoToFrame(intValue(els.interactiveFrameIndex, 0), { capture: true });
+  });
+  els.interactiveFrameTime?.addEventListener("change", () => {
+    ensureInputNodeVisible();
+    seekVideoToTime(numberValue(els.interactiveFrameTime, 0), { capture: true });
+  });
+  els.captureCurrentFrameBtn?.addEventListener("click", () => {
+    ensureInputNodeVisible();
+    captureCurrentFrame({ updateSelection: true });
+  });
   els.clearPromptBtn?.addEventListener("click", () => {
+    ensureInputNodeVisible();
     state.prompt.points = [];
     state.prompt.box = null;
     renderPrompt();
   });
   els.promptLayer?.addEventListener("pointerdown", (event) => {
+    if (!ensureInteractiveSurfaceReady("prompt")) return;
     const start = pointFromEvent(event, els.promptLayer);
+    if (!start) return;
     if ((els.interactivePromptType?.value || "box") === "point") {
       state.prompt.points.push({ ...start, label: els.interactivePointLabel?.value || "positive" });
       renderPrompt();
@@ -778,7 +923,9 @@ function bindEvents() {
     renderPrompt();
   });
   els.regionOverlay?.addEventListener("pointerdown", (event) => {
+    if (!ensureInteractiveSurfaceReady("region")) return;
     state.region.drag = pointFromEvent(event, els.regionOverlay);
+    if (!state.region.drag) return;
     els.regionOverlay.setPointerCapture?.(event.pointerId);
   });
   els.regionOverlay?.addEventListener("pointermove", (event) => {
@@ -793,9 +940,11 @@ function bindEvents() {
     renderRegion();
   });
   els.useCurrentRegionFrameBtn?.addEventListener("click", () => {
+    ensureInputNodeVisible();
     if (els.regionVideo && els.video) els.regionVideo.currentTime = els.video.currentTime;
   });
   els.clearRegionBtn?.addEventListener("click", () => {
+    ensureInputNodeVisible();
     state.region.box = null;
     renderRegion();
   });

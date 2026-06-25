@@ -37,6 +37,8 @@ function resolveAppPath(value, baseDir = __dirname) {
 const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
 const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
+const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
+const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
 let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolveAppPath(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
 let savedProjects = [];
@@ -109,7 +111,7 @@ async function loadUsers() {
 }
 
 async function userFromRequest(req) {
-  const token = parseCookies(req).ad_session || "";
+  const token = parseCookies(req)[SESSION_COOKIE_NAME] || "";
   return authStore.userFromSessionToken(token);
 }
 
@@ -124,14 +126,14 @@ async function login(req, res) {
   if (!result.authenticated) {
     return sendJson(res, { error: "账号或密码错误" }, 401);
   }
-  appendCookie(res, `ad_session=${encodeURIComponent(result.token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
+  appendCookie(res, `${SESSION_COOKIE_NAME}=${encodeURIComponent(result.token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
   return sendJson(res, { authenticated: true, user: result.user });
 }
 
 async function logout(req, res) {
-  const token = parseCookies(req).ad_session || "";
+  const token = parseCookies(req)[SESSION_COOKIE_NAME] || "";
   await authStore.logout(token);
-  appendCookie(res, clearCookie("ad_session"));
+  appendCookie(res, clearCookie(SESSION_COOKIE_NAME));
   return sendJson(res, { ok: true, authenticated: false });
 }
 
@@ -2846,10 +2848,10 @@ async function withRequestScope(req, res, handler, options = {}) {
     return sendJson(res, { error: "请先登录" }, 401);
   }
   const userId = user.username;
-  const cookieBase = cookies.ad_project_root ? resolve(cookies.ad_project_root) : projectRoot;
+  const cookieBase = cookies[PROJECT_ROOT_COOKIE_NAME] ? resolve(cookies[PROJECT_ROOT_COOKIE_NAME]) : projectRoot;
   const allowedBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
-  if (cookies.ad_project_root !== allowedBase) {
-    appendCookie(res, `ad_project_root=${encodeURIComponent(allowedBase)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+  if (cookies[PROJECT_ROOT_COOKIE_NAME] !== allowedBase) {
+    appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(allowedBase)}; Path=/; Max-Age=31536000; SameSite=Lax`);
   }
   const scopedProjectRoot = userProjectRoot(allowedBase, userId);
   await ensureProjectStructure(scopedProjectRoot);
@@ -2902,24 +2904,24 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/config") return sendJson(res, { projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), userId: currentUserId(), projects: projectList() });
     if (req.method === "POST" && url.pathname === "/api/config") {
       const result = await updateConfig(await readJson(req));
-      appendCookie(res, `ad_project_root=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
       return sendJson(res, result);
     }
     if (req.method === "GET" && url.pathname === "/api/projects") return sendJson(res, { projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), userId: currentUserId(), projects: projectList() });
     if (req.method === "POST" && url.pathname === "/api/projects/switch") {
       const result = await switchProject(await readJson(req));
-      appendCookie(res, `ad_project_root=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
       return sendJson(res, result);
     }
     if (req.method === "POST" && url.pathname === "/api/projects/create") {
       const result = await createProject(await readJson(req));
-      appendCookie(res, `ad_project_root=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
       return sendJson(res, result);
     }
     if (req.method === "POST" && url.pathname === "/api/projects/rename") return sendJson(res, await renameProject(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/projects/delete") {
       const result = await deleteProject(await readJson(req));
-      appendCookie(res, `ad_project_root=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
       return sendJson(res, result);
     }
     if (req.method === "GET" && url.pathname === "/api/state") return sendJson(res, getRunState());

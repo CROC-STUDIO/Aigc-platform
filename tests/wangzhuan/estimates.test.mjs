@@ -187,10 +187,12 @@ test("estimates a batch from inline launch draft without saved template", async 
       disclaimerPreset: "auto",
       disclaimerLanguage: "pt",
       disclaimerOverlay: {
+        enabled: true,
         position: "bottom_left",
         fontSize: 24,
         boxHeight: 156,
-        opacity: 0.66
+        bottomMargin: 72,
+        horizontalMargin: 48
       },
       templateSnapshot: {
         draft: {
@@ -248,7 +250,8 @@ test("estimates a batch from inline launch draft without saved template", async 
     assert.equal(loaded.request.disclaimerOverlay.position, "bottom_left");
     assert.equal(loaded.request.disclaimerOverlay.fontSize, 24);
     assert.equal(loaded.request.disclaimerOverlay.boxHeight, 156);
-    assert.equal(loaded.request.disclaimerOverlay.opacity, 0.66);
+    assert.equal(loaded.request.disclaimerOverlay.bottomMargin, 72);
+    assert.equal(loaded.request.disclaimerOverlay.horizontalMargin, 48);
     assert.deepEqual(loaded.request.targetRegions, ["BR", "PT"]);
     assert.deepEqual(loaded.request.languages, ["pt-BR", "en-US"]);
 
