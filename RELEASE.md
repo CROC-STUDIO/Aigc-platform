@@ -398,3 +398,162 @@ EACCES: permission denied, open '/app/users.json'
 - `VIDEO_AIGC_API_KEY` 是否配置。
 - `WANGZHUAN_LLM_API_KEY` 或模型网关配置是否可用。
 - S3/CDN 是否能从服务端访问。
+
+## 9. 8.219.102.128 容器化发布命令
+
+适用范围：
+
+- 当前正式机 `8.219.102.128`
+- 代码目录 `/opt/ad-picture-web-codex`
+- 现网老服务保留在 `5177`
+- 容器候选版先走 `8000`
+- 账号基础继续复用 `/opt/ad-picture-web/users.json`
+- 项目数据继续复用 `/opt/ad-picture-web-data`
+
+### 9.1 当前文件约定
+
+- compose 文件：`/opt/ad-picture-web-codex/docker-compose.yml`
+- 镜像文件：`/opt/ad-picture-web-codex/Dockerfile`
+- 运行配置：`/opt/ad-picture-web-codex/.env`
+- 容器版配置：`/opt/ad-picture-web-codex/config.json`
+- 共享账号：`/opt/ad-picture-web/users.json`
+- 共享项目数据：`/opt/ad-picture-web-data`
+
+### 9.2 首次或更新后启动
+
+先修权限并停掉宿主机版候选服务：
+
+```bash
+cd /opt/ad-picture-web-codex
+sudo chown root:root .env
+sudo chmod 644 .env
+sudo systemctl stop ad-picture-web-codex.service
+sudo systemctl disable ad-picture-web-codex.service
+```
+
+启动容器：
+
+```bash
+cd /opt/ad-picture-web-codex
+sudo docker-compose down
+sudo docker-compose up -d --build
+sudo docker-compose ps
+```
+
+查看状态：
+
+```bash
+sudo docker-compose logs --tail 100 mysql
+sudo docker-compose logs --tail 100 app
+```
+
+### 9.3 首次空库执行迁移
+
+如果 `aigc-mysql` 是新库，执行：
+
+```bash
+cd /opt/ad-picture-web-codex
+for f in database/migrations/*.sql; do
+  case "$f" in
+    *.down.sql|*.verify.sql) continue ;;
+  esac
+  echo "apply $(basename "$f")"
+  sudo docker exec -i aigc-mysql sh -lc "mysql -uroot -paigc_root_dev_only aigc_platform" < "$f"
+done
+```
+
+验表：
+
+```bash
+sudo docker exec -it aigc-mysql sh -lc "mysql -uroot -paigc_root_dev_only -e 'USE aigc_platform; SHOW TABLES;'"
+```
+
+### 9.4 启动时序问题处理
+
+如果日志里出现过：
+
+```text
+connect ECONNREFUSED <mysql_ip>:3306
+```
+
+先确认 MySQL ready：
+
+```bash
+sudo docker exec aigc-mysql mysqladmin ping -h 127.0.0.1 -uroot -paigc_root_dev_only --silent
+```
+
+返回 `mysqld is alive` 后重启 app：
+
+```bash
+cd /opt/ad-picture-web-codex
+sudo docker-compose restart app
+sleep 5
+sudo docker-compose logs --since 30s app
+```
+
+### 9.5 验收命令
+
+首页：
+
+```bash
+curl -I http://127.0.0.1:8000/
+```
+
+登录：
+
+```bash
+curl -sS -c /tmp/codex.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' \
+  http://127.0.0.1:8000/api/login
+```
+
+模板接口：
+
+```bash
+curl -sS -b /tmp/codex.cookie \
+  http://127.0.0.1:8000/api/wangzhuan/templates
+```
+
+重点功能：
+
+- 参考视频检查
+- 项目切换
+- 模板列表
+- 当前要合并的 4 个关键页面
+
+### 9.6 当前容器版挂载约定
+
+当前最终版 `docker-compose.yml` 约定：
+
+```yaml
+    volumes:
+      - ./config.json:/data/app/config.json
+      - /opt/ad-picture-web/users.json:/data/users/users.json
+      - /opt/ad-picture-web-data:/data/project-data
+```
+
+含义：
+
+- `config.json` 可写，支持项目切换写回
+- `users.json` 继续作为账号基础文件
+- 项目数据挂整个 `/opt/ad-picture-web-data`，避免只挂 `cwz` 导致项目变少
+
+### 9.7 切回 5177
+
+容器版在 `8000` 验收通过后，再切现网：
+
+1. 修改 `.env` 或 compose 端口映射，把 `8000` 切成 `5177`
+2. 停老的 `ad-picture-web.service`
+3. 重新 `sudo docker-compose up -d`
+4. 验 `http://127.0.0.1:5177/`
+
+### 9.8 回滚
+
+容器版有问题时：
+
+```bash
+cd /opt/ad-picture-web-codex
+sudo docker-compose down
+sudo systemctl start ad-picture-web.service
+```

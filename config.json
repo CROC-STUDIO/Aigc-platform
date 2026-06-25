@@ -56,15 +56,35 @@
       "watermark": false
     }
   },
-  "projectRoot": "../project-data/PROJECT_ROOT_P",
+  "projectRoot": "/opt/ad-picture-web-data/cwz",
   "projects": [
     {
-      "name": "puzzle",
-      "path": "../project-data/puzzle"
+      "name": "网赚业务",
+      "path": "/opt/ad-picture-web-data/cwz"
+    },
+    {
+      "name": "KaKaPic",
+      "path": "/opt/ad-picture-web-data/KaKaPic"
+    },
+    {
+      "name": "hoshi",
+      "path": "/opt/ad-picture-web-data/hoshi"
+    },
+    {
+      "name": "ad-picture-web-data",
+      "path": "/opt/ad-picture-web-data"
+    },
+    {
+      "name": "超休",
+      "path": "/opt/ad-picture-web-data/超休"
     },
     {
       "name": "包包4",
-      "path": "../project-data/PROJECT_ROOT_P"
+      "path": "/opt/ad-picture-web-data/包包4"
+    },
+    {
+      "name": "puzzle",
+      "path": "../project-data/puzzle"
     },
     {
       "name": "三国",
