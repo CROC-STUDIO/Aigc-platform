@@ -239,6 +239,10 @@ function renderParamGroups() {
 }
 
 function ensureInputNodeVisible({ center = false } = {}) {
+  if (typeof window.wzActivateStep === "function") {
+    window.wzActivateStep("2", { scroll: center });
+    return;
+  }
   const node = document.getElementById("remixNodeInput");
   if (!node) return;
   if (typeof window.wzFocusNode === "function") {
@@ -260,7 +264,7 @@ function renderSelection() {
   renderPrompt();
   renderRegion();
   renderPayloadPreview();
-  if (task.maskMode !== "none") ensureInputNodeVisible();
+  ensureInputNodeVisible();
 }
 
 function sourceInputPayload() {
@@ -472,8 +476,8 @@ function renderJob() {
   if (els.retryBtn) els.retryBtn.disabled = !id || job?.status !== "failed";
   if (els.taskDetailLink) {
     els.taskDetailLink.href = archiveHref();
-    els.taskDetailLink.classList.toggle("disabled", !id);
-    els.taskDetailLink.setAttribute("aria-disabled", id ? "false" : "true");
+    els.taskDetailLink.classList.remove("disabled");
+    els.taskDetailLink.removeAttribute("aria-disabled");
   }
   renderSubmitState();
 }
@@ -775,6 +779,11 @@ async function submitJob() {
     renderJob();
     renderResult();
     schedulePoll();
+    if (typeof window.wzActivateStep === "function") {
+      window.wzActivateStep("3");
+    } else if (typeof window.wzFocusNode === "function") {
+      window.wzFocusNode("remixNodeJob", { center: false });
+    }
   } catch (error) {
     setFormError(error.message || "提交失败");
   } finally {
@@ -998,10 +1007,6 @@ function bindEvents() {
   els.downloadBtn?.addEventListener("click", () => {
     const id = jobId();
     if (id) location.assign(archiveHref());
-  });
-  els.taskDetailLink?.addEventListener("click", (event) => {
-    if (jobId()) return;
-    event.preventDefault();
   });
   els.cancelBtn?.addEventListener("click", cancelJob);
   els.retryBtn?.addEventListener("click", retryJob);

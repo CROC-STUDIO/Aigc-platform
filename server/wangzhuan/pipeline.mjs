@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { normalizeBranchDrafts } from "./branches.mjs";
+import { normalizeBranchDrafts, normalizeStoredBranchDrafts } from "./branches.mjs";
 import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { WangzhuanError } from "./http.mjs";
@@ -10,6 +10,8 @@ import {
   hasWangzhuanFactsStore,
   loadActivePipelineRunFromMysql,
   loadBatchDetailFromMysql,
+  loadEstimateFromMysql,
+  loadLatestBatchEstimateForReferenceVideo,
   syncBatchFacts
 } from "./mysql-facts.mjs";
 import {
@@ -472,6 +474,9 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
     validateBranchTruthRulesForPlan(branchDrafts);
   }
   let sequence = 1;
+  const variantCount = Number(batch.estimate?.variantCount || 0);
+  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * segmentMultiplier : 0;
+  let planSequence = 0;
 
   for (const branch of branchDrafts) {
     const branchChannel = branch.targetChannels?.[0] || batch.estimate?.request?.targetChannel || "generic";
@@ -500,6 +505,14 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
         let planRecord = null;
 
         if (useLlmPlans) {
+          planSequence += 1;
+          options.onPlanProgress?.({
+            index: planSequence,
+            total: totalPlans,
+            branchLabel: branch.branchLabel || branch.branchId,
+            branchVariantIndex,
+            segmentIndex
+          });
           const planPayload = await generateSeedancePlan(context, {
             batch,
             branch,
@@ -507,7 +520,8 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
             channelRules,
             branchVariantIndex,
             segmentIndex,
-            knowledgeNotes: options.knowledgeNotes
+            knowledgeNotes: options.knowledgeNotes,
+            llmConfig: options.llmConfig || {}
           });
           hook = planPayload.hook;
           body = planPayload.body;
@@ -626,6 +640,65 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   return saved;
 }
 
+async function enrichBatchWorkbenchContext(context, detail) {
+  const batch = detail?.batch;
+  if (!batch) return detail;
+
+  let estimateId = batch.estimate?.estimateId || batch.request?.estimateId || null;
+  let estimateRecord = estimateId ? await loadEstimateFromMysql(context, estimateId) : null;
+  if (!estimateRecord) {
+    const referenceVideoId = batch.referenceVideo?.referenceVideoId || batch.request?.referenceVideoId || "";
+    if (referenceVideoId) {
+      estimateRecord = await loadLatestBatchEstimateForReferenceVideo(context, referenceVideoId);
+      estimateId = estimateRecord?.estimate?.estimateId || estimateId;
+    }
+  }
+
+  const decomposition = [batch.decomposition, estimateRecord?.decomposition, batch.request?.decomposition]
+    .find((item) => item && (item.referenceVideoId || item.scene || item.hook || item.action)) || null;
+  const templateSnapshot = batch.templateSnapshot?.draft
+    ? batch.templateSnapshot
+    : (estimateRecord?.templateSnapshot || batch.templateSnapshot || null);
+  const rawBranchDrafts = batch.branchDrafts?.length
+    ? batch.branchDrafts
+    : (estimateRecord?.request?.branches || batch.request?.branchDrafts || batch.request?.branches || []);
+  const branchDrafts = normalizeStoredBranchDrafts(templateSnapshot, rawBranchDrafts);
+  const estimate = estimateRecord
+    ? {
+        ...estimateRecord.estimate,
+        ...batch.estimate,
+        estimateId: estimateId || estimateRecord.estimate?.estimateId,
+        request: {
+          ...(estimateRecord.request || {}),
+          ...(batch.estimate?.request || {})
+        }
+      }
+    : batch.estimate;
+
+  const referenceVideo = batch.referenceVideo?.referenceVideoId
+    ? batch.referenceVideo
+    : (estimateRecord?.referenceVideo || batch.referenceVideo || null);
+
+  const changed = referenceVideo !== batch.referenceVideo
+    || decomposition !== batch.decomposition
+    || templateSnapshot !== batch.templateSnapshot
+    || branchDrafts !== batch.branchDrafts
+    || estimate !== batch.estimate;
+  if (!changed) return detail;
+
+  return {
+    ...detail,
+    batch: {
+      ...batch,
+      referenceVideo,
+      decomposition,
+      templateSnapshot,
+      branchDrafts,
+      estimate
+    }
+  };
+}
+
 export async function getBatchDetail(context, batchId) {
   const initial = await readBatch(context, batchId);
   const { pollUpstreamBatch, shouldPollUpstreamBatch } = await import("./upstream-poll.mjs");
@@ -636,8 +709,9 @@ export async function getBatchDetail(context, batchId) {
       console.warn(`[wangzhuan] upstream poll failed for ${batchId}: ${error?.message || error}`);
     }
   }
-  const detail = await loadBatchDetailFromMysql(context, batchId);
+  let detail = await loadBatchDetailFromMysql(context, batchId);
   if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+  detail = await enrichBatchWorkbenchContext(context, detail);
   return detail;
 }
 
@@ -839,7 +913,9 @@ async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, 
   for (const plan of plans) {
     const isConfirmed = confirmedPlanIds.has(plan.planId);
     const editedPlan = edits.get(plan.planId);
+    const branch = (Array.isArray(batch.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === plan.branchId);
     const payload = validateSeedancePlan(isConfirmed && editedPlan ? { ...plan, ...editedPlan } : plan, {
+      branch: branch || {},
       branchId: plan.branchId,
       branchVariantIndex: plan.branchVariantIndex,
       segmentIndex: plan.segmentIndex
@@ -921,11 +997,12 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     throw new WangzhuanError("validation_error", "存在未知预案编号", { batchId, unknownPlanIds });
   }
   const assetReviewAlreadyConfirmed = Boolean(request.assetReviewConfirmed && (batch.assetReviewConfirmedAt || batch.request?.assetReviewConfirmed));
-  const branchSource = assetReviewAlreadyConfirmed
+  const rawBranchSource = assetReviewAlreadyConfirmed
     ? batch.branchDrafts || batch.request?.branches || []
     : Array.isArray(request.branchDrafts) && request.branchDrafts.length
       ? request.branchDrafts
       : batch.branchDrafts || batch.request?.branches || [];
+  const branchSource = normalizeBranchDrafts(batch.templateSnapshot?.draft || {}, rawBranchSource);
   const review = assetReviewAlreadyConfirmed
     ? { branches: branchSource, reviewResult: validateAssetReviewState(branchSource) }
     : await ensureAssetReviewsApproved(context, branchSource);
@@ -984,9 +1061,10 @@ export async function confirmBatchAssets(context, batchId, request = {}) {
       status: batch.status
     });
   }
-  const branchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
+  const rawBranchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
     ? request.branchDrafts
     : batch.branchDrafts || batch.request?.branches || [];
+  const branchSource = normalizeBranchDrafts(batch.templateSnapshot?.draft || {}, rawBranchSource);
   const review = await ensureAssetReviewsApproved(context, branchSource);
   if (!review.reviewResult.ok) {
     throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请等待审核通过后再确认结果", {

@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 
 import { getChannelRules } from "./channel-rules.mjs";
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
+import { mergeDisclaimerWithChannelRequirements } from "./disclaimers.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { llmSupportsVideoUrl, llmUsesGeminiCompat, resolveQcLlmConfig } from "./llm-config.mjs";
+import { llmUsesGeminiNativeApi, llmSupportsVideoUrl, resolveQcLlmConfig } from "./llm-config.mjs";
 import { hasWangzhuanFactsStore, loadBatchDetailFromMysql, syncBatchFacts } from "./mysql-facts.mjs";
 import { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, ffprobeMediaFile } from "./reference-videos.mjs";
 import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
@@ -84,6 +85,19 @@ function resolveUserPath(context, relativePath) {
     throw new WangzhuanError("validation_error", "文件路径越界", { path: relativePath });
   }
   return target;
+}
+
+function tryResolveUserPath(context, relativePath) {
+  const text = String(relativePath || "").trim();
+  if (!text || text.match(/^[A-Za-z]:[\\/]|^\//)) return null;
+  const root = resolve(context.userProjectRoot);
+  const target = resolve(root, text);
+  if (target !== root && !target.startsWith(`${root}\\`) && !target.startsWith(`${root}/`)) return null;
+  return target;
+}
+
+function outputHasRemoteAsset(output = {}) {
+  return Boolean(output.storageUrl || output.storageKey);
 }
 
 async function readNonEmptyText(target) {
@@ -298,9 +312,9 @@ async function collectGeneratedVideoVisionInputs(context, output, options = {}) 
   const forceInlineVideo = options.forceInlineVideo === true;
   const forceFramesOnly = options.forceFramesOnly === true;
   const skipRemoteVideoUrl = forceInlineVideo;
-  const videoPath = resolveUserPath(context, output.filePath);
-  const mimeType = output.mimeType || mimeForExt(extname(videoPath).toLowerCase());
   const fileUrl = resolveModelFileUrl(output);
+  const videoPath = tryResolveUserPath(context, output.filePath);
+  const mimeType = output.mimeType || mimeForExt(extname(videoPath || output.filePath || ".mp4").toLowerCase());
   const frameCount = clampInteger(
     context.config?.wangzhuan?.llm?.generatedFrameCount ?? context.config?.wangzhuan?.llm?.referenceFrameCount,
     DEFAULT_GENERATED_FRAME_COUNT,
@@ -309,6 +323,27 @@ async function collectGeneratedVideoVisionInputs(context, output, options = {}) 
   );
   const timestampsSec = generatedFrameTimestamps(output.durationSec, frameCount);
   const warnings = [];
+  if (!videoPath) {
+    if (!fileUrl) {
+      throw new WangzhuanError("missing_required_file", "生成视频文件不存在，无法进行模型质检", {
+        filePath: output.filePath || "",
+        storageKey: output.storageKey || ""
+      });
+    }
+    warnings.push({
+      code: "generated_video_local_missing",
+      message: "本地生成视频不存在，已回退为远程视频地址",
+      reason: "local_file_missing"
+    });
+    return {
+      fileName: basename(String(output.filePath || output.outputId || "output.mp4")),
+      mimeType,
+      fileUrl,
+      frames: [],
+      timestampsSec,
+      warnings
+    };
+  }
   let frames = [];
   try {
     frames = await extractGeneratedFrames(context, videoPath, timestampsSec, output);
@@ -501,7 +536,8 @@ async function scriptSchemaCheck(context, batch, output, tasks) {
     if (missing.length) {
       return check("script_schema", "fail", `脚本缺少字段：${missing.join(",")}`, "scripts");
     }
-    if (!existsSync(resolveUserPath(context, script.scriptPath))) {
+    const scriptTarget = tryResolveUserPath(context, script.scriptPath);
+    if (!scriptTarget || !existsSync(scriptTarget)) {
       return check("script_schema", "fail", "脚本文件不存在", "scriptPath");
     }
   }
@@ -510,8 +546,10 @@ async function scriptSchemaCheck(context, batch, output, tasks) {
 
 function templateSnapshotCheck(batch) {
   const draft = batch.templateSnapshot?.draft || {};
-  if (!draft.productName) {
-    return check("template_snapshot", "fail", "模板快照缺少 templateId/versionId/productName", "templateSnapshot");
+  const branches = Array.isArray(draft.branches) ? draft.branches : [];
+  const productName = draft.productName || branches.find((branch) => branch?.productName)?.productName || "";
+  if (!productName) {
+    return check("template_snapshot", "fail", "模板快照缺少 productName", "templateSnapshot");
   }
   const hasSavedTemplateIdentity = Boolean(batch.templateSnapshot?.templateId && batch.templateSnapshot?.versionId);
   if (!hasSavedTemplateIdentity) {
@@ -520,12 +558,24 @@ function templateSnapshotCheck(batch) {
   return check("template_snapshot", "pass", "模板快照完整");
 }
 
-async function promptSchemaCheck(context, tasks) {
+async function promptSchemaCheck(context, tasks, scripts = []) {
   if (!tasks.length) {
     return check("prompt_schema", "fail", "输出缺少关联任务", "tasks");
   }
+  const scriptsById = new Map(scripts.map((script) => [script.scriptId, script]));
   for (const task of tasks) {
-    const seedancePrompt = resolveUserPath(context, task.promptPath);
+    const script = scriptsById.get(task.scriptId);
+    const promptRel = task.promptPath || script?.promptPath || "";
+    if (!promptRel) {
+      if (task.promptStorageUrl || task.promptStorageKey) {
+        continue;
+      }
+      return check("prompt_schema", "fail", "Seedance prompt 路径缺失", "promptPath");
+    }
+    const seedancePrompt = tryResolveUserPath(context, promptRel);
+    if (!seedancePrompt) {
+      return check("prompt_schema", "fail", "Seedance prompt 路径不合法", "promptPath");
+    }
     const imagePrompt = join(dirname(seedancePrompt), `${task.generationTaskId}_image.txt`);
     if (!(await readNonEmptyText(seedancePrompt))) {
       return check("prompt_schema", "fail", "Seedance prompt 缺失或为空", "promptPath");
@@ -580,7 +630,17 @@ async function deterministicVideoChecks(context, batch, output) {
   const expectedDuration = Number(output.durationSec || batch.estimate?.durationSec || 0);
   const expectedRatio = expectedOutputRatio(batch, output);
   const minResolution = minResolutionForRatio(expectedRatio);
-  const filePath = resolveUserPath(context, output.filePath);
+  const filePath = tryResolveUserPath(context, output.filePath);
+  if (!filePath) {
+    checks.push(checkWithData(
+      "download_status",
+      outputHasRemoteAsset(output) ? "warn" : "fail",
+      outputHasRemoteAsset(output) ? "输出仅在对象存储，本地文件未落盘" : "输出文件路径缺失",
+      "filePath",
+      { filePath: output.filePath || "", storageKey: output.storageKey || "" }
+    ));
+    return checks;
+  }
   let probe = output.probe || output.mediaProbe || null;
   if (!probe) {
     try {
@@ -646,10 +706,14 @@ function videoSpecCheck(context, output) {
   if (![15, 30].includes(Number(output.durationSec)) || !output.kind) {
     return check("video_spec", "fail", "输出缺少时长或类型记录", "output");
   }
-  if (!existsSync(resolveUserPath(context, output.filePath))) {
-    return check("video_spec", "fail", "输出文件不存在", "filePath");
+  const localPath = tryResolveUserPath(context, output.filePath);
+  if (localPath && existsSync(localPath)) {
+    return check("video_spec", "pass", "输出文件和规格记录存在");
   }
-  return check("video_spec", "pass", "输出文件和规格记录存在");
+  if (outputHasRemoteAsset(output)) {
+    return check("video_spec", "pass", "输出已存储在对象存储");
+  }
+  return check("video_spec", "fail", "输出文件不存在", "filePath");
 }
 
 async function stitchReportPresenceCheck(context, batch, output) {
@@ -657,8 +721,8 @@ async function stitchReportPresenceCheck(context, batch, output) {
   if (!output.stitchReportPath) {
     return check("stitch_report_presence", "fail", "30s 输出缺少 stitch report 路径", "stitchReportPath");
   }
-  const reportTarget = resolveUserPath(context, output.stitchReportPath);
-  if (!existsSync(reportTarget)) {
+  const reportTarget = tryResolveUserPath(context, output.stitchReportPath);
+  if (!reportTarget || !existsSync(reportTarget)) {
     return check("stitch_report_presence", "fail", "30s 输出缺少 stitch report 文件", "stitchReportPath");
   }
   const report = JSON.parse(await readFile(reportTarget, "utf8"));
@@ -1020,7 +1084,8 @@ function modelReviewCheck(modelReview) {
 
 function shouldRunModelVideoQc(context, batch, output) {
   if (output.sourceType !== "pipeline") return false;
-  if (!output.filePath) return false;
+  const hasLocalVideo = Boolean(tryResolveUserPath(context, output.filePath));
+  if (!hasLocalVideo && !outputHasRemoteAsset(output)) return false;
   const isFinalStitchedOutput = output.kind === "stitched_video";
   const isFinalSingleSegmentOutput = Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15;
   if (!isFinalStitchedOutput && !isFinalSingleSegmentOutput) return false;
@@ -1082,7 +1147,7 @@ async function runModelVideoQc(context, batch, output, tasks, scripts, options =
       tasks,
       scripts
     })
-    : await (llmUsesGeminiCompat(llmConfig)
+    : await (llmUsesGeminiNativeApi(llmConfig)
         ? callGeminiCompatibleLlm(llmConfig, messages, {
           requestId: context?.requestId,
           dumpRequest: (dump) => dumpQcModelRequest(context, batch.batchId, output.outputId, dump)
@@ -1125,8 +1190,9 @@ function strongPromiseTruthRulesCheck(batch) {
 
 async function channelRuleCheck(context, batch, tasks) {
   const draft = batch.templateSnapshot?.draft || {};
-  const channel = draft.targetChannels?.[0] || "generic";
-  const rules = await getChannelRules(context, { channel, promiseLevel: draft.promiseLevel || "stable" });
+  const channel = draft.targetChannels?.[0] || batch.estimate?.request?.targetChannel || "generic";
+  const promiseLevel = draft.promiseLevel || batch.estimate?.request?.promiseLevel || "stable";
+  const rules = await getChannelRules(context, { channel, promiseLevel });
   const text = textForPolicy(batch, tasks);
   const forbidden = rules.rules.flatMap((rule) => rule.forbiddenTerms || []);
   const hit = forbidden.find((term) => term && text.includes(String(term).toLowerCase()));
@@ -1136,7 +1202,17 @@ async function channelRuleCheck(context, batch, tasks) {
     draft.disclaimer,
     batch.estimate?.request?.disclaimer,
     ...(draft.disclaimerByLanguage ? Object.values(draft.disclaimerByLanguage) : []),
-    ...(batch.estimate?.request?.disclaimerByLanguage ? Object.values(batch.estimate.request.disclaimerByLanguage) : [])
+    ...(batch.estimate?.request?.disclaimerByLanguage ? Object.values(batch.estimate.request.disclaimerByLanguage) : []),
+    ...(Array.isArray(draft.branches) ? draft.branches.flatMap((branch) => [
+      branch.disclaimer,
+      ...(branch.disclaimerByLanguage ? Object.values(branch.disclaimerByLanguage) : [])
+    ]) : [])
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const effectiveDisclaimers = [
+    ...configuredDisclaimers,
+    ...configuredDisclaimers.map((item) => mergeDisclaimerWithChannelRequirements(item, channel, promiseLevel))
   ]
     .map((item) => String(item || "").toLowerCase().trim())
     .filter(Boolean);
@@ -1144,12 +1220,12 @@ async function channelRuleCheck(context, batch, tasks) {
     const needle = String(item || "").toLowerCase().trim();
     if (!needle) return false;
     if (text.includes(needle)) return false;
-    return !configuredDisclaimers.some((configured) => configured.includes(needle) || needle.includes(configured));
+    return !effectiveDisclaimers.some((configured) => configured.includes(needle));
   });
   if (missingDisclaimer) {
     return check("channel_rule", "fail", `缺少渠道免责声明：${missingDisclaimer}`, "channelRule.requiredDisclaimers");
   }
-  return check("channel_rule", "pass", "未触发渠道禁用词");
+  return check("channel_rule", "pass", "渠道免责声明与禁用词检查通过");
 }
 
 function qcStatusFromChecks(checks) {
@@ -1177,7 +1253,7 @@ async function qcReportForOutput(context, batch, output) {
     currencyLocaleCheck(batch),
     await channelRuleCheck(context, batch, tasks),
     strongPromiseTruthRulesCheck(batch),
-    await promptSchemaCheck(context, tasks),
+    await promptSchemaCheck(context, tasks, scripts),
     taskIdPresenceCheck(tasks),
     videoSpecCheck(context, output)
   ];
@@ -1272,6 +1348,9 @@ function batchStatusFromReports(reports) {
 export async function runBatchQc(context, batchId) {
   const batch = await readBatch(context, batchId);
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  if (!outputs.length) {
+    throw new WangzhuanError("validation_error", "当前批次没有可质检的输出", { batchId });
+  }
   const reports = [];
   const nextOutputs = [];
 
@@ -1333,3 +1412,9 @@ export async function runBatchQc(context, batchId) {
     }
   };
 }
+
+export const qcPathHelpers = {
+  tryResolveUserPath,
+  videoSpecCheck,
+  templateSnapshotCheck
+};

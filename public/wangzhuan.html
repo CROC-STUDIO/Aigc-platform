@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Touka AI素材中台 - 网赚素材管线</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260626-step3-nav-scroll" />
   </head>
   <body class="wz-body">
     <header class="platform-topbar">
@@ -106,12 +106,15 @@
                 <div class="wz-node-body">
                   <input id="wzReferenceFile" class="wz-upload-input" type="file" accept="video/mp4,video/webm,video/quicktime" />
                   <div id="wzReferenceUploadPanel" class="wz-upload-panel">
+                    <div class="wz-upload-dropzone-mark" aria-hidden="true">
+                      <span class="wz-upload-dropzone-icon"></span>
+                    </div>
                     <div class="wz-upload-copy">
                       <span class="wz-upload-kicker">MP4 / WEBM / MOV</span>
                       <strong>上传参考视频</strong>
                       <small id="wzReferenceUploadStatus">选中文件后会自动完成上传、格式检查和视频预览。</small>
                     </div>
-                    <button id="wzCheckReferenceBtn" class="wz-upload-button" type="button">上传视频</button>
+                    <button id="wzCheckReferenceBtn" class="wz-upload-button" type="button">选择视频</button>
                   </div>
                   <section class="wz-launch-template">
                     <div class="wz-batch-section-head">
@@ -139,10 +142,25 @@
                     <span>分析参考视频，提取镜头与脚本结构</span>
                   </div>
                   <div class="wz-panel-head-actions">
-                    <button id="wzDecomposeBtn" class="ghost" type="button" disabled>确认脚本拆解</button>
+                    <button id="wzDecomposeBtn" type="button" disabled>确认脚本拆解</button>
                   </div>
                 </div>
                 <div class="wz-node-body">
+                  <details class="wz-details wz-advanced-settings wz-decompose-llm-settings">
+                    <summary>拆解模型设置</summary>
+                    <p class="wz-field-hint">开始解析前可选择拆解模型；默认 GPT-5.4，也可切换 Gemini 3.5 Flash。</p>
+                    <div class="wz-inline-form">
+                      <label>模型服务商 <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
+                      <label>拆解模型
+                        <select id="wzLlmModel">
+                          <option value="gpt-5.4" selected>GPT-5.4</option>
+                          <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                        </select>
+                      </label>
+                      <label>接口地址 <input id="wzLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型 API 地址" /></label>
+                      <label>创意随机度 <input id="wzLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" title="数值越低输出越稳定，越高越有变化" /></label>
+                    </div>
+                  </details>
                   <div id="wzDecompositionStatus" class="wz-info">先上传参考视频，再点击「开始解析」生成脚本草稿。</div>
                   <div id="wzLlmServiceStatus" class="wz-info wz-service-pill">正在检查 AI 拆解服务…</div>
                   <label class="wz-field-label">素材经验补充（可选）
@@ -154,16 +172,6 @@
                   </div>
                   <p id="wzDecompositionHint" class="wz-field-hint wz-decomposition-hint">解析结果会以表单展示，确认前可直接修改；确认后将锁定并进入第三步。</p>
                   <div id="wzDecompositionForm" class="wz-decomposition-form empty-line" hidden aria-live="polite"></div>
-                  <details class="wz-details wz-advanced-settings">
-                    <summary>开发者选项（一般无需修改）</summary>
-                    <p class="wz-field-hint">仅在切换模型或排查故障时使用，日常制作可忽略。</p>
-                    <div class="wz-inline-form">
-                      <label>模型服务商 <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
-                      <label>模型名称 <input id="wzLlmModel" type="text" value="gemini-3.5-flash" placeholder="服务端配置的模型名" /></label>
-                      <label>接口地址 <input id="wzLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型 API 地址" /></label>
-                      <label>创意随机度 <input id="wzLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" title="数值越低输出越稳定，越高越有变化" /></label>
-                    </div>
-                  </details>
                 </div>
               </section>
             </div>
@@ -171,37 +179,65 @@
             <!-- 列3：改写分支（可扇出） -->
             <div class="wz-col wz-col-branches" data-step="3">
               <div class="wz-col-label">
-                <b>3</b> 产品改写（可裂变 3.1 / 3.2 / 3.3…）
+                <span class="wz-col-label-text"><b>3</b> 产品改写（可裂变 3.1 / 3.2 / 3.3…）</span>
                 <button id="wzAddBranchBtn" class="mini ghost wz-add-branch" type="button" title="裂变一个完整的改写子节点">+ 裂变子节点</button>
               </div>
-              <div id="wzRewriteStatus" class="wz-template-status wz-info">填写产品改写信息后点击「确认信息」，即可进入批次估算；保存模板为可选项。</div>
+              <div id="wzRewriteStatus" class="wz-template-status wz-info">填写全部裂变子节点信息后，在上方点击「确认信息」，即可进入第四步批次估算；保存模板为可选项。</div>
+              <div class="wz-rewrite-toolbar">
+                <div class="modal-actions wz-actions wz-rewrite-actions">
+                  <button id="wzConfirmRewriteBtn" type="button">确认信息</button>
+                </div>
+                <p id="wzRewriteConfirmHint" class="wz-field-hint">确认前需填写各子节点产品名称；若有素材将一并上传。确认后仍可修改，修改后建议重新估算。</p>
+              </div>
               <div class="wz-branches" id="wzBranches">
                 <section class="wz-node wz-node-branch" id="wzNodeRewrite" data-node="rewrite" data-branch="0" data-port-in="1" data-port-out="1">
                   <div class="panel-head">
                     <div class="wz-panel-head-copy">
                       <h2 class="wz-branch-title">改写 3.1</h2>
                     </div>
-                    <div class="wz-panel-head-actions">
-                      <button id="wzConfirmRewriteBtn" type="button">确认信息</button>
-                    </div>
                   </div>
                   <div class="wz-node-body">
                     <div class="wz-subflow">
-                      <section class="wz-subnode" data-sub="1" data-port-in="1" data-port-out="1">
-                        <div class="wz-subnode-head"><span class="wz-subno">3.1.1</span> 模板与产品信息</div>
+                      <nav class="wz-subflow-nav" aria-label="改写子步骤">
+                        <button type="button" class="wz-subflow-nav-item" data-sub="1">模板信息</button>
+                        <button type="button" class="wz-subflow-nav-item" data-sub="2">产品素材</button>
+                        <button type="button" class="wz-subflow-nav-item" data-sub="3">投放设置</button>
+                        <button type="button" class="wz-subflow-nav-item" data-sub="4">提示词</button>
+                      </nav>
+                      <section class="wz-subnode" data-sub="1" data-sub-page="template" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head">
+                          <span class="wz-subno">3.1.1</span>
+                          <span class="wz-subnode-head-copy">
+                            <strong>模板与产品信息</strong>
+                            <small class="wz-subnode-desc">复用历史模板，或手动填写本次产品名与商店链接</small>
+                          </span>
+                        </div>
                         <div class="wz-subnode-body">
-                          <div class="wz-batch-section-head">
-                            <h3>模板复用（可选）</h3>
-                            <span class="wz-field-hint">选择模板会带入历史填写信息，不选择也可以直接填写本次批次。</span>
+                          <div class="wz-rewrite-section">
+                            <div class="wz-rewrite-section-head">
+                              <h4>模板复用</h4>
+                              <span class="wz-field-hint">可选。选择模板会带入历史填写信息。</span>
+                            </div>
+                            <div class="wz-template-form wz-primary-form wz-template-pick-form">
+                              <label>选择模板
+                                <select id="wzTemplateSelect"></select>
+                              </label>
+                              <label>模板名 <input id="wzDisplayName" type="text" value="" placeholder="例如：产品名_地区_版本" /></label>
+                            </div>
                           </div>
-                          <div class="wz-template-form wz-primary-form">
-                            <label>选择模板
-                              <select id="wzTemplateSelect"></select>
-                            </label>
-                            <label>模板名 <input id="wzDisplayName" type="text" value="" placeholder="例如：产品名_地区_版本" /></label>
-                            <label>产品名 <input id="wzProductName" type="text" value="" placeholder="填写我方产品名" /></label>
-                            <label>产品链接 <input id="wzProductLink" type="url" value="" placeholder="App Store / Google Play 链接" /></label>
-                            <button id="wzInspectStoreBtn" class="mini ghost wz-inspect-store-btn" type="button">读取商店页</button>
+                          <div class="wz-rewrite-section">
+                            <div class="wz-rewrite-section-head">
+                              <h4>产品基础信息</h4>
+                              <span class="wz-field-hint">填写会写入 Seedance 预案与最终成片替换逻辑。</span>
+                            </div>
+                            <div class="wz-template-form wz-primary-form">
+                              <label>产品名 <input id="wzProductName" type="text" value="" placeholder="填写我方产品名" /></label>
+                              <label>产品链接 <input id="wzProductLink" type="url" value="" placeholder="App Store / Google Play 链接" /></label>
+                              <div class="wz-store-inspect-row">
+                                <button id="wzInspectStoreBtn" class="mini ghost wz-inspect-store-btn" type="button">读取商店页</button>
+                                <span class="wz-field-hint">自动抓取 icon、截图与产品名候选</span>
+                              </div>
+                            </div>
                           </div>
                           <div id="wzStoreCandidates" class="wz-list empty-line wz-store-candidates">尚未读取商店页资产</div>
                           <div class="wz-template-save-block">
@@ -213,27 +249,66 @@
                         </div>
                       </section>
 
-                      <section class="wz-subnode" data-sub="2" data-port-in="1" data-port-out="1">
-                        <div class="wz-subnode-head"><span class="wz-subno">3.1.2</span> 我方产品素材资产</div>
+                      <section class="wz-subnode" data-sub="2" data-sub-page="assets" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head">
+                          <span class="wz-subno">3.1.2</span>
+                          <span class="wz-subnode-head-copy">
+                            <strong>我方产品素材资产</strong>
+                            <small class="wz-subnode-desc">上传会替换进成片的图标、界面、人物与奖励元素</small>
+                          </span>
+                        </div>
                         <div class="wz-subnode-body">
-                          <div class="wz-batch-section-head">
-                            <h3>我方产品信息与参考素材</h3>
-                            <span class="wz-field-hint">整个服务是为了复刻竞品素材，这里集中填写会替换进最终视频的我方产品信息与参考素材。</span>
-                          </div>
-                          <div class="wz-template-form">
-                            <label>产品图标 <input id="wzProductIconFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                            <label>产品截图 <input id="wzProductScreenshotFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                            <label>产品录屏 <input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
-                            <label>人物 <input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                            <label>奖励元素 <input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                          <div class="wz-rewrite-section">
+                            <div class="wz-rewrite-section-head">
+                              <h4>参考素材上传</h4>
+                              <span class="wz-field-hint">支持图片或短视频。上传后会带入 Seedance 预案与成片替换。</span>
+                            </div>
+                            <div class="wz-asset-grid">
+                              <label class="wz-asset-slot">
+                                <span class="wz-asset-slot-label">产品图标</span>
+                                <span class="wz-asset-slot-hint">PNG / JPG / WebP</span>
+                                <input id="wzProductIconFile" type="file" accept="image/png,image/jpeg,image/webp" />
+                              </label>
+                              <label class="wz-asset-slot">
+                                <span class="wz-asset-slot-label">产品截图</span>
+                                <span class="wz-asset-slot-hint">应用界面静态图</span>
+                                <input id="wzProductScreenshotFile" type="file" accept="image/png,image/jpeg,image/webp" />
+                              </label>
+                              <label class="wz-asset-slot">
+                                <span class="wz-asset-slot-label">产品录屏</span>
+                                <span class="wz-asset-slot-hint">MP4 / WebM / MOV</span>
+                                <input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" />
+                              </label>
+                              <label class="wz-asset-slot">
+                                <span class="wz-asset-slot-label">人物</span>
+                                <span class="wz-asset-slot-hint">口播或演示人物素材</span>
+                                <input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                              </label>
+                              <label class="wz-asset-slot">
+                                <span class="wz-asset-slot-label">奖励元素</span>
+                                <span class="wz-asset-slot-hint">金币、余额等视觉元素</span>
+                                <input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                              </label>
+                            </div>
                           </div>
                         </div>
                       </section>
 
-                      <section class="wz-subnode" data-sub="3" data-port-in="1" data-port-out="1">
-                        <div class="wz-subnode-head"><span class="wz-subno">3.1.3</span> 本次投放</div>
+                      <section class="wz-subnode" data-sub="3" data-sub-page="delivery" data-port-in="1" data-port-out="1">
+                        <div class="wz-subnode-head">
+                          <span class="wz-subno">3.1.3</span>
+                          <span class="wz-subnode-head-copy">
+                            <strong>本次投放</strong>
+                            <small class="wz-subnode-desc">渠道定向、CTA 与合规贴片，影响生成策略与后处理</small>
+                          </span>
+                        </div>
                         <div class="wz-subnode-body">
-                          <div class="wz-inline-form">
+                          <div class="wz-rewrite-section">
+                            <div class="wz-rewrite-section-head">
+                              <h4>定向与风格</h4>
+                              <span class="wz-field-hint">渠道、地区与语言决定素材本地化方向。</span>
+                            </div>
+                            <div class="wz-inline-form">
                             <label>目标渠道
                               <select id="wzTargetChannel">
                                 <option value="meta_ads">Meta Ads</option>
@@ -244,7 +319,7 @@
                                 <option value="generic">通用</option>
                               </select>
                             </label>
-                            <label>目标地区
+                            <label class="wz-multi-select">目标地区
                               <select id="wzTargetRegions" multiple size="5">
                                 <option value="US" selected>US</option>
                                 <option value="BR">BR</option>
@@ -258,7 +333,7 @@
                                 <option value="VN">VN</option>
                               </select>
                             </label>
-                            <label>语言
+                            <label class="wz-multi-select">语言
                               <select id="wzLanguages" multiple size="5">
                                 <option value="en-US" selected>English (US)</option>
                                 <option value="pt-BR">Portuguese (Brazil)</option>
@@ -299,14 +374,32 @@
                               </select>
                             </label>
                             <label>币种 <input id="wzCurrencySymbol" type="text" value="$" /></label>
+                            </div>
                           </div>
-                          <div class="wz-inline-form wz-paired-form">
-                            <label>CTA <input id="wzCta" type="text" value="" placeholder="可选，留空则按竞品结构生成" /></label>
-                            <label>CTA 素材 <input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                            <label>Ending <input id="wzEnding" type="text" value="" placeholder="可选，留空不影响视频生成" /></label>
-                            <label>Ending 素材 <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                          <div class="wz-rewrite-section">
+                            <div class="wz-rewrite-section-head">
+                              <h4>CTA 与结尾</h4>
+                              <span class="wz-field-hint">留空时按竞品结构生成；可附带专用素材文件。</span>
+                            </div>
+                            <div class="wz-inline-form wz-paired-form">
+                              <label>CTA <input id="wzCta" type="text" value="" placeholder="可选，留空则按竞品结构生成" /></label>
+                              <label class="wz-asset-slot wz-asset-slot-inline">
+                                <span class="wz-asset-slot-label">CTA 素材</span>
+                                <input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                              </label>
+                              <label>Ending <input id="wzEnding" type="text" value="" placeholder="可选，留空不影响视频生成" /></label>
+                              <label class="wz-asset-slot wz-asset-slot-inline">
+                                <span class="wz-asset-slot-label">Ending 素材</span>
+                                <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                              </label>
+                            </div>
                           </div>
-                          <div class="wz-disclaimer-head">
+                          <div class="wz-rewrite-section wz-rewrite-section-disclaimer">
+                            <div class="wz-rewrite-section-head">
+                              <h4>免责声明贴片</h4>
+                              <span class="wz-field-hint">仅作成片后处理，不写入 Seedance prompt。</span>
+                            </div>
+                            <div class="wz-disclaimer-head">
                             <label class="wz-field-label">免责声明贴片模板
                               <select id="wzDisclaimerPreset">
                                 <option value="auto" selected>按语言自动选择</option>
@@ -321,7 +414,7 @@
                               <span>启用免责声明贴片</span>
                             </label>
                           </div>
-                          <p class="wz-field-hint">免责声明只作为最终视频透明后处理贴片，不会写入 Seedance prompt 或 payload。</p>
+                          <p class="wz-field-hint wz-disclaimer-note">免责声明只作为最终视频透明后处理贴片，不会写入 Seedance prompt 或 payload。</p>
                           <label class="wz-field-label">免责声明文案
                             <textarea id="wzDisclaimer" class="wz-json-box compact" spellcheck="false">Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.</textarea>
                           </label>
@@ -345,40 +438,53 @@
                               <input id="wzDisclaimerOverlayHorizontalMargin" type="number" min="0" max="220" step="2" value="50" />
                             </label>
                           </div>
-                          <p class="wz-field-hint">这些设置只影响最终视频后处理贴片，业务可以按渠道或地区选择展示样式。</p>
-                          <div id="wzRulesBox" class="wz-list empty-line wz-branch-rules">等待加载渠道规则</div>
-                          <div class="modal-actions wz-actions">
-                            <button id="wzLoadRulesBtn" class="ghost wz-load-rules-btn" type="button">刷新渠道规则</button>
                           </div>
-                          <details id="wzTruthDetails" class="wz-details wz-truth-details">
-                            <summary>强承诺真实规则</summary>
-                            <div id="wzTruthFields" class="wz-template-form wz-truth-fields"></div>
-                          </details>
+                          <div class="wz-rewrite-section wz-rewrite-section-rules">
+                            <div class="wz-rewrite-section-head">
+                              <h4>渠道规则</h4>
+                              <span class="wz-field-hint">按目标渠道加载合规约束，确认前建议刷新一次。</span>
+                            </div>
+                            <div id="wzRulesBox" class="wz-list empty-line wz-branch-rules">等待加载渠道规则</div>
+                            <div class="modal-actions wz-actions">
+                              <button id="wzLoadRulesBtn" class="ghost wz-load-rules-btn" type="button">刷新渠道规则</button>
+                            </div>
+                            <details id="wzTruthDetails" class="wz-details wz-truth-details">
+                              <summary>强承诺真实规则</summary>
+                              <div id="wzTruthFields" class="wz-template-form wz-truth-fields"></div>
+                            </details>
+                          </div>
                         </div>
                       </section>
 
-                      <section class="wz-subnode" data-sub="4" data-port-in="1">
-                        <div class="wz-subnode-head"><span class="wz-subno">3.1.4</span> 提示词规则（可选补充）</div>
+                      <section class="wz-subnode" data-sub="4" data-sub-page="prompts" data-port-in="1">
+                        <div class="wz-subnode-head">
+                          <span class="wz-subno">3.1.4</span>
+                          <span class="wz-subnode-head-copy">
+                            <strong>提示词规则</strong>
+                            <small class="wz-subnode-desc">可选补充，会直接进入 Seedance 预案提示词</small>
+                          </span>
+                        </div>
                         <div class="wz-subnode-body">
-                          <label class="wz-field-label">脚本裂变规则（可选）
-                            <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：变体 2 用快递员替代外卖员；变体 3 用超市收银员；保留原视频口播结构与转化节奏。"></textarea>
-                            <span class="wz-field-hint">可指定各变体的人物/相似职业裂变；不填时系统会按参考拆解自动做相似职业替换。</span>
-                          </label>
-                          <label class="wz-field-label">补充提示词（可选）
-                            <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：价格/金额如需出现请在此填写；强调某个镜头、字幕语言、产品 UI、参考素材替换方式等。"></textarea>
-                            <span class="wz-field-hint">这里填写的内容会直接带入 Seedance 预案提示词。</span>
-                          </label>
-                          <label class="wz-field-label">限定提示词（可选）
-                            <textarea id="wzNegativePrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：不要出现竞品 logo、不要编造到账金额、不要残留水印、不要错误币种。"></textarea>
-                            <span class="wz-field-hint">可选补充：禁止出现的元素或表述，也会进入 Seedance 预案提示词。</span>
-                          </label>
+                          <div class="wz-prompt-stack">
+                            <label class="wz-field-label">脚本裂变规则（可选）
+                              <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：变体 2 用快递员替代外卖员；变体 3 用超市收银员；保留原视频口播结构与转化节奏。"></textarea>
+                              <span class="wz-field-hint">可指定各变体的人物/相似职业裂变；不填时系统会按参考拆解自动做相似职业替换。</span>
+                            </label>
+                            <label class="wz-field-label">补充提示词（可选）
+                              <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：价格/金额如需出现请在此填写；强调某个镜头、字幕语言、产品 UI、参考素材替换方式等。"></textarea>
+                              <span class="wz-field-hint">这里填写的内容会直接带入 Seedance 预案提示词。</span>
+                            </label>
+                            <label class="wz-field-label">限定提示词（可选）
+                              <textarea id="wzNegativePrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：不要出现竞品 logo、不要编造到账金额、不要残留水印、不要错误币种。"></textarea>
+                              <span class="wz-field-hint">可选补充：禁止出现的元素或表述，也会进入 Seedance 预案提示词。</span>
+                            </label>
+                          </div>
                         </div>
                       </section>
                     </div>
                   </div>
                 </section>
               </div>
-              <p id="wzRewriteConfirmHint" class="wz-field-hint">确认后将上传素材并校验必填项；确认后仍可继续修改第 3 节内容。</p>
             </div>
 
             <!-- 列4：批次（汇聚） -->
@@ -402,7 +508,7 @@
                       <span class="wz-field-hint">调整时长、变体数后需重新估算</span>
                     </div>
                     <div class="wz-inline-form wz-batch-params">
-                      <label>模型
+                      <label>Seedance 视频模型
                         <select id="wzModelSelect">
                           <option value="dreamina-seedance-2-0-260128" selected>Seedance 2.0</option>
                         </select>
@@ -445,6 +551,22 @@
                       <h3>Seedance 预案</h3>
                       <span id="wzPlanHint" class="wz-field-hint">估算完成后生成，确认后再批量出片</span>
                     </div>
+                    <div id="wzPlanLlmServiceStatus" class="wz-info wz-service-pill">正在检查提示词模型服务…</div>
+                    <details class="wz-details wz-advanced-settings wz-plan-llm-settings">
+                      <summary>提示词模型设置</summary>
+                      <p class="wz-field-hint">用于生成首帧图与 Seedance 视频提示词，可与第 2 步拆解模型不同。</p>
+                      <div class="wz-inline-form">
+                        <label>模型服务商 <input id="wzPlanLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
+                        <label>提示词模型
+                          <select id="wzPlanLlmModel">
+                            <option value="gpt-5.4" selected>GPT-5.4</option>
+                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                          </select>
+                        </label>
+                        <label>接口地址 <input id="wzPlanLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型 API 地址" /></label>
+                        <label>创意随机度 <input id="wzPlanLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" title="数值越低输出越稳定，越高越有变化" /></label>
+                      </div>
+                    </details>
                     <div id="wzPlanBox" class="wz-list empty-line">尚未生成 Seedance 预案</div>
                   </section>
                   <label class="wz-check">
@@ -493,6 +615,22 @@
       </section>
     </main>
 
+    <div id="wzLlmStreamModal" class="modal-backdrop wz-llm-stream-modal" hidden>
+      <div class="modal-panel wz-llm-stream-panel" role="dialog" aria-modal="true" aria-labelledby="wzLlmStreamTitle">
+        <div class="wz-llm-stream-header">
+          <div>
+            <h2 id="wzLlmStreamTitle">LLM 运行中</h2>
+            <p id="wzLlmStreamSubtitle">正在调用模型，实时输出如下</p>
+          </div>
+          <span id="wzLlmStreamStatus" class="wz-llm-stream-status">running</span>
+        </div>
+        <pre id="wzLlmStreamOutput" class="wz-llm-stream-output" aria-live="polite"></pre>
+        <div class="modal-actions">
+          <button id="wzLlmStreamCloseBtn" type="button" class="ghost" disabled>关闭</button>
+        </div>
+      </div>
+    </div>
+
     <div id="wzLoginModal" class="modal-backdrop login-backdrop" hidden>
       <div class="modal-panel login-panel">
         <h2>登录 Touka AI素材中台</h2>
@@ -506,7 +644,7 @@
       </div>
     </div>
 
-    <script src="/wz-canvas.js" defer></script>
-    <script src="/wangzhuan.js" type="module"></script>
+    <script src="/wz-canvas.js?v=20260626-stepview-recheck" defer></script>
+    <script src="/wangzhuan.js?v=20260626-stepview-recheck" type="module"></script>
   </body>
 </html>

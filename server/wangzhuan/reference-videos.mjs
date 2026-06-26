@@ -5,7 +5,9 @@ import { promisify } from "node:util";
 
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { llmUsesGeminiCompat, resolveLlmConfig } from "./llm-config.mjs";
+import { callLlmStreaming } from "./llm-stream.mjs";
+import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, resolveLlmConfig } from "./llm-config.mjs";
+import { writeSseDelta, writeSseDone, writeSseError, writeSseLog } from "./sse.mjs";
 import {
   hasWangzhuanFactsStore,
   loadReferenceVideoProbeFromMysql,
@@ -848,7 +850,9 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
     temperature: llmConfig.temperature,
     response_format: { type: "json_object" }
   };
-  const useResponses = canUseResponsesInput(messages) && !forceChatForFileUrl;
+  const useResponses = canUseResponsesInput(messages)
+    && !forceChatForFileUrl
+    && !llmUsesSkylinkGeminiChatBridge(llmConfig);
   const initialUrl = useResponses ? responsesUrl(llmConfig.endpoint) : chatCompletionsUrl(llmConfig.endpoint);
   if (typeof options.dumpRequest === "function") {
     await options.dumpRequest(redactedModelRequest({
@@ -968,16 +972,28 @@ async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
   return llmResponseTextFromGemini(payload);
 }
 
-export async function draftReferenceVideoDecomposition(context, request = {}, options = {}) {
-  const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
-  if (probe.status === "fail") {
-    throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
-  }
-  const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
-  const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+export function buildGeminiRequestBody(messages, temperature) {
+  return {
+    ...geminiPartsFromMessages(messages),
+    generationConfig: {
+      temperature
+    }
+  };
+}
+
+async function invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options = {}) {
   const messages = buildDecompositionMessages(probe, request, llmConfig, visionInputs);
-  const content = typeof context.callWangzhuanLlm === "function"
-    ? await context.callWangzhuanLlm({
+  const streamHandlers = options.streamHandlers;
+  if (streamHandlers) {
+    return callLlmStreaming(
+      llmConfig,
+      messages,
+      streamHandlers,
+      (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
+    );
+  }
+  if (typeof context.callWangzhuanLlm === "function") {
+    return context.callWangzhuanLlm({
       messages,
       llmConfig: {
         provider: llmConfig.provider,
@@ -994,16 +1010,20 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
         frameCount: visionInputs.frames.length
       },
       visionInputs
+    });
+  }
+  return llmUsesGeminiNativeApi(llmConfig)
+    ? callGeminiCompatibleLlm(llmConfig, messages, {
+      requestId: options.requestId,
+      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
     })
-    : await (llmUsesGeminiCompat(llmConfig)
-      ? callGeminiCompatibleLlm(llmConfig, messages, {
-        requestId: options.requestId,
-        dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
-      })
-      : callOpenAiCompatibleLlm(llmConfig, messages, {
-        requestId: options.requestId,
-        dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
-      }));
+    : callOpenAiCompatibleLlm(llmConfig, messages, {
+      requestId: options.requestId,
+      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+    });
+}
+
+async function finalizeDraftDecomposition(context, probe, request, llmConfig, content) {
   const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
   if (decomposition.missingFields.length) {
     throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {
@@ -1025,8 +1045,55 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
       model: llmConfig.model,
       referenceVideoId: probe.referenceVideoId
     },
+    warnings: []
+  };
+}
+
+export async function draftReferenceVideoDecomposition(context, request = {}, options = {}) {
+  const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
+  if (probe.status === "fail") {
+    throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
+  }
+  const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
+  const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+  const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options);
+  const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, content);
+  return {
+    ...result,
     warnings: visionInputs.warnings
   };
+}
+
+export async function draftReferenceVideoDecompositionStream(context, request = {}, res, options = {}) {
+  const requestId = options.requestId;
+  try {
+    writeSseLog(res, `[${new Date().toISOString()}] init draft-decomposition stream`);
+    const probe = await loadReferenceVideoProbe(context, request.referenceVideoId);
+    if (probe.status === "fail") {
+      throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
+    }
+    const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
+    const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+    writeSseLog(res, `model=${llmConfig.model} provider=${llmConfig.provider}`);
+    writeSseLog(res, "POST upstream stream=true …");
+    const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, {
+      requestId,
+      streamHandlers: {
+        onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
+        onDelta: (delta) => writeSseDelta(res, delta)
+      }
+    });
+    writeSseLog(res, "");
+    writeSseLog(res, "[DONE] received — parsing JSON …");
+    const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, content);
+    writeSseLog(res, "parse ok — decomposition ready");
+    writeSseDone(res, {
+      ...result,
+      warnings: visionInputs.warnings
+    }, requestId);
+  } catch (error) {
+    writeSseError(res, error, requestId);
+  }
 }
 
 async function loadConfirmedDecomposition(context, referenceVideoId) {

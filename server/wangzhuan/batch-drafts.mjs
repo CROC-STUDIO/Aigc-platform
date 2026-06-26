@@ -2,11 +2,13 @@ import { join } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
 import { makeBatchId } from "./ids.mjs";
+import { normalizeBranchDrafts } from "./branches.mjs";
 import {
   hasWangzhuanFactsStore,
   loadActivePipelineRunFromMysql,
   loadBatchDetailFromMysql,
-  syncBatchFacts
+  syncBatchFacts,
+  syncVideoDecompositionFact
 } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 
@@ -48,7 +50,14 @@ function normalizeString(value, max = 0) {
 }
 
 function cleanObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  if (value == null) return undefined;
+  return typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function hasUsableDecomposition(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (value.referenceVideoId) return true;
+  return Boolean(value.scene || value.hook || value.action || value.subject);
 }
 
 function ensureReferenceVideo(request = {}) {
@@ -68,6 +77,9 @@ async function requireFactsStore() {
 }
 
 async function saveBatchDraftRecord(context, batch) {
+  if (batch.decomposition?.referenceVideoId) {
+    await syncVideoDecompositionFact(context, batch.decomposition);
+  }
   const synced = await syncBatchFacts(context, batch, "batch_draft_saved");
   if (synced?.skipped) {
     const detail = synced.error?.message || synced.error?.code || null;
@@ -96,6 +108,7 @@ function requestSnapshotFromDraft(request = {}, referenceVideo = {}) {
     productLink: normalizeString(request.productLink, 2000),
     knowledgeNotes: normalizeString(request.knowledgeNotes, 4000),
     llmConfig: cleanObject(request.llmConfig),
+    planLlmConfig: cleanObject(request.planLlmConfig),
     disclaimer: normalizeString(request.disclaimer, 2000),
     disclaimerPresetId: normalizeString(request.disclaimerPresetId || request.disclaimerPreset, 64),
     disclaimerPreset: normalizeString(request.disclaimerPreset || request.disclaimerPresetId, 64),
@@ -114,12 +127,23 @@ function requestSnapshotFromDraft(request = {}, referenceVideo = {}) {
     promiseLevel: normalizeString(request.promiseLevel, 64),
     templateId: normalizeString(request.templateId, 128),
     versionId: normalizeString(request.versionId, 160),
-    templateSnapshot: cleanObject(request.templateSnapshot),
+    templateSnapshot: request.templateSnapshot?.draft ? cleanObject(request.templateSnapshot) : undefined,
     branches: Array.isArray(request.branches) ? request.branches : [],
     branchDrafts: Array.isArray(request.branchDrafts) ? request.branchDrafts : [],
-    decomposition: cleanObject(request.decomposition),
+    ...(hasUsableDecomposition(request.decomposition) ? { decomposition: request.decomposition } : {}),
     referenceVideoId: referenceVideo.referenceVideoId
   };
+}
+
+function resolveBranchDrafts(request = {}, templateSnapshot = null, existing = []) {
+  const templateDraft = templateSnapshot?.draft || {};
+  const raw = Array.isArray(request.branchDrafts) && request.branchDrafts.length
+    ? request.branchDrafts
+    : Array.isArray(request.branches) && request.branches.length
+      ? request.branches
+      : [];
+  if (!raw.length) return Array.isArray(existing) ? existing : [];
+  return normalizeBranchDrafts(templateDraft, raw);
 }
 
 function buildDraftBatch(context, existing, request = {}) {
@@ -132,8 +156,9 @@ function buildDraftBatch(context, existing, request = {}) {
   const templateSnapshot = request.templateSnapshot !== undefined
     ? request.templateSnapshot
     : existing?.templateSnapshot || null;
+  const branchDrafts = resolveBranchDrafts(request, templateSnapshot, existing?.branchDrafts);
   const decomposition = request.decomposition !== undefined
-    ? request.decomposition
+    ? (hasUsableDecomposition(request.decomposition) ? request.decomposition : null)
     : existing?.decomposition || null;
   return {
     batchId,
@@ -149,11 +174,13 @@ function buildDraftBatch(context, existing, request = {}) {
     request: {
       ...(existing?.request || {}),
       ...requestSnapshot,
+      branches: branchDrafts,
+      branchDrafts,
       batchId,
       sourceStep: normalizeString(request.sourceStep, 64)
     },
-    estimate: existing?.estimate || null,
-    branchDrafts: Array.isArray(request.branchDrafts) ? request.branchDrafts : (existing?.branchDrafts || []),
+    estimate: request.estimate !== undefined ? request.estimate : (existing?.estimate || null),
+    branchDrafts,
     previewType: existing?.previewType,
     plans: Array.isArray(existing?.plans) ? existing.plans : [],
     scripts: Array.isArray(existing?.scripts) ? existing.scripts : [],

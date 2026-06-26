@@ -1,6 +1,7 @@
 import {
   $,
   apiEnvelope,
+  apiEnvelopeStream,
   badge,
   batchGenerationProgress,
   batchRuntimeSummary,
@@ -37,8 +38,11 @@ import {
   showErrorModal,
   showLogin,
   showToast,
+  notifyBatchQcResult,
+  applyQcReportsToBatch,
   snapshotPreviewPlayback,
   syncActionHint,
+  readWorkbenchRestoreRequest,
   taskSpaceHref,
   taskProgressHtml,
   strongTruthFields,
@@ -50,6 +54,19 @@ import {
   renderActiveLockBanner,
   showActiveLockFromError
 } from "./wangzhuan-task-nav.js";
+
+const LLM_MODEL_OPTIONS = Object.freeze(["gpt-5.4", "gemini-3.5-flash"]);
+const DEFAULT_LLM_MODEL = "gpt-5.4";
+
+function normalizeLlmModelChoice(value, fallback = DEFAULT_LLM_MODEL) {
+  const text = String(value || "").trim().toLowerCase();
+  return LLM_MODEL_OPTIONS.find((item) => item.toLowerCase() === text) || fallback;
+}
+
+function setLlmModelSelect(select, value) {
+  if (!select) return;
+  select.value = normalizeLlmModelChoice(value);
+}
 
 const lockHost = () => ({
   state,
@@ -122,6 +139,11 @@ const els = {
   llmModel: $("#wzLlmModel"),
   llmEndpoint: $("#wzLlmEndpoint"),
   llmTemperature: $("#wzLlmTemperature"),
+  planLlmProvider: $("#wzPlanLlmProvider"),
+  planLlmModel: $("#wzPlanLlmModel"),
+  planLlmEndpoint: $("#wzPlanLlmEndpoint"),
+  planLlmTemperature: $("#wzPlanLlmTemperature"),
+  planLlmServiceStatus: $("#wzPlanLlmServiceStatus"),
   knowledgeNotes: $("#wzKnowledgeNotes"),
   variantPrompt: $("#wzVariantPrompt"),
   customPrompt: $("#wzCustomPrompt"),
@@ -187,11 +209,13 @@ const state = {
   galleryPageSize: 20,
   llmDefaults: null,
   activeLock: null,
+  backgroundActiveBatchId: null,
   storeInspection: null,
   templateCommitted: false,
   rewriteConfirmed: false,
   suppressTemplateUnlock: false,
   pollTimer: 0,
+  pollGeneration: 0,
   runtimeClockTimer: 0,
   pollIntervalMs: 2000
 };
@@ -275,6 +299,7 @@ const DISCLAIMER_PRESETS = {
 
 const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，请继续填写第三步产品改写。";
 const REWRITE_CONFIRMED_MESSAGE = "产品改写信息已确认，可进入第四步估算本批任务。";
+const REWRITE_MULTI_CONFIRMED_MESSAGE = "全部裂变子节点已确认，可进入第四步估算本批任务。";
 const TEMPLATE_SAVED_MESSAGE = "模板已保存，可在后续批次中复用。";
 const ESTIMATE_BTN_LABEL = Object.freeze({
   first: "估算本批任务",
@@ -403,17 +428,54 @@ const REQUIRED_DRAFT_FIELDS = Object.freeze([
   "promiseLevel"
 ]);
 
+const REQUIRED_BRANCH_CONFIRM_FIELDS = Object.freeze([
+  "productName"
+]);
+
+const BRANCH_MODULE_SUB = Object.freeze({
+  template: "1",
+  assets: "2",
+  delivery: "3",
+  prompts: "4"
+});
+
+const BRANCH_MODULE_LABELS = Object.freeze({
+  template: "模板信息",
+  assets: "产品素材",
+  delivery: "投放设置",
+  prompts: "提示词"
+});
+
+const DRAFT_FIELD_LABELS = Object.freeze({
+  displayName: "模板名",
+  productName: "产品名",
+  productLink: "产品链接",
+  currencySymbol: "币种",
+  language: "语言",
+  regions: "目标地区",
+  targetChannels: "目标渠道",
+  defaultOutputRatio: "输出比例",
+  defaultDurationSec: "时长",
+  promiseLevel: "承诺等级"
+});
+
 const DRAFT_FIELD_BRANCH_KEYS = Object.freeze({
   displayName: "displayName",
   productName: "productName",
+  productLink: "productLink",
   cta: "cta",
   ending: "ending",
   currencySymbol: "currencySymbol",
   language: "language",
+  languages: "languages",
   regions: "regions",
-  targetChannels: "templateChannel",
+  targetChannels: "targetChannel",
+  templateChannel: "templateChannel",
   defaultDurationSec: "defaultDuration",
-  promiseLevel: "promiseLevel"
+  promiseLevel: "promiseLevel",
+  materialDirection: "materialDirection",
+  materialDirectionCustom: "materialDirectionCustom",
+  voiceoverStyle: "voiceoverStyle"
 });
 
 function isDecompositionConfirmed() {
@@ -474,7 +536,10 @@ function resetControlToDefault(control) {
 }
 
 function resetTransientFormState({ generateBatchName = false, clearSession = true } = {}) {
-  if (clearSession) clearWorkflowSession();
+  if (clearSession) {
+    stopPolling();
+    clearWorkflowSession();
+  }
   state.referenceVideo = null;
   state.decomposition = null;
   state.decompositionDraft = null;
@@ -518,19 +583,13 @@ function bootstrapWorkbenchUi() {
 
 function syncStartNewTaskButton() {
   if (!els.startNewTaskBtn) return;
-  const locked = hasActivePipelineBatch();
-  els.startNewTaskBtn.disabled = locked;
-  els.startNewTaskBtn.title = locked
-    ? "当前有进行中的批次，请先停止、完成质检或放弃后再开始新任务"
+  els.startNewTaskBtn.disabled = false;
+  els.startNewTaskBtn.title = state.backgroundActiveBatchId
+    ? "清空当前填写并生成新的批次名（不影响其他进行中的批次）"
     : "清空当前填写并生成新的批次名";
 }
 
 async function startNewTask() {
-  if (hasActivePipelineBatch()) {
-    showToast("当前有进行中的批次，请先停止或完成后再开始新任务", { type: "error" });
-    return;
-  }
-  clearActiveLockBanner(lockHost());
   resetTransientFormState({ generateBatchName: true, clearSession: true });
   clearReferenceObjectUrl();
   syncMaterialDirectionCustom();
@@ -543,8 +602,14 @@ async function startNewTask() {
   renderReference();
   renderBatch();
   renderEstimate();
+  await refreshBackgroundActiveBatchBanner();
   syncStartNewTaskButton();
-  showToast("已开始新任务", { type: "success" });
+  showToast(
+    state.backgroundActiveBatchId
+      ? "已开始新任务；上方仍有其他进行中的批次提醒"
+      : "已开始新任务",
+    { type: "success" }
+  );
 }
 
 function persistWorkflowSession() {
@@ -558,26 +623,29 @@ function persistWorkflowSession() {
 }
 
 function restoreBatchDraftForm(batch = state.batchDetail?.batch) {
-  const draft = batch?.templateSnapshot?.draft;
-  if (!draft || typeof draft !== "object") return false;
-  const branches = Array.isArray(batch.branchDrafts) && batch.branchDrafts.length
+  const branchDrafts = Array.isArray(batch.branchDrafts) && batch.branchDrafts.length
     ? batch.branchDrafts
-    : draft.branches;
-  const payload = { ...draft, branches: branches || draft.branches };
+    : null;
+  const draft = batch?.templateSnapshot?.draft;
+  if (!draft && !branchDrafts) return false;
+  const payload = draft
+    ? { ...draft, branches: branchDrafts || draft.branches }
+    : { branches: branchDrafts };
   state.suppressTemplateUnlock = true;
   applyBranches(payload);
   const request = batch.estimate?.request || batch.request || {};
-  if (request.knowledgeNotes || draft.knowledgeNotes) {
-    els.knowledgeNotes.value = request.knowledgeNotes || draft.knowledgeNotes || "";
+  if (request.knowledgeNotes || draft?.knowledgeNotes) {
+    els.knowledgeNotes.value = request.knowledgeNotes || draft?.knowledgeNotes || "";
   }
-  if (request.durationSec || draft.defaultDurationSec) {
-    els.duration.value = String(request.durationSec || draft.defaultDurationSec || els.duration.value || 15);
+  if (request.durationSec || draft?.defaultDurationSec) {
+    els.duration.value = String(request.durationSec || draft?.defaultDurationSec || els.duration.value || 15);
   }
-  if (request.outputRatio || draft.defaultOutputRatio) {
-    setOptionalValue(els.outputRatio, request.outputRatio || draft.defaultOutputRatio || "9:16");
+  if (request.outputRatio || draft?.defaultOutputRatio) {
+    setOptionalValue(els.outputRatio, request.outputRatio || draft?.defaultOutputRatio || "9:16");
   }
   if (request.variantCount) els.variantCount.value = String(request.variantCount);
   if (request.requestedConcurrency) els.concurrency.value = String(request.requestedConcurrency);
+  applyPlanLlmConfigValues(request.planLlmConfig || request.llmConfig || draft?.planLlmConfig || draft?.llmConfig || {});
   state.suppressTemplateUnlock = false;
   return true;
 }
@@ -587,10 +655,16 @@ function isRewriteConfirmed() {
 }
 
 function syncRewriteDomState() {
+  const step3 = document.querySelector(".wz-col-branches[data-step=\"3\"]");
   const node = document.getElementById("wzNodeRewrite");
-  if (!node) return;
-  if (isRewriteConfirmed()) node.dataset.rewriteConfirmed = "1";
-  else node.removeAttribute("data-rewrite-confirmed");
+  if (step3) {
+    if (isRewriteConfirmed()) step3.dataset.rewriteConfirmed = "1";
+    else step3.removeAttribute("data-rewrite-confirmed");
+  }
+  if (node) {
+    if (isRewriteConfirmed()) node.dataset.rewriteConfirmed = "1";
+    else node.removeAttribute("data-rewrite-confirmed");
+  }
   window.dispatchEvent(new CustomEvent("wz:rewrite-confirmed-changed"));
 }
 
@@ -615,7 +689,8 @@ function clearRewriteProgress({ clearEstimate = true } = {}) {
 }
 
 function restoreRewriteConfirmedFromBatch(batch = {}) {
-  const sourceStep = String(batch.request?.sourceStep || "");
+  const request = batch.estimate?.request || batch.request || {};
+  const sourceStep = String(request.sourceStep || batch.request?.sourceStep || "");
   if (batch.estimate?.estimateId || ["rewrite_confirmed", "estimate", "template_saved"].includes(sourceStep)) {
     state.rewriteConfirmed = true;
     syncRewriteDomState();
@@ -653,39 +728,103 @@ function applyRestoredTemplate(versionId, { lock = false } = {}) {
   return true;
 }
 
+function referenceVideoIdFromBatch(batch = {}) {
+  return String(
+    batch.referenceVideo?.referenceVideoId
+    || batch.decomposition?.referenceVideoId
+    || batch.estimate?.request?.referenceVideoId
+    || batch.request?.referenceVideoId
+    || ""
+  ).trim();
+}
+
+function restoreTemplateFromBatch(batch = {}) {
+  const request = batch.estimate?.request || batch.request || {};
+  const versionId = request.versionId || batch.templateSnapshot?.versionId || "";
+  if (versionId && applyRestoredTemplate(versionId, { lock: true })) return true;
+  const snapshot = batch.templateSnapshot;
+  if (!snapshot?.draft) return false;
+  state.suppressTemplateUnlock = true;
+  applyTemplate(snapshot);
+  setTemplateCommitted(true, snapshot);
+  syncTemplateSelectValues(snapshot.versionId || "");
+  state.suppressTemplateUnlock = false;
+  return true;
+}
+
+async function hydrateReferenceWorkflowFromBatch(batch = {}) {
+  const referenceVideoId = referenceVideoIdFromBatch(batch);
+  if (!referenceVideoId) return false;
+  if (batch.referenceVideo?.referenceVideoId) {
+    state.referenceVideo = batch.referenceVideo;
+  }
+  if (batch.decomposition?.referenceVideoId) {
+    state.decomposition = batch.decomposition;
+    return true;
+  }
+  try {
+    const data = await apiEnvelope(`/api/wangzhuan/reference-videos/${encodeURIComponent(referenceVideoId)}/workflow-state`);
+    if (data.referenceVideo?.referenceVideoId) {
+      state.referenceVideo = data.referenceVideo;
+    }
+    if (data.decompositionConfirmed && data.decomposition?.referenceVideoId) {
+      state.decomposition = data.decomposition;
+    }
+  } catch {
+    if (batch.referenceVideo?.referenceVideoId) {
+      state.referenceVideo = batch.referenceVideo;
+    }
+  }
+  return Boolean(state.referenceVideo?.referenceVideoId);
+}
+
 function restoreWorkflowFromBatch(detail) {
   const batch = detail?.batch;
   if (!batch) return false;
   let restored = false;
+  const referenceVideoId = referenceVideoIdFromBatch(batch);
   if (batch.referenceVideo?.referenceVideoId) {
     state.referenceVideo = batch.referenceVideo;
-    if (batch.decomposition?.referenceVideoId) {
-      state.decomposition = batch.decomposition;
-    }
+  } else if (referenceVideoId && state.referenceVideo?.referenceVideoId === referenceVideoId) {
     restored = true;
   }
-  const request = batch.estimate?.request || {};
-  if (request.versionId) {
-    restored = applyRestoredTemplate(request.versionId, { lock: true }) || restored;
+  const decomposition = batch.decomposition?.referenceVideoId
+    ? batch.decomposition
+    : (batch.request?.decomposition?.referenceVideoId || batch.request?.decomposition?.scene
+      ? batch.request.decomposition
+      : state.decomposition);
+  if (decomposition?.referenceVideoId || decomposition?.scene) {
+    state.decomposition = {
+      ...decomposition,
+      referenceVideoId: decomposition.referenceVideoId || referenceVideoId
+    };
+    restored = true;
   }
-  if (batch.estimate?.estimateId) {
-    state.estimate = { estimate: batch.estimate, capabilities: batch.capabilities || null };
-    state.capabilities = batch.capabilities || null;
+  restored = Boolean(state.referenceVideo?.referenceVideoId) || restored;
+  if (restoreTemplateFromBatch(batch)) restored = true;
+  if (batch.estimate?.estimateId || batch.estimate?.scriptCount) {
+    state.estimate = {
+      estimate: batch.estimate,
+      capabilities: batch.capabilities || state.capabilities || null
+    };
+    state.capabilities = batch.capabilities || state.capabilities || null;
+    restored = true;
   }
   restoreRewriteConfirmedFromBatch(batch);
-  restoreBatchDraftForm(batch);
+  const draftRestored = restoreBatchDraftForm(batch);
   restoreUserBatchName();
-  if (restored) {
-    renderReference();
-    syncDecompositionDomState();
-    if (state.decomposition?.referenceVideoId) {
-      renderDecompositionForm(state.decomposition);
-    }
-    renderRewriteStatus();
-    renderBatchReadiness();
-    renderEstimate();
-    persistWorkflowSession();
+  restored = restored || draftRestored || Boolean(batch.branchDrafts?.length);
+  renderReference();
+  syncDecompositionDomState();
+  if (state.decomposition?.referenceVideoId) {
+    renderDecompositionForm(state.decomposition);
   }
+  renderRewriteStatus();
+  renderTemplateSaveStatus();
+  renderBatchReadiness();
+  renderEstimate();
+  syncFlowHints();
+  if (restored) persistWorkflowSession();
   return restored;
 }
 
@@ -1002,15 +1141,17 @@ function syncDecompositionHints() {
 
 function syncRewriteHints() {
   const frozen = isUpstreamWorkflowLocked();
-  syncActionHint(
-    els.confirmRewriteBtn,
-    frozen
-      ? "Seedance 已提交生成，前序步骤已锁定"
-      : isRewriteConfirmed()
-        ? "产品信息已确认，仍可修改；修改后建议重新估算"
-        : "确认后将上传素材并校验必填项，之后可进入批次估算",
-    { tone: frozen ? "warn" : isRewriteConfirmed() ? "muted" : "warn" }
-  );
+  const hint = frozen
+    ? "Seedance 已提交生成，前序步骤已锁定"
+    : isRewriteConfirmed()
+      ? "产品信息已确认，仍可修改；修改后建议重新估算"
+      : branchNodes().length > 1
+        ? "确认前需填写各子节点产品名称；若有素材将一并上传"
+        : "确认前需填写产品名称；若有素材将一并上传";
+  const tone = frozen ? "warn" : isRewriteConfirmed() ? "muted" : "warn";
+  for (const button of confirmRewriteButtons()) {
+    syncActionHint(button, hint, { tone });
+  }
   syncActionHint(
     els.createTemplateBtn,
     isTemplateCommitted()
@@ -1020,14 +1161,47 @@ function syncRewriteHints() {
   );
 }
 
-function isBlockingPipelineBatch() {
-  const batch = state.batchDetail?.batch;
+function isBackgroundReminderBatch(batch) {
   if (!batch?.batchId || terminalBatchStatus(batch.status)) return false;
   return !["draft", "checking"].includes(batch.status);
 }
 
+function activeLockFromBatchInfo(batch) {
+  if (!isBackgroundReminderBatch(batch)) return null;
+  const name = batchDisplayName(batch);
+  return {
+    type: "batch",
+    id: batch.batchId,
+    status: batch.status,
+    label: activeLockLabel("batch", name || batch.batchId, batch.status)
+  };
+}
+
+function isCurrentWorkbenchBatchBlocking(batch, stalePlanPreview = false) {
+  if (!batch?.batchId || terminalBatchStatus(batch.status)) return false;
+  if (batch.status === "preview_required" && !stalePlanPreview) return false;
+  return ["queued", "running", "stitching", "qc"].includes(batch.status);
+}
+
 function hasActivePipelineBatch() {
-  return isBlockingPipelineBatch();
+  return isCurrentWorkbenchBatchBlocking(state.batchDetail?.batch, isCurrentPlanPreviewStale(state.batchDetail?.batch));
+}
+
+async function refreshBackgroundActiveBatchBanner() {
+  try {
+    const detail = await apiEnvelope("/api/wangzhuan/batches/active");
+    const batch = detail?.batch;
+    const lock = activeLockFromBatchInfo(batch);
+    state.backgroundActiveBatchId = lock?.id || null;
+    if (lock) {
+      renderActiveLockBanner(lockHost(), lock);
+      return detail;
+    }
+    clearActiveLockBanner(lockHost());
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function isQcBatchPending(batch = state.batchDetail?.batch) {
@@ -1057,11 +1231,40 @@ function isUpstreamWorkflowLocked() {
   return isSeedancePlanConfirmed();
 }
 
+function decompositionLlmConfig() {
+  return {
+    provider: els.llmProvider?.value.trim() || "",
+    model: normalizeLlmModelChoice(els.llmModel?.value),
+    endpoint: els.llmEndpoint?.value.trim() || "",
+    temperature: Number(els.llmTemperature?.value || 0.2)
+  };
+}
+
+function planLlmConfig() {
+  const defaults = state.llmDefaults || {};
+  return {
+    provider: els.planLlmProvider?.value.trim() || defaults.provider || "skylink",
+    model: normalizeLlmModelChoice(els.planLlmModel?.value, defaults.model || DEFAULT_LLM_MODEL),
+    endpoint: els.planLlmEndpoint?.value.trim() || defaults.endpoint || "https://skylink-gateway.com/api/v1",
+    temperature: Number(els.planLlmTemperature?.value ?? defaults.temperature ?? 0.2)
+  };
+}
+
+function applyPlanLlmConfigValues(config = {}) {
+  if (!config || typeof config !== "object") return;
+  if (els.planLlmProvider && config.provider != null) els.planLlmProvider.value = config.provider;
+  if (config.model != null) setLlmModelSelect(els.planLlmModel, config.model);
+  if (els.planLlmEndpoint && config.endpoint != null) els.planLlmEndpoint.value = config.endpoint;
+  if (els.planLlmTemperature && config.temperature != null) els.planLlmTemperature.value = String(config.temperature);
+  renderPlanLlmServiceStatus();
+}
+
 function syncBatchParamControls() {
   const frozen = isUpstreamWorkflowLocked();
-  for (const input of [els.modelSelect, els.duration, els.outputRatio, els.variantCount, els.concurrency, els.seedanceModel]) {
+  for (const input of [els.modelSelect, els.duration, els.outputRatio, els.variantCount, els.concurrency, els.seedanceModel, els.planLlmProvider, els.planLlmModel, els.planLlmEndpoint, els.planLlmTemperature]) {
     if (!input) continue;
     input.disabled = frozen;
+    input.classList.toggle("wz-readonly", frozen);
   }
   const uploadAssetsBtn = els.estimateBox?.querySelector("[data-action=upload-seedance-assets]");
   if (uploadAssetsBtn) uploadAssetsBtn.disabled = frozen;
@@ -1106,14 +1309,7 @@ function syncUpstreamWorkflowLock() {
 }
 
 function activeLockFromBatch(batch) {
-  if (!isBlockingPipelineBatch()) return null;
-  const name = batchDisplayName(batch);
-  return {
-    type: "batch",
-    id: batch.batchId,
-    status: batch.status,
-    label: activeLockLabel("batch", name || batch.batchId, batch.status)
-  };
+  return activeLockFromBatchInfo(batch);
 }
 
 function syncBatchActionButtons() {
@@ -1121,9 +1317,9 @@ function syncBatchActionButtons() {
   const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
   const stalePlanPreview = isCurrentPlanPreviewStale(batch);
-  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required" && !stalePlanPreview;
+  const locked = isCurrentWorkbenchBatchBlocking(batch, stalePlanPreview);
   const frozen = isUpstreamWorkflowLocked();
-  const qcPending = isQcBatchPending(batch);
+  const qcPending = isQcBatchPending(batch) && locked;
 
   if (!estimate) {
     els.planBatchBtn.disabled = true;
@@ -1143,9 +1339,9 @@ function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
   const stalePlanPreview = isCurrentPlanPreviewStale(batch);
-  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required" && !stalePlanPreview;
+  const locked = isCurrentWorkbenchBatchBlocking(batch, stalePlanPreview);
   const frozen = isUpstreamWorkflowLocked();
-  const qcPending = isQcBatchPending(batch);
+  const qcPending = isQcBatchPending(batch) && locked;
   syncActionHint(
     els.estimateBtn,
     frozen
@@ -1263,20 +1459,73 @@ function primaryBranchNode() {
   return branchNodes()[0] || document.getElementById("wzNodeRewrite");
 }
 
-function focusRewriteStep(missingFields = []) {
-  const rewriteNode = document.getElementById("wzNodeRewrite");
-  if (!rewriteNode) return;
-  wzFocusNodeId("wzNodeRewrite", "3");
-  for (const input of rewriteNode.querySelectorAll(".wz-field-missing")) {
-    input.classList.remove("wz-field-missing");
+function draftFieldLabel(field, assetKey = "") {
+  if (assetKey) return assetLabel(assetKey);
+  return DRAFT_FIELD_LABELS[field] || field;
+}
+
+function branchValidationShape(node, branch, index) {
+  return branchDraftToTemplateShape({
+    ...branch,
+    displayName: fieldValue(node, "displayName"),
+    productName: fieldValue(node, "productName"),
+    productLink: fieldValue(node, "productLink")
+  }, index);
+}
+
+function validateBranchModules(node) {
+  const issues = [];
+  for (const field of REQUIRED_BRANCH_CONFIRM_FIELDS) {
+    if (fieldValue(node, field)) continue;
+    issues.push({
+      module: "template",
+      field,
+      key: field,
+      label: draftFieldLabel(field)
+    });
   }
-  const node = primaryBranchNode() || rewriteNode;
+  return issues;
+}
+
+function focusBranchModule(node, module = "template") {
+  const sub = BRANCH_MODULE_SUB[module] || "1";
+  node?.querySelector(`.wz-subflow-nav-item[data-sub="${sub}"]`)?.click();
+}
+
+function focusRewriteStep(missingFields = [], branchNode = null, module = "") {
+  const node = branchNode || primaryBranchNode() || document.getElementById("wzNodeRewrite");
+  if (!node) return;
+  const stepOpts = { center: false, branchNode: node };
+  if (module) stepOpts.sub = BRANCH_MODULE_SUB[module] || "1";
+  if (typeof window.wzActivateStep === "function") {
+    window.wzActivateStep("3", stepOpts);
+  } else if (typeof window.wzFocusNode === "function") {
+    window.wzFocusNode(node, { center: false, sub: stepOpts.sub });
+  } else if (node.id) {
+    wzFocusNodeId(node.id, "3");
+  } else {
+    wzFocusNodeId("wzNodeRewrite", "3");
+  }
+  for (const branch of branchNodes()) {
+    for (const input of branch.querySelectorAll(".wz-field-missing")) {
+      input.classList.remove("wz-field-missing");
+    }
+    for (const slot of branch.querySelectorAll(".wz-asset-slot.wz-field-missing")) {
+      slot.classList.remove("wz-field-missing");
+    }
+  }
+  for (const item of document.querySelectorAll("#wzStepbar .wz-stepbar-item")) {
+    item.classList.toggle("active", item.dataset.step === "3");
+  }
+  if (module && typeof window.wzActivateStep !== "function") {
+    focusBranchModule(node, module);
+  }
   let focusInput = null;
   for (const field of missingFields) {
     const branchKey = DRAFT_FIELD_BRANCH_KEYS[field];
     if (!branchKey) continue;
     const input = branchField(node, branchKey)
-      || (field === "regions" ? branchField(node, "targetRegion") : null);
+      || (field === "regions" ? branchField(node, "targetRegions") || branchField(node, "targetRegion") : null);
     if (input) {
       input.classList.add("wz-field-missing");
       if (!focusInput) focusInput = input;
@@ -1285,6 +1534,24 @@ function focusRewriteStep(missingFields = []) {
   requestAnimationFrame(() => {
     focusInput?.focus({ preventScroll: true });
   });
+}
+
+function focusBranchValidationIssue(node, issue) {
+  if (!node || !issue) return;
+  focusRewriteStep([issue.field], node, issue.module);
+  if (issue.assetKey) {
+    const field = assetInputKeys.find(([key]) => key === issue.assetKey)?.[1];
+    const input = field ? branchField(node, field) : null;
+    const slot = input?.closest(".wz-asset-slot");
+    if (slot) slot.classList.add("wz-field-missing");
+    requestAnimationFrame(() => input?.focus({ preventScroll: true }));
+    return;
+  }
+  const input = branchField(node, issue.field);
+  if (input) {
+    input.classList.add("wz-field-missing");
+    requestAnimationFrame(() => input.focus({ preventScroll: true }));
+  }
 }
 
 function parseRegions(node) {
@@ -1324,15 +1591,40 @@ function disclaimerPresetForLanguage(language) {
   return "en";
 }
 
+function mergeDisclaimerWithRequired(baseText = "", requiredList = []) {
+  let text = String(baseText || "").trim();
+  for (const item of requiredList) {
+    const needle = String(item || "").trim();
+    if (!needle) continue;
+    if (text.toLowerCase().includes(needle.toLowerCase())) continue;
+    text = text ? `${text} ${needle}` : needle;
+  }
+  return text;
+}
+
+function requiredDisclaimersForBranch(node = primaryBranchNode()) {
+  const channel = splitMultiValue(
+    fieldValue(node, "targetChannels") || els.targetChannel?.value || "generic",
+    ["generic"]
+  )[0];
+  const promiseLevel = fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable";
+  return [...new Set(
+    (state.channelRules || [])
+      .filter((rule) => rule.channel === channel && rule.promiseLevel === promiseLevel)
+      .flatMap((rule) => rule.requiredDisclaimers || [])
+  )];
+}
+
 function effectiveDisclaimerText({
   language = "en-US",
   presetValue = "auto",
-  customText = ""
+  customText = "",
+  node = null
 } = {}) {
   const manual = String(customText || "").trim();
-  if (manual) return manual;
   const presetKey = presetValue === "auto" ? disclaimerPresetForLanguage(language) : presetValue;
-  return DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en;
+  const base = manual || (presetKey === "other" ? "" : (DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en));
+  return mergeDisclaimerWithRequired(base, requiredDisclaimersForBranch(node));
 }
 
 function selectedDisclaimerPreset() {
@@ -1355,7 +1647,7 @@ function applyDisclaimerPresetForNode(node = primaryBranchNode(), { force = fals
     ? disclaimerPresetForLanguage(language)
     : presetValue;
   if (presetKey === "other") return;
-  const presetText = effectiveDisclaimerText({ language, presetValue });
+  const presetText = effectiveDisclaimerText({ language, presetValue, node });
   const current = disclaimerInput.value.trim();
   const knownText = Object.values(DISCLAIMER_PRESETS).includes(current);
   if (force || !current || knownText) {
@@ -1386,10 +1678,11 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
     ["en-US"]
   );
   const fallbackText = presetKey === "other"
-    ? ""
+    ? mergeDisclaimerWithRequired(String(disclaimerInput?.value || "").trim(), requiredDisclaimersForBranch(node))
     : effectiveDisclaimerText({
       language: languages[0] || "en-US",
-      presetValue
+      presetValue,
+      node
     });
   const disclaimerText = enabled ? (disclaimerInput?.value.trim() || fallbackText) : "";
   const overlayPosition = overlayPositionInput?.value || "bottom_center";
@@ -1541,13 +1834,15 @@ function syncMaterialDirectionForNode(node = primaryBranchNode()) {
 
 function markBranchFields(root = els.branches) {
   if (!root) return;
-  for (const [field, id] of Object.entries(branchFieldIds)) {
-    const node = root.querySelector(`#${id}`);
-    if (node) node.dataset.branchField = field;
-  }
-  for (const [assetKey, field] of assetInputKeys) {
-    const input = root.querySelector(`[data-branch-field="${field}"]`);
-    if (input) input.dataset.assetKey = assetKey;
+  for (const branchNode of root.querySelectorAll(".wz-node-branch")) {
+    for (const [field, id] of Object.entries(branchFieldIds)) {
+      const byId = branchNode.querySelector(`#${id}`);
+      if (byId) byId.dataset.branchField = field;
+    }
+    for (const [assetKey, field] of assetInputKeys) {
+      const input = branchNode.querySelector(`[data-branch-field="${field}"]`);
+      if (input) input.dataset.assetKey = assetKey;
+    }
   }
   const base = document.getElementById("wzNodeRewrite");
   if (base && !base.dataset.branchId) base.dataset.branchId = "branch_1";
@@ -1556,6 +1851,14 @@ function markBranchFields(root = els.branches) {
 function branchNodes() {
   markBranchFields();
   return [...(els.branches?.querySelectorAll(".wz-node-branch") || [])];
+}
+
+function confirmRewriteButtons() {
+  return els.confirmRewriteBtn ? [els.confirmRewriteBtn] : [];
+}
+
+function setConfirmRewriteButtonsBusy(busy, label) {
+  if (els.confirmRewriteBtn) setBusy(els.confirmRewriteBtn, busy, label);
 }
 
 function branchField(node, field) {
@@ -1930,6 +2233,8 @@ function collectBranchAssets(node) {
     const savedAssetId = input?.dataset.assetId || "";
     const savedReviewStatus = input?.dataset.reviewStatus || "";
     const savedReviewReason = input?.dataset.reviewReason || "";
+    const hasAsset = Boolean(file?.name || savedName || savedUrl || savedStorageKey || savedStoredPath);
+    if (!hasAsset) continue;
     if (file?.name) assetFileNames[assetKey] = file.name;
     else if (savedName) assetFileNames[assetKey] = savedName;
     if (savedUrl) assetUrls[assetKey] = savedUrl;
@@ -2053,13 +2358,32 @@ function findIncompleteBranchDraft() {
   const branches = collectAllBranchDrafts();
   for (let index = 0; index < branches.length; index += 1) {
     const branch = branches[index];
-    const missingRequired = missingRequiredDraftFields(branchDraftToTemplateShape(branch, index));
-    if (missingRequired.length) {
-      return { index, node: nodes[index], missingFields: missingRequired, kind: "required" };
+    const node = nodes[index];
+    const issues = validateBranchModules(node);
+    if (issues.length) {
+      return {
+        index,
+        node,
+        issues,
+        issue: issues[0],
+        module: issues[0].module,
+        missingFields: issues.map((item) => item.key),
+        missingLabels: issues.map((item) => item.label),
+        kind: "required"
+      };
     }
-    const missingStrong = missingStrongFields(branchDraftToTemplateShape(branch, index));
+    const missingStrong = missingStrongFields(branchValidationShape(node, branch, index));
     if (missingStrong.length) {
-      return { index, node: nodes[index], missingFields: missingStrong, kind: "strong" };
+      return {
+        index,
+        node,
+        issues: missingStrong.map((label) => ({ module: "delivery", field: "truthRules", key: label, label })),
+        issue: { module: "delivery", field: "truthRules", key: missingStrong[0], label: missingStrong[0] },
+        module: "delivery",
+        missingFields: missingStrong,
+        missingLabels: missingStrong,
+        kind: "strong"
+      };
     }
   }
   return null;
@@ -2083,24 +2407,32 @@ function renderRewriteStatus() {
   els.rewriteStatus.hidden = false;
   if (isRewriteConfirmed()) {
     els.rewriteStatus.className = "wz-template-status wz-success";
-    els.rewriteStatus.textContent = REWRITE_CONFIRMED_MESSAGE;
+    els.rewriteStatus.textContent = branchNodes().length > 1
+      ? REWRITE_MULTI_CONFIRMED_MESSAGE
+      : REWRITE_CONFIRMED_MESSAGE;
     els.rewriteStatus.classList.remove("empty-line");
     return;
   }
   els.rewriteStatus.className = "wz-template-status wz-info";
   els.rewriteStatus.textContent = branchNodes().length > 1
-    ? "填写全部裂变子节点信息后点击「确认信息」，即可进入批次估算；保存模板为可选项。"
-    : "填写产品改写信息后点击「确认信息」，即可进入批次估算；保存模板为可选项。";
+    ? "填写全部裂变子节点（3.1 / 3.2 / 3.3…）后，在上方点击「确认信息」进入第四步估算。"
+    : "填写产品改写信息后，在上方点击「确认信息」，即可进入第四步批次估算。";
   els.rewriteStatus.classList.remove("empty-line");
   if (els.rewriteConfirmHint) {
     els.rewriteConfirmHint.textContent = isUpstreamWorkflowLocked()
       ? "Seedance 已提交生成，第 1–4 步内容已锁定。"
       : isRewriteConfirmed()
-        ? "产品信息已确认，仍可继续修改第 3 节内容；修改后建议重新估算。"
-        : "确认后将上传素材并校验必填项；确认后仍可继续修改第 3 节内容。";
+        ? branchNodes().length > 1
+          ? "全部裂变子节点已确认，仍可继续修改；修改后建议重新估算。"
+          : "产品信息已确认，仍可继续修改第 3 节内容；修改后建议重新估算。"
+        : branchNodes().length > 1
+          ? "确认前需填写各子节点产品名称；若有素材将一并上传，之后可进入批次估算。"
+          : "确认前需填写产品名称；若有素材将一并上传，确认后仍可继续修改第 3 节内容。";
   }
   if (els.confirmRewriteBtn && !els.confirmRewriteBtn.dataset.originalText) {
-    els.confirmRewriteBtn.textContent = isRewriteConfirmed() ? "重新确认信息" : "确认信息";
+    els.confirmRewriteBtn.textContent = isRewriteConfirmed()
+      ? (branchNodes().length > 1 ? "重新确认全部子节点" : "重新确认信息")
+      : (branchNodes().length > 1 ? "确认全部子节点" : "确认信息");
   }
 }
 
@@ -2250,6 +2582,7 @@ function draftFromForm() {
   }
   const branches = collectBranchDrafts();
   const primaryBranch = branches[0] || {};
+  const multiBranch = branches.length > 1;
   const targetChannel = fieldValue(node, "templateChannel")
     || fieldValue(node, "targetChannel")
     || els.templateChannel?.value
@@ -2273,16 +2606,14 @@ function draftFromForm() {
     defaultOutputRatio: els.outputRatio?.value || "9:16",
     defaultDurationSec: Number(fieldValue(node, "defaultDuration") || els.defaultDuration?.value || 15),
     promiseLevel: fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable",
-    assetFileNames: primaryBranch.assetFileNames || {},
-    assetUrls: primaryBranch.assetUrls || {},
-    assetStorageKeys: primaryBranch.assetStorageKeys || {},
-    assetReviews: primaryBranch.assetReviews || {},
-    llmConfig: {
-      provider: els.llmProvider.value.trim(),
-      model: els.llmModel.value.trim(),
-      endpoint: els.llmEndpoint.value.trim(),
-      temperature: Number(els.llmTemperature.value)
-    },
+    ...(multiBranch ? {} : {
+      assetFileNames: primaryBranch.assetFileNames || {},
+      assetUrls: primaryBranch.assetUrls || {},
+      assetStorageKeys: primaryBranch.assetStorageKeys || {},
+      assetReviews: primaryBranch.assetReviews || {}
+    }),
+    llmConfig: decompositionLlmConfig(),
+    planLlmConfig: planLlmConfig(),
     knowledgeNotes: els.knowledgeNotes.value.trim(),
     variantPrompt: fieldValue(node, "variantPrompt") || els.variantPrompt?.value.trim() || "",
     seedanceModel: els.seedanceModel.value.trim(),
@@ -2337,9 +2668,10 @@ function applyTemplate(template) {
   setOptionalValue(els.outputRatio, draft.defaultOutputRatio || "9:16");
   els.promiseLevel.value = draft.promiseLevel || "stable";
   els.llmProvider.value = draft.llmConfig?.provider || "";
-  els.llmModel.value = draft.llmConfig?.model || "";
+  setLlmModelSelect(els.llmModel, draft.llmConfig?.model || DEFAULT_LLM_MODEL);
   els.llmEndpoint.value = draft.llmConfig?.endpoint || state.llmDefaults?.endpoint || "";
   els.llmTemperature.value = String(draft.llmConfig?.temperature ?? 0.2);
+  applyPlanLlmConfigValues(draft.planLlmConfig || draft.llmConfig || {});
   els.knowledgeNotes.value = draft.knowledgeNotes || "";
   els.variantPrompt.value = draft.variantPrompt || "";
   els.seedanceModel.value = draft.seedanceModel || els.modelSelect.value || "";
@@ -2405,24 +2737,47 @@ function renderLlmServiceStatus() {
     els.llmServiceStatus.textContent = "正在检查 AI 拆解服务…";
     return;
   }
-  const modelLabel = config.model || "默认模型";
+  const modelLabel = els.llmModel?.value.trim() || config.model || "默认模型";
   if (config.hasApiKey) {
     els.llmServiceStatus.className = "wz-success wz-service-pill";
-    els.llmServiceStatus.textContent = `AI 拆解服务已就绪（${modelLabel}）`;
+    els.llmServiceStatus.textContent = `拆解模型已就绪（${modelLabel}）`;
     return;
   }
   els.llmServiceStatus.className = "wz-warning wz-service-pill";
-  els.llmServiceStatus.textContent = "AI 拆解服务未配置，请联系管理员设置 API Key";
+  els.llmServiceStatus.textContent = "拆解模型未配置 API Key，请联系管理员";
+}
+
+function renderPlanLlmServiceStatus() {
+  if (!els.planLlmServiceStatus) return;
+  const config = state.llmDefaults;
+  if (!config) {
+    els.planLlmServiceStatus.className = "wz-info wz-service-pill";
+    els.planLlmServiceStatus.textContent = "正在检查提示词模型服务…";
+    return;
+  }
+  const modelLabel = els.planLlmModel?.value.trim() || config.model || "默认模型";
+  if (config.hasApiKey) {
+    els.planLlmServiceStatus.className = "wz-success wz-service-pill";
+    els.planLlmServiceStatus.textContent = `提示词模型已就绪（${modelLabel}）`;
+    return;
+  }
+  els.planLlmServiceStatus.className = "wz-warning wz-service-pill";
+  els.planLlmServiceStatus.textContent = "提示词模型未配置 API Key，请联系管理员";
 }
 
 function applyLlmConfigDefaults() {
   const config = state.llmDefaults;
   if (!config) return;
   if (!els.llmProvider.value.trim()) els.llmProvider.value = config.provider || "skylink";
-  if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gemini-3.5-flash";
+  setLlmModelSelect(els.llmModel, els.llmModel?.value || config.model || DEFAULT_LLM_MODEL);
   if (!els.llmEndpoint.value.trim()) els.llmEndpoint.value = config.endpoint || "https://skylink-gateway.com/api/v1";
   if (!els.llmTemperature.value.trim()) els.llmTemperature.value = String(config.temperature ?? 0.2);
+  if (els.planLlmProvider && !els.planLlmProvider.value.trim()) els.planLlmProvider.value = config.provider || "skylink";
+  setLlmModelSelect(els.planLlmModel, els.planLlmModel?.value || config.model || DEFAULT_LLM_MODEL);
+  if (els.planLlmEndpoint && !els.planLlmEndpoint.value.trim()) els.planLlmEndpoint.value = config.endpoint || "https://skylink-gateway.com/api/v1";
+  if (els.planLlmTemperature && !els.planLlmTemperature.value.trim()) els.planLlmTemperature.value = String(config.temperature ?? 0.2);
   renderLlmServiceStatus();
+  renderPlanLlmServiceStatus();
 }
 
 async function loadLlmConfig() {
@@ -2551,23 +2906,19 @@ async function draftReferenceVideoDecomposition() {
   els.decompositionStatus.className = "wz-info";
   els.decompositionStatus.textContent = "正在分析参考视频并生成脚本草稿，请稍等。";
   try {
-    const data = await apiEnvelope("/api/wangzhuan/reference-videos/draft-decomposition", {
+    const data = await apiEnvelopeStream("/api/wangzhuan/reference-videos/draft-decomposition/stream", {
       method: "POST",
       body: JSON.stringify({
         referenceVideoId: state.referenceVideo.referenceVideoId,
         knowledgeNotes: els.knowledgeNotes.value.trim(),
-        llmConfig: {
-          provider: els.llmProvider.value.trim(),
-          model: els.llmModel.value.trim(),
-          endpoint: els.llmEndpoint.value.trim(),
-          temperature: Number(els.llmTemperature.value)
-        }
+        llmConfig: decompositionLlmConfig()
       })
-    });
+    }, { title: "脚本拆解 · LLM 控制台" });
     renderDecompositionForm(data.decomposition || {});
     state.decompositionDraft = data.decomposition || null;
     els.decompositionStatus.className = "wz-success";
     els.decompositionStatus.textContent = "脚本草稿已生成，请检查表单内容后点击「确认脚本拆解」。";
+    focusDecomposeStep();
     showToast("脚本草稿已生成", { type: "success" });
   } catch (error) {
     els.decompositionStatus.className = "wz-warning";
@@ -2749,14 +3100,28 @@ function isPlanPreviewVideoUrl(url = "") {
   return /\.(mp4|webm|mov)(\?|#|$)/i.test(String(url));
 }
 
+function branchAssetPreviewUrl(branch, assetKey) {
+  const url = String(branch?.assetUrls?.[assetKey] || "").trim();
+  if (url) return url;
+  const storedPath = String(branch?.assetStoredPaths?.[assetKey] || branch?.assetRelativePaths?.[assetKey] || "").trim();
+  if (storedPath) return `/file?path=${encodeURIComponent(storedPath)}`;
+  return "";
+}
+
+function branchDraftForPlan(batch, plan) {
+  const live = collectBranchDrafts().find((item) => item.branchId === plan.branchId);
+  if (live) return live;
+  return (Array.isArray(batch?.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === plan.branchId) || null;
+}
+
 function renderPlanReferencePreview(batch, plan) {
-  const branch = (Array.isArray(batch?.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === plan.branchId);
+  const branch = branchDraftForPlan(batch, plan);
   if (!branch) return "";
   let imageIndex = 0;
   let videoIndex = 0;
   const entries = [];
   for (const key of PLAN_REFERENCE_ASSET_ORDER) {
-    const url = String(branch.assetUrls?.[key] || "").trim();
+    const url = branchAssetPreviewUrl(branch, key);
     if (!url) continue;
     const isVideo = isPlanPreviewVideoUrl(url);
     const orderLabel = isVideo ? `视频${++videoIndex}` : `图片${++imageIndex}`;
@@ -2783,7 +3148,7 @@ function collectEstimateReferenceEntries() {
     let imageIndex = 0;
     let videoIndex = 0;
     for (const key of PLAN_REFERENCE_ASSET_ORDER) {
-      const url = String(branch.assetUrls?.[key] || "").trim();
+      const url = branchAssetPreviewUrl(branch, key);
       if (!url) continue;
       const isVideo = isPlanPreviewVideoUrl(url);
       const orderLabel = isVideo ? `视频${++videoIndex}` : `图片${++imageIndex}`;
@@ -2916,8 +3281,8 @@ function renderTaskArchive(batch = state.batchDetail?.batch) {
   const href = taskSpaceHref("batch", batchId);
   if (els.taskDetailLink) {
     els.taskDetailLink.href = href;
-    els.taskDetailLink.classList.toggle("disabled", !batchId);
-    els.taskDetailLink.setAttribute("aria-disabled", batchId ? "false" : "true");
+    els.taskDetailLink.classList.remove("disabled");
+    els.taskDetailLink.removeAttribute("aria-disabled");
   }
   if (!els.taskArchiveBox) return;
   if (!batchId) {
@@ -3184,6 +3549,7 @@ async function loadRules(node = primaryBranchNode()) {
     promiseLevel: fieldValue(node, "promiseLevel") || els.promiseLevel?.value || "stable"
   });
   renderRules(await apiEnvelope(`/api/wangzhuan/channel-rules?${params}`), node);
+  applyDisclaimerPresetForNode(node, { force: false });
 }
 
 function showBranchDraftValidationError(validation) {
@@ -3191,23 +3557,28 @@ function showBranchDraftValidationError(validation) {
   if (validation.incompleteBranch) {
     const { incompleteBranch } = validation;
     const branchMissing = incompleteBranch.missingFields;
-    focusRewriteStep(incompleteBranch.kind === "required" ? branchMissing : []);
+    const branchLabels = incompleteBranch.missingLabels || branchMissing;
+    const moduleLabel = BRANCH_MODULE_LABELS[incompleteBranch.module] || "改写信息";
     if (incompleteBranch.kind === "strong") {
+      focusRewriteStep([], incompleteBranch.node, "delivery");
       incompleteBranch.node?.querySelector(".wz-truth-details")?.setAttribute("open", "");
       renderError(els.globalError, {
         code: "strong_rule_missing",
-        message: `改写 3.${incompleteBranch.index + 1} 强承诺需要补齐真实收益规则`,
+        message: `改写 3.${incompleteBranch.index + 1} · ${moduleLabel}：强承诺需要补齐真实收益规则（${branchLabels.join("、")}）`,
         data: { missingFields: branchMissing }
       }, "模板校验");
     } else {
+      focusBranchValidationIssue(incompleteBranch.node, incompleteBranch.issue);
       renderError(els.globalError, {
         code: "validation_error",
-        message: `改写 3.${incompleteBranch.index + 1} 缺少必填字段`,
-        data: { missingFields: branchMissing }
+        message: `改写 3.${incompleteBranch.index + 1} · ${moduleLabel}：请先补齐 ${branchLabels.join("、")}`,
+        data: { missingFields: branchMissing, module: incompleteBranch.module }
       }, "模板校验");
     }
     incompleteBranch.node?.classList.remove("collapsed");
-    incompleteBranch.node?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    if (!window.matchMedia("(min-width: 981px)").matches) {
+      incompleteBranch.node?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    }
     return true;
   }
   if (validation.missingStrong?.length) {
@@ -3235,11 +3606,11 @@ async function confirmRewriteInfo() {
   if (isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
   if (showBranchDraftValidationError(resolveBranchDraftValidationError())) return;
-  setBusy(els.confirmRewriteBtn, true, "上传素材");
+  setConfirmRewriteButtonsBusy(true, "上传素材");
   try {
     await uploadBranchAssets();
   } catch (error) {
-    setBusy(els.confirmRewriteBtn, false);
+    setConfirmRewriteButtonsBusy(false);
     renderError(els.globalError, error, "产品素材上传失败");
     return;
   }
@@ -3255,11 +3626,14 @@ async function confirmRewriteInfo() {
     });
     setRewriteConfirmed(true);
     focusBatchStep();
-    showToast("产品信息已确认，可开始估算批次", { type: "success" });
+    showToast(
+      branchNodes().length > 1 ? "全部裂变子节点已确认，可开始估算批次" : "产品信息已确认，可开始估算批次",
+      { type: "success" }
+    );
   } catch (error) {
     renderError(els.globalError, error, "产品信息确认失败");
   } finally {
-    setBusy(els.confirmRewriteBtn, false);
+    setConfirmRewriteButtonsBusy(false);
   }
 }
 
@@ -3341,8 +3715,7 @@ async function checkReferenceVideo() {
     await saveDraftBatch({
       status: "checking",
       sourceStep: "reference_checked",
-      referenceVideo: data.referenceVideo,
-      decomposition: null
+      referenceVideo: data.referenceVideo
     });
     persistWorkflowSession();
     clearReferenceObjectUrl();
@@ -3464,6 +3837,7 @@ function estimateRequest(draft = draftFromForm()) {
     || "stable";
   const branches = draft.branches || collectBranchDrafts();
   return {
+    batchId: currentBatchId() || undefined,
     templateId: template?.templateId,
     versionId: template?.versionId,
     projectName: els.projectName.value.trim(),
@@ -3487,12 +3861,8 @@ function estimateRequest(draft = draftFromForm()) {
       versionId: template?.versionId,
       draft
     },
-    llmConfig: {
-      provider: els.llmProvider.value.trim(),
-      model: els.llmModel.value.trim(),
-      endpoint: els.llmEndpoint.value.trim(),
-      temperature: Number(els.llmTemperature.value)
-    },
+    llmConfig: decompositionLlmConfig(),
+    planLlmConfig: planLlmConfig(),
     knowledgeNotes: els.knowledgeNotes.value.trim(),
     variantPrompt: els.variantPrompt.value.trim(),
     ...disclaimerFields
@@ -3503,6 +3873,7 @@ function estimateRequestSignature() {
   const request = estimateRequest();
   delete request.templateSnapshot;
   delete request.llmConfig;
+  delete request.planLlmConfig;
   return JSON.stringify(request);
 }
 
@@ -3510,7 +3881,7 @@ function currentBatchId() {
   return state.batchDetail?.batch?.batchId || "";
 }
 
-async function saveDraftBatch({ status, sourceStep = "", referenceVideo, decomposition, templateSnapshot, branches } = {}) {
+async function saveDraftBatch({ status, sourceStep = "", referenceVideo, decomposition, templateSnapshot, branches, estimate } = {}) {
   const nextReferenceVideo = referenceVideo || state.referenceVideo;
   if (!nextReferenceVideo?.referenceVideoId) return null;
   const draft = draftFromForm();
@@ -3522,12 +3893,8 @@ async function saveDraftBatch({ status, sourceStep = "", referenceVideo, decompo
     productName: draft.productName || "",
     productLink: draft.productLink || "",
     knowledgeNotes: els.knowledgeNotes?.value.trim() || "",
-    llmConfig: {
-      provider: els.llmProvider.value.trim(),
-      model: els.llmModel.value.trim(),
-      endpoint: els.llmEndpoint.value.trim(),
-      temperature: Number(els.llmTemperature.value)
-    },
+    llmConfig: decompositionLlmConfig(),
+    planLlmConfig: planLlmConfig(),
     targetChannel: els.targetChannel?.value || "",
     targetRegion: els.targetRegion?.value || "",
     targetRegions: splitMultiValue(els.targetRegions?.value || els.regions?.value || "", []),
@@ -3545,6 +3912,7 @@ async function saveDraftBatch({ status, sourceStep = "", referenceVideo, decompo
     branchDrafts: branches ?? draft.branches ?? [],
     decomposition: decomposition ?? state.decomposition,
     referenceVideo: nextReferenceVideo,
+    ...(estimate ? { estimate } : {}),
     ...disclaimerRequestFields()
   };
   const detail = await apiEnvelope("/api/wangzhuan/batches/draft", {
@@ -3594,6 +3962,13 @@ async function estimateBatch() {
     state.estimate = data;
     state.estimate.requestSignature = estimateRequestSignature();
     state.capabilities = data.capabilities || null;
+    await saveDraftBatch({
+      sourceStep: "estimate",
+      templateSnapshot: { draft },
+      branches: draft.branches || [],
+      decomposition: state.decomposition,
+      estimate: data.estimate
+    });
     renderEstimate();
     showToast("批次估算完成", { type: "success" });
   } catch (error) {
@@ -3614,18 +3989,30 @@ async function loadBatchDetail({ quiet = false } = {}) {
   const batchId = state.batchDetail?.batch?.batchId;
   if (!batchId) return null;
   const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+  if (state.batchDetail?.batch?.batchId !== batchId) return null;
   state.batchDetail = data;
   renderBatch();
   return data;
 }
 
+function stopPolling() {
+  window.clearTimeout(state.pollTimer);
+  state.pollTimer = 0;
+  state.pollGeneration += 1;
+}
+
 function startPolling() {
   window.clearTimeout(state.pollTimer);
+  state.pollTimer = 0;
+  const generation = state.pollGeneration;
   const tick = async () => {
+    if (generation !== state.pollGeneration) return;
     try {
       const previousStatus = state.batchDetail?.batch?.status;
       const detail = await loadBatchDetail();
+      if (generation !== state.pollGeneration) return;
       await loadGallerySafely();
+      if (generation !== state.pollGeneration) return;
       const batch = detail?.batch;
       if (!batch || terminalBatchStatus(batch.status)) {
         if (batch) {
@@ -3636,13 +4023,14 @@ function startPolling() {
           if (batch.status === "succeeded") {
             showToast("批次生成完成，可下载交付包", { type: "success" });
           } else if (batch.status === "partial_failed" || batch.status === "failed") {
-            showToast("批次未完全成功，可在任务详情中重试", { type: "error" });
+            showToast("批次未完全成功，可在步骤 5 查看日志或在任务管理中重试", { type: "info", duration: 5200 });
           }
         }
         return;
       }
       state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     } catch (error) {
+      if (generation !== state.pollGeneration) return;
       if (state.batchDetail?.batch) {
         renderBatchOutputPreviews(state.batchDetail.batch.outputs || [], { force: true });
       }
@@ -3681,23 +4069,17 @@ async function planBatch() {
   clearActiveLockBanner(lockHost());
   setBusy(els.planBatchBtn, true, "生成中");
   try {
-    const llmDefaults = state.llmDefaults || {};
-    const data = await apiEnvelope("/api/wangzhuan/batches/plan", {
+    const data = await apiEnvelopeStream("/api/wangzhuan/batches/plan/stream", {
       method: "POST",
       body: JSON.stringify({
         idempotencyKey: idempotencyKey("batch_plan"),
         ...(currentBatchId() ? { batchId: currentBatchId() } : {}),
         estimateId: estimate.estimateId,
-        llmConfig: {
-          provider: els.llmProvider.value.trim() || llmDefaults.provider || "skylink",
-          model: els.llmModel.value.trim() || llmDefaults.model || "gemini-3.5-flash",
-          endpoint: els.llmEndpoint.value.trim() || llmDefaults.endpoint || "https://skylink-gateway.com/api/v1",
-          temperature: Number(els.llmTemperature.value || llmDefaults.temperature || 0.2)
-        },
+        llmConfig: planLlmConfig(),
         knowledgeNotes: els.knowledgeNotes.value.trim(),
         ...(estimate.confirmationToken ? { confirmationToken: estimate.confirmationToken } : {})
       })
-    });
+    }, { title: "Seedance 预案 · LLM 控制台" });
     const planBranchSignature = branchPlanCoverage(collectBranchDrafts(), data.batch?.plans || data.plans || []).signature;
     if (data.batch) data.batch.planBranchSignature = planBranchSignature;
     state.batchDetail = {
@@ -3791,10 +4173,10 @@ async function stopBatch() {
       method: "POST",
       body: JSON.stringify({ reason: "frontend_stop" })
     });
-    clearActiveLockBanner(lockHost());
-    window.clearTimeout(state.pollTimer);
-    state.pollTimer = 0;
+    stopPolling();
     renderBatch();
+    await refreshBackgroundActiveBatchBanner();
+    syncStartNewTaskButton();
     showToast("批次已停止", { type: "success" });
   } catch (error) {
     renderError(els.globalError, error, "停止失败");
@@ -3823,6 +4205,14 @@ async function retryStitch() {
   }
 }
 
+async function loadBatchById(batchId) {
+  const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+  state.batchDetail = data;
+  renderBatch();
+  if (!terminalBatchStatus(data.batch?.status)) startPolling();
+  return data;
+}
+
 async function loadActiveBatch() {
   const detail = await apiEnvelope("/api/wangzhuan/batches/active");
   if (!detail?.batch) {
@@ -3837,18 +4227,54 @@ async function loadActiveBatch() {
   return detail;
 }
 
+function focusWorkbenchFromHash() {
+  const hash = location.hash.replace(/^#/, "");
+  if (hash === "wzNodeBatch") {
+    focusBatchStep();
+    return;
+  }
+  if (hash === "wzNodeLog") {
+    focusLogStep();
+    return;
+  }
+  if (hash) wzFocusNodeId(hash);
+}
+
+async function restoreBatchWorkbenchFromTasks(batchId) {
+  const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+  if (!data?.batch) return false;
+  state.batchDetail = data;
+  await hydrateReferenceWorkflowFromBatch(data.batch);
+  restoreWorkflowFromBatch(data);
+  renderBatch();
+  if (!terminalBatchStatus(data.batch?.status)) startPolling();
+  if (isBackgroundReminderBatch(data.batch)) {
+    const lock = activeLockFromBatchInfo(data.batch);
+    if (lock) renderActiveLockBanner(lockHost(), lock);
+    renderBatchOutputPreviews(data.batch.outputs || [], { force: true });
+  }
+  await loadGallerySafely();
+  focusWorkbenchFromHash();
+  return true;
+}
+
 async function runVideoQc() {
   const batchId = state.batchDetail?.batch?.batchId;
   if (!batchId) return;
   clearError(els.globalError);
   setBusy(els.runQcBtn, true, "质检中");
   try {
-    state.batchDetail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/qc`, {
+    const qcResult = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/qc`, {
       method: "POST",
       body: JSON.stringify({})
     });
+    state.batchDetail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+    if (state.batchDetail?.batch && qcResult?.batch) {
+      applyQcReportsToBatch(state.batchDetail.batch, qcResult.reports || []);
+    }
     renderBatch();
     await loadGallery();
+    notifyBatchQcResult(qcResult);
   } catch (error) {
     renderError(els.globalError, error, "视频质检失败");
   } finally {
@@ -4021,6 +4447,7 @@ function bindEvents() {
     renderTemplateSaveStatus();
     if (!state.suppressTemplateUnlock) clearRewriteProgress();
     renderRewriteStatus();
+    syncRewriteHints();
     renderPlanPreview(state.batchDetail?.batch);
   });
   window.addEventListener("wz:branch-removed", () => {
@@ -4030,6 +4457,7 @@ function bindEvents() {
     setSaveTemplateButtonsDisabled(isTemplateCommitted());
     renderTemplateSaveStatus();
     renderRewriteStatus();
+    syncRewriteHints();
     renderPlanPreview(state.batchDetail?.batch);
   });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
@@ -4111,40 +4539,46 @@ function bindEvents() {
   }
   els.includeSegments?.addEventListener("change", renderBatch);
   els.downloadBtn?.addEventListener("click", downloadPackage);
-  els.taskDetailLink?.addEventListener("click", (event) => {
-    if (state.batchDetail?.batch?.batchId) return;
-    event.preventDefault();
-  });
 }
 
 async function loadInitialData() {
   clearError(els.globalError);
   clearActiveLockBanner(lockHost());
-  clearWorkflowSession();
 
   await loadLlmConfig();
   await loadTemplates();
   await loadRules();
 
-  // Page refresh starts a fresh workflow form. Only keep an in-progress batch
-  // for the run/results panel and lock banner — never refill steps 1-4.
-  await loadActiveBatch();
-  if (state.batchDetail?.batch && isBlockingPipelineBatch()) {
-    const lock = activeLockFromBatch(state.batchDetail.batch);
-    if (lock) renderActiveLockBanner(lockHost(), lock);
-    renderBatchOutputPreviews(state.batchDetail.batch.outputs || [], { force: true });
-    await loadGallerySafely();
-  } else {
-    state.batchDetail = null;
-    batchRenderFingerprint = "";
-    batchOutputsRenderFingerprint = "";
-    renderBatch();
-    if (els.batchOutputsBox) {
-      els.batchOutputsBox.hidden = true;
-      els.batchOutputsBox.innerHTML = "";
+  const restoreRequest = readWorkbenchRestoreRequest();
+  if (restoreRequest?.type === "batch" && restoreRequest.id) {
+    clearWorkflowSession();
+    const restored = await restoreBatchWorkbenchFromTasks(restoreRequest.id);
+    if (restored) {
+      renderReference();
+      renderRewriteStatus();
+      renderEstimate();
+      renderBatchReadiness();
+      syncStartNewTaskButton();
+      syncMetrics();
+      return;
     }
-    await loadGallerySafely();
   }
+
+  clearWorkflowSession();
+
+  // Page refresh starts a fresh workflow form. Show in-progress batches as a top
+  // reminder only — never attach them to the current workbench steps 1-4.
+  await refreshBackgroundActiveBatchBanner();
+  stopPolling();
+  state.batchDetail = null;
+  batchRenderFingerprint = "";
+  batchOutputsRenderFingerprint = "";
+  renderBatch();
+  if (els.batchOutputsBox) {
+    els.batchOutputsBox.hidden = true;
+    els.batchOutputsBox.innerHTML = "";
+  }
+  await loadGallerySafely();
 
   ensureNewTaskBatchName();
   renderReference();

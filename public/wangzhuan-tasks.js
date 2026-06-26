@@ -19,6 +19,8 @@ import {
   schedulePoll,
   setBusy,
   showToast,
+  notifyBatchQcResult,
+  applyQcReportsToBatch,
   stopWorkflowTask,
   terminalBatchStatus,
   workbenchHref
@@ -30,10 +32,12 @@ const els = {
   loginModal: $("#wzTasksLoginModal"),
   globalError: $("#wzTasksGlobalError"),
   refreshBtn: $("#wzTasksRefreshBtn"),
+  stats: $("#wzTasksStats"),
+  layout: $("#wzTasksLayout"),
   list: $("#wzTasksList"),
   pager: $("#wzTasksPager"),
+  detailPane: $("#wzTasksDetailPane"),
   detail: $("#wzTasksDetail"),
-  detailEmpty: $("#wzTasksDetailEmpty"),
   scopeActive: $("#wzTasksScopeActive"),
   scopeAll: $("#wzTasksScopeAll"),
   scopeDone: $("#wzTasksScopeDone"),
@@ -46,7 +50,7 @@ const OUTPUT_KIND_PRIORITY = ["stitched_video", "remix_video", "segment_video", 
 
 const state = {
   user: null,
-  scope: "active",
+  scope: "all",
   runType: "",
   page: 1,
   pageSize: 20,
@@ -55,8 +59,106 @@ const state = {
   selectedId: "",
   selectedType: "",
   detail: null,
-  stopPoll: null
+  stopPagePoll: null,
+  loading: false,
+  bootstrapped: false,
+  listRequestId: 0,
+  detailRequestId: 0
 };
+
+function shortId(value, head = 10, tail = 6) {
+  const text = String(value || "");
+  if (text.length <= head + tail + 1) return text;
+  return `${text.slice(0, head)}…${text.slice(-tail)}`;
+}
+
+function taskDisplayTitle(item) {
+  return item.productName || operationLabels[item.operationType] || item.operationType || "未命名任务";
+}
+
+function renderLoadingSkeleton() {
+  els.list.className = "wz-tasks-list-host is-loading";
+  els.list.setAttribute("aria-busy", "true");
+  els.list.innerHTML = Array.from({ length: 6 }, (_, index) => `
+    <div class="wz-tasks-skeleton" style="--wz-skeleton-delay: ${index * 70}ms" aria-hidden="true">
+      <span class="wz-tasks-skeleton-line wz-tasks-skeleton-line-sm"></span>
+      <span class="wz-tasks-skeleton-line"></span>
+      <span class="wz-tasks-skeleton-line wz-tasks-skeleton-line-xs"></span>
+    </div>
+  `).join("");
+}
+
+function renderListEmpty(message) {
+  els.list.className = "wz-tasks-list-host is-empty";
+  els.list.removeAttribute("aria-busy");
+  const hint = state.scope === "active"
+    ? "进行中的任务会出现在这里。已完成或失败的批次请切换到「全部」或「已完成」。"
+    : "切换筛选条件或刷新列表试试。";
+  const showCreateActions = state.scope !== "terminal" && !state.runType;
+  els.list.innerHTML = `
+    <div class="wz-tasks-empty-state wz-tasks-empty-state-inline wz-tasks-empty-state-rich">
+      <div class="wz-tasks-empty-icon" aria-hidden="true"></div>
+      <strong>${escapeHtml(message)}</strong>
+      <p>${escapeHtml(hint)}</p>
+      ${showCreateActions ? `
+        <div class="wz-tasks-empty-actions">
+          <a class="mini" href="/wangzhuan.html">去网赚管线创建</a>
+          <a class="mini ghost" href="/competitor-remix.html">去竞品改造创建</a>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderDetailSkeleton() {
+  els.detail.hidden = false;
+  els.detail.className = "wz-tasks-detail is-loading";
+  els.detail.innerHTML = `
+    <div class="wz-tasks-detail-skeleton" aria-busy="true" aria-label="加载任务详情">
+      <span class="wz-tasks-skeleton-line wz-tasks-skeleton-line-sm"></span>
+      <span class="wz-tasks-skeleton-line"></span>
+      <div class="wz-tasks-detail-skeleton-media"></div>
+      <span class="wz-tasks-skeleton-line wz-tasks-skeleton-line-xs"></span>
+    </div>
+  `;
+}
+
+function updateTasksLayout() {
+  const hasSelection = Boolean(state.selectedId && state.selectedType);
+  els.layout?.classList.toggle("is-list-only", !hasSelection);
+  if (els.detailPane) {
+    if (hasSelection) {
+      els.detailPane.hidden = false;
+    } else {
+      els.detailPane.hidden = true;
+    }
+  }
+}
+
+function renderStats() {
+  if (!els.stats) return;
+  const pagination = state.pagination;
+  if (!pagination?.total && !state.items.length) {
+    els.stats.hidden = true;
+    els.stats.innerHTML = "";
+    return;
+  }
+  const activeOnPage = state.items.filter((item) => item.isActive).length;
+  const total = pagination?.total ?? state.items.length;
+  els.stats.hidden = false;
+  els.stats.innerHTML = `
+    <div class="wz-tasks-stat">
+      <strong>${escapeHtml(total)}</strong>
+      <span>当前列表</span>
+    </div>
+    ${state.scope === "active" || activeOnPage ? `
+      <div class="wz-tasks-stat is-live">
+        <strong>${escapeHtml(activeOnPage)}</strong>
+        <span>本页进行中</span>
+      </div>
+    ` : ""}
+  `;
+}
 
 function readInitialSelection() {
   const params = new URLSearchParams(location.search);
@@ -65,11 +167,13 @@ function readInitialSelection() {
   if (batchId) {
     state.selectedType = "batch";
     state.selectedId = batchId;
+    state.scope = "all";
     return;
   }
   if (remixId) {
     state.selectedType = "remix";
     state.selectedId = remixId;
+    state.scope = "all";
   }
 }
 
@@ -90,28 +194,108 @@ function taskTypeLabel(type) {
   return type === "remix" ? "竞品素材改造" : "网赚素材管线";
 }
 
+function taskTypeLabelShort(type) {
+  return type === "remix" ? "改造" : "管线";
+}
+
+function statusStripeTone(status) {
+  if (["succeeded", "pass"].includes(status)) return "good";
+  if (["failed", "partial_failed", "preview_required", "warn", "manual_required"].includes(status)) {
+    return "warn";
+  }
+  if (["stopped", "unsupported"].includes(status)) return "bad";
+  return "neutral";
+}
+
+function taskListStripe(label, stripeClass) {
+  return `
+    <span class="wz-tasks-stripe ${stripeClass}">
+      <span class="wz-tasks-stripe-line" aria-hidden="true"></span>
+      <span class="wz-tasks-stripe-text">${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function typeStripe(type, label) {
+  const stripeClass = type === "remix" ? "type-remix" : "type-pipeline";
+  return taskListStripe(label, stripeClass);
+}
+
+function statusStripe(status, labelMap) {
+  const label = labelMap[status] || status || "未知";
+  return taskListStripe(label, `tone-${statusStripeTone(status)}`);
+}
+
 function taskPrimaryId(item) {
   return item.type === "remix" ? item.remixId : item.batchId;
+}
+
+function taskItemSignature(item) {
+  if (!item) return "";
+  return [
+    item.type,
+    taskPrimaryId(item),
+    item.status,
+    item.updatedAt,
+    item.isActive ? "1" : "0",
+    taskDisplayTitle(item)
+  ].join(":");
+}
+
+function listSignature(items = []) {
+  return items.map(taskItemSignature).join("|");
+}
+
+function detailSignature(detail) {
+  if (!detail) return "";
+  const entity = detail.batch || detail.remix;
+  if (!entity) return "";
+  const outputs = Array.isArray(entity.outputs) ? entity.outputs : [];
+  const outputSig = outputs.map((output) => [
+    output.outputId,
+    output.qcStatus,
+    output.downloadEligible ? "1" : "0",
+    output.previewConfirmed ? "1" : "0"
+  ].join(":")).join("|");
+  return [
+    entity.status,
+    entity.updatedAt,
+    detail.downloadSummary?.downloadEligibleCount || 0,
+    detail.downloadSummary?.packageReady ? "1" : "0",
+    outputSig
+  ].join("|");
+}
+
+function hasActiveTasksOnPage() {
+  return state.items.some((item) => item.isActive);
+}
+
+function shouldPollPage() {
+  return hasActiveTasksOnPage() || shouldPollDetail(state.detail);
+}
+
+function stopPagePolling() {
+  state.stopPagePoll?.();
+  state.stopPagePoll = null;
+}
+
+function updatePagePolling() {
+  stopPagePolling();
+  if (!shouldPollPage()) return;
+  state.stopPagePoll = schedulePoll({
+    load: async () => {
+      await refreshTasksPage({ silent: true });
+      return state.detail;
+    },
+    shouldStop: () => !shouldPollPage(),
+    interval: 4000
+  });
 }
 
 function assetPreviewUrl(asset) {
   if (!asset) return "";
   return String(asset.previewUrl || asset.storageUrl || "").trim()
     || (asset.storedPath ? `/file?path=${encodeURIComponent(asset.storedPath)}` : "");
-}
-
-function mediaDimensions(asset) {
-  return {
-    width: Number(asset?.width || 0),
-    height: Number(asset?.height || 0)
-  };
-}
-
-function mediaAspectRatioValue(dimensions) {
-  const w = Number(dimensions?.width);
-  const h = Number(dimensions?.height);
-  if (w > 0 && h > 0) return `${w} / ${h}`;
-  return "9 / 16";
 }
 
 function isVideoAsset(asset) {
@@ -165,6 +349,22 @@ function outputStatusText(output = {}) {
   return parts.join(" · ");
 }
 
+function renderOutputQcIssues(output = {}) {
+  const checks = Array.isArray(output.qcChecks) ? output.qcChecks : [];
+  const issues = checks.filter((item) => ["fail", "warn", "manual_required"].includes(item.status));
+  if (!issues.length) return "";
+  return `
+    <ul class="wz-tasks-qc-issues">
+      ${issues.map((item) => `
+        <li class="wz-tasks-qc-issue wz-tasks-qc-issue--${escapeHtml(item.status || "fail")}">
+          <strong>${escapeHtml(item.checkId || "检查项")}</strong>
+          <span>${escapeHtml(item.message || "")}</span>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+}
+
 function renderOutputCollection(outputs = []) {
   const items = sortedOutputs(outputs);
   if (!items.length) {
@@ -193,6 +393,7 @@ function renderOutputCollection(outputs = []) {
             </div>
             ${renderMediaPlayer(output, "该输出暂不可预览")}
             <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
+            ${renderOutputQcIssues(output)}
             ${assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
           </article>
         `).join("")}
@@ -227,16 +428,15 @@ function renderMediaPlayer(asset, emptyText) {
   if (!url) {
     return `<div class="wz-tasks-media-empty">${escapeHtml(emptyText)}</div>`;
   }
-  const aspect = mediaAspectRatioValue(mediaDimensions(asset));
   if (isVideoAsset(asset)) {
     return `
-      <div class="wz-tasks-media-frame" style="--wz-media-aspect: ${escapeHtml(aspect)}">
+      <div class="wz-tasks-media-frame">
         <video src="${escapeHtml(url)}" controls preload="metadata" playsinline></video>
       </div>
     `;
   }
   return `
-    <div class="wz-tasks-media-frame" style="--wz-media-aspect: ${escapeHtml(aspect)}">
+    <div class="wz-tasks-media-frame">
       <img src="${escapeHtml(url)}" alt="素材预览" />
     </div>
   `;
@@ -278,6 +478,7 @@ function renderScopeFilters() {
   for (const button of [els.scopeActive, els.scopeAll, els.scopeDone]) {
     if (!button) continue;
     button.classList.toggle("active", button.dataset.scope === state.scope);
+    button.setAttribute("aria-pressed", button.dataset.scope === state.scope ? "true" : "false");
   }
 }
 
@@ -286,6 +487,7 @@ function renderTypeFilters() {
     if (!button) continue;
     const active = (button.dataset.runType || "") === state.runType;
     button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
   }
 }
 
@@ -299,8 +501,8 @@ function renderPager() {
   els.pager.hidden = false;
   const pageLabel = pagination.totalPages ? `${pagination.page} / ${pagination.totalPages}` : "0 / 0";
   els.pager.innerHTML = `
-    <span>共 ${escapeHtml(pagination.total)} 条 · 第 ${escapeHtml(pageLabel)} 页</span>
-    <div>
+    <span class="wz-tasks-pager-meta">共 ${escapeHtml(pagination.total)} 条 · 第 ${escapeHtml(pageLabel)} 页</span>
+    <div class="wz-tasks-pager-actions">
       <button type="button" class="ghost" data-tasks-page="${pagination.page - 1}" ${pagination.hasPrev ? "" : "disabled"}>上一页</button>
       <button type="button" class="ghost" data-tasks-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
     </div>
@@ -310,29 +512,32 @@ function renderPager() {
 function renderTaskList() {
   renderScopeFilters();
   renderTypeFilters();
+  renderStats();
   if (!state.items.length) {
-    els.list.className = "wz-list empty-line";
-    els.list.textContent = state.scope === "active" ? "暂无进行中的任务" : "暂无任务记录";
+    renderListEmpty(state.scope === "active" ? "暂无进行中的任务" : "暂无任务记录");
     renderPager();
     return;
   }
-  els.list.className = "wz-list wz-tasks-list";
+  els.list.className = "wz-tasks-list-host wz-tasks-list";
+  els.list.removeAttribute("aria-busy");
   els.list.innerHTML = state.items.map((item) => {
     const id = taskPrimaryId(item);
     const selected = item.type === state.selectedType && id === state.selectedId;
     const labels = taskLabels(item.type);
     const typeClass = item.type === "remix" ? "remix" : "pipeline";
-    const label = item.typeLabel || taskTypeLabel(item.type);
+    const label = taskTypeLabelShort(item.type);
+    const liveClass = item.isActive ? " is-live" : "";
+    const title = taskDisplayTitle(item);
     return `
-      <button type="button" class="wz-tasks-item${selected ? " selected" : ""}" data-task-type="${escapeHtml(item.type)}" data-task-id="${escapeHtml(id)}">
-        <div class="wz-tasks-item-head">
-          <span class="wz-tasks-type-badge ${typeClass}">${escapeHtml(label)}</span>
-          ${badge(item.status, labels)}
-        </div>
-        <div class="wz-tasks-item-body">
-          <span>${escapeHtml(id)}</span>
-          <small>${escapeHtml(item.productName || item.operationType || "-")} · ${escapeHtml(formatTimestamp(item.updatedAt || item.createdAt))}</small>
-        </div>
+      <button type="button" class="wz-tasks-item${selected ? " selected" : ""}${liveClass}" data-task-type="${escapeHtml(item.type)}" data-task-id="${escapeHtml(id)}">
+        <span class="wz-tasks-item-rail" aria-hidden="true"></span>
+        <span class="wz-tasks-item-row">
+          ${typeStripe(typeClass, label)}
+          ${statusStripe(item.status, labels)}
+          <strong class="wz-tasks-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
+          <code class="wz-tasks-item-id" title="${escapeHtml(id)}">${escapeHtml(shortId(id))}</code>
+          <small class="wz-tasks-item-time">${escapeHtml(formatTimestamp(item.updatedAt || item.createdAt))}</small>
+        </span>
       </button>
     `;
   }).join("");
@@ -367,15 +572,17 @@ function renderBatchDetail(detail) {
   const outputAsset = pickPrimaryOutput(batch.outputs);
   const outputLabel = outputAsset?.kind === "stitched_video" ? "拼接成片" : "输出视频";
   return `
-    <article class="wz-row wz-tasks-detail-head">
-      <div>
-        <span class="wz-tasks-type-badge pipeline">网赚素材管线</span>
-        <strong>${escapeHtml(batch.batchId)}</strong>
+    <article class="wz-tasks-detail-head">
+      <div class="wz-tasks-detail-head-copy">
+        <div class="wz-tasks-detail-head-badges">
+          <span class="wz-tasks-type-badge pipeline">网赚素材管线</span>
+          ${badge(batch.status, batchStatusLabels)}
+        </div>
+        <strong class="wz-tasks-detail-id" title="${escapeHtml(batch.batchId)}">${escapeHtml(batch.batchId)}</strong>
         <small>创建 ${escapeHtml(formatTimestamp(batch.createdAt))} · 更新 ${escapeHtml(formatTimestamp(batch.updatedAt))}</small>
       </div>
-      ${badge(batch.status, batchStatusLabels)}
     </article>
-    ${notice ? `<div class="wz-warning">${escapeHtml(notice)}</div>` : ""}
+    ${notice ? `<div class="wz-warning wz-tasks-notice">${escapeHtml(notice)}</div>` : ""}
     ${renderTaskMediaCompare({
       inputAsset: batch.referenceVideo,
       outputAsset,
@@ -402,10 +609,10 @@ function renderBatchDetail(detail) {
         `).join("")}
       </div>
     ` : batch.status === "preview_required" ? `<div class="wz-warning">未读取到 Seedance 预案，请刷新或前往管线工作台第 4 步查看。</div>` : ""}
-    <div class="modal-actions wz-actions wz-tasks-actions">
+    <div class="modal-actions wz-actions wz-tasks-actions wz-tasks-actions-bar">
       ${batch.status === "preview_required" && plans.length ? `<button id="wzTasksConfirmPlanBtn" type="button">确认预案并生成视频</button>` : ""}
       ${qcRunnable ? `<button id="wzTasksRunQcBtn" type="button">${batch.status === "qc" ? "运行视频质检" : "重新质检"}</button>` : ""}
-      <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status))}">前往管线工作台</a>
+      <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status, batch.batchId))}">前往管线工作台</a>
       ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
       ${batch.status === "partial_failed" ? `<label class="wz-check"><input id="wzTasksIncludeSegments" type="checkbox" checked /> 下载可用分段/可用项</label>` : ""}
       ${detail.downloadSummary?.packageReady || batch.status === "partial_failed" ? `<button id="wzTasksDownloadBtn" type="button">${batch.status === "partial_failed" ? "下载可用项" : "下载交付包"}</button>` : ""}
@@ -419,15 +626,17 @@ function renderRemixDetail(detail) {
   const output = pickPrimaryOutput(remix.outputs);
   const notice = detailNotice("remix", remix.status);
   return `
-    <article class="wz-row wz-tasks-detail-head">
-      <div>
-        <span class="wz-tasks-type-badge remix">竞品素材改造</span>
-        <strong>${escapeHtml(remix.remixId)}</strong>
+    <article class="wz-tasks-detail-head">
+      <div class="wz-tasks-detail-head-copy">
+        <div class="wz-tasks-detail-head-badges">
+          <span class="wz-tasks-type-badge remix">竞品素材改造</span>
+          ${badge(remix.status, remixStatusLabels)}
+        </div>
+        <strong class="wz-tasks-detail-id" title="${escapeHtml(remix.remixId)}">${escapeHtml(remix.remixId)}</strong>
         <small>${escapeHtml(operationLabels[remix.operationType] || remix.operationType || "-")}</small>
       </div>
-      ${badge(remix.status, remixStatusLabels)}
     </article>
-    ${notice ? `<div class="wz-warning">${escapeHtml(notice)}</div>` : ""}
+    ${notice ? `<div class="wz-warning wz-tasks-notice">${escapeHtml(notice)}</div>` : ""}
     ${renderTaskMediaCompare({
       inputAsset: remix.source,
       outputAsset: output,
@@ -445,8 +654,8 @@ function renderRemixDetail(detail) {
         ["远端状态", remix.providerJob?.status || "-"]
       ])}
     </div>
-    <div class="modal-actions wz-actions wz-tasks-actions">
-      <a class="mini ghost" href="${escapeHtml(workbenchHref("remix", remix.status))}">前往改造工作台</a>
+    <div class="modal-actions wz-actions wz-tasks-actions wz-tasks-actions-bar">
+      <a class="mini ghost" href="${escapeHtml(workbenchHref("remix", remix.status, remix.remixId))}">前往改造工作台</a>
       ${remix.status === "preview_required" && output ? `<button id="wzTasksConfirmPreviewBtn" type="button">确认预览</button>` : ""}
       ${!["succeeded", "failed", "stopped"].includes(remix.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">停止任务</button>` : ""}
       ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载交付包</button>` : ""}
@@ -463,77 +672,145 @@ function shouldPollDetail(detail) {
   return Boolean(status && !["succeeded", "failed", "stopped"].includes(status));
 }
 
-function renderDetailPanel() {
-  if (!state.detail) {
+function renderDetailPanel(options = {}) {
+  const { force = false } = options;
+  updateTasksLayout();
+  if (!state.selectedId || !state.selectedType) {
     els.detail.hidden = true;
-    els.detailEmpty.hidden = false;
+    els.detail.innerHTML = "";
     return;
   }
-  els.detailEmpty.hidden = true;
+  if (!state.detail) {
+    renderDetailSkeleton();
+    return;
+  }
   els.detail.hidden = false;
-  els.detail.className = "wz-list wz-tasks-detail";
-  els.detail.innerHTML = state.selectedType === "remix"
+  els.detail.className = "wz-tasks-detail";
+  const nextHtml = state.selectedType === "remix"
     ? renderRemixDetail(state.detail)
     : renderBatchDetail(state.detail);
+  if (!force && els.detail.innerHTML === nextHtml) return;
+  const scrollTop = els.detail.scrollTop;
+  els.detail.innerHTML = nextHtml;
+  if (scrollTop > 0) els.detail.scrollTop = scrollTop;
 }
 
 async function loadTasks(options = {}) {
-  if (options.scope) state.scope = options.scope;
-  if (options.runType !== undefined) state.runType = options.runType;
-  if (options.page) state.page = options.page;
+  const {
+    scope,
+    runType,
+    page,
+    silent = false,
+    autoSelect = false
+  } = options;
+  if (scope) state.scope = scope;
+  if (runType !== undefined) state.runType = runType;
+  if (page) state.page = page;
   clearError(els.globalError);
+  const requestId = ++state.listRequestId;
+  state.loading = !silent;
+  const previousSignature = listSignature(state.items);
+  const hadRenderedList = Boolean(els.list?.querySelector(".wz-tasks-item"));
+  if (!silent) {
+    renderLoadingSkeleton();
+    els.refreshBtn?.classList.add("is-spinning");
+  } else {
+    els.list?.setAttribute("aria-busy", "true");
+  }
   const query = new URLSearchParams({
     scope: state.scope,
     page: String(state.page),
     pageSize: String(state.pageSize)
   });
   if (state.runType) query.set("runType", state.runType);
-  const data = await apiEnvelope(`/api/wangzhuan/tasks?${query}`);
-  state.items = data.items || [];
-  state.pagination = data.pagination || null;
-  state.page = state.pagination?.page || state.page;
-  if (state.selectedId && !state.items.some((item) => taskPrimaryId(item) === state.selectedId && item.type === state.selectedType)) {
-    // Keep deep-linked selection even if it is not on the current page.
-  } else if (!state.selectedId && state.items.length) {
-    const firstActive = state.items.find((item) => item.isActive) || state.items[0];
-    state.selectedType = firstActive.type;
-    state.selectedId = taskPrimaryId(firstActive);
-    syncSelectionUrl();
+  try {
+    const data = await apiEnvelope(`/api/wangzhuan/tasks?${query}`);
+    if (requestId !== state.listRequestId) return;
+    state.items = data.items || [];
+    state.pagination = data.pagination || null;
+    state.page = state.pagination?.page || state.page;
+    if (autoSelect && !state.selectedId && state.items.length) {
+      const firstActive = state.items.find((item) => item.isActive) || state.items[0];
+      state.selectedType = firstActive.type;
+      state.selectedId = taskPrimaryId(firstActive);
+      syncSelectionUrl();
+    }
+    const nextSignature = listSignature(state.items);
+    if (!silent || !hadRenderedList || previousSignature !== nextSignature) {
+      renderTaskList();
+    } else {
+      renderScopeFilters();
+      renderTypeFilters();
+      renderStats();
+      renderPager();
+    }
+  } catch (error) {
+    if (requestId !== state.listRequestId) return;
+    if (!silent || !hadRenderedList) {
+      renderListEmpty("任务列表加载失败");
+      renderStats();
+      renderPager();
+    }
+    throw error;
+  } finally {
+    if (requestId === state.listRequestId) {
+      state.loading = false;
+      els.list?.removeAttribute("aria-busy");
+      if (!silent) els.refreshBtn?.classList.remove("is-spinning");
+    }
   }
-  renderTaskList();
 }
 
-async function loadSelectedDetail() {
-  state.stopPoll?.();
-  state.stopPoll = null;
+async function loadSelectedDetail(options = {}) {
+  const { silent = false } = options;
   if (!state.selectedId || !state.selectedType) {
     state.detail = null;
-    renderDetailPanel();
+    stopPagePolling();
+    renderDetailPanel({ force: true });
     return;
+  }
+  const requestId = ++state.detailRequestId;
+  const previousSignature = detailSignature(state.detail);
+  if (!silent && !state.detail) {
+    renderDetailPanel({ force: true });
+  } else if (silent) {
+    els.detail?.setAttribute("aria-busy", "true");
   }
   const url = state.selectedType === "remix"
     ? `/api/wangzhuan/remix/${encodeURIComponent(state.selectedId)}`
     : `/api/wangzhuan/batches/${encodeURIComponent(state.selectedId)}`;
-  state.detail = await apiEnvelope(url);
-  renderDetailPanel();
-  if (shouldPollDetail(state.detail)) {
-    state.stopPoll = schedulePoll({
-      load: async () => {
-        state.detail = await apiEnvelope(url);
-        renderDetailPanel();
-        return state.detail;
-      },
-      shouldStop: () => !shouldPollDetail(state.detail),
-      interval: 3000
-    });
+  try {
+    const nextDetail = await apiEnvelope(url);
+    if (requestId !== state.detailRequestId) return;
+    state.detail = nextDetail;
+    const nextSignature = detailSignature(state.detail);
+    if (!silent || previousSignature !== nextSignature) {
+      renderDetailPanel({ force: !silent || previousSignature !== nextSignature });
+    }
+    updatePagePolling();
+  } catch (error) {
+    if (requestId !== state.detailRequestId) return;
+    if (!silent) {
+      state.detail = null;
+      renderDetailPanel({ force: true });
+    }
+    throw error;
+  } finally {
+    if (requestId === state.detailRequestId) {
+      els.detail?.removeAttribute("aria-busy");
+    }
   }
 }
 
 async function selectTask(type, id) {
+  if (type === state.selectedType && id === state.selectedId) return;
+  stopPagePolling();
   state.selectedType = type;
   state.selectedId = id;
+  state.detail = null;
   syncSelectionUrl();
   renderTaskList();
+  renderDetailPanel({ force: true });
   try {
     await loadSelectedDetail();
   } catch (error) {
@@ -550,8 +827,7 @@ async function confirmBatchPlan() {
   try {
     await confirmBatchPlanRequest(batch.batchId, plans);
     showToast("批次已提交生成，正在后台处理", { type: "success" });
-    await loadSelectedDetail();
-    await loadTasks();
+    await refreshTasksPage({ silent: true });
   } catch (error) {
     renderError(els.globalError, error, "确认预案失败");
   } finally {
@@ -561,17 +837,22 @@ async function confirmBatchPlan() {
 
 async function runSelectedBatchQc() {
   const batch = state.detail?.batch;
-  if (!batch?.batchId || batch.status !== "qc") return;
+  const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
+  const outputs = Array.isArray(batch?.outputs) ? batch.outputs : [];
+  if (!batch?.batchId || !isBatchQcRunnable(batch, tasks, outputs)) return;
   const button = $("#wzTasksRunQcBtn");
   setBusy(button, true, "质检中");
   try {
-    state.detail = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/qc`, {
+    const qcResult = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/qc`, {
       method: "POST",
       body: JSON.stringify({})
     });
-    showToast("视频质检已完成", { type: "success" });
-    renderDetailPanel();
-    await loadTasks();
+    await refreshTasksPage({ silent: true });
+    if (state.detail?.batch && qcResult?.batch) {
+      applyQcReportsToBatch(state.detail.batch, qcResult.reports || []);
+      renderDetailPanel({ force: true });
+    }
+    notifyBatchQcResult(qcResult);
   } catch (error) {
     renderError(els.globalError, error, "视频质检失败");
   } finally {
@@ -595,8 +876,7 @@ async function confirmRemixPreview() {
       })
     });
     showToast("预览已确认", { type: "success" });
-    await loadSelectedDetail();
-    await loadTasks();
+    await refreshTasksPage({ silent: true });
   } catch (error) {
     renderError(els.globalError, error, "确认预览失败");
   } finally {
@@ -611,8 +891,7 @@ async function stopSelectedTask() {
   try {
     state.detail = await stopWorkflowTask(state.selectedType, state.selectedId, "frontend_stop_from_tasks_page");
     showToast("任务已停止", { type: "success" });
-    renderDetailPanel();
-    await loadTasks();
+    await refreshTasksPage({ silent: true });
   } catch (error) {
     renderError(els.globalError, error, "停止任务失败");
   } finally {
@@ -647,19 +926,21 @@ async function downloadSelectedTask() {
 
 function bindEvents() {
   els.refreshBtn?.addEventListener("click", () => {
-    loadTasks().then(() => loadSelectedDetail()).catch((error) => renderError(els.globalError, error, "刷新失败"));
+    refreshTasksPage({ silent: false })
+      .catch((error) => renderError(els.globalError, error, "刷新失败"));
   });
   for (const button of [els.scopeActive, els.scopeAll, els.scopeDone]) {
     button?.addEventListener("click", () => {
-      loadTasks({ scope: button.dataset.scope, page: 1 })
-        .then(() => loadSelectedDetail())
+      if (button.dataset.scope === state.scope) return;
+      refreshTasksPage({ silent: true, scope: button.dataset.scope, page: 1 })
         .catch((error) => renderError(els.globalError, error, "加载任务失败"));
     });
   }
   for (const button of [els.typeAll, els.typePipeline, els.typeRemix]) {
     button?.addEventListener("click", () => {
-      loadTasks({ runType: button.dataset.runType || "", page: 1 })
-        .then(() => loadSelectedDetail())
+      const runType = button.dataset.runType || "";
+      if (runType === state.runType) return;
+      refreshTasksPage({ silent: true, runType, page: 1 })
         .catch((error) => renderError(els.globalError, error, "加载任务失败"));
     });
   }
@@ -671,7 +952,9 @@ function bindEvents() {
   els.pager?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-tasks-page]");
     if (!button || button.disabled) return;
-    loadTasks({ page: Number(button.dataset.tasksPage) })
+    const nextPage = Number(button.dataset.tasksPage);
+    if (nextPage === state.page) return;
+    loadTasks({ page: nextPage, silent: true })
       .catch((error) => renderError(els.globalError, error, "加载任务失败"));
   });
   els.detail?.addEventListener("click", (event) => {
@@ -698,14 +981,35 @@ function bindEvents() {
   });
 }
 
+async function refreshTasksPage(options = {}) {
+  const {
+    silent = false,
+    autoSelect = false,
+    scope,
+    runType,
+    page
+  } = options;
+  await loadTasks({ silent, autoSelect, scope, runType, page });
+  if (state.selectedId) {
+    await loadSelectedDetail({ silent });
+  } else {
+    stopPagePolling();
+    renderDetailPanel({ force: true });
+  }
+}
+
 async function loadInitialData() {
+  if (state.bootstrapped) return;
+  state.bootstrapped = true;
   readInitialSelection();
-  await loadTasks();
+  const hadUrlSelection = Boolean(state.selectedId);
+  await loadTasks({ autoSelect: !hadUrlSelection });
   if (state.selectedId) {
     await loadSelectedDetail();
   } else {
-    renderDetailPanel();
+    renderDetailPanel({ force: true });
   }
+  updatePagePolling();
 }
 
 async function init() {

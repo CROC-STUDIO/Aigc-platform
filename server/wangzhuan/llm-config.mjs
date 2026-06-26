@@ -47,6 +47,19 @@ export function llmUsesGeminiCompat(llmConfig = {}) {
     || model.startsWith("gemini-");
 }
 
+/** 直连 Google Generative Language API 时用原生 Gemini 协议；Skylink 等网关走 Chat Completions。 */
+export function llmUsesGeminiNativeApi(llmConfig = {}) {
+  if (!llmUsesGeminiCompat(llmConfig)) return false;
+  const endpoint = cleanString(llmConfig.endpoint).toLowerCase();
+  if (endpoint.includes("generativelanguage.googleapis.com")) return true;
+  if (endpoint.includes("googleapis.com") && endpoint.includes("v1beta")) return true;
+  return false;
+}
+
+export function llmUsesSkylinkGeminiChatBridge(llmConfig = {}) {
+  return llmUsesGeminiCompat(llmConfig) && !llmUsesGeminiNativeApi(llmConfig);
+}
+
 export function configuredApiKey(llm = {}) {
   const envName = configuredApiKeyEnv(llm);
   return cleanString(llm.apiKey)

@@ -223,7 +223,10 @@ export function modelQcStatusLabel(outputs = [], qcRunnable = false) {
 export function isBatchQcRunnable(batch = {}, tasks = [], outputs = []) {
   if (!outputs.length || !tasks.length) return false;
   const generationDoneStatuses = new Set(["downloaded", "qc", "succeeded", "failed", "stopped", "skipped"]);
-  const hasRenderableOutputs = outputs.some((output) => String(output.filePath || "").trim());
+  const hasRenderableOutputs = outputs.some((output) => {
+    const filePath = String(output.filePath || "").trim();
+    return filePath || output.storageUrl || output.storageKey;
+  });
   if (!hasRenderableOutputs) return false;
   if (!tasks.every((task) => generationDoneStatuses.has(task.status))) return false;
   if (batch.status === "qc") {
@@ -506,6 +509,473 @@ export async function apiEnvelope(path, options = {}) {
   return payload.data;
 }
 
+export function parseClientSseBlocks(buffer) {
+  const events = [];
+  let rest = buffer;
+  let splitAt;
+  while ((splitAt = rest.indexOf("\n\n")) >= 0) {
+    const block = rest.slice(0, splitAt);
+    rest = rest.slice(splitAt + 2);
+    if (!block.trim()) continue;
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length) continue;
+    events.push({ event: eventName, data: dataLines.join("\n") });
+  }
+  return { events, rest };
+}
+
+function ensureLlmStreamDock() {
+  let dock = document.getElementById("wzLlmStreamDock");
+  if (!dock) {
+    dock = document.createElement("div");
+    dock.id = "wzLlmStreamDock";
+    dock.className = "wz-llm-stream-dock";
+    dock.hidden = true;
+    dock.innerHTML = `
+      <button type="button" class="wz-llm-stream-dock-btn" aria-live="polite">
+        <span class="wz-llm-stream-dock-title"></span>
+        <span class="wz-llm-stream-dock-stage"></span>
+      </button>
+    `;
+    document.body.appendChild(dock);
+  }
+  return dock;
+}
+
+function ensureLlmStreamModal() {
+  let backdrop = document.getElementById("wzLlmStreamModal");
+  if (backdrop && !backdrop.querySelector("#wzLlmStreamStage")) {
+    backdrop.remove();
+    backdrop = null;
+  }
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "wzLlmStreamModal";
+    backdrop.className = "modal-backdrop wz-llm-stream-modal";
+    backdrop.hidden = true;
+    backdrop.innerHTML = `
+    <div class="modal-panel wz-llm-stream-panel" role="dialog" aria-modal="true" aria-labelledby="wzLlmStreamTitle">
+      <div class="wz-llm-stream-header">
+        <div>
+          <h2 id="wzLlmStreamTitle">LLM 运行中</h2>
+          <p id="wzLlmStreamSubtitle">正在调用模型，请稍候</p>
+        </div>
+        <span id="wzLlmStreamStatus" class="wz-llm-stream-status" data-state="running">running</span>
+      </div>
+      <div class="wz-llm-stream-stage">
+        <div id="wzLlmStreamStage" class="wz-llm-stream-stage-label">正在连接服务…</div>
+        <div id="wzLlmStreamStageDetail" class="wz-llm-stream-stage-detail"></div>
+        <div class="wz-llm-stream-progress" aria-hidden="true">
+          <div id="wzLlmStreamProgressBar" class="wz-llm-stream-progress-bar" style="width: 8%"></div>
+        </div>
+        <p class="wz-llm-stream-hint">可点击「后台继续」先处理其他步骤；任务不会中断，完成后会提示您。</p>
+      </div>
+      <details id="wzLlmStreamLogDetails" class="wz-llm-stream-log-details">
+        <summary>技术日志（可选）</summary>
+        <pre id="wzLlmStreamOutput" class="wz-llm-stream-output" aria-live="polite"></pre>
+      </details>
+      <div class="modal-actions wz-llm-stream-actions">
+        <button id="wzLlmStreamMinimizeBtn" type="button" class="ghost">后台继续</button>
+        <button id="wzLlmStreamCloseBtn" type="button" class="ghost">关闭</button>
+      </div>
+    </div>
+  `;
+    document.body.appendChild(backdrop);
+  }
+  if (!backdrop.dataset.bound) {
+    backdrop.dataset.bound = "1";
+    const dock = ensureLlmStreamDock();
+    backdrop.querySelector("#wzLlmStreamMinimizeBtn")?.addEventListener("click", () => {
+      backdrop.__llmConsole?.minimize?.();
+    });
+    backdrop.querySelector("#wzLlmStreamCloseBtn")?.addEventListener("click", () => {
+      backdrop.__llmConsole?.closePanel?.();
+    });
+    dock.querySelector(".wz-llm-stream-dock-btn")?.addEventListener("click", () => {
+      backdrop.__llmConsole?.expand?.();
+    });
+  }
+  return backdrop;
+}
+
+function updateLlmStreamSubtitle(backdrop, text) {
+  const subtitle = backdrop?.querySelector("#wzLlmStreamSubtitle");
+  if (subtitle) subtitle.textContent = text;
+}
+
+function inferLlmStreamStage(line = "", title = "") {
+  const text = String(line || "").trim();
+  if (!text) return null;
+
+  const planMatch = text.match(/\[plan\s+(\d+)\/(\d+)\]\s*(.*)$/i);
+  if (planMatch) {
+    const index = Number(planMatch[1]);
+    const total = Number(planMatch[2]) || 1;
+    const detail = planMatch[3]?.trim() || "";
+    const progress = Math.min(96, Math.round((index / total) * 100));
+    return {
+      label: `正在生成 Seedance 预案（${index}/${total}）`,
+      detail: detail || `第 ${index} 条预案调用模型中…`,
+      progress
+    };
+  }
+
+  if (/init draft-decomposition stream/i.test(text)) {
+    return { label: "准备脚本拆解", detail: "读取参考视频与模型配置", progress: 12 };
+  }
+  if (/init batch-plan stream/i.test(text)) {
+    return { label: "准备生成预案", detail: "校验批次参数并创建预览批次", progress: 10 };
+  }
+  if (/^model=/i.test(text)) {
+    return { label: "模型已就绪", detail: text, progress: 22 };
+  }
+  if (/idempotency replay/i.test(text)) {
+    return { label: "复用已有结果", detail: "跳过重复调用，正在加载历史预案", progress: 88 };
+  }
+  if (/POST upstream stream/i.test(text)) {
+    const isPlan = /plan|预案|batch-plan/i.test(title);
+    return {
+      label: isPlan ? "正在调用模型生成预案" : "正在调用模型拆解脚本",
+      detail: "模型流式输出中，通常需要 30 秒到数分钟",
+      progress: 42
+    };
+  }
+  if (/\[DONE\] received — parsing JSON/i.test(text)) {
+    return { label: "正在解析脚本结果", detail: "模型输出已完成，正在整理表单字段", progress: 86 };
+  }
+  if (/parse ok — decomposition ready/i.test(text)) {
+    return { label: "脚本拆解完成", detail: "即将写入第 2 步表单", progress: 96 };
+  }
+  if (/\[DONE\] all plans ready/i.test(text)) {
+    return { label: "预案生成完成", detail: "正在保存批次并刷新表格", progress: 96 };
+  }
+  if (/\[完成\] 正在应用到页面/i.test(text)) {
+    return { label: "正在应用到页面", detail: "请稍候…", progress: 98 };
+  }
+  if (/upstream:/i.test(text)) {
+    return { label: "已连接上游模型", detail: text.replace(/^upstream:\s*/i, ""), progress: 28 };
+  }
+  return null;
+}
+
+async function appendAnimatedDelta(consoleUi, text, animated = true) {
+  const chunk = String(text || "");
+  if (!chunk) return;
+  if (!animated || consoleUi.isMinimized?.()) {
+    consoleUi.delta(chunk);
+    return;
+  }
+  const maxFrames = 160;
+  const sliceSize = Math.max(1, Math.ceil(chunk.length / maxFrames));
+  for (let offset = 0; offset < chunk.length; offset += sliceSize) {
+    consoleUi.delta(chunk.slice(offset, offset + sliceSize));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
+export function openLlmStreamConsole(title = "LLM 运行中") {
+  const backdrop = ensureLlmStreamModal();
+  const dock = ensureLlmStreamDock();
+  const titleEl = backdrop.querySelector("#wzLlmStreamTitle");
+  const statusEl = backdrop.querySelector("#wzLlmStreamStatus");
+  const outputEl = backdrop.querySelector("#wzLlmStreamOutput");
+  const logDetails = backdrop.querySelector("#wzLlmStreamLogDetails");
+  const stageEl = backdrop.querySelector("#wzLlmStreamStage");
+  const stageDetailEl = backdrop.querySelector("#wzLlmStreamStageDetail");
+  const progressBar = backdrop.querySelector("#wzLlmStreamProgressBar");
+  const minimizeBtn = backdrop.querySelector("#wzLlmStreamMinimizeBtn");
+  const closeBtn = backdrop.querySelector("#wzLlmStreamCloseBtn");
+  const dockTitle = dock.querySelector(".wz-llm-stream-dock-title");
+  const dockStage = dock.querySelector(".wz-llm-stream-dock-stage");
+  const dockBtn = dock.querySelector(".wz-llm-stream-dock-btn");
+
+  if (titleEl) titleEl.textContent = title;
+  updateLlmStreamSubtitle(backdrop, "通常需要 30 秒到数分钟，可先后台继续处理其他步骤");
+  if (statusEl) {
+    statusEl.textContent = "running";
+    statusEl.dataset.state = "running";
+  }
+  if (outputEl) outputEl.textContent = "";
+  if (logDetails) logDetails.open = false;
+  if (minimizeBtn) {
+    minimizeBtn.hidden = false;
+    minimizeBtn.disabled = false;
+    minimizeBtn.textContent = "后台继续";
+  }
+  if (closeBtn) {
+    closeBtn.hidden = true;
+    closeBtn.disabled = false;
+    closeBtn.textContent = "关闭";
+  }
+  dock.hidden = true;
+  dock.dataset.state = "running";
+  backdrop.hidden = false;
+  backdrop.classList.remove("is-minimized");
+
+  let logBuffer = "";
+  let deltaBuffer = "";
+  let minimized = false;
+  let panelTitle = title;
+  let stageLabel = "正在连接服务…";
+  let stageDetail = "";
+
+  function renderOutput() {
+    if (!outputEl) return;
+    outputEl.textContent = logBuffer + deltaBuffer;
+    outputEl.scrollTop = outputEl.scrollHeight;
+  }
+
+  function syncProgress(progress) {
+    if (!progressBar || progress === undefined || progress === null) return;
+    const value = Math.max(4, Math.min(100, Number(progress) || 0));
+    progressBar.style.width = `${value}%`;
+  }
+
+  function syncStageUi() {
+    if (stageEl) stageEl.textContent = stageLabel;
+    if (stageDetailEl) stageDetailEl.textContent = stageDetail;
+    if (dockTitle) dockTitle.textContent = panelTitle;
+    if (dockStage) dockStage.textContent = stageDetail ? `${stageLabel} · ${stageDetail}` : stageLabel;
+  }
+
+  function syncDockState(state) {
+    dock.dataset.state = state;
+    if (dockBtn) {
+      dockBtn.dataset.state = state;
+    }
+  }
+
+  const consoleUi = {
+    isMinimized() {
+      return minimized;
+    },
+    setStage(label, { detail = "", progress } = {}) {
+      if (label) stageLabel = String(label);
+      if (detail !== undefined) stageDetail = String(detail || "");
+      if (progress !== undefined) syncProgress(progress);
+      syncStageUi();
+    },
+    inferStageFromLog(line) {
+      const inferred = inferLlmStreamStage(line, panelTitle);
+      if (!inferred) return;
+      this.setStage(inferred.label, { detail: inferred.detail, progress: inferred.progress });
+    },
+    log(line) {
+      const text = String(line ?? "");
+      logBuffer += text.endsWith("\n") ? text : `${text}\n`;
+      this.inferStageFromLog(text);
+      renderOutput();
+    },
+    delta(text) {
+      deltaBuffer += String(text || "");
+      renderOutput();
+    },
+    resetDelta() {
+      if (deltaBuffer) {
+        logBuffer += deltaBuffer;
+        if (!logBuffer.endsWith("\n")) logBuffer += "\n";
+        deltaBuffer = "";
+      }
+      renderOutput();
+    },
+    minimize() {
+      if (statusEl?.dataset.state !== "running") return;
+      minimized = true;
+      backdrop.hidden = true;
+      backdrop.classList.add("is-minimized");
+      dock.hidden = false;
+      syncDockState("running");
+      syncStageUi();
+      showToast(`${panelTitle}：已转入后台，完成后会通知您`, { type: "info", duration: 3600 });
+    },
+    expand() {
+      minimized = false;
+      backdrop.hidden = false;
+      backdrop.classList.remove("is-minimized");
+      dock.hidden = true;
+    },
+    closePanel() {
+      if (statusEl?.dataset.state === "running") {
+        this.minimize();
+        return;
+      }
+      backdrop.hidden = true;
+      dock.hidden = true;
+      minimized = false;
+      backdrop.classList.remove("is-minimized");
+    },
+    finish() {
+      if (deltaBuffer) {
+        logBuffer += deltaBuffer;
+        if (!logBuffer.endsWith("\n")) logBuffer += "\n";
+        deltaBuffer = "";
+      }
+      if (statusEl) {
+        statusEl.textContent = "done";
+        statusEl.dataset.state = "done";
+      }
+      this.setStage("已完成", { detail: "结果已写入页面，请检查后继续", progress: 100 });
+      updateLlmStreamSubtitle(backdrop, "生成完成，请检查结果后关闭");
+      if (minimizeBtn) minimizeBtn.hidden = true;
+      if (closeBtn) {
+        closeBtn.hidden = false;
+        closeBtn.disabled = false;
+        closeBtn.textContent = "关闭";
+      }
+      syncDockState("done");
+      if (minimized) {
+        dock.hidden = false;
+      }
+      renderOutput();
+    },
+    fail(message) {
+      logBuffer += `\n[error] ${String(message || "请求失败")}\n`;
+      if (statusEl) {
+        statusEl.textContent = "error";
+        statusEl.dataset.state = "error";
+      }
+      this.setStage("请求失败", { detail: String(message || "请求失败"), progress: 100 });
+      updateLlmStreamSubtitle(backdrop, "请求失败，可展开技术日志查看详情");
+      if (minimizeBtn) minimizeBtn.hidden = true;
+      if (closeBtn) {
+        closeBtn.hidden = false;
+        closeBtn.disabled = false;
+        closeBtn.textContent = "关闭";
+      }
+      syncDockState("error");
+      if (minimized) {
+        dock.hidden = false;
+        this.expand();
+        if (logDetails) logDetails.open = true;
+        showToast(`${panelTitle}失败，请查看控制台输出`, { type: "error", duration: 5600 });
+      }
+      renderOutput();
+    },
+    close(delayMs = 0) {
+      window.setTimeout(() => {
+        backdrop.hidden = true;
+        dock.hidden = true;
+        minimized = false;
+        backdrop.classList.remove("is-minimized");
+      }, delayMs);
+    }
+  };
+
+  consoleUi.setStage(stageLabel, { detail: "正在建立连接…", progress: 8 });
+  backdrop.__llmConsole = consoleUi;
+  return consoleUi;
+}
+
+export async function apiEnvelopeStream(path, options = {}, streamUi = {}) {
+  const {
+    title = "LLM 运行中",
+    console: externalConsole = null,
+    animated = true,
+    autoCloseOnSuccess = false
+  } = streamUi;
+  const consoleUi = externalConsole || openLlmStreamConsole(title);
+  let settled = false;
+
+  try {
+    const response = await fetch(path, {
+      ...options,
+      headers: { ...JSON_HEADERS, ...(options.headers || {}) },
+      credentials: "same-origin"
+    });
+    const contentType = response.headers.get("Content-Type") || "";
+
+    if (!contentType.includes("text/event-stream")) {
+      const text = await response.text();
+      let payload = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        throw new WangzhuanApiError({
+          code: "invalid_json",
+          message: "服务返回了无法解析的数据",
+          requestId: response.headers.get("X-Request-Id") || ""
+        }, response.status);
+      }
+      if (!response.ok || payload.code !== "ok") {
+        throw new WangzhuanApiError(payload, response.status);
+      }
+      consoleUi.finish();
+      settled = true;
+      return payload.data;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new WangzhuanApiError({
+        code: "stream_unavailable",
+        message: "浏览器无法读取流式响应"
+      }, response.status);
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let resultData = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseClientSseBlocks(buffer);
+      buffer = parsed.rest;
+
+      for (const item of parsed.events) {
+        if (item.data === "[DONE]") continue;
+        let payload = {};
+        try {
+          payload = JSON.parse(item.data);
+        } catch {
+          continue;
+        }
+
+        if (item.event === "log") {
+          consoleUi.log(payload.line ?? "");
+        } else if (item.event === "reset") {
+          consoleUi.resetDelta();
+        } else if (item.event === "delta") {
+          await appendAnimatedDelta(consoleUi, payload.text ?? "", animated);
+        } else if (item.event === "done") {
+          if (payload.code !== "ok") {
+            throw new WangzhuanApiError(payload, response.status);
+          }
+          consoleUi.log("");
+          consoleUi.log("[完成] 正在应用到页面…");
+          consoleUi.finish();
+          resultData = payload.data;
+          settled = true;
+        } else if (item.event === "error") {
+          throw new WangzhuanApiError(payload, response.status);
+        }
+      }
+    }
+
+    if (resultData) return resultData;
+    throw new WangzhuanApiError({
+      code: "stream_incomplete",
+      message: "流式连接意外结束",
+      requestId: response.headers.get("X-Request-Id") || ""
+    }, response.status);
+  } catch (error) {
+    if (!settled) {
+      consoleUi.fail(error?.message || "请求失败");
+    }
+    throw error;
+  } finally {
+    if (!externalConsole && settled && autoCloseOnSuccess) {
+      consoleUi.close(1800);
+    }
+  }
+}
+
 export async function apiLegacy(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -681,11 +1151,13 @@ export function showErrorModal(error, context = "") {
   const closeBtn = backdrop.querySelector("[data-wz-error-close]");
   if (title) title.textContent = context || error?.code || "操作失败";
   if (message) message.textContent = error?.message || "请求失败，请稍后重试。";
-  const rows = buildErrorDetails(error);
+  const rows = Array.isArray(error?.details) && error.details.length
+    ? error.details
+    : buildErrorDetails(error);
   if (details) {
     if (rows.length) {
       details.hidden = false;
-      details.innerHTML = rows.map((row) => `<small>${escapeHtml(row)}</small>`).join("");
+      details.innerHTML = rows.map((row) => `<div class="wz-error-modal-detail-row">${escapeHtml(String(row))}</div>`).join("");
     } else {
       details.hidden = true;
       details.innerHTML = "";
@@ -1151,15 +1623,36 @@ export function taskSpaceHref(type, id = "") {
   return `/wangzhuan-tasks.html${query ? `?${query}` : ""}`;
 }
 
-export function workbenchHref(type, status = "") {
-  if (type === "remix") return "/competitor-remix.html";
-  return status === "preview_required" ? "/wangzhuan.html#wzNodeBatch" : "/wangzhuan.html#wzNodeLog";
+export function workbenchFocusHash(type, status = "") {
+  if (type === "remix") return "#remixNodeDelivery";
+  return status === "preview_required" ? "#wzNodeBatch" : "#wzNodeLog";
+}
+
+export function readWorkbenchRestoreRequest() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("restore") !== "1") return null;
+  const remixId = String(params.get("remixId") || "").trim();
+  if (remixId) return { type: "remix", id: remixId };
+  const batchId = String(params.get("batchId") || "").trim();
+  if (batchId) return { type: "batch", id: batchId };
+  return null;
+}
+
+export function workbenchHref(type, status = "", id = "") {
+  const base = type === "remix" ? "/competitor-remix.html" : "/wangzhuan.html";
+  const hash = workbenchFocusHash(type, status);
+  const taskId = String(id || "").trim();
+  if (!taskId) return `${base}${hash}`;
+  const params = new URLSearchParams({ restore: "1" });
+  if (type === "remix") params.set("remixId", taskId);
+  else params.set("batchId", taskId);
+  return `${base}?${params}${hash}`;
 }
 
 export function activeLockActionsHtml(lock) {
   if (!lock) return "";
   const href = taskSpaceHref(lock.type, lock.id);
-  return `${escapeHtml(lock.label)} · <a href="${href}">打开任务管理</a>`;
+  return `${escapeHtml(lock.label)} · 可继续并行发起新任务 · <a href="${href}">打开任务管理</a>`;
 }
 
 export async function stopWorkflowTask(type, id, reason = "frontend_stop") {
@@ -1212,6 +1705,136 @@ export function schedulePoll({ load, shouldStop, interval = 2000 }) {
 
 let toastTimer = 0;
 let toastEl = null;
+
+export function applyQcReportsToBatch(batch = {}, reports = []) {
+  if (!batch || !Array.isArray(reports) || !reports.length) return batch;
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  const byId = new Map(outputs.map((output) => [output.outputId, output]));
+  for (const report of reports) {
+    if (!report?.outputId) continue;
+    const output = byId.get(report.outputId) || { outputId: report.outputId };
+    if (!byId.has(report.outputId)) outputs.push(output);
+    output.qcStatus = report.qcStatus || output.qcStatus;
+    if (Array.isArray(report.checks) && report.checks.length) output.qcChecks = report.checks;
+    if (report.summary) output.qcSummary = report.summary;
+    if (report.modelReview) {
+      output.modelQcSummary = {
+        provider: report.modelReview.provider,
+        model: report.modelReview.model,
+        passed: report.modelReview.passed,
+        score: report.modelReview.score,
+        summary: report.modelReview.summary,
+        issueCodes: (report.modelReview.issues || []).map((issue) => issue.code),
+        recommendedAction: report.modelReview.recommendedAction
+      };
+    }
+    byId.set(report.outputId, output);
+  }
+  batch.outputs = outputs;
+  return batch;
+}
+
+function outputExpectsModelQc(batch = {}, output = {}) {
+  if (output.sourceType !== "pipeline") return false;
+  const hasAsset = Boolean(output.filePath || output.storageUrl || output.storageKey);
+  if (!hasAsset) return false;
+  if (output.kind === "stitched_video") return true;
+  return Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15;
+}
+
+function batchModelQcSummary(batch = {}, reports = []) {
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  const reportById = new Map((Array.isArray(reports) ? reports : []).map((report) => [report.outputId, report]));
+  let expected = 0;
+  let ran = 0;
+  for (const output of outputs) {
+    if (!outputExpectsModelQc(batch, output)) continue;
+    expected += 1;
+    const report = reportById.get(output.outputId);
+    if (report?.modelReview || output.modelQcSummary) {
+      ran += 1;
+      continue;
+    }
+    const checks = report?.checks || output.qcChecks || [];
+    if (checks.some((item) => item.checkId === "model_video_qc")) ran += 1;
+  }
+  return { expected, ran, skipped: Math.max(0, expected - ran) };
+}
+
+export function summarizeBatchQcFailures(batch = {}, reports = []) {
+  const reportById = new Map((Array.isArray(reports) ? reports : []).map((report) => [report.outputId, report]));
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  const rows = [];
+  for (const output of outputs) {
+    const label = output.outputId || output.kind || "输出";
+    const report = reportById.get(output.outputId);
+    const checks = Array.isArray(report?.checks) && report.checks.length
+      ? report.checks
+      : (Array.isArray(output.qcChecks) ? output.qcChecks : []);
+    const issues = checks.filter((item) => ["fail", "warn", "manual_required"].includes(item.status));
+    if (issues.length) {
+      for (const item of issues) {
+        const prefix = item.status === "warn" ? "警告" : "未通过";
+        rows.push(`${label} · ${prefix} · ${item.checkId}: ${item.message}`);
+      }
+      continue;
+    }
+    const qcStatus = report?.qcStatus || output.qcStatus;
+    if (qcStatus && !["pass", "not_started"].includes(qcStatus)) {
+      const summary = report?.summary
+        || (typeof output.qcSummary === "string" ? output.qcSummary : output.qcSummary?.summary)
+        || output.modelQcSummary?.summary
+        || output.errorMessage
+        || "";
+      rows.push(`${label} · ${qcStatus}${summary ? `: ${summary}` : ""}`);
+    }
+  }
+  const modelSummary = batchModelQcSummary(batch, reports);
+  if (modelSummary.skipped > 0) {
+    rows.unshift(`模型质检未执行（${modelSummary.skipped}/${modelSummary.expected} 个成片输出）：规则质检秒级完成，视觉模型需本地文件或可访问的视频 URL。`);
+  }
+  if (!rows.length && batch.qcSummary) {
+    const failed = Number(batch.qcSummary.failed || 0);
+    const passed = Number(batch.qcSummary.passed || 0);
+    const total = Number(batch.qcSummary.total || 0);
+    if (total) rows.push(`汇总：${passed}/${total} 通过，${failed} 项未通过`);
+  }
+  return rows.slice(0, 14);
+}
+
+export function notifyBatchQcResult(qcResult = {}) {
+  const reports = Array.isArray(qcResult.reports) ? qcResult.reports : [];
+  const batch = applyQcReportsToBatch({ ...(qcResult.batch || qcResult) }, reports);
+  const hasFreshQc = reports.length > 0 || batch.outputs?.some((output) => Array.isArray(output.qcChecks) && output.qcChecks.length);
+  const modelSummary = batchModelQcSummary(batch, reports);
+  const ruleOnly = hasFreshQc && modelSummary.expected > 0 && modelSummary.ran === 0;
+  const qcFailed = batch.outputs?.some((output) => ["fail", "manual_required"].includes(output.qcStatus))
+    || (hasFreshQc && (batch.status === "failed" || batch.status === "partial_failed"));
+  const qcPassed = hasFreshQc && batch.outputs?.length
+    && batch.outputs.every((output) => output.qcStatus === "pass");
+
+  if (qcPassed || (hasFreshQc && batch.status === "succeeded")) {
+    showToast(ruleOnly ? "规则质检通过（未调用视觉模型）" : "视频质检通过", { type: "success", duration: 4200 });
+    return;
+  }
+  if (qcFailed) {
+    const details = summarizeBatchQcFailures(batch, reports);
+    showErrorModal({
+      message: ruleOnly
+        ? "规则质检未通过（秒级完成，未调用视觉模型）。请根据明细修复后重新质检。"
+        : details.length
+          ? "以下检查项未通过，请根据明细修复后重新质检。"
+          : "视频质检未通过，请在下方交付结果中查看各输出的质检状态。",
+      details
+    }, ruleOnly ? "规则质检未通过" : "质检未通过");
+    return;
+  }
+  if (hasFreshQc) {
+    showToast(ruleOnly ? "规则质检已完成（未调用视觉模型）" : "视频质检已完成", { type: "info", duration: 4200 });
+    return;
+  }
+  showToast("质检状态已刷新", { type: "info", duration: 3200 });
+}
 
 export function showToast(message, { type = "info", duration = 4200, actionLabel = "", onAction = null } = {}) {
   const text = String(message || "").trim();

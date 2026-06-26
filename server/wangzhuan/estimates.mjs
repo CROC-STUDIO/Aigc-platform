@@ -15,11 +15,8 @@ import {
 import { WangzhuanError } from "./http.mjs";
 import { makeBatchId } from "./ids.mjs";
 import {
-  findActiveResourceLock,
   hasWangzhuanFactsStore,
-  loadActivePipelineRunFromMysql,
   loadBatchDetailFromMysql,
-  loadActiveRemixFromMysql,
   loadEstimateFromMysql,
   loadIdempotencyFactFromMysql,
   loadTemplateStoreFromMysql,
@@ -30,12 +27,13 @@ import {
   syncEstimateFact,
   verifyEstimateConfirmationTokenFromMysql
 } from "./mysql-facts.mjs";
-import { prepareBatchForPipeline } from "./pipeline.mjs";
+import { prepareBatchForPipeline, stopBatch } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
 import { assertSeedanceReferenceAssetLimits } from "./seedance-provider.mjs";
 import { DEFAULT_SEEDANCE_MODEL, resolveSeedanceModel } from "./seedance-provider.mjs";
 import { preflightStitcher } from "./stitch.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { writeSseDelta, writeSseDone, writeSseError, writeSseLog, writeSseReset } from "./sse.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
@@ -409,11 +407,6 @@ export async function loadEstimate(context, estimateId) {
   throw new WangzhuanError("validation_error", "estimate 不存在，请重新估算", { estimateId });
 }
 
-async function findActiveBatch(context) {
-  const active = await loadActivePipelineRunFromMysql(context);
-  return active?.batchId ? active : null;
-}
-
 async function loadDraftBatch(context, batchId) {
   if (!batchId) return null;
   const detail = await loadBatchDetailFromMysql(context, batchId);
@@ -431,11 +424,6 @@ export function canReuseActivePipelineDraft(active, request = {}, options = {}) 
   return editableStatuses.includes(String(activeStatus || ""));
 }
 
-async function findActiveRemix(context) {
-  const detail = await loadActiveRemixFromMysql(context);
-  return detail?.remix || null;
-}
-
 async function saveBatch(context, batch) {
   const synced = await syncBatchFacts(context, batch, "batch_created");
   if (synced?.skipped) {
@@ -448,6 +436,73 @@ async function saveBatch(context, batch) {
       : "批次状态保存失败，请确认数据库迁移已执行到最新版本（含 pending_preview 任务状态）", {
       batchId: batch.batchId,
       cause: detail
+    });
+  }
+}
+
+async function rollbackEmptyPlanPreviewBatch(context, batchId) {
+  if (!batchId) return;
+  try {
+    const detail = await loadBatchDetailFromMysql(context, batchId);
+    const batch = detail?.batch;
+    if (!batch || batch.status !== "preview_required") return;
+    const planCount = Array.isArray(batch.plans) ? batch.plans.length : 0;
+    const scriptCount = Array.isArray(batch.scripts) ? batch.scripts.length : 0;
+    if (planCount > 0 || scriptCount > 0) return;
+    await stopBatch(context, batchId, { reason: "plan_generation_failed" });
+  } catch (error) {
+    console.warn(`[estimates] failed to rollback empty plan preview batch ${batchId}: ${error?.message || error}`);
+  }
+}
+
+export function enrichPlanGenerationError(error, batchId) {
+  if (!batchId) return error;
+  if (!(error instanceof WangzhuanError)) {
+    return new WangzhuanError("internal_error", error?.message || "系统错误", { batchId });
+  }
+  return new WangzhuanError(error.code, error.message, { ...error.data, batchId }, error.status);
+}
+
+export function buildPlanPreviewBatch(context, record, draftBatch, branchDrafts) {
+  const now = new Date().toISOString();
+  return {
+    batchId: draftBatch?.batchId || makeBatchId(),
+    userBatchName: record.request.batchName || draftBatch?.userBatchName || "",
+    displayBatchName: record.request.batchName || draftBatch?.displayBatchName || "",
+    type: "pipeline",
+    status: "preview_required",
+    previewType: "seedance_plan",
+    userId: currentUserId(context),
+    projectRoot: context.projectName || "current_project",
+    templateSnapshot: record.templateSnapshot,
+    referenceVideo: record.referenceVideo,
+    decomposition: record.decomposition,
+    estimate: record.estimate,
+    request: {
+      ...record.request,
+      branches: branchDrafts
+    },
+    branchDrafts,
+    scripts: [],
+    tasks: [],
+    plans: [],
+    outputs: draftBatch?.outputs || [],
+    qcSummary: draftBatch?.qcSummary || {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      warnings: []
+    },
+    createdAt: draftBatch?.createdAt || now,
+    updatedAt: now
+  };
+}
+
+async function assertPlanGenerationAllowed(context, record) {
+  if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
+    throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
+      estimateId: record.estimate.estimateId,
+      capability: "stitcher"
     });
   }
 }
@@ -479,24 +534,6 @@ async function assertCanStartFromEstimate(context, record, request, options = {}
       runningResource: "existing_ad_batch"
     });
   }
-  const activeMysqlLock = await findActiveResourceLock(context);
-  const lockRunId = activeMysqlLock?.runId || activeMysqlLock?.batchId || "";
-  const lockStatus = String(activeMysqlLock?.runStatus || activeMysqlLock?.status || "");
-  const reusingSameEditableDraft = Boolean(
-    request?.batchId
-      && lockRunId === request.batchId
-      && (options.allowPreviewRequired
-        ? ["draft", "checking", "preview_required"]
-        : ["draft", "checking"]).includes(lockStatus)
-  );
-  if (activeMysqlLock && !reusingSameEditableDraft) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: activeMysqlLock.runType || "mysql_resource_lock",
-      batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
-      remixId: activeMysqlLock.runType === "remix" ? activeMysqlLock.runId : undefined,
-      status: activeMysqlLock.runStatus || activeMysqlLock.status
-    });
-  }
 }
 
 export async function startBatchFromEstimate(context, request = {}) {
@@ -515,22 +552,6 @@ export async function startBatchFromEstimate(context, request = {}) {
       capability: "stitcher"
     });
   }
-  const active = await findActiveBatch(context);
-  if (active && !canReuseActivePipelineDraft(active, request)) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      batchId: active.batchId,
-      status: active.status
-    });
-  }
-  const activeRemix = await findActiveRemix(context);
-  if (activeRemix) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "remix",
-      remixId: activeRemix.remixId,
-      status: activeRemix.status
-    });
-  }
-
   const draftBatch = await loadDraftBatch(context, request.batchId);
   const now = new Date().toISOString();
   const batch = {
@@ -589,83 +610,115 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
 
   const record = await loadEstimate(context, request.estimateId);
   await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
-  const branchDrafts = record.request?.branches || record.templateSnapshot?.draft?.branches || [];
-  if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
-    throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
-      estimateId: record.estimate.estimateId,
-      capability: "stitcher"
-    });
-  }
-  const active = await findActiveBatch(context);
-  if (active && !canReuseActivePipelineDraft(active, request, { allowPreviewRequired: true })) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      batchId: active.batchId,
-      status: active.status
-    });
-  }
-  const activeRemix = await findActiveRemix(context);
-  if (activeRemix) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "remix",
-      remixId: activeRemix.remixId,
-      status: activeRemix.status
-    });
-  }
+  const branchDrafts = normalizeBranchDrafts(
+    record.templateSnapshot?.draft || {},
+    record.request?.branches || record.templateSnapshot?.draft?.branches || []
+  );
+  await assertPlanGenerationAllowed(context, record);
 
   const draftBatch = await loadDraftBatch(context, request.batchId);
-  const now = new Date().toISOString();
-  const batch = {
-    batchId: draftBatch?.batchId || makeBatchId(),
-    userBatchName: record.request.batchName || draftBatch?.userBatchName || "",
-    displayBatchName: record.request.batchName || draftBatch?.displayBatchName || "",
-    type: "pipeline",
-    status: "preview_required",
-    previewType: "seedance_plan",
-    userId: currentUserId(context),
-    projectRoot: context.projectName || "current_project",
-    templateSnapshot: record.templateSnapshot,
-    referenceVideo: record.referenceVideo,
-    decomposition: record.decomposition,
-    estimate: record.estimate,
-    request: {
-      ...record.request,
-      branches: branchDrafts
-    },
-    branchDrafts,
-    scripts: [],
-    tasks: [],
-    plans: [],
-    outputs: draftBatch?.outputs || [],
-    qcSummary: draftBatch?.qcSummary || {
-      total: 0,
-      passed: 0,
-      failed: 0,
-      warnings: []
-    },
-    createdAt: draftBatch?.createdAt || now,
-    updatedAt: now
-  };
-  assertSeedanceReferenceAssetLimits(branchDrafts);
-  await saveBatch(context, batch);
-  const preparedBatch = await prepareBatchForPipeline(context, batch, {
-    useLlmPlans: true,
-    llmConfig: request.llmConfig || {},
-    knowledgeNotes: request.knowledgeNotes || ""
-  });
-  const result = {
-    batch: preparedBatch,
-    plans: preparedBatch.plans || []
-  };
-  await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
-    type: "batch_plan",
-    response: result
-  });
-  await recordTelemetryEvent(context, "seedance_plan_generated", {
-    batchId: preparedBatch.batchId,
-    estimateId: record.estimate.estimateId,
-    idempotencyKey: request.idempotencyKey,
-    planCount: preparedBatch.plans?.length || 0,
-    previewType: preparedBatch.previewType
-  }, { audit: true });
-  return result;
+  const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
+  let planBatchId = null;
+  try {
+    assertSeedanceReferenceAssetLimits(branchDrafts);
+    await saveBatch(context, batch);
+    planBatchId = batch.batchId;
+    const preparedBatch = await prepareBatchForPipeline(context, batch, {
+      useLlmPlans: true,
+      llmConfig: request.llmConfig || {},
+      knowledgeNotes: request.knowledgeNotes || ""
+    });
+    const result = {
+      batch: preparedBatch,
+      plans: preparedBatch.plans || []
+    };
+    await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
+      type: "batch_plan",
+      response: result
+    });
+    await recordTelemetryEvent(context, "seedance_plan_generated", {
+      batchId: preparedBatch.batchId,
+      estimateId: record.estimate.estimateId,
+      idempotencyKey: request.idempotencyKey,
+      planCount: preparedBatch.plans?.length || 0,
+      previewType: preparedBatch.previewType
+    }, { audit: true });
+    return result;
+  } catch (error) {
+    await rollbackEmptyPlanPreviewBatch(context, planBatchId);
+    throw enrichPlanGenerationError(error, planBatchId);
+  }
+}
+
+export async function prepareBatchPlanFromEstimateStream(context, request = {}, res, options = {}) {
+  const requestId = options.requestId;
+  let planBatchId = null;
+  try {
+    writeSseLog(res, `[${new Date().toISOString()}] init batch-plan stream`);
+    if (!request.idempotencyKey) {
+      throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+    }
+    const requestHash = hashPayload(request);
+    const replay = await loadIdempotencyFactFromMysql(context, "batches_plan", request.idempotencyKey, requestHash);
+    if (replay) {
+      writeSseLog(res, "idempotency replay — skip upstream");
+      writeSseDone(res, replay, requestId);
+      return;
+    }
+
+    const record = await loadEstimate(context, request.estimateId);
+    await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
+    const branchDrafts = normalizeBranchDrafts(
+      record.templateSnapshot?.draft || {},
+      record.request?.branches || record.templateSnapshot?.draft?.branches || []
+    );
+    await assertPlanGenerationAllowed(context, record);
+
+    const draftBatch = await loadDraftBatch(context, request.batchId);
+    const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
+    assertSeedanceReferenceAssetLimits(branchDrafts);
+    await saveBatch(context, batch);
+    planBatchId = batch.batchId;
+
+    const llmConfig = request.llmConfig || {};
+    writeSseLog(res, `model=${llmConfig.model || "(default)"} provider=${llmConfig.provider || "(default)"}`);
+    const streamContext = {
+      ...context,
+      llmStreamHandlers: {
+        onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
+        onDelta: (delta) => writeSseDelta(res, delta)
+      }
+    };
+    const preparedBatch = await prepareBatchForPipeline(streamContext, batch, {
+      useLlmPlans: true,
+      llmConfig,
+      knowledgeNotes: request.knowledgeNotes || "",
+      onPlanProgress: ({ index, total, branchLabel, branchVariantIndex, segmentIndex }) => {
+        writeSseReset(res);
+        writeSseLog(res, `[plan ${index}/${total}] ${branchLabel} variant=${branchVariantIndex} segment=${segmentIndex}`);
+        writeSseLog(res, "POST upstream stream=true …");
+      }
+    });
+    const result = {
+      batch: preparedBatch,
+      plans: preparedBatch.plans || []
+    };
+    await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
+      type: "batch_plan",
+      response: result
+    });
+    await recordTelemetryEvent(context, "seedance_plan_generated", {
+      batchId: preparedBatch.batchId,
+      estimateId: record.estimate.estimateId,
+      idempotencyKey: request.idempotencyKey,
+      planCount: preparedBatch.plans?.length || 0,
+      previewType: preparedBatch.previewType
+    }, { audit: true });
+    writeSseLog(res, "");
+    writeSseLog(res, "[DONE] all plans ready — saving batch");
+    writeSseDone(res, result, requestId);
+  } catch (error) {
+    await rollbackEmptyPlanPreviewBatch(context, planBatchId);
+    writeSseError(res, enrichPlanGenerationError(error, planBatchId), requestId);
+  }
 }
