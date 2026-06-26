@@ -7,7 +7,11 @@ import {
   REQUIRED_STRONG_TRUTH_FIELDS,
   TARGET_CHANNELS
 } from "./constants.mjs";
-import { buildDisclaimerByLanguage, resolveDisclaimerPreset, resolveDisclaimerText } from "./disclaimers.mjs";
+import {
+  buildEffectiveDisclaimerByLanguage,
+  resolveDisclaimerPreset,
+  resolveEffectiveDisclaimer
+} from "./disclaimers.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeBatchId } from "./ids.mjs";
 import {
@@ -270,12 +274,21 @@ export async function estimateBatch(context, request = {}) {
   const disclaimerLanguage = String(
     request.disclaimerLanguage || resolveDisclaimerPreset(normalized.languages[0], disclaimerPresetId)
   );
-  const disclaimer = String(
-    request.disclaimer || resolveDisclaimerText(normalized.languages[0], disclaimerPresetId)
-  );
+  const disclaimer = String(resolveEffectiveDisclaimer({
+    language: normalized.languages[0],
+    preset: disclaimerPresetId,
+    targetChannel: request.targetChannel,
+    promiseLevel: request.promiseLevel,
+    customText: request.disclaimer
+  }));
   const disclaimerByLanguage = request.disclaimerByLanguage && typeof request.disclaimerByLanguage === "object"
     ? request.disclaimerByLanguage
-    : buildDisclaimerByLanguage(normalized.languages, disclaimerPresetId);
+    : buildEffectiveDisclaimerByLanguage(normalized.languages, {
+      preset: disclaimerPresetId,
+      targetChannel: request.targetChannel,
+      promiseLevel: request.promiseLevel,
+      customText: request.disclaimer
+    });
   const disclaimerOverlay = request.disclaimerOverlay && typeof request.disclaimerOverlay === "object"
     ? {
       enabled: request.disclaimerOverlay.enabled !== false,
@@ -283,7 +296,7 @@ export async function estimateBatch(context, request = {}) {
       fontSize: Number(request.disclaimerOverlay.fontSize || 22),
       boxHeight: Number(request.disclaimerOverlay.boxHeight || 88),
       bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 64),
-      horizontalMargin: Number(request.disclaimerOverlay.horizontalMargin || 80)
+      horizontalMargin: Number(request.disclaimerOverlay.horizontalMargin || 50)
     }
     : {
       enabled: true,
@@ -291,7 +304,7 @@ export async function estimateBatch(context, request = {}) {
       fontSize: 22,
       boxHeight: 88,
       bottomMargin: 64,
-      horizontalMargin: 80
+      horizontalMargin: 50
     };
   const normalizedRequest = {
     templateId: request.templateId,

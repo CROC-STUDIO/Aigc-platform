@@ -9,7 +9,9 @@ import {
   confirmBatchPlanRequest,
   downloadZip,
   escapeHtml,
+  formatTimestamp,
   idempotencyKey,
+  isBatchQcRunnable,
   operationLabels,
   remixStatusLabels,
   renderError,
@@ -252,7 +254,7 @@ function renderTaskList() {
         </div>
         <div class="wz-tasks-item-body">
           <span>${escapeHtml(id)}</span>
-          <small>${escapeHtml(item.productName || item.operationType || "-")} · ${escapeHtml(item.updatedAt || item.createdAt || "")}</small>
+          <small>${escapeHtml(item.productName || item.operationType || "-")} · ${escapeHtml(formatTimestamp(item.updatedAt || item.createdAt))}</small>
         </div>
       </button>
     `;
@@ -267,6 +269,9 @@ function detailNotice(type, status) {
   if (type === "batch" && status === "qc") {
     return "视频已生成完成，下一步请运行视频质检；质检通过后才能下载交付包。";
   }
+  if (type === "batch" && status === "failed") {
+    return "当前批次已有视频输出但质检未通过，可重新运行视频质检，无需重新提交 Seedance。";
+  }
   if (type === "remix" && status === "preview_required") {
     return "改造已完成，请预览输出并确认交付。";
   }
@@ -279,6 +284,8 @@ function renderBatchDetail(detail) {
   if (!batch) return "";
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  const qcRunnable = isBatchQcRunnable(batch, tasks, outputs);
   const notice = detailNotice("batch", batch.status);
   const outputAsset = pickPrimaryOutput(batch.outputs);
   const outputLabel = outputAsset?.kind === "stitched_video" ? "拼接成片" : "输出视频";
@@ -287,7 +294,7 @@ function renderBatchDetail(detail) {
       <div>
         <span class="wz-tasks-type-badge pipeline">网赚素材管线</span>
         <strong>${escapeHtml(batch.batchId)}</strong>
-        <small>${escapeHtml(batch.createdAt || "")}</small>
+        <small>创建 ${escapeHtml(formatTimestamp(batch.createdAt))} · 更新 ${escapeHtml(formatTimestamp(batch.updatedAt))}</small>
       </div>
       ${badge(batch.status, batchStatusLabels)}
     </article>
@@ -319,7 +326,7 @@ function renderBatchDetail(detail) {
     ` : batch.status === "preview_required" ? `<div class="wz-warning">未读取到 Seedance 预案，请刷新或前往管线工作台第 4 步查看。</div>` : ""}
     <div class="modal-actions wz-actions wz-tasks-actions">
       ${batch.status === "preview_required" && plans.length ? `<button id="wzTasksConfirmPlanBtn" type="button">确认预案并生成视频</button>` : ""}
-      ${batch.status === "qc" ? `<button id="wzTasksRunQcBtn" type="button">运行视频质检</button>` : ""}
+      ${qcRunnable ? `<button id="wzTasksRunQcBtn" type="button">${batch.status === "qc" ? "运行视频质检" : "重新质检"}</button>` : ""}
       <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status))}">前往管线工作台</a>
       ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
       ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载交付包</button>` : ""}

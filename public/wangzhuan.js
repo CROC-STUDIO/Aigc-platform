@@ -4,6 +4,7 @@ import {
   badge,
   batchGenerationProgress,
   batchRuntimeSummary,
+  formatTimestamp,
   batchGenerationTaskStatusLabels,
   batchStatusDisplayLabel,
   batchStatusLabels,
@@ -169,6 +170,7 @@ const state = {
   selectedTemplate: null,
   referenceVideo: null,
   decomposition: null,
+  decompositionDraft: null,
   estimate: null,
   capabilities: null,
   batchDetail: null,
@@ -182,6 +184,7 @@ const state = {
   rewriteConfirmed: false,
   suppressTemplateUnlock: false,
   pollTimer: 0,
+  runtimeClockTimer: 0,
   pollIntervalMs: 2000
 };
 
@@ -341,9 +344,9 @@ const DECOMPOSITION_FORM_SECTIONS = Object.freeze([
     title: "画面与动作",
     layout: "stack",
     fields: [
-      { key: "scene", label: "scene", required: true, hint: "空间、App 页面或人物所在环境" },
-      { key: "subject", label: "subject", required: true, hint: "人物、手机、产品 UI 或奖励元素" },
-      { key: "action", label: "action", required: true, hint: "用户行为、镜头推进和转折" }
+      { key: "scene", label: "scene", required: true, hint: "空间、时间段、App 页面或人物所在环境" },
+      { key: "subject", label: "subject", required: true, hint: "人物职业/身份、外观、服装、手机或 UI 元素" },
+      { key: "action", label: "action", required: true, hint: "按时间段拆分：动作、口播功能、字幕与奖励反馈" }
     ]
   },
   {
@@ -462,6 +465,7 @@ function resetTransientFormState({ generateBatchName = false, clearSession = tru
   if (clearSession) clearWorkflowSession();
   state.referenceVideo = null;
   state.decomposition = null;
+  state.decompositionDraft = null;
   state.estimate = null;
   state.capabilities = null;
   state.batchDetail = null;
@@ -482,6 +486,7 @@ function resetTransientFormState({ generateBatchName = false, clearSession = tru
 function bootstrapWorkbenchUi() {
   state.referenceVideo = null;
   state.decomposition = null;
+  state.decompositionDraft = null;
   state.estimate = null;
   state.capabilities = null;
   state.batchDetail = null;
@@ -580,6 +585,15 @@ function syncRewriteDomState() {
 function invalidateEstimateFromEdit() {
   if (!state.estimate?.estimate) return;
   state.estimate = null;
+  if (state.batchDetail?.batch?.status === "preview_required") {
+    state.batchDetail = {
+      ...state.batchDetail,
+      batch: {
+        ...state.batchDetail.batch,
+        plans: []
+      }
+    };
+  }
   renderEstimate();
 }
 
@@ -818,7 +832,7 @@ function decompositionFieldInput(key) {
 
 function collectDecompositionFromForm() {
   ensureDecompositionForm();
-  const draft = {};
+  const draft = { ...(state.decompositionDraft || {}) };
   for (const section of DECOMPOSITION_FORM_SECTIONS) {
     for (const field of section.fields) {
       const input = decompositionFieldInput(field.key);
@@ -874,6 +888,7 @@ function onDecompositionFormInput(event) {
     event.target.style.height = `${Math.max(84, event.target.scrollHeight + 2)}px`;
   }
   state.decomposition = null;
+  state.decompositionDraft = null;
   state.estimate = null;
   renderEstimate();
   syncDecompositionControls();
@@ -1081,7 +1096,7 @@ function syncBatchActionButtons() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
-  const locked = hasActivePipelineBatch();
+  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required";
   const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
 
@@ -1102,7 +1117,7 @@ function syncBatchActionButtons() {
 function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
-  const locked = hasActivePipelineBatch();
+  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required";
   const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
   syncActionHint(
@@ -1146,20 +1161,49 @@ function syncFlowHints() {
   syncUpstreamWorkflowLock();
 }
 
+function batchRuntimeKeyValues(batch, tasks, now = Date.now()) {
+  const runtime = batchRuntimeSummary(batch, tasks, { now });
+  return [
+    ["创建时间", runtime.createdAt],
+    ["执行进度", `${runtime.progressText}${runtime.percent === null ? "" : ` · ${runtime.percent}%`}`],
+    ["已运行", runtime.elapsed],
+    ["预估剩余", runtime.eta],
+    ["更新时间", runtime.updatedAt]
+  ];
+}
+
+function syncRuntimeClock() {
+  window.clearInterval(state.runtimeClockTimer);
+  state.runtimeClockTimer = 0;
+  const batch = state.batchDetail?.batch;
+  if (!batch || terminalBatchStatus(batch.status)) return;
+  const tick = () => {
+    const currentBatch = state.batchDetail?.batch;
+    if (!currentBatch || terminalBatchStatus(currentBatch.status)) {
+      window.clearInterval(state.runtimeClockTimer);
+      state.runtimeClockTimer = 0;
+      return;
+    }
+    const strip = document.querySelector(".wz-runtime-strip");
+    if (!strip) return;
+    strip.innerHTML = renderKeyValues(batchRuntimeKeyValues(currentBatch, currentBatch.tasks || [], Date.now()));
+  };
+  tick();
+  state.runtimeClockTimer = window.setInterval(tick, 1000);
+}
+
+function stopRuntimeClock() {
+  window.clearInterval(state.runtimeClockTimer);
+  state.runtimeClockTimer = 0;
+}
+
 function batchProgressSection(batch, tasks, outputs = []) {
   if (!batch || terminalBatchStatus(batch.status)) return "";
   const progress = batchGenerationProgress(batch, tasks);
-  const runtime = batchRuntimeSummary(batch, tasks);
   return `
     ${taskProgressHtml(progress)}
     <div class="wz-runtime-strip" aria-label="批次运行信息">
-      ${renderKeyValues([
-        ["创建时间", runtime.createdAt],
-        ["执行进度", `${runtime.progressText}${runtime.percent === null ? "" : ` · ${runtime.percent}%`}`],
-        ["已运行", runtime.elapsed],
-        ["预估剩余", runtime.eta],
-        ["更新时间", runtime.updatedAt]
-      ])}
+      ${renderKeyValues(batchRuntimeKeyValues(batch, tasks))}
     </div>
   `;
 }
@@ -1167,6 +1211,7 @@ function batchProgressSection(batch, tasks, outputs = []) {
 function clearDecompositionDraft() {
   renderDecompositionForm({});
   state.decomposition = null;
+  state.decompositionDraft = null;
   clearRewriteProgress();
   syncDecompositionDomState();
   renderEstimate();
@@ -1223,6 +1268,10 @@ function parseRegions(node) {
 }
 
 function splitMultiValue(value, fallback = []) {
+  if (value instanceof HTMLSelectElement && value.multiple) {
+    const selected = [...value.selectedOptions].map((option) => String(option.value || "").trim()).filter(Boolean);
+    return selected.length ? [...new Set(selected)] : fallback;
+  }
   const source = Array.isArray(value) ? value : String(value || "").split(",");
   const values = source.map((item) => String(item || "").trim()).filter(Boolean);
   return values.length ? [...new Set(values)] : fallback;
@@ -1245,6 +1294,17 @@ function disclaimerPresetForLanguage(language) {
   return "en";
 }
 
+function effectiveDisclaimerText({
+  language = "en-US",
+  presetValue = "auto",
+  customText = ""
+} = {}) {
+  const manual = String(customText || "").trim();
+  if (manual) return manual;
+  const presetKey = presetValue === "auto" ? disclaimerPresetForLanguage(language) : presetValue;
+  return DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en;
+}
+
 function selectedDisclaimerPreset() {
   const selected = els.disclaimerPreset?.value || "auto";
   if (selected !== "auto") return selected;
@@ -1256,11 +1316,16 @@ function applyDisclaimerPresetForNode(node = primaryBranchNode(), { force = fals
   const presetSelect = branchField(node, "disclaimerPreset") || els.disclaimerPreset;
   if (!disclaimerInput) return;
   const presetValue = presetSelect?.value || "auto";
+  const language = fieldValue(node, "language")
+    || fieldValue(node, "languages")
+    || els.languages?.value
+    || els.language?.value
+    || "en-US";
   const presetKey = presetValue === "auto"
-    ? disclaimerPresetForLanguage(fieldValue(node, "language") || fieldValue(node, "languages") || els.languages?.value || els.language?.value || "en-US")
+    ? disclaimerPresetForLanguage(language)
     : presetValue;
   if (presetKey === "other") return;
-  const presetText = DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en;
+  const presetText = effectiveDisclaimerText({ language, presetValue });
   const current = disclaimerInput.value.trim();
   const knownText = Object.values(DISCLAIMER_PRESETS).includes(current);
   if (force || !current || knownText) {
@@ -1290,7 +1355,12 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
     fieldValue(node, "languages") || fieldValue(node, "language") || els.languages?.value || els.language?.value,
     ["en-US"]
   );
-  const fallbackText = presetKey === "other" ? "" : (DISCLAIMER_PRESETS[presetKey] || DISCLAIMER_PRESETS.en);
+  const fallbackText = presetKey === "other"
+    ? ""
+    : effectiveDisclaimerText({
+      language: languages[0] || "en-US",
+      presetValue
+    });
   const disclaimerText = enabled ? (disclaimerInput?.value.trim() || fallbackText) : "";
   const overlayPosition = overlayPositionInput?.value || "bottom_center";
   const overlayFontSize = Number(overlayFontSizeInput?.value || 22);
@@ -1307,7 +1377,11 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
       language,
       presetValue === "other"
         ? disclaimerText
-        : (DISCLAIMER_PRESETS[presetValue === "auto" ? disclaimerPresetForLanguage(language) : presetKey] || disclaimerText)
+        : effectiveDisclaimerText({
+          language,
+          presetValue,
+          customText: disclaimerText
+        })
     ])),
     disclaimerOverlay: {
       enabled,
@@ -1315,7 +1389,7 @@ function disclaimerRequestFields(node = primaryBranchNode()) {
       fontSize: Number.isFinite(overlayFontSize) ? overlayFontSize : 22,
       boxHeight: Number.isFinite(overlayBoxHeight) ? overlayBoxHeight : 88,
       bottomMargin: Number.isFinite(overlayBottomMargin) ? overlayBottomMargin : 64,
-      horizontalMargin: Number.isFinite(overlayHorizontalMargin) ? overlayHorizontalMargin : 80
+      horizontalMargin: Number.isFinite(overlayHorizontalMargin) ? overlayHorizontalMargin : 50
     }
   };
 }
@@ -1505,6 +1579,11 @@ function setFieldValue(node, field, value) {
     input.checked = value === true || value === "true" || value === "1";
     return;
   }
+  if (input instanceof HTMLSelectElement && input.multiple) {
+    const selected = new Set(Array.isArray(value) ? value.map((item) => String(item)) : splitMultiValue(value, []));
+    for (const option of input.options) option.selected = selected.has(option.value);
+    return;
+  }
   input.value = Array.isArray(value) ? value.join(",") : String(value);
 }
 
@@ -1526,6 +1605,11 @@ function setMaterialDirectionValue(node, value) {
 
 function setOptionalValue(input, value) {
   if (!input || value === undefined || value === null) return;
+  if (input instanceof HTMLSelectElement && input.multiple) {
+    const selected = new Set(Array.isArray(value) ? value.map((item) => String(item)) : splitMultiValue(value, []));
+    for (const option of input.options) option.selected = selected.has(option.value);
+    return;
+  }
   input.value = Array.isArray(value) ? value.join(",") : String(value);
 }
 
@@ -2062,7 +2146,7 @@ function fillBranchDraft(node, draft = {}, index = 0) {
   setFieldValue(node, "disclaimerOverlayFontSize", String(draft.disclaimerOverlay?.fontSize ?? 22));
   setFieldValue(node, "disclaimerOverlayBoxHeight", String(draft.disclaimerOverlay?.boxHeight ?? 88));
   setFieldValue(node, "disclaimerOverlayBottomMargin", String(draft.disclaimerOverlay?.bottomMargin ?? 64));
-  setFieldValue(node, "disclaimerOverlayHorizontalMargin", String(draft.disclaimerOverlay?.horizontalMargin ?? 80));
+  setFieldValue(node, "disclaimerOverlayHorizontalMargin", String(draft.disclaimerOverlay?.horizontalMargin ?? 50));
   syncMaterialDirectionForNode(node);
   for (const [assetKey, field] of assetInputKeys) {
     const input = branchField(node, field);
@@ -2242,7 +2326,7 @@ function applyTemplate(template) {
   if (els.disclaimerOverlayFontSize) els.disclaimerOverlayFontSize.value = String(draft.disclaimerOverlay?.fontSize ?? 22);
   if (els.disclaimerOverlayBoxHeight) els.disclaimerOverlayBoxHeight.value = String(draft.disclaimerOverlay?.boxHeight ?? 88);
   if (els.disclaimerOverlayBottomMargin) els.disclaimerOverlayBottomMargin.value = String(draft.disclaimerOverlay?.bottomMargin ?? 64);
-  if (els.disclaimerOverlayHorizontalMargin) els.disclaimerOverlayHorizontalMargin.value = String(draft.disclaimerOverlay?.horizontalMargin ?? 80);
+  if (els.disclaimerOverlayHorizontalMargin) els.disclaimerOverlayHorizontalMargin.value = String(draft.disclaimerOverlay?.horizontalMargin ?? 50);
   applyDisclaimerPreset({ force: !draft.disclaimer && els.disclaimerPreset?.value !== "other" });
   for (const input of els.truthFields.querySelectorAll("[data-truth-field]")) {
     input.value = draft.truthRules?.[input.dataset.truthField] || "";
@@ -2430,6 +2514,7 @@ async function draftReferenceVideoDecomposition() {
   if (!state.referenceVideo || isDecompositionConfirmed() || isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
   state.decomposition = null;
+  state.decompositionDraft = null;
   state.estimate = null;
   renderEstimate();
   setBusy(els.draftDecompositionBtn, true, hasDecompositionDraft() ? "重新解析中" : "解析中");
@@ -2450,6 +2535,7 @@ async function draftReferenceVideoDecomposition() {
       })
     });
     renderDecompositionForm(data.decomposition || {});
+    state.decompositionDraft = data.decomposition || null;
     els.decompositionStatus.className = "wz-success";
     els.decompositionStatus.textContent = "脚本草稿已生成，请检查表单内容后点击「确认脚本拆解」。";
     showToast("脚本草稿已生成", { type: "success" });
@@ -2765,6 +2851,7 @@ function renderBatch() {
     syncMetrics();
     renderBatchStepProgress();
     syncFlowHints();
+    stopRuntimeClock();
     return;
   }
   syncBatchNodeStatus(batch.status);
@@ -2772,7 +2859,7 @@ function renderBatch() {
     ...batchStatusLabels,
     [batch.status]: batchStatusDisplayLabel(batch)
   });
-  if (els.estimateBtn) els.estimateBtn.disabled = isQcBatchPending(batch) || isUpstreamWorkflowLocked();
+  if (els.estimateBtn) els.estimateBtn.disabled = isQcBatchPending(batch) || isSeedancePlanConfirmed(batch);
   els.stopBatchBtn.disabled = terminalBatchStatus(batch.status);
   els.stopBatchBtn.textContent = isQcBatchPending(batch) ? "放弃批次" : "停止任务";
   els.retryStitchBtn.hidden = batch.status !== "partial_failed";
@@ -2787,7 +2874,9 @@ function renderBatch() {
   if (logNode) logNode.classList.toggle("wz-generation-live", generationActive);
   const previewPlayback = snapshotPreviewPlayback(els.batchBox);
   els.batchBox.className = "wz-list";
-  const retryActions = batch.status === "partial_failed"
+  const retryActions = batch.status === "preview_required"
+    ? [{ id: "re-estimate", label: "重新估算" }]
+    : batch.status === "partial_failed"
     ? [{ id: "retry-stitch", label: "重试拼接" }, { id: "re-estimate", label: "重新估算" }]
     : batch.status === "failed"
       ? qcRunnable
@@ -2813,7 +2902,7 @@ function renderBatch() {
     <article class="wz-row">
       <div>
         <strong>${escapeHtml(batchDisplayName(batch) || batch.batchId)}</strong>
-        <small>${escapeHtml(batch.batchId)} · ${escapeHtml(batch.createdAt || "")} · ${tasks.length} 个任务 · ${escapeHtml(batch.estimate?.durationSec || "-")}s</small>
+        <small>${escapeHtml(batch.batchId)} · 创建 ${escapeHtml(formatTimestamp(batch.createdAt))} · 更新 ${escapeHtml(formatTimestamp(batch.updatedAt))} · ${tasks.length} 个任务 · ${escapeHtml(batch.estimate?.durationSec || "-")}s</small>
       </div>
       ${badge(batch.status, {
         ...batchStatusLabels,
@@ -2840,7 +2929,7 @@ function renderBatch() {
         </div>
       `).join("")}
     </div>
-    ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(event.createdAt || "")}</small>`).join("")}</div>` : ""}
+    ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(formatTimestamp(event.createdAt))}</small>`).join("")}</div>` : ""}
   `;
   restorePreviewPlayback(previewPlayback, els.batchBox);
   els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
@@ -2850,6 +2939,8 @@ function renderBatch() {
   renderBatchStepProgress();
   syncFlowHints();
   syncStartNewTaskButton();
+  if (terminalBatchStatus(batch.status)) stopRuntimeClock();
+  else syncRuntimeClock();
 }
 
 function renderGallery() {
@@ -3110,6 +3201,7 @@ async function decomposeReferenceVideo() {
       })
     });
     state.decomposition = data.decomposition;
+    state.decompositionDraft = null;
     state.estimate = null;
     await saveDraftBatch({
       status: "checking",
@@ -3690,10 +3782,12 @@ function bindEvents() {
   els.branches?.addEventListener("input", (event) => {
     markTemplateDirtyFromEdit();
     markRewriteDirtyFromEdit();
+    clearRewriteProgress();
   }, true);
   els.branches?.addEventListener("change", (event) => {
     markTemplateDirtyFromEdit();
     markRewriteDirtyFromEdit();
+    clearRewriteProgress();
   }, true);
   window.addEventListener("wz:branch-created", (event) => {
     const node = event.detail?.node;

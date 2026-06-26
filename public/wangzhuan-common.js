@@ -99,22 +99,41 @@ export function batchGenerationProgress(batch = {}, tasks = []) {
 }
 
 const DONE_TASK_STATUSES = new Set(["downloaded", "qc", "succeeded", "failed", "skipped", "stopped"]);
+const SEEDANCE_ETA_MINUTES_PER_TASK = 3;
+const SEEDANCE_ETA_MS_PER_TASK = SEEDANCE_ETA_MINUTES_PER_TASK * 60 * 1000;
+const UNSUBMITTED_TASK_STATUSES = new Set(["pending", "pending_preview"]);
+
+function normalizeTimestampInput(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value).trim();
+  if (!text) return "";
+  if (/^\d{13,}$/.test(text)) return Number(text);
+  if (/^\d{4}-\d{2}-\d{2} /.test(text)) {
+    const base = text.replace(" ", "T");
+    if (/[zZ]$/.test(base) || /[+-]\d{2}:\d{2}$/.test(base)) return base;
+    return `${base}Z`;
+  }
+  return text;
+}
 
 function timestampMs(value) {
-  if (!value) return 0;
-  const ms = Date.parse(value);
+  const normalized = normalizeTimestampInput(value);
+  if (typeof normalized === "number") return normalized;
+  if (!normalized) return 0;
+  const ms = Date.parse(normalized);
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function formatTimestamp(value) {
-  const text = String(value || "").trim();
-  if (!text) return "-";
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
+export function formatTimestamp(value) {
+  const ms = timestampMs(value);
+  if (!ms) {
+    const text = String(value || "").trim();
+    return text || "-";
   }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return date.toISOString().slice(0, 16).replace("T", " ");
+  const date = new Date(ms);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function formatDuration(ms) {
@@ -132,37 +151,57 @@ function doneTaskCount(tasks = []) {
   return tasks.filter((task) => DONE_TASK_STATUSES.has(task.status)).length;
 }
 
-function taskDurationMs(task = {}) {
-  const started = timestampMs(task.startedAt || task.createdAt);
-  const finished = timestampMs(task.finishedAt || task.updatedAt);
-  return started && finished && finished >= started ? finished - started : 0;
+function seedanceSubmittedTasks(tasks = []) {
+  return tasks.filter((task) => {
+    const startedMs = timestampMs(task.startedAt);
+    if (!startedMs) return false;
+    return !UNSUBMITTED_TASK_STATUSES.has(task.status);
+  });
+}
+
+function seedanceSubmissionStartMs(batch = {}, tasks = []) {
+  const batchStartedMs = timestampMs(batch.startedAt);
+  if (batchStartedMs) return batchStartedMs;
+  const submittedStarts = seedanceSubmittedTasks(tasks)
+    .map((task) => timestampMs(task.startedAt))
+    .filter(Boolean);
+  return submittedStarts.length ? Math.min(...submittedStarts) : 0;
 }
 
 export function batchRuntimeSummary(batch = {}, tasks = [], { now = Date.now() } = {}) {
   const nowMs = typeof now === "number" ? now : timestampMs(now);
   const total = tasks.length;
   const done = doneTaskCount(tasks);
-  const startedMs = timestampMs(batch.startedAt || batch.createdAt);
-  const endMs = timestampMs(batch.finishedAt || batch.stoppedAt) || nowMs || timestampMs(batch.updatedAt);
-  const completedDurations = tasks.map(taskDurationMs).filter((value) => value > 0);
-  const averageDoneMs = completedDurations.length
-    ? completedDurations.reduce((sum, value) => sum + value, 0) / completedDurations.length
-    : startedMs && done > 0 && endMs > startedMs
-      ? (endMs - startedMs) / done
-      : 0;
-  const remaining = Math.max(0, total - done);
+  const submittedTasks = seedanceSubmittedTasks(tasks);
+  const seedanceStartMs = seedanceSubmissionStartMs(batch, tasks);
+  const seedanceCount = submittedTasks.length;
   const active = !terminalBatchStatus(batch.status);
+  const endMs = timestampMs(batch.finishedAt || batch.stoppedAt)
+    || (active ? nowMs : timestampMs(batch.updatedAt));
+  const elapsedMs = seedanceStartMs && endMs >= seedanceStartMs ? endMs - seedanceStartMs : 0;
+  const elapsedRoundedMs = Math.floor(elapsedMs / 60000) * 60000;
+  const remaining = Math.max(0, total - done);
+  const etaBudgetMs = seedanceCount > 0 ? seedanceCount * SEEDANCE_ETA_MS_PER_TASK : total * SEEDANCE_ETA_MS_PER_TASK;
+  const etaRemainingMs = seedanceStartMs
+    ? Math.max(0, etaBudgetMs - elapsedRoundedMs)
+    : etaBudgetMs;
+  const updatedSourceMs = active && seedanceStartMs
+    ? nowMs
+    : (timestampMs(batch.updatedAt) || timestampMs(batch.createdAt) || nowMs);
+
   return {
     createdAt: formatTimestamp(batch.createdAt),
-    updatedAt: formatTimestamp(batch.updatedAt),
-    elapsed: startedMs && endMs >= startedMs ? formatDuration(endMs - startedMs) : "-",
+    updatedAt: formatTimestamp(updatedSourceMs),
+    elapsed: seedanceStartMs ? formatDuration(elapsedMs) : "-",
     eta: total && remaining === 0
       ? "已完成"
-      : active && averageDoneMs && remaining
-        ? `约 ${formatDuration(averageDoneMs * remaining)}`
-        : total
-          ? "计算中"
-          : "等待任务",
+      : !seedanceStartMs
+        ? (total ? `约 ${formatDuration(etaBudgetMs)}（待提交 Seedance）` : "待提交 Seedance")
+        : active
+          ? `约 ${formatDuration(etaRemainingMs)}`
+          : remaining === 0
+            ? "已完成"
+            : `约 ${formatDuration(etaRemainingMs)}`,
     progressText: total ? `${done}/${total}` : "0/0",
     percent: total ? Math.round((done / total) * 100) : null
   };
@@ -183,12 +222,15 @@ export function modelQcStatusLabel(outputs = [], qcRunnable = false) {
 
 export function isBatchQcRunnable(batch = {}, tasks = [], outputs = []) {
   if (!outputs.length || !tasks.length) return false;
-  const generationDoneStatuses = new Set(["downloaded", "qc", "succeeded"]);
+  const generationDoneStatuses = new Set(["downloaded", "qc", "succeeded", "failed", "stopped", "skipped"]);
+  const hasRenderableOutputs = outputs.some((output) => String(output.filePath || "").trim());
+  if (!hasRenderableOutputs) return false;
   if (!tasks.every((task) => generationDoneStatuses.has(task.status))) return false;
   if (batch.status === "qc") {
     return outputs.some((output) => output.qcStatus === "not_started");
   }
   if (batch.status === "failed" || batch.status === "partial_failed") {
+    if (outputs.some((output) => output.qcStatus === "not_started")) return true;
     return outputs.some((output) => ["fail", "warn", "manual_required"].includes(output.qcStatus));
   }
   return false;

@@ -7039,11 +7039,38 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.wz-subnode-body .wz-disclaimer-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.wz-subnode-body .wz-inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(184, 148, 255, 0.26);
+  border-radius: 8px;
+  background: rgba(18, 16, 29, 0.88);
+  color: #f3efff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wz-subnode-body .wz-inline-toggle input {
+  margin: 0;
+}
+
 @media (max-width: 760px) {
   .wz-subnode-body .wz-paired-form {
     grid-template-columns: 1fr;
   }
 
+  .wz-subnode-body .wz-disclaimer-head,
   .wz-subnode-body .wz-disclaimer-overlay-form {
     grid-template-columns: 1fr;
   }

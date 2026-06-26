@@ -117,9 +117,11 @@ async function addStoredFile(context, files, missingFiles, zipPath, asset = {}) 
 }
 
 function outputPackagePath(batchRoot, output) {
-  if (output.kind === "stitched_video") return `${batchRoot}/stitched/${output.outputId}_30s${extname(output.filePath) || ".mp4"}`;
-  if (output.kind === "segment_video") return `${batchRoot}/segments/${output.outputId}${extname(output.filePath) || ".mp4"}`;
-  return `${batchRoot}/outputs/${output.outputId}${extname(output.filePath) || ".mp4"}`;
+  const ext = extname(output.filePath) || ".mp4";
+  const fileName = output.displayFileName || `${output.outputId}${output.kind === "stitched_video" ? "_30s" : ""}${ext}`;
+  if (output.kind === "stitched_video") return `${batchRoot}/stitched/${fileName}`;
+  if (output.kind === "segment_video") return `${batchRoot}/segments/${fileName}`;
+  return `${batchRoot}/outputs/${fileName}`;
 }
 
 function packageOutputSelection(batch, request) {

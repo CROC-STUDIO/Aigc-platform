@@ -244,8 +244,34 @@
                                 <option value="generic">通用</option>
                               </select>
                             </label>
-                            <label>目标地区 <input id="wzTargetRegions" type="text" value="US" placeholder="US,BR,PT" /></label>
-                            <label>语言 <input id="wzLanguages" type="text" value="en-US" placeholder="en-US,pt-BR,zh-CN" /></label>
+                            <label>目标地区
+                              <select id="wzTargetRegions" multiple size="5">
+                                <option value="US" selected>US</option>
+                                <option value="BR">BR</option>
+                                <option value="MX">MX</option>
+                                <option value="GB">GB</option>
+                                <option value="CA">CA</option>
+                                <option value="AU">AU</option>
+                                <option value="PH">PH</option>
+                                <option value="ID">ID</option>
+                                <option value="TH">TH</option>
+                                <option value="VN">VN</option>
+                              </select>
+                            </label>
+                            <label>语言
+                              <select id="wzLanguages" multiple size="5">
+                                <option value="en-US" selected>English (US)</option>
+                                <option value="pt-BR">Portuguese (Brazil)</option>
+                                <option value="es-MX">Spanish (Mexico)</option>
+                                <option value="en-GB">English (UK)</option>
+                                <option value="fr-FR">French</option>
+                                <option value="de-DE">German</option>
+                                <option value="id-ID">Indonesian</option>
+                                <option value="th-TH">Thai</option>
+                                <option value="vi-VN">Vietnamese</option>
+                                <option value="zh-CN">Chinese (Simplified)</option>
+                              </select>
+                            </label>
                             <label>素材方向
                               <select id="wzMaterialDirection">
                                 <option value="痛点开场">痛点开场</option>
@@ -280,21 +306,23 @@
                             <label>Ending <input id="wzEnding" type="text" value="" placeholder="可选，留空不影响视频生成" /></label>
                             <label>Ending 素材 <input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
                           </div>
-                          <label class="wz-field-label">
-                            <input id="wzDisclaimerEnabled" type="checkbox" checked />
-                            添加承诺规则贴片
-                          </label>
-                          <label class="wz-field-label">承诺规则模板
-                            <select id="wzDisclaimerPreset">
-                              <option value="auto" selected>按语言自动选择</option>
-                              <option value="en">英文</option>
-                              <option value="pt">葡语</option>
-                              <option value="zh">中文</option>
-                              <option value="other">其他</option>
-                            </select>
-                            <span class="wz-field-hint">承诺规则只作为最终视频透明后处理贴片，不会写入 Seedance prompt 或 payload。</span>
-                          </label>
-                          <label class="wz-field-label">承诺规则
+                          <div class="wz-disclaimer-head">
+                            <label class="wz-field-label">免责声明贴片模板
+                              <select id="wzDisclaimerPreset">
+                                <option value="auto" selected>按语言自动选择</option>
+                                <option value="en">英文</option>
+                                <option value="pt">葡语</option>
+                                <option value="zh">中文</option>
+                                <option value="other">其他</option>
+                              </select>
+                            </label>
+                            <label class="wz-inline-toggle" for="wzDisclaimerEnabled">
+                              <input id="wzDisclaimerEnabled" type="checkbox" checked />
+                              <span>启用免责声明贴片</span>
+                            </label>
+                          </div>
+                          <p class="wz-field-hint">免责声明只作为最终视频透明后处理贴片，不会写入 Seedance prompt 或 payload。</p>
+                          <label class="wz-field-label">免责声明文案
                             <textarea id="wzDisclaimer" class="wz-json-box compact" spellcheck="false">Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.</textarea>
                           </label>
                           <div class="wz-inline-form wz-disclaimer-overlay-form">
@@ -314,7 +342,7 @@
                               <input id="wzDisclaimerOverlayBottomMargin" type="number" min="0" max="260" step="2" value="64" />
                             </label>
                             <label>左右距离
-                              <input id="wzDisclaimerOverlayHorizontalMargin" type="number" min="0" max="220" step="2" value="80" />
+                              <input id="wzDisclaimerOverlayHorizontalMargin" type="number" min="0" max="220" step="2" value="50" />
                             </label>
                           </div>
                           <p class="wz-field-hint">这些设置只影响最终视频后处理贴片，业务可以按渠道或地区选择展示样式。</p>
@@ -333,8 +361,8 @@
                         <div class="wz-subnode-head"><span class="wz-subno">3.1.4</span> 提示词规则（可选补充）</div>
                         <div class="wz-subnode-body">
                           <label class="wz-field-label">脚本裂变规则（可选）
-                            <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：保留竞品前三秒节奏，替换为我方产品 icon、截图、口播与奖励反馈，生成不同开场角度。"></textarea>
-                            <span class="wz-field-hint">这是给用户补充额外要求的入口；不填也可以直接生成预案。</span>
+                            <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：变体 2 用快递员替代外卖员；变体 3 用超市收银员；保留原视频口播结构与转化节奏。"></textarea>
+                            <span class="wz-field-hint">可指定各变体的人物/相似职业裂变；不填时系统会按参考拆解自动做相似职业替换。</span>
                           </label>
                           <label class="wz-field-label">补充提示词（可选）
                             <textarea id="wzCustomPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：价格/金额如需出现请在此填写；强调某个镜头、字幕语言、产品 UI、参考素材替换方式等。"></textarea>
@@ -396,7 +424,7 @@
                         <input id="wzVariantCount" type="number" min="1" max="50" value="3" />
                         <span class="wz-field-hint">每个 3.x 子节点的脚本变体数；总任务 ≈ 子节点数 × 变体数 × 时长系数</span>
                       </label>
-                      <label>同时生成数量 <input id="wzConcurrency" type="number" min="1" max="4" value="2" /></label>
+                      <label>同时生成数量 <input id="wzConcurrency" type="number" min="1" max="4" value="1" /></label>
                     </div>
                     <details class="wz-details wz-advanced-settings">
                       <summary>高级设置：Seedance 模型名</summary>
