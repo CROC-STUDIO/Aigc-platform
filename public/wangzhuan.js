@@ -26,17 +26,13 @@ import {
   renderError,
   renderFailureReasons,
   renderKeyValues,
-  bindPreviewPlaybackGuard,
   galleryStateFingerprint,
-  isAnyPreviewVideoPlaying,
   outputPreviewItemsFingerprint,
-  renderOutputPreviewCards,
-  restorePreviewPlayback,
+  patchOutputPreviewCards,
   setBusy,
   showErrorModal,
   showLogin,
   showToast,
-  snapshotPreviewPlayback,
   syncActionHint,
   taskProgressHtml,
   strongTruthFields,
@@ -191,29 +187,7 @@ const state = {
 };
 
 let galleryRenderFingerprint = "";
-let deferredGalleryFingerprint = "";
 let batchOutputsRenderFingerprint = "";
-let deferredBatchOutputsFingerprint = "";
-let pendingBatchOutputs = null;
-
-function flushDeferredGalleryRender() {
-  if (!deferredGalleryFingerprint || deferredGalleryFingerprint === galleryRenderFingerprint) {
-    deferredGalleryFingerprint = "";
-    return;
-  }
-  if (isAnyPreviewVideoPlaying(els.galleryBox)) return;
-  renderGallery({ force: true });
-}
-
-function flushDeferredBatchOutputsRender() {
-  if (!deferredBatchOutputsFingerprint || deferredBatchOutputsFingerprint === batchOutputsRenderFingerprint) {
-    deferredBatchOutputsFingerprint = "";
-    pendingBatchOutputs = null;
-    return;
-  }
-  if (isAnyPreviewVideoPlaying(els.batchOutputsBox)) return;
-  renderBatchOutputs(pendingBatchOutputs ?? state.batchDetail?.batch?.outputs ?? [], { force: true });
-}
 
 let referenceObjectUrl = "";
 
@@ -2794,8 +2768,6 @@ function renderBatch() {
       els.batchOutputsBox.innerHTML = "";
     }
     batchOutputsRenderFingerprint = "";
-    deferredBatchOutputsFingerprint = "";
-    pendingBatchOutputs = null;
     els.stopBatchBtn.disabled = true;
     els.runQcBtn.disabled = true;
     renderPlanPreview(null);
@@ -2822,7 +2794,6 @@ function renderBatch() {
   const generationActive = isBatchGenerationActive(batch, tasks);
   const logNode = document.getElementById("wzNodeLog");
   if (logNode) logNode.classList.toggle("wz-generation-live", generationActive);
-  const previewPlayback = snapshotPreviewPlayback(els.batchBox);
   els.batchBox.className = "wz-list";
   const retryActions = batch.status === "partial_failed"
     ? [{ id: "retry-stitch", label: "重试拼接" }, { id: "re-estimate", label: "重新估算" }]
@@ -2878,7 +2849,6 @@ function renderBatch() {
     </div>
     ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(event.createdAt || "")}</small>`).join("")}</div>` : ""}
   `;
-  restorePreviewPlayback(previewPlayback, els.batchBox);
   renderBatchOutputs(outputs);
   els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
   renderPlanPreview(batch);
@@ -2893,16 +2863,7 @@ function renderBatchOutputs(outputs = [], { force = false } = {}) {
   const box = els.batchOutputsBox;
   if (!box) return;
   const fingerprint = outputPreviewItemsFingerprint(outputs);
-  if (!force) {
-    if (fingerprint === batchOutputsRenderFingerprint) return;
-    if (isAnyPreviewVideoPlaying(box)) {
-      deferredBatchOutputsFingerprint = fingerprint;
-      pendingBatchOutputs = outputs;
-      return;
-    }
-  }
-  deferredBatchOutputsFingerprint = "";
-  pendingBatchOutputs = null;
+  if (!force && fingerprint === batchOutputsRenderFingerprint) return;
   batchOutputsRenderFingerprint = fingerprint;
   if (!outputs.length) {
     box.hidden = true;
@@ -2910,22 +2871,13 @@ function renderBatchOutputs(outputs = [], { force = false } = {}) {
     return;
   }
   box.hidden = false;
-  const previewPlayback = snapshotPreviewPlayback(box);
-  box.innerHTML = renderOutputPreviewCards(outputs, { emptyText: "Seedance 输出生成后会显示在这里" });
-  restorePreviewPlayback(previewPlayback, box);
+  patchOutputPreviewCards(box, outputs, { emptyText: "Seedance 输出生成后会显示在这里" });
 }
 
 function renderGallery({ force = false } = {}) {
   const gallery = state.gallery;
   const fingerprint = galleryStateFingerprint(gallery);
-  if (!force) {
-    if (fingerprint === galleryRenderFingerprint) return;
-    if (gallery?.items?.length && isAnyPreviewVideoPlaying(els.galleryBox)) {
-      deferredGalleryFingerprint = fingerprint;
-      return;
-    }
-  }
-  deferredGalleryFingerprint = "";
+  if (!force && fingerprint === galleryRenderFingerprint) return;
   galleryRenderFingerprint = fingerprint;
   if (!gallery?.items?.length) {
     els.galleryBox.className = "wz-gallery empty-line";
@@ -2937,12 +2889,16 @@ function renderGallery({ force = false } = {}) {
     return;
   }
   els.galleryBox.className = "wz-gallery";
-  const previewPlayback = snapshotPreviewPlayback(els.galleryBox);
-  els.galleryBox.innerHTML = `
-    ${renderOutputPreviewCards(gallery.items)}
-    ${galleryPaginationHtml(gallery)}
-  `;
-  restorePreviewPlayback(previewPlayback, els.galleryBox);
+  if (!els.galleryBox.querySelector(":scope > .wz-output-previews:not(.empty-line)")) {
+    for (const node of [...els.galleryBox.children]) {
+      if (!node.classList.contains("wz-gallery-pager")) node.remove();
+    }
+  }
+  patchOutputPreviewCards(els.galleryBox, gallery.items);
+  const pager = els.galleryBox.querySelector(":scope > .wz-gallery-pager");
+  const pagerHtml = galleryPaginationHtml(gallery);
+  if (pager) pager.outerHTML = pagerHtml;
+  else els.galleryBox.insertAdjacentHTML("beforeend", pagerHtml);
   syncMetrics();
 }
 
@@ -3850,8 +3806,6 @@ function bindEvents() {
   els.runQcBtn.addEventListener("click", runVideoQc);
   els.retryStitchBtn.addEventListener("click", retryStitch);
   els.refreshGalleryBtn.addEventListener("click", () => loadGallery({ force: true }).catch((error) => renderError(els.globalError, error, "图库刷新失败")));
-  bindPreviewPlaybackGuard(els.galleryBox, flushDeferredGalleryRender);
-  bindPreviewPlaybackGuard(els.batchOutputsBox, flushDeferredBatchOutputsRender);
   els.galleryBox.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
     const button = event.target.closest("[data-gallery-page]");

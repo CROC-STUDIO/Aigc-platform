@@ -596,48 +596,130 @@ function isImagePreview(output = {}) {
     || kind.includes("image");
 }
 
+function outputPreviewCardKey(output = {}, index = 0) {
+  const base = output.outputId || output.storageKey || outputPreviewUrl(output) || "output";
+  return `${base}::${index}`;
+}
+
+function outputPreviewCardFingerprint(output = {}, index = 0) {
+  const url = outputPreviewUrl(output);
+  return [
+    outputPreviewCardKey(output, index),
+    output.qcStatus || "",
+    url,
+    output.downloadEligible ? "1" : "0",
+    output.previewConfirmed ? "1" : "0",
+    output.errorMessage || "",
+    output.modelQcSummary?.score ?? "",
+    output.modelQcSummary?.summary || ""
+  ].join("|");
+}
+
+function renderOutputPreviewCard(output = {}, index = 0, { confirmable = false } = {}) {
+  const url = outputPreviewUrl(output);
+  const key = outputPreviewCardKey(output, index);
+  const fingerprint = outputPreviewCardFingerprint(output, index);
+  const statusMap = { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" };
+  const meta = [
+    output.kind,
+    output.durationSec ? `${output.durationSec}s` : "",
+    output.downloadEligible ? "可下载" : "",
+    output.previewConfirmed ? "已确认" : ""
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="wz-output-card" data-output-id="${escapeHtml(key)}" data-preview-fingerprint="${escapeHtml(fingerprint)}">
+      <div class="wz-output-card-media">
+        ${url
+          ? isImagePreview(output)
+            ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(output.outputId || "输出预览")}" loading="lazy" />`
+            : `<video class="wz-output-video" data-preview-key="${escapeHtml(key)}" src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(output.outputId || "输出视频预览")}"></video>`
+          : `<div class="wz-output-card-empty">暂无预览地址</div>`}
+      </div>
+      <div class="wz-output-card-body">
+        <div>
+          <strong>${escapeHtml(output.displayBatchName || output.userBatchName || output.outputId || `输出 ${index + 1}`)}</strong>
+          ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+        </div>
+        ${badge(output.qcStatus || "not_started", statusMap)}
+        ${output.modelQcSummary ? `<small>模型质检 ${escapeHtml(output.modelQcSummary.score ?? "-")} · ${escapeHtml(output.modelQcSummary.summary || "")}</small>` : ""}
+        ${output.errorMessage ? `<small class="wz-output-error">${escapeHtml(output.errorMessage)}</small>` : ""}
+        <div class="wz-output-card-actions">
+          ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开文件</a>` : ""}
+          ${confirmable && output.qcStatus === "manual_required" ? `<span>待人工确认</span>` : ""}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 export function renderOutputPreviewCards(outputs = [], { emptyText = "暂无输出", confirmable = false } = {}) {
   const items = (Array.isArray(outputs) ? outputs : []).filter(Boolean);
   if (!items.length) return `<div class="wz-output-previews empty-line">${escapeHtml(emptyText)}</div>`;
   return `
     <div class="wz-output-previews">
-      ${items.map((output, index) => {
-        const url = outputPreviewUrl(output);
-        const key = output.outputId || output.storageKey || url || `output_${index + 1}`;
-        const statusMap = { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" };
-        const meta = [
-          output.kind,
-          output.durationSec ? `${output.durationSec}s` : "",
-          output.downloadEligible ? "可下载" : "",
-          output.previewConfirmed ? "已确认" : ""
-        ].filter(Boolean).join(" · ");
-        return `
-          <article class="wz-output-card" data-output-id="${escapeHtml(key)}">
-            <div class="wz-output-card-media">
-              ${url
-                ? isImagePreview(output)
-                  ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(output.outputId || "输出预览")}" loading="lazy" />`
-                  : `<video class="wz-output-video" data-preview-key="${escapeHtml(key)}" src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(output.outputId || "输出视频预览")}"></video>`
-                : `<div class="wz-output-card-empty">暂无预览地址</div>`}
-            </div>
-            <div class="wz-output-card-body">
-              <div>
-                <strong>${escapeHtml(output.displayBatchName || output.userBatchName || output.outputId || `输出 ${index + 1}`)}</strong>
-                ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
-              </div>
-              ${badge(output.qcStatus || "not_started", statusMap)}
-              ${output.modelQcSummary ? `<small>模型质检 ${escapeHtml(output.modelQcSummary.score ?? "-")} · ${escapeHtml(output.modelQcSummary.summary || "")}</small>` : ""}
-              ${output.errorMessage ? `<small class="wz-output-error">${escapeHtml(output.errorMessage)}</small>` : ""}
-              <div class="wz-output-card-actions">
-                ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开文件</a>` : ""}
-                ${confirmable && output.qcStatus === "manual_required" ? `<span>待人工确认</span>` : ""}
-              </div>
-            </div>
-          </article>
-        `;
-      }).join("")}
+      ${items.map((output, index) => renderOutputPreviewCard(output, index, { confirmable })).join("")}
     </div>
   `;
+}
+
+function ensureOutputPreviewRoot(container) {
+  let root = container.querySelector(":scope > .wz-output-previews:not(.empty-line)");
+  if (root) return root;
+  container.querySelector(":scope > .wz-output-previews.empty-line")?.remove();
+  root = document.createElement("div");
+  root.className = "wz-output-previews";
+  const pager = container.querySelector(":scope > .wz-gallery-pager");
+  if (pager) container.insertBefore(root, pager);
+  else container.appendChild(root);
+  return root;
+}
+
+export function patchOutputPreviewCards(container, outputs = [], { emptyText = "暂无输出", confirmable = false } = {}) {
+  if (!container) return;
+  const items = (Array.isArray(outputs) ? outputs : []).filter(Boolean);
+  if (!items.length) {
+    container.querySelector(":scope > .wz-output-previews:not(.empty-line)")?.remove();
+    let empty = container.querySelector(":scope > .wz-output-previews.empty-line");
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.className = "wz-output-previews empty-line";
+      const pager = container.querySelector(":scope > .wz-gallery-pager");
+      if (pager) container.insertBefore(empty, pager);
+      else container.appendChild(empty);
+    }
+    empty.textContent = emptyText;
+    return;
+  }
+
+  const root = ensureOutputPreviewRoot(container);
+  const existing = new Map();
+  for (const card of root.querySelectorAll(":scope > .wz-output-card[data-output-id]")) {
+    existing.set(card.dataset.outputId, card);
+  }
+
+  const nextKeys = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const output = items[index];
+    const key = outputPreviewCardKey(output, index);
+    const fingerprint = outputPreviewCardFingerprint(output, index);
+    nextKeys.push(key);
+    const current = existing.get(key);
+    if (current?.dataset.previewFingerprint === fingerprint) {
+      root.appendChild(current);
+      continue;
+    }
+    const html = renderOutputPreviewCard(output, index, { confirmable }).trim();
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    const next = holder.firstElementChild;
+    if (!next) continue;
+    if (current) current.replaceWith(next);
+    else root.appendChild(next);
+  }
+
+  for (const [key, card] of existing) {
+    if (!nextKeys.includes(key)) card.remove();
+  }
 }
 
 function compactFailureRows(rows = []) {
@@ -729,32 +811,13 @@ export function restorePreviewPlayback(snapshot, root = document) {
 
 export function outputPreviewItemsFingerprint(items = []) {
   return (Array.isArray(items) ? items : [])
-    .map((item, index) => {
-      const key = item.outputId || item.storageKey || `idx_${index}`;
-      const url = outputPreviewUrl(item);
-      return [key, item.qcStatus || "", url, item.downloadEligible ? "1" : "0"].join(":");
-    })
+    .map((item, index) => outputPreviewCardFingerprint(item, index))
     .join("|");
 }
 
 export function galleryStateFingerprint(gallery = {}) {
   const pagination = gallery.pagination || {};
   return `${outputPreviewItemsFingerprint(gallery.items)}::${pagination.page || 1}:${pagination.pageSize || 0}:${pagination.total || 0}`;
-}
-
-export function isAnyPreviewVideoPlaying(root) {
-  if (!root?.querySelectorAll) return false;
-  for (const video of root.querySelectorAll(".wz-output-video")) {
-    if (!video.paused && !video.ended) return true;
-  }
-  return false;
-}
-
-export function bindPreviewPlaybackGuard(root, flush) {
-  if (!root || typeof flush !== "function" || root.dataset.previewGuardBound) return;
-  root.dataset.previewGuardBound = "1";
-  root.addEventListener("pause", flush, true);
-  root.addEventListener("ended", flush, true);
 }
 
 const DECOMPOSITION_NESTED_LABELS = Object.freeze({

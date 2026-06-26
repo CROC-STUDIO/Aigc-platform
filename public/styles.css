@@ -3103,6 +3103,17 @@ button.mini {
   color: #ffffff;
 }
 
+.wz-batch-outputs {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  margin-top: 10px;
+}
+
+.wz-body .wz-node-log .wz-batch-outputs {
+  overflow: auto;
+}
+
 .wz-output-previews {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -5547,6 +5558,7 @@ button.mini {
 
 .wz-body .wz-node-output .wz-gallery,
 .wz-body .wz-node-log .wz-list,
+.wz-body .wz-node-log .wz-batch-outputs,
 .wz-body .wz-node-template #wzRulesBox {
   max-height: 280px;
 }
