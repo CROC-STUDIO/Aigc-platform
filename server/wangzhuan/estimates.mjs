@@ -407,12 +407,15 @@ async function loadDraftBatch(context, batchId) {
   return detail?.batch || null;
 }
 
-function sameEditableDraft(active, request = {}) {
+export function canReuseActivePipelineDraft(active, request = {}, options = {}) {
   const activeId = active?.batchId || active?.runId || "";
   const activeStatus = active?.status || active?.runStatus || "";
   if (!activeId || !request?.batchId) return false;
   if (activeId !== request.batchId) return false;
-  return ["draft", "checking"].includes(String(activeStatus || ""));
+  const editableStatuses = options.allowPreviewRequired
+    ? ["draft", "checking", "preview_required"]
+    : ["draft", "checking"];
+  return editableStatuses.includes(String(activeStatus || ""));
 }
 
 async function findActiveRemix(context) {
@@ -436,7 +439,7 @@ async function saveBatch(context, batch) {
   }
 }
 
-async function assertCanStartFromEstimate(context, record, request) {
+async function assertCanStartFromEstimate(context, record, request, options = {}) {
   const actualHash = hashPayload(record.request);
   if (actualHash !== record.estimateHash) {
     throw new WangzhuanError("validation_error", "estimate 已失效，请重新估算", { estimateId: record.estimate.estimateId });
@@ -469,7 +472,9 @@ async function assertCanStartFromEstimate(context, record, request) {
   const reusingSameEditableDraft = Boolean(
     request?.batchId
       && lockRunId === request.batchId
-      && ["draft", "checking"].includes(lockStatus)
+      && (options.allowPreviewRequired
+        ? ["draft", "checking", "preview_required"]
+        : ["draft", "checking"]).includes(lockStatus)
   );
   if (activeMysqlLock && !reusingSameEditableDraft) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
@@ -498,7 +503,7 @@ export async function startBatchFromEstimate(context, request = {}) {
     });
   }
   const active = await findActiveBatch(context);
-  if (active && !sameEditableDraft(active, request)) {
+  if (active && !canReuseActivePipelineDraft(active, request)) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       batchId: active.batchId,
       status: active.status
@@ -570,7 +575,7 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
   if (replay) return replay;
 
   const record = await loadEstimate(context, request.estimateId);
-  await assertCanStartFromEstimate(context, record, request);
+  await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
   const branchDrafts = record.request?.branches || record.templateSnapshot?.draft?.branches || [];
   if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
     throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", {
@@ -579,7 +584,7 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
     });
   }
   const active = await findActiveBatch(context);
-  if (active && !sameEditableDraft(active, request)) {
+  if (active && !canReuseActivePipelineDraft(active, request, { allowPreviewRequired: true })) {
     throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
       batchId: active.batchId,
       status: active.status

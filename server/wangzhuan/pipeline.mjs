@@ -611,7 +611,11 @@ export async function getBatchDetail(context, batchId) {
   const initial = await readBatch(context, batchId);
   const { pollUpstreamBatch, shouldPollUpstreamBatch } = await import("./upstream-poll.mjs");
   if (shouldPollUpstreamBatch(initial)) {
-    await pollUpstreamBatch(context, batchId);
+    try {
+      await pollUpstreamBatch(context, batchId);
+    } catch (error) {
+      console.warn(`[wangzhuan] upstream poll failed for ${batchId}: ${error?.message || error}`);
+    }
   }
   const detail = await loadBatchDetailFromMysql(context, batchId);
   if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });

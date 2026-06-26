@@ -143,6 +143,83 @@ function pickPrimaryOutput(outputs) {
     .find((output) => assetPreviewUrl(output)) || outputs[0];
 }
 
+function sortedOutputs(outputs = []) {
+  const priority = new Map(OUTPUT_KIND_PRIORITY.map((kind, index) => [kind, index]));
+  return (Array.isArray(outputs) ? [...outputs] : [])
+    .filter(Boolean)
+    .sort((a, b) => {
+      const diff = (priority.get(a.kind) ?? 100) - (priority.get(b.kind) ?? 100);
+      if (diff !== 0) return diff;
+      return String(a.outputId || "").localeCompare(String(b.outputId || ""));
+    });
+}
+
+function outputStatusText(output = {}) {
+  const parts = [];
+  if (output.kind) parts.push(output.kind);
+  if (output.qcStatus) parts.push(`QC ${output.qcStatus}`);
+  parts.push(output.downloadEligible ? "可下载" : "不可下载");
+  if (output.visualPreviewRequired && !output.previewConfirmed) parts.push("待预览确认");
+  return parts.join(" · ");
+}
+
+function renderOutputCollection(outputs = []) {
+  const items = sortedOutputs(outputs);
+  if (!items.length) {
+    return `
+      <section class="wz-tasks-output-stage" aria-label="交付结果">
+        <header class="wz-tasks-media-stage-head">
+          <h2>交付结果</h2>
+          <p>最终输出会在任务完成后归档到这里</p>
+        </header>
+        <div class="wz-list empty-line">暂无输出</div>
+      </section>
+    `;
+  }
+  return `
+    <section class="wz-tasks-output-stage" aria-label="交付结果">
+      <header class="wz-tasks-media-stage-head">
+        <h2>交付结果</h2>
+        <p>当前任务的全部输出、质检状态和下载资格</p>
+      </header>
+      <div class="wz-tasks-output-grid">
+        ${items.map((output) => `
+          <article class="wz-tasks-output-card">
+            <div class="wz-tasks-output-card-head">
+              <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
+              ${output.downloadEligible ? badge("succeeded", { succeeded: "可下载" }) : badge("pending", { pending: "归档中" })}
+            </div>
+            ${renderMediaPlayer(output, "该输出暂不可预览")}
+            <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
+            ${assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDiagnosticArchive(providerJob = {}) {
+  if (!providerJob?.resultPath && !providerJob?.resultStorageUrl) return "";
+  const href = providerJob.resultStorageUrl || (providerJob.resultPath ? `/file?path=${encodeURIComponent(providerJob.resultPath)}` : "");
+  return `
+    <section class="wz-tasks-output-stage" aria-label="诊断归档">
+      <header class="wz-tasks-media-stage-head">
+        <h2>诊断归档</h2>
+        <p>video-ops result、stage_timings 和 engine_trace 已归口到任务管理</p>
+      </header>
+      <article class="wz-tasks-output-card">
+        <div class="wz-tasks-output-card-head">
+          <strong>${escapeHtml(providerJob.jobId || "video-ops result")}</strong>
+          ${badge("succeeded", { succeeded: "已归档" })}
+        </div>
+        <footer class="wz-tasks-media-meta">${escapeHtml(providerJob.resultPath || providerJob.resultStorageUrl || "")}</footer>
+        ${href ? `<a class="wz-tasks-media-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">打开诊断结果</a>` : ""}
+      </article>
+    </section>
+  `;
+}
+
 function renderMediaPlayer(asset, emptyText) {
   const url = assetPreviewUrl(asset);
   if (!url) {
@@ -298,6 +375,7 @@ function renderBatchDetail(detail) {
       inputLabel: "参考输入视频",
       outputLabel
     })}
+    ${renderOutputCollection(batch.outputs)}
     <div class="wz-kv-grid">
       ${renderKeyValues([
         ["任务数", tasks.length],
@@ -322,7 +400,8 @@ function renderBatchDetail(detail) {
       ${batch.status === "qc" ? `<button id="wzTasksRunQcBtn" type="button">运行视频质检</button>` : ""}
       <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status))}">前往管线工作台</a>
       ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
-      ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载交付包</button>` : ""}
+      ${batch.status === "partial_failed" ? `<label class="wz-check"><input id="wzTasksIncludeSegments" type="checkbox" checked /> 下载可用分段/可用项</label>` : ""}
+      ${detail.downloadSummary?.packageReady || batch.status === "partial_failed" ? `<button id="wzTasksDownloadBtn" type="button">${batch.status === "partial_failed" ? "下载可用项" : "下载交付包"}</button>` : ""}
     </div>
   `;
 }
@@ -348,6 +427,8 @@ function renderRemixDetail(detail) {
       inputLabel: "竞品源视频",
       outputLabel: "改造输出"
     })}
+    ${renderOutputCollection(remix.outputs)}
+    ${renderDiagnosticArchive(remix.providerJob)}
     <div class="wz-kv-grid">
       ${renderKeyValues([
         ["渠道", channelLabels[remix.targetChannel] || remix.targetChannel || "-"],
@@ -545,7 +626,7 @@ async function downloadSelectedTask() {
     } else {
       await downloadZip({
         batchIds: [state.selectedId],
-        includeSegments: false,
+        includeSegments: Boolean($("#wzTasksIncludeSegments")?.checked),
         includeFailed: false,
         includeRemoteUrls: false
       });

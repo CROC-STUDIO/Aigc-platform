@@ -3149,6 +3149,9 @@ button.mini {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.025);
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
 }
 
 .wz-output-card-media video,
@@ -3157,6 +3160,13 @@ button.mini {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  pointer-events: auto;
+}
+
+.wz-list .wz-output-previews,
+.wz-gallery .wz-output-previews {
+  max-height: min(70vh, 960px);
+  overflow: auto;
 }
 
 .wz-output-card-empty {
@@ -4009,6 +4019,60 @@ button.mini {
   border-radius: 14px;
   margin: 14px 0;
   padding: 16px;
+}
+
+.wz-tasks-output-stage {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  margin: 14px 0;
+  padding: 16px;
+}
+
+.wz-tasks-output-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.wz-tasks-output-card {
+  background: rgba(5, 8, 10, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.wz-tasks-output-card .wz-tasks-media-frame,
+.wz-tasks-output-card .wz-tasks-media-empty {
+  min-height: 180px;
+}
+
+.wz-tasks-output-card-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.wz-tasks-output-card-head strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wz-task-archive-card p,
+.video-ops-result-box p,
+.wz-tasks-output-card p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.wz-task-archive-actions {
+  justify-content: flex-start;
 }
 
 .wz-tasks-media-stage-head h2 {
@@ -5558,9 +5622,8 @@ button.mini {
 
 .wz-body .wz-node-output .wz-gallery,
 .wz-body .wz-node-log .wz-list,
-.wz-body .wz-node-log .wz-batch-outputs,
 .wz-body .wz-node-template #wzRulesBox {
-  max-height: 280px;
+  max-height: none;
 }
 
 @media (max-width: 1180px) {
