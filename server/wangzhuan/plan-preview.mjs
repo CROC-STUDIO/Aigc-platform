@@ -1,14 +1,16 @@
 import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makePlanId } from "./ids.mjs";
-import { llmUsesGeminiCompat, resolveLlmConfig } from "./llm-config.mjs";
+import { llmUsesGeminiNativeApi, resolveLlmConfig } from "./llm-config.mjs";
 import {
   buildReferenceAssetSlotGuide,
   formatReferenceAssetSlotGuide
 } from "./reference-assets.mjs";
-import { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, parseLlmJsonContent } from "./reference-videos.mjs";
+import { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, parseLlmJsonContent, buildGeminiRequestBody } from "./reference-videos.mjs";
+import { callLlmStreaming } from "./llm-stream.mjs";
 import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { join } from "node:path";
+import { resolveBranchMediaRefs, branchHasReferenceAssets } from "./branches.mjs";
 
 const REQUIRED_PLAN_FIELDS = Object.freeze([
   "hook",
@@ -231,6 +233,20 @@ export function validateBranchTruthRulesForPlan(branches = []) {
   }
 }
 
+function sanitizePlanAssetReferences(plan = {}, branch = {}) {
+  if (branchHasReferenceAssets(branch)) return plan;
+  const stripSlotRefs = (text = "") => String(text)
+    .replace(/图片[0-9]+/g, "产品画面")
+    .replace(/视频[0-9]+/g, "参考镜头")
+    .replace(/\bimage[0-9]+\b/gi, "product visual")
+    .replace(/\bvideo[0-9]+\b/gi, "reference clip");
+  return {
+    ...plan,
+    imagePrompt: stripSlotRefs(plan.imagePrompt),
+    seedancePrompt: stripSlotRefs(plan.seedancePrompt)
+  };
+}
+
 export function validateSeedancePlan(plan = {}, context = {}) {
   const missingFields = REQUIRED_PLAN_FIELDS.filter((field) => !isNonEmptyString(plan[field]));
   if (missingFields.length) {
@@ -242,7 +258,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       missingFields
     });
   }
-  return {
+  return sanitizePlanAssetReferences({
     hook: cleanString(plan.hook),
     body: cleanString(plan.body),
     voiceover: cleanString(plan.voiceover),
@@ -252,16 +268,16 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     imagePrompt: cleanString(plan.imagePrompt),
     seedancePrompt: cleanString(plan.seedancePrompt),
     negativePrompt: cleanString(plan.negativePrompt),
-    mediaRefs: {
+    mediaRefs: resolveBranchMediaRefs(context.branch || {}, {
       productIcon: cleanString(plan.mediaRefs?.productIcon),
       productScreenshot: cleanString(plan.mediaRefs?.productScreenshot),
       productRecording: cleanString(plan.mediaRefs?.productRecording),
       endingAsset: cleanString(plan.mediaRefs?.endingAsset),
       personAsset: cleanString(plan.mediaRefs?.personAsset),
       rewardElement: cleanString(plan.mediaRefs?.rewardElement)
-    },
+    }),
     complianceNotes: normalizeStringList(plan.complianceNotes)
-  };
+  }, context.branch || {});
 }
 
 export function buildSeedancePlanMessages({
@@ -372,6 +388,14 @@ export function buildSeedancePlanMessages({
 }
 
 async function callPlanLlm(context, messages, llmConfig) {
+  if (context.llmStreamHandlers) {
+    return callLlmStreaming(
+      llmConfig,
+      messages,
+      context.llmStreamHandlers,
+      (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
+    );
+  }
   if (typeof context.callWangzhuanLlm === "function") {
     return context.callWangzhuanLlm({
       messages,
@@ -393,7 +417,7 @@ async function callPlanLlm(context, messages, llmConfig) {
     const target = join(wangzhuanPaths(context).batchesDir, batchId, `llm-request-plan-${requestId}.json`);
     await writeAtomicJson(target, dump);
   };
-  return llmUsesGeminiCompat(llmConfig)
+  return llmUsesGeminiNativeApi(llmConfig)
     ? callGeminiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest })
     : callOpenAiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest });
 }
@@ -406,6 +430,7 @@ export async function generateSeedancePlan(context, input = {}) {
     currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
   }, messages, llmConfig);
   const parsed = validateSeedancePlan(parseLlmJsonContent(content), {
+    branch: input.branch || {},
     branchId: input.branch?.branchId,
     branchVariantIndex: input.branchVariantIndex,
     segmentIndex: input.segmentIndex

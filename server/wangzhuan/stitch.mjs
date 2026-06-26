@@ -28,7 +28,11 @@ const DISCLAIMER_FONT_CANDIDATES = Object.freeze([
   "/System/Library/Fonts/PingFang.ttc",
   "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
   "/Library/Fonts/Arial Unicode.ttf",
-  "/System/Library/Fonts/Supplemental/Arial.ttf"
+  "/System/Library/Fonts/Supplemental/Arial.ttf",
+  "C:/Windows/Fonts/msyh.ttc",
+  "C:/Windows/Fonts/msyhbd.ttc",
+  "C:/Windows/Fonts/arial.ttf",
+  "C:/Windows/Fonts/Arial.ttf"
 ]);
 
 function ffmpegAvailableSync() {
@@ -80,29 +84,24 @@ function firstNonEmptyString(...values) {
   return "";
 }
 
-function wrapDisclaimerText(text, maxUnits = 28) {
-  const source = cleanString(text);
-  if (!source) return "";
-  const lines = [];
-  let line = "";
-  let units = 0;
-  for (const char of source) {
-    const weight = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/u.test(char) ? 2 : 1;
-    if (line && units + weight > maxUnits) {
-      lines.push(line);
-      line = char;
-      units = weight;
-      continue;
-    }
-    line += char;
-    units += weight;
-  }
-  if (line) lines.push(line);
-  return lines.join("\n");
+function normalizeDisclaimerText(text) {
+  return cleanString(text).replace(/\s+/g, " ");
 }
 
 function pickDisclaimerFont() {
   return DISCLAIMER_FONT_CANDIDATES.find((candidate) => existsSync(candidate)) || "";
+}
+
+function resolvePythonCommand() {
+  for (const command of ["python3", "python"]) {
+    try {
+      execFileSync(command, ["-c", "import PIL"], { stdio: "ignore", timeout: 5000, windowsHide: true });
+      return command;
+    } catch {
+      // try next candidate
+    }
+  }
+  return "python3";
 }
 
 function resolveDisclaimerOverlay(batch, branchDraft = null) {
@@ -146,7 +145,7 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
   const tmpDir = await mkdtemp(join(tmpdir(), "wz-disclaimer-"));
   try {
     const imagePath = join(tmpDir, "disclaimer.png");
-    const wrappedText = wrapDisclaimerText(overlay.text);
+    const disclaimerText = normalizeDisclaimerText(overlay.text);
     await mkdir(dirname(targetPath), { recursive: true });
     const boxHeight = Math.max(56, Number(overlay.boxHeight || 88));
     const fontSize = Math.max(18, Number(overlay.fontSize || 22));
@@ -154,41 +153,45 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
     const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 50));
     const alignLeft = overlay.position === "bottom_left";
     const fontFile = pickDisclaimerFont();
+    const pythonCommand = resolvePythonCommand();
     const pythonScript = [
       "from PIL import Image, ImageDraw, ImageFont",
       "import sys",
-      "target, font_path, text, font_size, box_h, margin_x, align_left = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), sys.argv[7] == '1'",
-      "lines = text.split('\\n') if text else ['']",
-      "font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()",
-      "canvas = Image.new('RGBA', (720, box_h), (0, 0, 0, 0))",
+      "target, font_path, text, font_size, box_h, margin_x, align_left, canvas_w = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), sys.argv[7] == '1', int(sys.argv[8])",
+      "text = ' '.join(text.split())",
+      "available_w = max(1, canvas_w - margin_x * 2)",
+      "min_font_size = 12",
+      "def load_font(size):",
+      "    return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()",
+      "probe = ImageDraw.Draw(Image.new('RGBA', (1, 1), (0, 0, 0, 0)))",
+      "while font_size > min_font_size:",
+      "    font = load_font(font_size)",
+      "    bbox = probe.textbbox((0, 0), text, font=font)",
+      "    if max(0, bbox[2] - bbox[0]) <= available_w:",
+      "        break",
+      "    font_size -= 1",
+      "font = load_font(font_size)",
+      "canvas = Image.new('RGBA', (canvas_w, box_h), (0, 0, 0, 0))",
       "draw = ImageDraw.Draw(canvas)",
-      "line_gap = 10",
-      "line_heights = []",
-      "line_widths = []",
-      "for line in lines:",
-      "    bbox = draw.textbbox((0, 0), line, font=font)",
-      "    line_widths.append(max(0, bbox[2] - bbox[0]))",
-      "    line_heights.append(max(0, bbox[3] - bbox[1]))",
-      "total_h = sum(line_heights) + line_gap * max(0, len(lines) - 1)",
-      "y = max(16, (box_h - total_h) // 2)",
-      "for idx, line in enumerate(lines):",
-      "    width = line_widths[idx]",
-      "    height = line_heights[idx]",
-      "    x = max(0, margin_x) if align_left else max(0, (720 - width) // 2)",
-      "    draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))",
-      "    y += height + line_gap",
+      "bbox = draw.textbbox((0, 0), text, font=font)",
+      "width = max(0, bbox[2] - bbox[0])",
+      "height = max(0, bbox[3] - bbox[1])",
+      "x = max(0, margin_x) if align_left else max(0, (canvas_w - width) // 2)",
+      "y = max(0, (box_h - height) // 2)",
+      "draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))",
       "canvas.save(target)"
     ].join("\n");
-    await execFileAsync("python3", [
+    await execFileAsync(pythonCommand, [
       "-c",
       pythonScript,
       imagePath,
       fontFile,
-      wrappedText,
+      disclaimerText,
       String(fontSize),
       String(boxHeight),
       String(horizontalMargin),
-      alignLeft ? "1" : "0"
+      alignLeft ? "1" : "0",
+      "720"
     ], {
       timeout: 30000,
       windowsHide: true,

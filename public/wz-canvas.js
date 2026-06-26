@@ -80,6 +80,14 @@
   }
 
   function drawLinks() {
+    if (canvas.classList.contains("wz-step-view")) {
+      svg.setAttribute("viewBox", "0 0 0 0");
+      svg.setAttribute("width", 0);
+      svg.setAttribute("height", 0);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      return;
+    }
+
     const W = canvas.offsetWidth;
     const H = canvas.offsetHeight;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -242,13 +250,28 @@
     }
   }
 
+  function stripBranchConfirmUi(node) {
+    const actions = node?.querySelector(".panel-head .wz-panel-head-actions");
+    if (!actions) return;
+    for (const btn of [...actions.querySelectorAll("button:not(.wz-branch-remove)")]) {
+      btn.remove();
+    }
+    if (!actions.querySelector(".wz-branch-remove")) actions.remove();
+  }
+
   function wireBranch(node) {
     ensureCollapseButtons();
+    stripBranchConfirmUi(node);
     node.querySelector(".wz-branch-remove")?.addEventListener("click", () => {
       const branchId = node.dataset.branchId || "";
+      const refocusStep3 = stepViewEnabled() && activeStep === "3" && !node.hidden;
       node.remove();
       renumberBranches();
-      scheduleDraw();
+      syncBranchLayoutMeta();
+      if (refocusStep3) {
+        const next = branchesWrap?.querySelector(".wz-node-branch");
+        if (next) activateStep("3", { branchNode: next, scroll: false });
+      }
       window.dispatchEvent(new CustomEvent("wz:branch-removed", { detail: { branchId } }));
     });
     if ("ResizeObserver" in window) {
@@ -272,6 +295,81 @@
         if (tag) tag.textContent = `3.${i + 1}.${j + 1}`;
       });
     });
+    syncBranchLayoutMeta();
+  }
+
+  function isRewriteBranch(node) {
+    return Boolean(node?.classList?.contains("wz-node-branch"));
+  }
+
+  function branchWrapFor(node) {
+    return node?.closest(".wz-branches") || null;
+  }
+
+  function branchGroup(node) {
+    const wrap = branchWrapFor(node);
+    if (!wrap) return [];
+    return [...wrap.querySelectorAll(".wz-node-branch")];
+  }
+
+  function syncBranchRail() {
+    if (!branchesWrap) return;
+    const branches = [...branchesWrap.querySelectorAll(".wz-node-branch")];
+    let rail = branchesWrap.querySelector(".wz-branch-rail");
+    if (branches.length < 2) {
+      rail?.remove();
+      return;
+    }
+    if (!rail) {
+      rail = document.createElement("nav");
+      rail.className = "wz-branch-rail";
+      rail.setAttribute("aria-label", "裂变子节点切换");
+      const firstBranch = branchesWrap.querySelector(".wz-node-branch");
+      branchesWrap.insertBefore(rail, firstBranch);
+    }
+    rail.replaceChildren(...branches.map((branch, index) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "wz-branch-rail-item";
+      btn.dataset.branchIndex = String(index);
+      btn.textContent = branch.querySelector(".wz-branch-title")?.textContent?.trim() || `改写 3.${index + 1}`;
+      btn.classList.toggle("active", branch.classList.contains("focused"));
+      return btn;
+    }));
+  }
+
+  function syncBranchLayoutMeta() {
+    if (!branchesWrap) return;
+    const count = branchesWrap.querySelectorAll(".wz-node-branch").length;
+    branchesWrap.classList.toggle("wz-branches-multi", count > 1);
+    syncBranchRail();
+    scheduleDraw();
+  }
+
+  function scrollBranchIntoView(branch) {
+    if (!branch) return;
+    requestAnimationFrame(() => {
+      const target = branch.querySelector(".panel-head") || branch;
+      target.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+      if (focusEnabled()) {
+        branch.closest(".wz-col")?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      }
+    });
+  }
+
+  function focusBranch(branch, { railItem = null } = {}) {
+    if (!branch) return;
+    if (stepViewEnabled()) {
+      activateStep("3", { branchNode: branch, railItem, scroll: false });
+      return;
+    }
+    focusNodeLegacy(branch, { center: true });
+    if (railItem) {
+      const rail = railItem.closest(".wz-branch-rail");
+      for (const item of rail?.querySelectorAll(".wz-branch-rail-item") || []) {
+        item.classList.toggle("active", item === railItem);
+      }
+    }
   }
 
   function createBranchNode(draft = {}, options = {}) {
@@ -294,9 +392,13 @@
       el.dataset.storageKey = "";
       el.dataset.storedPath = "";
       el.dataset.uploadedFileName = "";
+      el.dataset.assetId = "";
+      el.dataset.reviewStatus = "";
+      el.dataset.reviewReason = "";
+      el.closest("label")?.querySelector(".wz-file-meta")?.remove();
     }
     // Drop state classes/pills carried over from the original.
-    clone.classList.remove("focused", "collapsed", "state-done", "state-current", "state-pending");
+    clone.classList.remove("focused", "collapsed", "state-done", "state-current", "state-pending", "wz-branch-inactive");
     clone.querySelector(".wz-node-state")?.remove();
     ensureBranchTemplateSaveUi(clone);
 
@@ -312,8 +414,13 @@
     branchesWrap.appendChild(clone);
     renumberBranches();
     wireBranch(clone);
+    syncBranchLayoutMeta();
     if (options.focus !== false) {
-      clone.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      if (stepViewEnabled()) {
+        activateStep("3", { branchNode: clone, scroll: false });
+      } else {
+        clone.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      }
     }
     scheduleDraw();
     window.dispatchEvent(new CustomEvent("wz:branch-created", { detail: { node: clone, draft } }));
@@ -326,13 +433,25 @@
 
   window.wzCreateBranchNode = createBranchNode;
   addBtn?.addEventListener("click", addBranch);
+  if (baseNode) stripBranchConfirmUi(baseNode);
+  for (const node of branchesWrap?.querySelectorAll(".wz-node-branch") || []) {
+    stripBranchConfirmUi(node);
+  }
+  syncBranchLayoutMeta();
 
   // --- Step bar: smooth scroll + active highlight -------------------------
   const stepbar = document.getElementById("wzStepbar");
   const items = stepbar ? [...stepbar.querySelectorAll(".wz-stepbar-item")] : [];
   const scroller = document.querySelector(".wz-canvas-scroll");
 
-  if ("IntersectionObserver" in window) {
+  // --- Focus & collapse ---------------------------------------------------
+  // Desktop (≥981px): menu-driven step view — one stage fills the workspace.
+  // Mobile: vertical stack with scroll-into-view.
+  const stepViewEnabled = () => window.matchMedia("(min-width: 981px)").matches;
+  const focusEnabled = stepViewEnabled;
+  let activeStep = "1";
+
+  if ("IntersectionObserver" in window && !stepViewEnabled()) {
     const stageNodes = [
       ["1", nodeById("wzNodeUpload")],
       ["2", nodeById("wzNodeDecompose")],
@@ -366,11 +485,6 @@
       observer.observe(el);
     }
   }
-
-  // --- Focus & collapse ---------------------------------------------------
-  // Focus expands the active node, collapses others in focus mode, and scrolls
-  // it into view. Completing a stage auto-advances focus to the next one.
-  const focusEnabled = () => window.matchMedia("(min-width: 981px)").matches;
 
   function columnForNode(node) {
     return node?.closest(".wz-col") || null;
@@ -434,7 +548,148 @@
     }
   }
 
-  function focusNode(node, { center = true, collapseOthers = true } = {}) {
+  function defaultSubForBranch(branch) {
+    const active = branch?.querySelector(".wz-subflow-nav-item.active");
+    if (active?.dataset?.sub) return active.dataset.sub;
+    return "1";
+  }
+
+  function activateSubPanel(subId, branchNode, { navItem = null } = {}) {
+    if (!subId || !branchNode) return;
+    branchNode.hidden = false;
+    branchNode.classList.remove("collapsed");
+    branchNode.classList.add("focused");
+    const subflow = branchNode.querySelector(".wz-subflow");
+    for (const sub of branchNode.querySelectorAll(".wz-subnode")) {
+      const isActive = sub.dataset.sub === String(subId);
+      sub.classList.toggle("is-sub-active", isActive);
+      sub.hidden = !isActive;
+      sub.classList.toggle("focused", isActive);
+    }
+    for (const item of subflow?.querySelectorAll(".wz-subflow-nav-item") || []) {
+      item.classList.toggle("active", navItem ? item === navItem : item.dataset.sub === String(subId));
+    }
+  }
+
+  function applyStep3BranchVisibility(focusBranch) {
+    const step3Col = canvas.querySelector('.wz-col[data-step="3"]');
+    if (!step3Col) return focusBranch;
+    const branches = [...step3Col.querySelectorAll(".wz-node-branch")];
+    const focus = focusBranch || branches[0];
+    for (const branch of branches) {
+      const show = branch === focus;
+      branch.hidden = !show;
+      branch.classList.toggle("focused", show);
+      branch.classList.remove("collapsed", "wz-branch-inactive");
+      branch.setAttribute("aria-expanded", "true");
+      if (show) activateSubPanel(defaultSubForBranch(branch), branch);
+    }
+    syncBranchRail();
+    return focus;
+  }
+
+  function resetStepViewDom() {
+    canvas.classList.remove("wz-step-view");
+    for (const col of canvas.querySelectorAll(".wz-col")) {
+      col.hidden = false;
+      col.classList.remove("is-step-active", "wz-col-focus");
+    }
+    for (const sub of canvas.querySelectorAll(".wz-subnode")) {
+      sub.hidden = false;
+      sub.classList.remove("is-sub-active");
+    }
+    for (const branch of canvas.querySelectorAll(".wz-node-branch")) {
+      branch.hidden = false;
+    }
+  }
+
+  function activateStep(step, options = {}) {
+    activeStep = String(step);
+    if (!stepViewEnabled()) {
+      const stage = STAGES.find((item) => item.step === activeStep);
+      const target = stage?.nodes?.map((id) => nodeById(id)).find(Boolean);
+      if (target) focusNodeLegacy(target, options);
+      return;
+    }
+
+    canvas.classList.add("wz-step-view");
+    canvas.classList.remove("wz-focus-mode");
+    canvas.removeAttribute("data-focus-step");
+
+    for (const col of canvas.querySelectorAll(".wz-col")) {
+      const isActive = col.dataset.step === activeStep;
+      col.classList.toggle("is-step-active", isActive);
+      col.hidden = !isActive;
+      col.classList.remove("wz-col-focus");
+    }
+    setStepbarActive(activeStep);
+
+    const activeCol = canvas.querySelector(".wz-col.is-step-active");
+    if (activeCol) {
+      for (const n of activeCol.querySelectorAll(".wz-node")) {
+        n.classList.remove("collapsed", "wz-branch-inactive");
+        n.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    for (const n of canvas.querySelectorAll(".wz-node")) {
+      n.classList.remove("focused");
+    }
+
+    if (activeStep === "3") {
+      const step3Col = canvas.querySelector('.wz-col[data-step="3"]');
+      let focusBranch = options.branchNode
+        || step3Col?.querySelector(".wz-node-branch.focused")
+        || nodeById("wzNodeRewrite");
+      focusBranch = applyStep3BranchVisibility(focusBranch);
+      if (options.sub && focusBranch) {
+        activateSubPanel(options.sub, focusBranch, options);
+      }
+      if (options.railItem) {
+        const rail = options.railItem.closest(".wz-branch-rail");
+        for (const item of rail?.querySelectorAll(".wz-branch-rail-item") || []) {
+          item.classList.toggle("active", item === options.railItem);
+        }
+      }
+    } else if (activeStep === "5") {
+      for (const nid of ["wzNodeLog", "wzNodeOutput"]) {
+        nodeById(nid)?.classList.add("focused");
+      }
+    } else {
+      const stage = STAGES.find((item) => item.step === activeStep);
+      for (const nid of stage?.nodes || []) {
+        nodeById(nid)?.classList.add("focused");
+      }
+    }
+
+    updateChipSummaries();
+    scheduleDraw();
+
+    if (options.scroll !== false) {
+      requestAnimationFrame(() => {
+        scroller?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
+    runStepEnter(activeCol);
+  }
+
+  function runStepEnter(activeCol) {
+    if (!activeCol || !stepViewEnabled()) return;
+    activeCol.classList.remove("wz-step-enter");
+    for (const node of activeCol.querySelectorAll(".wz-node")) {
+      node.classList.remove("wz-step-enter");
+    }
+    void activeCol.offsetWidth;
+    activeCol.classList.add("wz-step-enter");
+    for (const [index, node] of [...activeCol.querySelectorAll(".wz-node")].entries()) {
+      node.style.setProperty("--wz-step-stagger", `${Math.min(index, 4) * 60}ms`);
+      node.classList.add("wz-step-enter");
+    }
+  }
+
+  window.wzActivateStep = activateStep;
+
+  function focusNodeLegacy(node, { center = true, collapseOthers = true } = {}) {
     if (!node) return;
     if (!focusEnabled()) {
       if (center) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -443,6 +698,8 @@
 
     const focusCol = columnForNode(node);
     const focusStep = focusCol?.dataset?.step || null;
+    const branchWrap = isRewriteBranch(node) ? branchWrapFor(node) : null;
+    const multiBranch = Boolean(branchWrap && branchGroup(node).length > 1);
     canvas.classList.add("wz-focus-mode");
     canvas.dataset.focusStep = focusStep || "";
     for (const col of canvas.querySelectorAll(".wz-col")) {
@@ -453,12 +710,23 @@
     for (const n of canvas.querySelectorAll(".wz-node")) {
       const sameCol = columnForNode(n) === focusCol;
       const isTarget = n === node;
+      const sameBranchGroup = multiBranch && isRewriteBranch(n) && branchWrapFor(n) === branchWrap;
+
       n.classList.toggle("focused", isTarget);
-      n.setAttribute("aria-expanded", isTarget ? "true" : "false");
-      if (!collapseOthers) {
-        if (isTarget) n.classList.remove("collapsed");
+      n.classList.toggle("wz-branch-inactive", sameBranchGroup && !isTarget);
+      n.setAttribute("aria-expanded", isTarget || sameBranchGroup ? "true" : "false");
+
+      if (sameBranchGroup) {
+        n.classList.remove("collapsed");
         continue;
       }
+
+      if (!collapseOthers) {
+        if (isTarget) n.classList.remove("collapsed");
+        n.classList.remove("wz-branch-inactive");
+        continue;
+      }
+
       if (isTarget) {
         n.classList.remove("collapsed");
       } else if (sameCol && focusStep === "5") {
@@ -467,15 +735,22 @@
       } else {
         n.classList.add("collapsed");
       }
+      n.classList.remove("wz-branch-inactive");
     }
 
     for (const sub of canvas.querySelectorAll(".wz-subnode")) {
       sub.classList.remove("focused");
     }
 
+    syncBranchRail();
+
     if (center) {
       requestAnimationFrame(() => {
-        node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        if (multiBranch && isRewriteBranch(node)) {
+          scrollBranchIntoView(node);
+        } else {
+          node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        }
         scheduleDraw();
       });
     } else {
@@ -484,10 +759,29 @@
     updateChipSummaries();
   }
 
+  function focusNode(node, options = {}) {
+    if (!node) return;
+    if (stepViewEnabled()) {
+      const col = columnForNode(node);
+      const step = col?.dataset?.step;
+      if (!step) return;
+      const stepOpts = { ...options, scroll: options.center !== false };
+      if (step === "3") {
+        stepOpts.branchNode = isRewriteBranch(node) ? node : (options.branchNode || nodeById("wzNodeRewrite"));
+        if (options.sub) stepOpts.sub = options.sub;
+        else {
+          const activeSub = node.querySelector?.(".wz-subnode.is-sub-active, .wz-subnode.focused");
+          if (activeSub?.dataset?.sub) stepOpts.sub = activeSub.dataset.sub;
+        }
+      }
+      activateStep(step, stepOpts);
+      return;
+    }
+    focusNodeLegacy(node, options);
+  }
+
   function focusStage(step, options = {}) {
-    const stage = STAGES.find((item) => item.step === String(step));
-    const target = stage?.nodes?.map((id) => nodeById(id)).find(Boolean);
-    if (target) focusNode(target, options);
+    activateStep(step, options);
   }
 
   window.wzFocusNode = (idOrNode, options) => {
@@ -497,12 +791,34 @@
   window.wzFocusStage = (step, options) => focusStage(step, options);
 
   function toggleCollapse(node) {
+    if (stepViewEnabled()) return;
     node.classList.toggle("collapsed");
     if (!node.classList.contains("collapsed")) {
-      focusNode(node, { collapseOthers: true });
+      focusNodeLegacy(node, { collapseOthers: true });
       return;
     }
     scheduleDraw();
+  }
+
+  function focusSubnode(sub, { navItem = null } = {}) {
+    if (!sub) return;
+    const branchNode = sub.closest(".wz-node-branch");
+    const subId = sub.dataset.sub;
+    if (stepViewEnabled()) {
+      activateStep("3", { branchNode, sub: subId, navItem, scroll: false });
+      return;
+    }
+    const subflow = sub.closest(".wz-subflow");
+    if (branchNode) focusNodeLegacy(branchNode, { center: false });
+    for (const s of canvas.querySelectorAll(".wz-subnode")) {
+      s.classList.toggle("focused", s === sub);
+    }
+    for (const item of subflow?.querySelectorAll(".wz-subflow-nav-item") || []) {
+      item.classList.toggle("active", navItem ? item === navItem : item.dataset.sub === subId);
+    }
+    requestAnimationFrame(() => {
+      sub.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+    });
   }
 
   // Header click: chevron → collapse that node; elsewhere → focus it.
@@ -513,60 +829,69 @@
       if (collapseNode) toggleCollapse(collapseNode);
       return;
     }
+
+    const navItem = event.target.closest(".wz-subflow-nav-item");
+    if (navItem) {
+      event.preventDefault();
+      const subflow = navItem.closest(".wz-subflow");
+      const sub = subflow?.querySelector(`.wz-subnode[data-sub="${navItem.dataset.sub}"]`);
+      focusSubnode(sub, { navItem });
+      return;
+    }
+
+    const railItem = event.target.closest(".wz-branch-rail-item");
+    if (railItem) {
+      event.preventDefault();
+      const wrap = railItem.closest(".wz-branches");
+      const index = Number(railItem.dataset.branchIndex);
+      const branch = wrap?.querySelectorAll(".wz-node-branch")?.[index];
+      focusBranch(branch, { railItem });
+      return;
+    }
+
     if (event.target.closest("button, a, input, select, textarea, label")) return;
 
-    const collapsedNode = event.target.closest(".wz-node.collapsed");
-    if (collapsedNode) {
-      focusNode(collapsedNode);
-      return;
+    if (!stepViewEnabled()) {
+      const collapsedNode = event.target.closest(".wz-node.collapsed");
+      if (collapsedNode) {
+        focusNode(collapsedNode);
+        return;
+      }
     }
 
-    // Second level: clicking a sub-node header focuses that sub-node.
-    const subHead = event.target.closest(".wz-subnode-head");
-    if (subHead) {
-      const sub = subHead.closest(".wz-subnode");
-      if (sub) {
-        const branchNode = sub.closest(".wz-node-branch");
-        if (branchNode) focusNode(branchNode, { center: false });
-        for (const s of canvas.querySelectorAll(".wz-subnode")) {
-          s.classList.toggle("focused", s === sub);
-        }
-        sub.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    if (!stepViewEnabled()) {
+      const subHead = event.target.closest(".wz-subnode-head");
+      if (subHead) {
+        focusSubnode(subHead.closest(".wz-subnode"));
+        return;
       }
-      return;
+      const head = event.target.closest(".panel-head");
+      if (!head) return;
+      const node = head.closest(".wz-node");
+      if (!node) return;
+      if (event.target.closest(".wz-collapse-btn")) {
+        toggleCollapse(node);
+        return;
+      }
+      if (event.target.closest("button")) return;
+      focusNode(node);
     }
-    const head = event.target.closest(".panel-head");
-    if (!head) return;
-    const node = head.closest(".wz-node");
-    if (!node) return;
-    if (event.target.closest(".wz-collapse-btn")) {
-      toggleCollapse(node);
-      return;
-    }
-    if (event.target.closest("button")) return; // real action buttons
-    focusNode(node);
   });
 
   canvas.addEventListener("keydown", (event) => {
     if (!focusEnabled() || event.target.closest("input, textarea, select")) return;
     const step = event.key;
     if (!/^[1-5]$/.test(step)) return;
-    const item = items.find((it) => it.dataset.step === step);
-    const href = item?.getAttribute("href") || "";
-    const target = href.startsWith("#") ? nodeById(href.slice(1)) : null;
-    if (!target) return;
     event.preventDefault();
-    focusNode(target);
+    activateStep(step);
   });
 
-  // Step bar focuses the matching node and collapses the rest.
+  // Step bar is the sole desktop navigation between main stages.
   for (const item of items) {
     item.addEventListener("click", (event) => {
-      const href = item.getAttribute("href") || "";
-      const target = href.startsWith("#") ? nodeById(href.slice(1)) : null;
-      if (!target) return;
       event.preventDefault();
-      focusNode(target);
+      const step = item.dataset.step;
+      if (step) activateStep(step);
     });
   }
 
@@ -576,9 +901,14 @@
     if (last) requestAnimationFrame(() => focusNode(last));
   });
 
-  // Re-paint links when crossing the responsive breakpoint.
-  window.matchMedia("(min-width: 981px)").addEventListener?.("change", () => {
-    scheduleDraw();
+  // Re-layout when crossing the responsive breakpoint.
+  window.matchMedia("(min-width: 981px)").addEventListener?.("change", (event) => {
+    if (event.matches) {
+      activateStep(activeStep || "1", { scroll: false });
+    } else {
+      resetStepViewDom();
+      scheduleDraw();
+    }
   });
 
   // --- Grab-to-pan on empty canvas area -----------------------------------
@@ -591,6 +921,7 @@
 
     scroller.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      if (stepViewEnabled()) return;
       // Don't hijack drags that start on a node, control, or the step bar.
       if (event.target.closest(".wz-node") || event.target.closest("a, button, input, select, textarea")) return;
       panning = true;
@@ -795,16 +1126,15 @@
       if (refreshPipelineState.lastDoneFlags) {
         for (let i = 0; i < doneFlags.length - 1; i += 1) {
           if (doneFlags[i] && !refreshPipelineState.lastDoneFlags[i]) {
-            const nextStage = STAGES[i + 1];
-            const nextNode = nextStage?.nodes?.map((id) => nodeById(id)).find(Boolean);
-            if (nextNode) focusNode(nextNode);
+            // Only auto-advance when the user is still on the step that just completed.
+            if (Number(activeStep) === i + 1) {
+              activateStep(STAGES[i + 1].step);
+            }
             break;
           }
         }
       } else {
-        const currentStage = STAGES[currentIdx];
-        const currentNode = currentStage?.nodes?.map((id) => nodeById(id)).find(Boolean);
-        if (currentNode) focusNode(currentNode, { center: false });
+        activateStep(STAGES[currentIdx].step, { scroll: false });
       }
     }
     refreshPipelineState.lastDoneFlags = [...doneFlags];

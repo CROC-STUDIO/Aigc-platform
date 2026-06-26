@@ -42,9 +42,158 @@ function mergeAssetMap(base = {}, override = {}) {
   return merged;
 }
 
+function branchHasAssetField(branch = {}, assetKey) {
+  return Boolean(
+    cleanString(branch.assetUrls?.[assetKey])
+    || cleanString(branch.assetStorageKeys?.[assetKey])
+    || cleanString(branch.assetStoredPaths?.[assetKey])
+    || cleanString(branch.assetRelativePaths?.[assetKey])
+    || cleanString(branch.assetFileNames?.[assetKey])
+  );
+}
+
+function countBranchMediaFields(branch = {}) {
+  let count = 0;
+  for (const key of ASSET_KEYS) {
+    if (branchHasAssetField(branch, key)) count += 1;
+  }
+  return count;
+}
+
+function pruneAssetReviews(reviews = {}, media = {}) {
+  const pruned = {};
+  for (const [key, review] of Object.entries(isObject(reviews) ? reviews : {})) {
+    if (!branchHasAssetField(media, key)) continue;
+    pruned[key] = review;
+  }
+  return pruned;
+}
+
+export function branchMediaFields(raw = {}, { inheritFrom = null } = {}) {
+  const useInheritance = inheritFrom !== null && isObject(inheritFrom);
+  const base = useInheritance ? inheritFrom : {};
+  const media = {
+    assetFileNames: mergeAssetMap(useInheritance ? base.assetFileNames : {}, raw.assetFileNames),
+    assetUrls: mergeAssetMap(useInheritance ? base.assetUrls : {}, raw.assetUrls),
+    assetStorageKeys: mergeAssetMap(useInheritance ? base.assetStorageKeys : {}, raw.assetStorageKeys),
+    assetStoredPaths: mergeAssetMap(useInheritance ? base.assetStoredPaths : {}, raw.assetStoredPaths)
+  };
+  const reviewsSource = useInheritance
+    ? {
+        ...(isObject(base.assetReviews) ? base.assetReviews : {}),
+        ...(isObject(raw.assetReviews) ? raw.assetReviews : {})
+      }
+    : { ...(isObject(raw.assetReviews) ? raw.assetReviews : {}) };
+  media.assetReviews = pruneAssetReviews(reviewsSource, media);
+  return media;
+}
+
+function assetFieldSignature(branch = {}, assetKey) {
+  return [
+    cleanString(branch.assetUrls?.[assetKey]),
+    cleanString(branch.assetStorageKeys?.[assetKey]),
+    cleanString(branch.assetStoredPaths?.[assetKey]),
+    cleanString(branch.assetRelativePaths?.[assetKey]),
+    cleanString(branch.assetFileNames?.[assetKey])
+  ].join("|");
+}
+
+function cloneAssetMaps(branch = {}) {
+  return {
+    assetFileNames: { ...(isObject(branch.assetFileNames) ? branch.assetFileNames : {}) },
+    assetUrls: { ...(isObject(branch.assetUrls) ? branch.assetUrls : {}) },
+    assetStorageKeys: { ...(isObject(branch.assetStorageKeys) ? branch.assetStorageKeys : {}) },
+    assetStoredPaths: {
+      ...(isObject(branch.assetStoredPaths) ? branch.assetStoredPaths : {}),
+      ...(isObject(branch.assetRelativePaths) ? branch.assetRelativePaths : {})
+    },
+    assetReviews: { ...(isObject(branch.assetReviews) ? branch.assetReviews : {}) }
+  };
+}
+
+export function dedupeLeakedBranchAssets(branches = []) {
+  if (branches.length <= 1) return branches;
+  const primary = branches[0];
+  return branches.map((branch, index) => {
+    if (index === 0) return branch;
+    const maps = cloneAssetMaps(branch);
+    let changed = false;
+    for (const key of ASSET_KEYS) {
+      const branchSig = assetFieldSignature(branch, key);
+      if (!branchSig.replace(/\|/g, "")) continue;
+      if (branchSig !== assetFieldSignature(primary, key)) continue;
+      for (const mapName of ["assetFileNames", "assetUrls", "assetStorageKeys", "assetStoredPaths"]) {
+        if (maps[mapName][key]) {
+          delete maps[mapName][key];
+          changed = true;
+        }
+      }
+      if (maps.assetReviews[key]) {
+        delete maps.assetReviews[key];
+        changed = true;
+      }
+    }
+    if (!changed) return branch;
+    maps.assetReviews = pruneAssetReviews(maps.assetReviews, maps);
+    return { ...branch, ...maps };
+  });
+}
+
+export function branchHasReferenceAssets(branch = {}) {
+  return countBranchMediaFields(branch) > 0;
+}
+
+export function branchAssetPreviewUrl(branch = {}, assetKey = "") {
+  const url = cleanString(branch.assetUrls?.[assetKey]);
+  if (url) return url;
+  const storedPath = cleanString(branch.assetStoredPaths?.[assetKey] || branch.assetRelativePaths?.[assetKey]);
+  if (storedPath) return `/file?path=${encodeURIComponent(storedPath)}`;
+  return "";
+}
+
+export function resolveBranchMediaRefs(branch = {}, planMediaRefs = {}) {
+  const refs = {};
+  for (const key of ASSET_KEYS) {
+    const branchUrl = cleanString(branch.assetUrls?.[key]);
+    if (!branchUrl) continue;
+    const planUrl = cleanString(planMediaRefs?.[key]);
+    refs[key] = planUrl === branchUrl ? planUrl : branchUrl;
+  }
+  return refs;
+}
+
 function branchIdAt(index, raw = {}) {
   const rawId = cleanString(raw.branchId || raw.id);
   return rawId.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 48) || `branch_${index + 1}`;
+}
+
+function branchDraftHasContent(branch = {}) {
+  return Boolean(
+    cleanString(branch.productName)
+    || cleanString(branch.cta)
+    || cleanString(branch.materialDirection)
+    || countBranchMediaFields(branch) > 0
+  );
+}
+
+function stripBranchMeta(raw = {}) {
+  if (!isObject(raw)) return {};
+  const {
+    branches: _branches,
+    assetFileNames: _assetFileNames,
+    assetUrls: _assetUrls,
+    assetStorageKeys: _assetStorageKeys,
+    assetStoredPaths: _assetStoredPaths,
+    assetRelativePaths: _assetRelativePaths,
+    assetReviews: _assetReviews,
+    branchId: _branchId,
+    branchIndex: _branchIndex,
+    branchLabel: _branchLabel,
+    id: _id,
+    label: _label,
+    ...rest
+  } = raw;
+  return rest;
 }
 
 export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
@@ -54,10 +203,14 @@ export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
     : Array.isArray(base.branches)
       ? base.branches
       : [];
+  const hasExplicitMultiBranch = rawBranches.length > 1;
   const source = rawBranches.length ? rawBranches : [base];
+  const assetInheritFrom = hasExplicitMultiBranch ? null : base;
+  const baseScalars = stripBranchMeta(base);
 
-  return source.map((raw, index) => {
+  const branches = source.map((raw, index) => {
     const branch = isObject(raw) ? raw : {};
+    const branchScalars = stripBranchMeta(branch);
     const targetChannels = Array.isArray(branch.targetChannels) && branch.targetChannels.length
       ? branch.targetChannels
       : Array.isArray(base.targetChannels)
@@ -68,9 +221,10 @@ export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
       : Array.isArray(base.regions)
         ? base.regions
         : [];
+    const media = branchMediaFields(branch, { inheritFrom: assetInheritFrom });
     return {
-      ...base,
-      ...branch,
+      ...baseScalars,
+      ...branchScalars,
       branchId: branchIdAt(index, branch),
       branchIndex: index + 1,
       branchLabel: cleanString(branch.branchLabel || branch.label || branch.displayName || base.displayName) || `改写 3.${index + 1}`,
@@ -98,17 +252,18 @@ export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
         ...(isObject(branch.disclaimerOverlay) ? branch.disclaimerOverlay : {})
       },
       disclaimerByLanguage: mergeLanguageMap(base.disclaimerByLanguage, branch.disclaimerByLanguage),
-      assetFileNames: mergeAssetMap(base.assetFileNames, branch.assetFileNames),
-      assetUrls: mergeAssetMap(base.assetUrls, branch.assetUrls),
-      assetStorageKeys: mergeAssetMap(base.assetStorageKeys, branch.assetStorageKeys),
-      assetStoredPaths: mergeAssetMap(base.assetStoredPaths, branch.assetStoredPaths),
-      assetReviews: {
-        ...(isObject(base.assetReviews) ? base.assetReviews : {}),
-        ...(isObject(branch.assetReviews) ? branch.assetReviews : {})
-      },
+      ...media,
       truthRules: isObject(branch.truthRules) && Object.keys(branch.truthRules).length ? branch.truthRules : (base.truthRules || {})
     };
-  }).filter((branch) => branch.productName || branch.cta || branch.materialDirection);
+  }).filter(branchDraftHasContent);
+  return hasExplicitMultiBranch ? dedupeLeakedBranchAssets(branches) : branches;
+}
+
+export function normalizeStoredBranchDrafts(templateSnapshot = null, branchDrafts = []) {
+  const draft = isObject(templateSnapshot?.draft) ? templateSnapshot.draft : (isObject(templateSnapshot) ? templateSnapshot : {});
+  const raw = Array.isArray(branchDrafts) ? branchDrafts : [];
+  if (!raw.length) return [];
+  return normalizeBranchDrafts(draft, raw);
 }
 
 export function branchSummaries(branches = []) {

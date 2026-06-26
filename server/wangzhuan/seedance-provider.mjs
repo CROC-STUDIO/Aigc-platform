@@ -85,19 +85,25 @@ function mediaItemFromReviewedAsset(assetKey, review = {}) {
   };
 }
 
+function latestBranchMediaFields(latest = {}) {
+  const storedPaths = {
+    ...(latest.assetStoredPaths && typeof latest.assetStoredPaths === "object" ? latest.assetStoredPaths : {}),
+    ...(latest.assetRelativePaths && typeof latest.assetRelativePaths === "object" ? latest.assetRelativePaths : {})
+  };
+  return {
+    assetFileNames: { ...(latest.assetFileNames && typeof latest.assetFileNames === "object" ? latest.assetFileNames : {}) },
+    assetUrls: { ...(latest.assetUrls && typeof latest.assetUrls === "object" ? latest.assetUrls : {}) },
+    assetStorageKeys: { ...(latest.assetStorageKeys && typeof latest.assetStorageKeys === "object" ? latest.assetStorageKeys : {}) },
+    assetStoredPaths: storedPaths,
+    assetReviews: { ...(latest.assetReviews && typeof latest.assetReviews === "object" ? latest.assetReviews : {}) }
+  };
+}
+
 export function mergeBranchMediaDraft(latest = {}, base = {}) {
   return {
     ...base,
     ...latest,
-    assetFileNames: { ...(base.assetFileNames || {}), ...(latest.assetFileNames || {}) },
-    assetUrls: { ...(base.assetUrls || {}), ...(latest.assetUrls || {}) },
-    assetStorageKeys: { ...(base.assetStorageKeys || {}), ...(latest.assetStorageKeys || {}) },
-    assetStoredPaths: {
-      ...(base.assetStoredPaths || {}),
-      ...(latest.assetStoredPaths || {}),
-      ...(latest.assetRelativePaths || {})
-    },
-    assetReviews: { ...(base.assetReviews || {}), ...(latest.assetReviews || {}) }
+    ...latestBranchMediaFields(latest)
   };
 }
 
@@ -110,12 +116,15 @@ export function resolveBranchForSeedanceMedia(batch = {}, task = {}) {
     ...(Array.isArray(batch.request?.branchDrafts) ? batch.request.branchDrafts : []),
     ...(Array.isArray(batch.request?.branches) ? batch.request.branches : [])
   ];
-  const latestBranch = branchSources.find((item) => cleanString(item?.branchId) === branchId)
-    || branchSources[0]
-    || null;
+  const latestBranch = branchId
+    ? branchSources.find((item) => cleanString(item?.branchId) === branchId) || null
+    : branchSources[0] || null;
   const scriptBranch = script?.branchDraft || null;
+  const hasExplicitBranches = branchSources.length > 1;
   if (latestBranch && scriptBranch) return mergeBranchMediaDraft(latestBranch, scriptBranch);
-  return latestBranch || scriptBranch || draft;
+  if (latestBranch) return latestBranch;
+  if (scriptBranch) return scriptBranch;
+  return hasExplicitBranches ? { branchId: branchId || "", assetUrls: {} } : draft;
 }
 
 export function collectSeedanceMedia(batch = {}, task = {}) {

@@ -1,3 +1,5 @@
+import { DEFAULT_CHANNEL_RULES } from "./constants.mjs";
+
 export const DISCLAIMER_PRESETS = Object.freeze({
   en: "Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.",
   pt: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
@@ -17,6 +19,36 @@ export function resolveDisclaimerText(language = "", preset = "auto") {
   return DISCLAIMER_PRESETS[resolveDisclaimerPreset(language, preset)] || DISCLAIMER_PRESETS.en;
 }
 
+export function requiredDisclaimersForChannel(channel = "generic", promiseLevel = "stable") {
+  const normalizedChannel = String(channel || "generic").trim() || "generic";
+  const normalizedPromiseLevel = String(promiseLevel || "stable").trim() || "stable";
+  return [...new Set(
+    DEFAULT_CHANNEL_RULES
+      .filter((rule) => rule.channel === normalizedChannel && rule.promiseLevel === normalizedPromiseLevel)
+      .flatMap((rule) => rule.requiredDisclaimers || [])
+  )];
+}
+
+export function mergeDisclaimerWithChannelRequirements(
+  baseText = "",
+  channel = "generic",
+  promiseLevel = "stable",
+  extraRequired = []
+) {
+  let text = String(baseText || "").trim();
+  const required = [
+    ...requiredDisclaimersForChannel(channel, promiseLevel),
+    ...(Array.isArray(extraRequired) ? extraRequired : [])
+  ];
+  for (const item of required) {
+    const needle = String(item || "").trim();
+    if (!needle) continue;
+    if (text.toLowerCase().includes(needle.toLowerCase())) continue;
+    text = text ? `${text} ${needle}` : needle;
+  }
+  return text;
+}
+
 export function buildDisclaimerByLanguage(languages = [], preset = "auto") {
   const source = Array.isArray(languages) ? languages : String(languages || "").split(",");
   const normalized = source.map((item) => String(item || "").trim()).filter(Boolean);
@@ -30,16 +62,24 @@ export function buildDisclaimerByLanguage(languages = [], preset = "auto") {
 export function resolveEffectiveDisclaimer({
   language = "",
   preset = "auto",
-  customText = ""
+  customText = "",
+  targetChannel = "generic",
+  promiseLevel = "stable"
 } = {}) {
   const manual = String(customText || "").trim();
-  if (manual) return manual;
-  return resolveDisclaimerText(language, preset);
+  const base = manual || resolveDisclaimerText(language, preset);
+  return mergeDisclaimerWithChannelRequirements(base, targetChannel, promiseLevel);
 }
 
 export function buildEffectiveDisclaimerByLanguage(
   languages = [],
-  { preset = "auto", customByLanguage = null, customText = "" } = {}
+  {
+    preset = "auto",
+    customByLanguage = null,
+    customText = "",
+    targetChannel = "generic",
+    promiseLevel = "stable"
+  } = {}
 ) {
   const source = Array.isArray(languages) ? languages : String(languages || "").split(",");
   const normalized = source.map((item) => String(item || "").trim()).filter(Boolean);
@@ -50,7 +90,9 @@ export function buildEffectiveDisclaimerByLanguage(
     return [language, resolveEffectiveDisclaimer({
       language,
       preset,
-      customText: customValue || customText
+      customText: customValue || customText,
+      targetChannel,
+      promiseLevel
     })];
   }));
 }

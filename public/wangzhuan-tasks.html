@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Touka AI素材中台 - 任务管理</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260626-tasks-row" />
+    <link rel="stylesheet" href="/wangzhuan-tasks.css?v=20260626-tasks-row" />
   </head>
   <body class="wz-body">
     <header class="platform-topbar">
@@ -53,31 +54,38 @@
         <div id="wzTasksGlobalError" class="wz-error" hidden role="alert" aria-live="polite"></div>
 
         <header class="wz-tasks-head">
-          <div>
+          <div class="wz-tasks-head-copy">
             <h1>任务管理</h1>
             <p>查看进行中的素材管线批次与竞品改造任务，在此确认预案、停止任务或前往工作台继续编辑。</p>
           </div>
-          <button id="wzTasksRefreshBtn" class="mini ghost" type="button">刷新列表</button>
+          <div class="wz-tasks-head-tools">
+            <div id="wzTasksStats" class="wz-tasks-stats" aria-live="polite" hidden></div>
+            <button id="wzTasksRefreshBtn" class="wz-tasks-refresh mini ghost" type="button">
+              <span class="wz-tasks-refresh-icon" aria-hidden="true">↻</span>
+              刷新
+            </button>
+          </div>
         </header>
 
-        <div class="wz-tasks-layout">
+        <div id="wzTasksLayout" class="wz-tasks-layout is-list-only">
           <section class="wz-tasks-list-pane" aria-label="任务列表">
-            <div class="wz-tasks-filters" role="tablist" aria-label="任务状态">
-              <button id="wzTasksScopeActive" class="wz-tasks-filter active" type="button" data-scope="active">进行中</button>
-              <button id="wzTasksScopeAll" class="wz-tasks-filter" type="button" data-scope="all">全部</button>
-              <button id="wzTasksScopeDone" class="wz-tasks-filter" type="button" data-scope="terminal">已完成</button>
+            <div class="wz-tasks-filter-bar">
+              <div class="wz-tasks-segment" role="group" aria-label="任务状态">
+                <button id="wzTasksScopeActive" class="wz-tasks-segment-btn" type="button" data-scope="active" aria-pressed="false">进行中</button>
+                <button id="wzTasksScopeAll" class="wz-tasks-segment-btn active" type="button" data-scope="all" aria-pressed="true">全部</button>
+                <button id="wzTasksScopeDone" class="wz-tasks-segment-btn" type="button" data-scope="terminal" aria-pressed="false">已完成</button>
+              </div>
+              <div class="wz-tasks-segment wz-tasks-segment-type" role="group" aria-label="任务类型">
+                <button id="wzTasksTypeAll" class="wz-tasks-segment-btn wz-tasks-type-btn active" type="button" data-run-type="" aria-pressed="true">全部</button>
+                <button id="wzTasksTypePipeline" class="wz-tasks-segment-btn wz-tasks-type-btn pipeline" type="button" data-run-type="pipeline" aria-pressed="false">管线</button>
+                <button id="wzTasksTypeRemix" class="wz-tasks-segment-btn wz-tasks-type-btn remix" type="button" data-run-type="remix" aria-pressed="false">改造</button>
+              </div>
             </div>
-            <div class="wz-tasks-type-filters" role="tablist" aria-label="任务类型">
-              <button id="wzTasksTypeAll" class="wz-tasks-type-filter active" type="button" data-run-type="">全部类型</button>
-              <button id="wzTasksTypePipeline" class="wz-tasks-type-filter pipeline" type="button" data-run-type="pipeline">网赚素材管线</button>
-              <button id="wzTasksTypeRemix" class="wz-tasks-type-filter remix" type="button" data-run-type="remix">竞品素材改造</button>
-            </div>
-            <div id="wzTasksList" class="wz-list empty-line">加载中…</div>
-            <div id="wzTasksPager" class="wz-gallery-pager" hidden></div>
+            <div id="wzTasksList" class="wz-tasks-list-host" aria-busy="true">加载中…</div>
+            <div id="wzTasksPager" class="wz-tasks-pager wz-gallery-pager" hidden></div>
           </section>
 
-          <section class="wz-tasks-detail-pane" aria-label="任务详情">
-            <div id="wzTasksDetailEmpty" class="wz-list empty-line">从左侧选择一个任务查看详情</div>
+          <section id="wzTasksDetailPane" class="wz-tasks-detail-pane" aria-label="任务详情" hidden>
             <div id="wzTasksDetail" hidden></div>
           </section>
         </div>
@@ -97,6 +105,6 @@
       </div>
     </div>
 
-    <script src="/wangzhuan-tasks.js" type="module"></script>
+    <script src="/wangzhuan-tasks.js?v=20260626-qc-real" type="module"></script>
   </body>
 </html>

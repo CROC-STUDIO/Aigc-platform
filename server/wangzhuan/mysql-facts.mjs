@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { normalizeStoredBranchDrafts } from "./branches.mjs";
 import { makeEstimateId, makeRemixEstimateId, makeRemixSourceId } from "./ids.mjs";
 import { normalizePagination, paginationMeta } from "./pagination.mjs";
 
@@ -1342,6 +1343,34 @@ function inlineTemplateSnapshotFromRequest(request = {}) {
   };
 }
 
+function hasUsableDecomposition(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (value.referenceVideoId) return true;
+  return Boolean(value.scene || value.hook || value.action || value.subject);
+}
+
+function pickUsableDecomposition(...candidates) {
+  for (const item of candidates) {
+    if (hasUsableDecomposition(item)) return item;
+  }
+  return null;
+}
+
+function resolveTemplateSnapshotForBatch(batch = {}) {
+  if (batch.templateSnapshot?.draft) return batch.templateSnapshot;
+  const fromRequest = inlineTemplateSnapshotFromRequest(batch.request || {});
+  if (fromRequest) return fromRequest;
+  const branches = batch.branchDrafts || batch.request?.branchDrafts || batch.request?.branches;
+  if (Array.isArray(branches) && branches.length) {
+    return {
+      schemaVersion: "template-inline-draft.v1",
+      status: "inline_draft",
+      draft: { branches }
+    };
+  }
+  return null;
+}
+
 function referenceSnapshotFromEstimateRow(row) {
   if (!row.reference_video_uid) return null;
   const probe = parseJsonValue(row.reference_probe_json, {});
@@ -1370,6 +1399,34 @@ function remixSourceSnapshotFromEstimateRow(row) {
     created_at: row.source_created_at,
     updated_at: row.source_updated_at
   });
+}
+
+export async function loadLatestBatchEstimateForReferenceVideo(context, referenceVideoId) {
+  const pool = await getPool();
+  if (!pool || !referenceVideoId) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT we.estimate_uid
+      FROM work_estimates we
+      JOIN reference_videos rv ON rv.id = we.reference_video_id
+      WHERE we.project_id = ?
+        AND we.user_id = ?
+        AND we.estimate_type = 'batch'
+        AND rv.reference_video_uid = ?
+      ORDER BY we.created_at DESC, we.id DESC
+      LIMIT 1`,
+      [facts.projectId, facts.userId, referenceVideoId]
+    );
+    if (!rows[0]?.estimate_uid) return null;
+    return loadEstimateFromMysql(context, rows[0].estimate_uid);
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load latest estimate for ${referenceVideoId}: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function loadEstimateFromMysql(context, estimateId) {
@@ -1669,7 +1726,7 @@ function taskRowToTask(row) {
     durationSec: request.durationSec,
     status: row.status,
     kind: row.task_kind,
-    promptPath: request.promptPath || "",
+    promptPath: relativePath(row.prompt_relative_path) || request.promptPath || "",
     outputPath: response.outputPath || relativePath(row.output_storage_relative_path) || "",
     remoteUrlStored: response.remoteUrlStored,
     attempts: Number(row.attempts || 0),
@@ -1737,7 +1794,10 @@ function outputRowToOutput(row, taskIds = []) {
   if (qcReportStorageUrl) output.qcReportStorageUrl = qcReportStorageUrl;
   if (probe.modelQcSummary && typeof probe.modelQcSummary === "object") output.modelQcSummary = probe.modelQcSummary;
   if (Array.isArray(probe.qcChecks) && probe.qcChecks.length) output.qcChecks = probe.qcChecks;
-  if (probe.qcSummary) output.qcSummary = probe.qcSummary;
+  const qcChecksFromReport = parseJsonValue(row.qc_checks_json ?? row.checks_json, []);
+  if (Array.isArray(qcChecksFromReport) && qcChecksFromReport.length) output.qcChecks = qcChecksFromReport;
+  if (row.qc_report_summary || row.qc_summary) output.qcSummary = row.qc_report_summary || row.qc_summary;
+  else if (probe.qcSummary) output.qcSummary = probe.qcSummary;
   return output;
 }
 
@@ -1790,12 +1850,11 @@ async function loadRemixRunRows(conn, facts, remixId) {
       af.updated_at AS source_updated_at
     FROM workflow_runs wr
     LEFT JOIN asset_files af ON af.id = wr.source_asset_file_id
-    WHERE wr.project_id = ?
-      AND wr.run_type = 'remix'
+    WHERE wr.run_type = 'remix'
       AND wr.run_uid = ?
       AND (wr.user_id = ? OR ? = 'admin')
     LIMIT 1`,
-    [facts.projectId, remixId, facts.userId, facts.role || "user"]
+    [remixId, facts.userId, facts.role || "user"]
   );
   return runs[0] ?? null;
 }
@@ -1821,6 +1880,13 @@ async function loadBatchRunRow(conn, facts, batchId) {
       we.estimate_uid,
       we.request_json AS estimate_request_json,
       we.estimate_json AS estimate_json,
+      est_pt.template_uid AS estimate_template_uid,
+      est_pv.template_version_uid AS estimate_template_version_uid,
+      est_pv.version_number AS estimate_template_version_number,
+      est_pv.status AS estimate_template_status,
+      est_pv.draft_json AS estimate_template_draft_json,
+      est_au.username AS estimate_template_created_by,
+      est_pv.created_at AS estimate_template_created_at,
       rv.reference_video_uid,
       rv.status AS reference_status,
       rv.duration_sec AS reference_duration_sec,
@@ -1839,15 +1905,17 @@ async function loadBatchRunRow(conn, facts, batchId) {
       vd.decomposition_json
     FROM workflow_runs wr
     LEFT JOIN work_estimates we ON we.id = wr.estimate_id
-    LEFT JOIN reference_videos rv ON rv.id = wr.reference_video_id
+    LEFT JOIN product_template_versions est_pv ON est_pv.id = we.template_version_id
+    LEFT JOIN product_templates est_pt ON est_pt.id = est_pv.template_id
+    LEFT JOIN app_users est_au ON est_au.id = est_pv.created_by
+    LEFT JOIN reference_videos rv ON rv.id = COALESCE(wr.reference_video_id, we.reference_video_id)
     LEFT JOIN asset_files ref_asset ON ref_asset.id = rv.asset_file_id
     LEFT JOIN video_decompositions vd ON vd.reference_video_id = rv.id
-    WHERE wr.project_id = ?
-      AND wr.run_type = 'pipeline'
+    WHERE wr.run_type = 'pipeline'
       AND wr.run_uid = ?
       AND (wr.user_id = ? OR ? = 'admin')
     LIMIT 1`,
-    [facts.projectId, batchId, facts.userId, facts.role || "user"]
+    [batchId, facts.userId, facts.role || "user"]
   );
   return runs[0] ?? null;
 }
@@ -1950,6 +2018,7 @@ async function loadBatchByRunRow(conn, facts, run) {
       gs.script_uid,
       prompt_asset.storage_key AS prompt_storage_key,
       prompt_asset.storage_url AS prompt_storage_url,
+      prompt_asset.storage_relative_path AS prompt_relative_path,
       output_asset.storage_relative_path AS output_storage_relative_path,
       output_asset.storage_key AS output_storage_key,
       output_asset.storage_url AS output_storage_url
@@ -1990,7 +2059,9 @@ async function loadBatchByRunRow(conn, facts, run) {
       prompt_asset.storage_url AS prompt_storage_url,
       qr_asset.storage_relative_path AS qc_report_path,
       qr_asset.storage_key AS qc_report_storage_key,
-      qr_asset.storage_url AS qc_report_storage_url
+      qr_asset.storage_url AS qc_report_storage_url,
+      qr.checks_json AS qc_checks_json,
+      qr.summary AS qc_report_summary
     FROM workflow_outputs wo
     JOIN asset_files af ON af.id = wo.asset_file_id
     LEFT JOIN generation_scripts gs ON gs.id = wo.script_id
@@ -2050,26 +2121,63 @@ async function loadBatchByRunRow(conn, facts, run) {
     };
   });
   const request = parseJsonValue(run.request_json, {});
+  const estimateRequest = parseJsonValue(run.estimate_request_json, {});
   const capability = parseJsonValue(run.capability_json, {});
   const estimatePayload = parseJsonValue(run.estimate_json, null);
   const estimate = {
     ...(estimatePayload?.estimate || estimatePayload || request.estimate || {}),
-    ...(run.estimate_uid ? { estimateId: run.estimate_uid } : {})
+    ...(run.estimate_uid ? { estimateId: run.estimate_uid } : {}),
+    request: estimateRequest
   };
   delete estimate.confirmationToken;
+  let templateSnapshot = parseJsonValue(run.template_snapshot_json, null);
+  if (!templateSnapshot?.draft) {
+    const fromEstimate = templateSnapshotFromEstimateRow({
+      template_uid: run.estimate_template_uid,
+      template_version_uid: run.estimate_template_version_uid,
+      template_version_number: run.estimate_template_version_number,
+      template_status: run.estimate_template_status,
+      template_draft_json: run.estimate_template_draft_json,
+      template_created_by: run.estimate_template_created_by,
+      template_created_at: run.estimate_template_created_at
+    });
+    if (fromEstimate) templateSnapshot = fromEstimate;
+  }
+  if (!templateSnapshot?.draft) {
+    const fromRequest = inlineTemplateSnapshotFromRequest(request);
+    if (fromRequest) templateSnapshot = fromRequest;
+  }
+  let branchDrafts = request.branchDrafts || request.branches || estimateRequest.branches || [];
+  if (branchDrafts.length) {
+    branchDrafts = normalizeStoredBranchDrafts(templateSnapshot, branchDrafts);
+  }
+  if (!templateSnapshot?.draft && branchDrafts.length) {
+    templateSnapshot = {
+      schemaVersion: "template-inline-draft.v1",
+      status: "inline_draft",
+      draft: { branches: branchDrafts }
+    };
+  }
+  const decomposition = pickUsableDecomposition(
+    parseJsonValue(run.decomposition_json, null),
+    request.decomposition,
+    estimateRequest.decomposition
+  );
   const batch = {
     batchId: run.run_uid,
-    userBatchName: request.batchName || "",
-    displayBatchName: request.batchName || "",
+    userBatchName: request.batchName || estimateRequest.batchName || "",
+    displayBatchName: request.batchName || estimateRequest.batchName || "",
     type: "pipeline",
     status: run.status,
     userId: facts.username || "mysql",
     projectRoot: projectRoot({ userProjectRoot: "" }) || "current_project",
-    templateSnapshot: parseJsonValue(run.template_snapshot_json, null),
+    request,
+    templateSnapshot,
     referenceVideo: withAssetPreviewUrl(referenceSnapshotFromRunRow(run)),
-    decomposition: parseJsonValue(run.decomposition_json, null),
+    decomposition,
     estimate,
-    branchDrafts: request.branchDrafts || request.branches || [],
+    capabilities: capability,
+    branchDrafts,
     previewType: capability.previewType,
     plans: capability.plans || [],
     previewConfirmedAt: capability.previewConfirmedAt,
@@ -2153,7 +2261,9 @@ async function loadRemixByRunRow(conn, facts, run) {
       prompt_asset.storage_url AS prompt_storage_url,
       qr_asset.storage_relative_path AS qc_report_path,
       qr_asset.storage_key AS qc_report_storage_key,
-      qr_asset.storage_url AS qc_report_storage_url
+      qr_asset.storage_url AS qc_report_storage_url,
+      qr.checks_json AS qc_checks_json,
+      qr.summary AS qc_report_summary
     FROM workflow_outputs wo
     JOIN asset_files af ON af.id = wo.asset_file_id
     LEFT JOIN workflow_tasks first_task ON first_task.run_id = wo.run_id
@@ -2775,7 +2885,8 @@ function taskSummaryFromRunRow(row) {
     startedAt: isoDate(row.started_at),
     finishedAt: isoDate(row.finished_at),
     stopReason: row.stop_reason || "",
-    isActive: ACTIVE_TASK_LIST_STATUSES.includes(row.status)
+    isActive: ACTIVE_TASK_LIST_STATUSES.includes(row.status),
+    projectKey: String(row.project_key || "").replace(/^root:/, "")
   };
 }
 
@@ -2800,9 +2911,8 @@ export async function loadWorkflowTasksFromMysql(context, query = {}) {
   try {
     const facts = await ensureContextFacts(conn, context);
     const pagination = normalizePagination(query);
-    const params = [facts.projectId, facts.userId];
+    const params = [facts.userId];
     const filters = [
-      "wr.project_id = ?",
       "wr.user_id = ?",
       "wr.run_type IN ('pipeline', 'remix')"
     ];
@@ -2840,8 +2950,10 @@ export async function loadWorkflowTasksFromMysql(context, query = {}) {
         wr.started_at,
         wr.finished_at,
         wr.created_at,
-        wr.updated_at
+        wr.updated_at,
+        p.project_key
       FROM workflow_runs wr
+      LEFT JOIN projects p ON p.id = wr.project_id
       WHERE ${whereClause}
       ORDER BY wr.updated_at DESC, wr.id DESC
       LIMIT ${limit} OFFSET ${offset}`,
@@ -2893,7 +3005,7 @@ function requestSnapshot(batch) {
   }
   return {
     ...(batch.request || {}),
-    estimateId: batch.estimate?.estimateId,
+    estimateId: batch.estimate?.estimateId || batch.request?.estimateId,
     estimate: sanitizedEstimateRecord({ estimate: batch.estimate || {} }),
     durationSec: batch.estimate?.durationSec,
     variantCount: batch.estimate?.variantCount,
@@ -2904,7 +3016,9 @@ function requestSnapshot(batch) {
     imageTaskCount: batch.estimate?.imageTaskCount,
     targetChannel: batch.estimate?.request?.targetChannel || batch.templateSnapshot?.draft?.targetChannels?.[0],
     outputRatio: batch.estimate?.outputRatio || batch.estimate?.request?.outputRatio,
-    branchDrafts: batch.branchDrafts || batch.estimate?.request?.branches || []
+    branchDrafts: batch.branchDrafts || batch.estimate?.request?.branches || batch.request?.branchDrafts || batch.request?.branches || [],
+    ...(hasUsableDecomposition(batch.decomposition) ? { decomposition: batch.decomposition } : {}),
+    ...(batch.templateSnapshot?.draft ? { templateSnapshot: batch.templateSnapshot } : {})
   };
 }
 
@@ -3507,17 +3621,24 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
     await ensureStateTransitionRules(conn);
     const existingRunId = await findRunId(conn, facts.projectId, batch.batchId);
     let previousStatus = null;
+    let previousReferenceVideoId = null;
+    let previousTemplateVersionId = null;
     if (existingRunId) {
       const [previousRows] = await conn.execute(
-        "SELECT status FROM workflow_runs WHERE id = ? LIMIT 1",
+        "SELECT status, reference_video_id, template_version_id FROM workflow_runs WHERE id = ? LIMIT 1",
         [existingRunId]
       );
       previousStatus = previousRows[0]?.status ?? null;
+      previousReferenceVideoId = previousRows[0]?.reference_video_id ?? null;
+      previousTemplateVersionId = previousRows[0]?.template_version_id ?? null;
     }
     const sourceAssetFileId = await sourceAssetIdForBatch(conn, facts, batch);
     const estimateId = await findEstimateId(conn, facts.projectId, batch.estimate?.estimateId);
-    const templateVersionId = await templateVersionIdForBatch(conn, facts, batch);
-    const referenceVideoId = await referenceVideoIdForBatch(conn, facts, batch);
+    let templateVersionId = await templateVersionIdForBatch(conn, facts, batch);
+    let referenceVideoId = await referenceVideoIdForBatch(conn, facts, batch);
+    if (!referenceVideoId && previousReferenceVideoId) referenceVideoId = previousReferenceVideoId;
+    if (!templateVersionId && previousTemplateVersionId) templateVersionId = previousTemplateVersionId;
+    const templateSnapshot = resolveTemplateSnapshotForBatch(batch);
 
     await conn.execute(
     `INSERT INTO workflow_runs
@@ -3527,13 +3648,13 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         status = VALUES(status),
-        estimate_id = VALUES(estimate_id),
+        estimate_id = COALESCE(VALUES(estimate_id), estimate_id),
         template_version_id = VALUES(template_version_id),
         reference_video_id = VALUES(reference_video_id),
         source_asset_file_id = VALUES(source_asset_file_id),
         operation_type = VALUES(operation_type),
         target_channel = VALUES(target_channel),
-        template_snapshot_json = VALUES(template_snapshot_json),
+        template_snapshot_json = COALESCE(VALUES(template_snapshot_json), template_snapshot_json),
         request_json = VALUES(request_json),
         capability_json = VALUES(capability_json),
         qc_summary_json = VALUES(qc_summary_json),
@@ -3553,7 +3674,7 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         sourceAssetFileId,
         batch.operationType || batch.request?.operationType || null,
         batch.targetChannel || batch.request?.targetChannel || batch.estimate?.request?.targetChannel || null,
-        batch.templateSnapshot ? json(batch.templateSnapshot) : null,
+        templateSnapshot ? json(templateSnapshot) : null,
         json(requestSnapshot(batch)),
         json(capabilitySnapshotForBatch(batch)),
         json(batch.qcSummary || {}),
@@ -3709,6 +3830,9 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
     await syncSchedulerJobs(conn, batch, runId);
 
     await conn.commit();
+    if (hasUsableDecomposition(batch.decomposition)) {
+      await syncVideoDecompositionFact(context, batch.decomposition);
+    }
     return { skipped: false, runId };
   } catch (error) {
     await conn.rollback();

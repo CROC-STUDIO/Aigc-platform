@@ -1,7 +1,7 @@
 // Horizontal node-canvas controller for the 竞品素材 video-ops 工作台.
-// Linear topology: task → input → job → result.
-// Draws SVG links from real DOM positions (responsive, no hard coords).
-// Self-contained, no imports, safe to load with `defer`.
+// Desktop (≥981px): menu-driven step view — one stage fills the workspace.
+// Mobile: vertical stack with scroll-into-view.
+// Linear topology: task → input → job + result.
 (() => {
   const canvas = document.getElementById("remixCanvas");
   const svg = document.getElementById("remixCanvasLinks");
@@ -11,7 +11,6 @@
 
   const SVGNS = "http://www.w3.org/2000/svg";
 
-  // Inject a collapse chevron button into every node header.
   for (const head of canvas.querySelectorAll(".wz-node > .panel-head")) {
     if (head.querySelector(".wz-collapse-btn")) continue;
     const btn = document.createElement("button");
@@ -36,7 +35,6 @@
     return list;
   }
 
-  // Position in the canvas's own (unscaled) coordinate space — immune to zoom/scroll.
   function pos(el) {
     let x = 0;
     let y = 0;
@@ -55,6 +53,14 @@
   }
 
   function drawLinks() {
+    if (canvas.classList.contains("wz-step-view")) {
+      svg.setAttribute("viewBox", "0 0 0 0");
+      svg.setAttribute("width", 0);
+      svg.setAttribute("height", 0);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      return;
+    }
+
     const W = canvas.offsetWidth;
     const H = canvas.offsetHeight;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -102,8 +108,13 @@
 
   const stepbar = id("remixStepbar");
   const items = stepbar ? [...stepbar.querySelectorAll(".wz-stepbar-item")] : [];
+  const scroller = document.querySelector(".wz-canvas-scroll");
 
-  if ("IntersectionObserver" in window) {
+  const stepViewEnabled = () => window.matchMedia("(min-width: 981px)").matches;
+  const focusEnabled = stepViewEnabled;
+  let activeStep = "1";
+
+  if ("IntersectionObserver" in window && !stepViewEnabled()) {
     const stageNodes = [
       ["1", id("remixNodeTask")],
       ["2", id("remixNodeInput")],
@@ -135,11 +146,6 @@
       observer.observe(el);
     }
   }
-
-  // --- Focus & collapse ---------------------------------------------------
-  // Focus expands the active node, collapses others in focus mode, and scrolls
-  // it into view — same behavior as the 网赚素材管线 canvas.
-  const focusEnabled = () => window.matchMedia("(min-width: 981px)").matches;
 
   function columnForNode(node) {
     return node?.closest(".wz-col") || null;
@@ -175,9 +181,8 @@
       }
       case "remixNodeResult": {
         const link = document.getElementById("videoOpsTaskDetailLink");
-        const box = document.getElementById("videoOpsResultBox");
         if (link && link.getAttribute("aria-disabled") === "false") return "结果已归档到任务管理";
-        return box?.textContent?.trim() || "结果待归档";
+        return document.getElementById("videoOpsResultBox")?.textContent?.trim() || "结果待归档";
       }
       default:
         return node.querySelector(".panel-head h2")?.textContent?.trim() || "";
@@ -192,7 +197,86 @@
     }
   }
 
-  function focusNode(node, { center = true, collapseOthers = true } = {}) {
+  function resetStepViewDom() {
+    canvas.classList.remove("wz-step-view");
+    for (const col of canvas.querySelectorAll(".wz-col")) {
+      col.hidden = false;
+      col.classList.remove("is-step-active", "wz-col-focus");
+    }
+  }
+
+  function activateStep(step, options = {}) {
+    activeStep = String(step);
+    if (!stepViewEnabled()) {
+      const stage = STAGES.find((item) => item.step === activeStep);
+      const target = stage?.nodes?.map((nid) => id(nid)).find(Boolean);
+      if (target) focusNodeLegacy(target, options);
+      return;
+    }
+
+    canvas.classList.add("wz-step-view");
+    canvas.classList.remove("wz-focus-mode");
+    canvas.removeAttribute("data-focus-step");
+
+    for (const col of canvas.querySelectorAll(".wz-col")) {
+      const isActive = col.dataset.step === activeStep;
+      col.classList.toggle("is-step-active", isActive);
+      col.hidden = !isActive;
+      col.classList.remove("wz-col-focus");
+    }
+    setStepbarActive(activeStep);
+
+    const activeCol = canvas.querySelector(".wz-col.is-step-active");
+    if (activeCol) {
+      for (const n of activeCol.querySelectorAll(".wz-node")) {
+        n.classList.remove("collapsed");
+        n.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    for (const n of canvas.querySelectorAll(".wz-node")) {
+      n.classList.remove("focused");
+    }
+
+    if (activeStep === "3") {
+      for (const nid of ["remixNodeJob", "remixNodeResult"]) {
+        id(nid)?.classList.add("focused");
+      }
+    } else {
+      const stage = STAGES.find((item) => item.step === activeStep);
+      for (const nid of stage?.nodes || []) {
+        id(nid)?.classList.add("focused");
+      }
+    }
+
+    updateChipSummaries();
+    scheduleDraw();
+
+    if (options.scroll !== false) {
+      requestAnimationFrame(() => {
+        scroller?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
+    runStepEnter(activeCol);
+  }
+
+  function runStepEnter(activeCol) {
+    if (!activeCol || !stepViewEnabled()) return;
+    activeCol.classList.remove("wz-step-enter");
+    for (const node of activeCol.querySelectorAll(".wz-node")) {
+      node.classList.remove("wz-step-enter");
+    }
+    void activeCol.offsetWidth;
+    activeCol.classList.add("wz-step-enter");
+    for (const [index, node] of [...activeCol.querySelectorAll(".wz-node")].entries()) {
+      node.style.setProperty("--wz-step-stagger", `${Math.min(index, 4) * 60}ms`);
+      node.classList.add("wz-step-enter");
+    }
+  }
+
+  window.wzActivateStep = activateStep;
+
+  function focusNodeLegacy(node, { center = true, collapseOthers = true } = {}) {
     if (!node) return;
     if (!focusEnabled()) {
       if (center) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -220,7 +304,6 @@
       if (isTarget) {
         n.classList.remove("collapsed");
       } else if (sameCol && (focusStep === "2" || focusStep === "3")) {
-        // Wide input column and job/result column keep sibling nodes visible.
         n.classList.remove("collapsed");
       } else {
         n.classList.add("collapsed");
@@ -238,10 +321,18 @@
     updateChipSummaries();
   }
 
+  function focusNode(node, options = {}) {
+    if (!node) return;
+    if (stepViewEnabled()) {
+      const step = columnForNode(node)?.dataset?.step;
+      if (step) activateStep(step, { ...options, scroll: options.center !== false });
+      return;
+    }
+    focusNodeLegacy(node, options);
+  }
+
   function focusStage(step, options = {}) {
-    const stage = STAGES.find((item) => item.step === String(step));
-    const target = stage?.nodes?.map((nid) => id(nid)).find(Boolean);
-    if (target) focusNode(target, options);
+    activateStep(step, options);
   }
 
   window.wzFocusNode = (idOrNode, options) => {
@@ -251,9 +342,10 @@
   window.wzFocusStage = (step, options) => focusStage(step, options);
 
   function toggleCollapse(node) {
+    if (stepViewEnabled()) return;
     node.classList.toggle("collapsed");
     if (!node.classList.contains("collapsed")) {
-      focusNode(node, { collapseOthers: true });
+      focusNodeLegacy(node, { collapseOthers: true });
       return;
     }
     scheduleDraw();
@@ -266,46 +358,45 @@
       return;
     }
     if (event.target.closest("button, a, input, select, textarea, label")) return;
-    const collapsedNode = event.target.closest(".wz-node.collapsed");
-    if (collapsedNode) {
-      focusNode(collapsedNode);
-      return;
+
+    if (!stepViewEnabled()) {
+      const collapsedNode = event.target.closest(".wz-node.collapsed");
+      if (collapsedNode) {
+        focusNode(collapsedNode);
+        return;
+      }
+      const head = event.target.closest(".panel-head");
+      if (!head) return;
+      const node = head.closest(".wz-node");
+      if (node) focusNode(node);
     }
-    const head = event.target.closest(".panel-head");
-    if (!head) return;
-    const node = head.closest(".wz-node");
-    if (!node) return;
-    focusNode(node);
   });
 
   canvas.addEventListener("keydown", (event) => {
     if (!focusEnabled() || event.target.closest("input, textarea, select")) return;
     const step = event.key;
     if (!/^[1-3]$/.test(step)) return;
-    const item = items.find((it) => it.dataset.step === step);
-    const href = item?.getAttribute("href") || "";
-    const target = href.startsWith("#") ? id(href.slice(1)) : null;
-    if (!target) return;
     event.preventDefault();
-    focusNode(target);
+    activateStep(step);
   });
 
   for (const item of items) {
     item.addEventListener("click", (event) => {
-      const href = item.getAttribute("href") || "";
-      const target = href.startsWith("#") ? id(href.slice(1)) : null;
-      if (!target) return;
       event.preventDefault();
-      focusNode(target);
+      const step = item.dataset.step;
+      if (step) activateStep(step);
     });
   }
 
-  window.matchMedia("(min-width: 981px)").addEventListener?.("change", () => {
-    scheduleDraw();
+  window.matchMedia("(min-width: 981px)").addEventListener?.("change", (event) => {
+    if (event.matches) {
+      activateStep(activeStep || "1", { scroll: false });
+    } else {
+      resetStepViewDom();
+      scheduleDraw();
+    }
   });
 
-  // --- Grab-to-pan on empty canvas area -----------------------------------
-  const scroller = document.querySelector(".wz-canvas-scroll");
   if (scroller) {
     let panning = false;
     let startX = 0;
@@ -315,6 +406,7 @@
 
     scroller.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      if (stepViewEnabled()) return;
       if (event.target.closest(".wz-node") || event.target.closest("a, button, input, select, textarea")) return;
       panning = true;
       startX = event.clientX;
@@ -342,7 +434,6 @@
     scroller.addEventListener("pointerleave", endPan);
   }
 
-  // --- Zoom (Ctrl/⌘ + wheel, and a floating zoom bar) ---------------------
   let zoom = 1;
   const ZMIN = 0.5;
   const ZMAX = 1.5;
@@ -386,7 +477,6 @@
     );
   }
 
-  // Drives off DOM signals for the video-ops workbench. Monotonic.
   const hasVideoInput = () => {
     const reportText = document.getElementById("videoOpsReportText")?.value?.trim();
     if (reportText) return true;
@@ -477,16 +567,14 @@
       if (refreshPipelineState.lastDoneFlags) {
         for (let i = 0; i < doneFlags.length - 1; i += 1) {
           if (doneFlags[i] && !refreshPipelineState.lastDoneFlags[i]) {
-            const nextStage = STAGES[i + 1];
-            const nextNode = nextStage?.nodes?.map((nid) => id(nid)).find(Boolean);
-            if (nextNode) focusNode(nextNode);
+            if (Number(activeStep) === i + 1) {
+              activateStep(STAGES[i + 1].step);
+            }
             break;
           }
         }
       } else {
-        const currentStage = STAGES[currentIdx];
-        const currentNode = currentStage?.nodes?.map((nid) => id(nid)).find(Boolean);
-        if (currentNode) focusNode(currentNode, { center: false });
+        activateStep(STAGES[currentIdx].step, { scroll: false });
       }
     }
     refreshPipelineState.lastDoneFlags = [...doneFlags];
@@ -504,8 +592,6 @@
     }
   }
   refreshPipelineState();
-
-  if (focusEnabled()) focusNode(id("remixNodeTask"), { center: false });
 
   scheduleDraw();
   window.addEventListener("load", scheduleDraw);
