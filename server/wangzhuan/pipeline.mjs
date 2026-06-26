@@ -26,6 +26,7 @@ import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mj
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
+  formatProtagonistFissionGuide,
   generateSeedancePlan,
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
@@ -103,10 +104,16 @@ function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaime
   const decomposition = batch.decomposition || {};
   const baseAction = decomposition.action || "Show the product benefit in a vertical app demo";
   const rewardFeedback = decomposition.rewardFeedback || "Show believable reward feedback inside the app";
+  const languages = Array.isArray(branch?.languages) && branch.languages.length
+    ? branch.languages
+    : (branch?.language ? [branch.language] : []);
+  const regions = Array.isArray(branch?.regions) ? branch.regions : [];
   return [
     `${baseAction}.`,
     `Variant ${variantIndex} focuses on ${productName} with ${batch.referenceVideo?.scene || decomposition.scene || "a reference-inspired scene"}.`,
     materialDirection ? `Creative angle: ${materialDirection}.` : "",
+    languages.length ? `Primary spoken language is ${languages[0]}${languages.length > 1 ? `, with locale coverage for ${languages.join(", ")}` : ""}.` : "",
+    regions.length ? `Target regions: ${regions.join(", ")}.` : "",
     `Segment ${segmentIndex} keeps pacing within 15 seconds and includes ${rewardFeedback}.`,
     ...requiredDisclaimers.map((item) => `Disclaimer: ${item}.`)
   ].filter(Boolean).join(" ");
@@ -142,12 +149,19 @@ function buildPrompt(batch, script, kind) {
   const decomposition = batch.decomposition || {};
   const assetUrls = branch.assetUrls || {};
   const channel = branch.targetChannels?.[0] || batch.estimate?.request?.targetChannel || batch.templateSnapshot?.draft?.targetChannels?.[0] || "generic";
+  const languages = Array.isArray(branch.languages) && branch.languages.length
+    ? branch.languages
+    : [branch.language || draft.language || batch.estimate?.request?.language || "en-US"];
+  const regions = Array.isArray(branch.regions) && branch.regions.length
+    ? branch.regions
+    : (Array.isArray(draft.regions) && draft.regions.length ? draft.regions : []);
   const lines = [
     script.branchId ? `Branch: ${script.branchLabel || script.branchId} (${script.branchId})` : "",
     `Product: ${branch.productName || draft.productName || "Product"}`,
     branch.productLink ? `Store page: ${branch.productLink}` : "",
-    `Language: ${branch.language || draft.language || batch.estimate?.request?.language || "en-US"}`,
-    `Region: ${Array.isArray(branch.regions) ? branch.regions.join(", ") : branch.regions || ""}`,
+    `Primary language: ${languages[0] || "en-US"}`,
+    `All languages: ${languages.join(", ")}`,
+    `Target regions: ${regions.join(", ") || "US"}`,
     `Currency: ${branch.currencySymbol || draft.currencySymbol || ""}`,
     `Channel: ${channel}`,
     `Revenue promise level: ${branch.promiseLevel || draft.promiseLevel || "stable"}`,
@@ -156,6 +170,8 @@ function buildPrompt(batch, script, kind) {
     ...promptAssetLines(assetUrls),
     `Scene: ${decomposition.scene || "mobile app reward scene"}`,
     `Subject: ${decomposition.subject || "user with phone"}`,
+    decomposition.protagonist ? `Protagonist: ${decomposition.protagonist}` : "",
+    decomposition.voiceover ? `Voiceover function: ${decomposition.voiceover}` : "",
     `Camera: ${decomposition.camera || "vertical close-up"}`,
     `Lighting: ${decomposition.lighting || "bright natural lighting"}`,
     `Style: ${decomposition.style || "clean performance ad"}`,
@@ -164,8 +180,11 @@ function buildPrompt(batch, script, kind) {
     `CTA: ${script.cta}`,
     `Ending: ${script.ending}`,
     branch.variantPrompt ? `Variant instructions: ${branch.variantPrompt}` : "",
+    formatProtagonistFissionGuide(decomposition, script.branchVariantIndex || script.variantIndex || 1, branch.variantPrompt),
     branch.customPrompt ? `Additional user prompt: ${branch.customPrompt}` : "",
     branch.negativePrompt ? `User restrictions: ${branch.negativePrompt}` : "",
+    `Locale rule: all on-screen UI text, subtitles, CTA phrasing, and voiceover must match the primary language ${languages[0] || "en-US"}; multi-language config (${languages.join(", ")}) and target regions (${regions.join(", ") || "US"}) should only affect localization style, scenario, and wording choices, never mixed-language output in one segment.`,
+    "Protagonist rule: seedancePrompt must name a specific profession/identity and reflect it in clothing, props, scene, and voiceover tone; do not use generic labels like user or young woman.",
     "Do not include competitor names, watermarks, logos, signed URLs, or policy-unsafe income guarantees.",
     kind === "image" ? "Task: create the first-frame image prompt for Seedance." : "Task: create a 15 second 9:16 Seedance image-to-video prompt."
   ].filter(Boolean);
@@ -675,23 +694,42 @@ export async function submitPendingGenerationTasks(context, batchId) {
       requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
     });
   }
-  const tasks = [];
-  for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
-    if (task.status !== "pending") {
-      tasks.push(task);
-      continue;
+  const limit = Math.max(
+    1,
+    Math.min(
+      Number(context.config?.wangzhuan?.capabilities?.maxConcurrency || 4),
+      Number(batch.estimate?.requestedConcurrency || batch.request?.requestedConcurrency || 1) || 1
+    )
+  );
+  const originalTasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const tasks = [...originalTasks];
+  const pendingIndexes = [];
+  for (let index = 0; index < originalTasks.length; index += 1) {
+    if (originalTasks[index]?.status === "pending") pendingIndexes.push(index);
+  }
+  for (let offset = 0; offset < pendingIndexes.length; offset += limit) {
+    const chunk = pendingIndexes.slice(offset, offset + limit);
+    const chunkResults = await Promise.all(chunk.map(async (taskIndex) => {
+      const nextTask = await submitTaskToSeedance(context, batch, originalTasks[taskIndex], provider, now);
+      return { taskIndex, nextTask };
+    }));
+    for (const { taskIndex, nextTask } of chunkResults) {
+      if (nextTask.status === "waiting_upstream") submittedCount += 1;
+      if (nextTask.status === "failed") failedSubmitCount += 1;
+      tasks[taskIndex] = nextTask;
     }
-    const nextTask = await submitTaskToSeedance(context, batch, task, provider, now);
-    if (nextTask.status === "waiting_upstream") submittedCount += 1;
-    if (nextTask.status === "failed") failedSubmitCount += 1;
-    tasks.push(nextTask);
   }
   const nextStatus = submittedCount > 0
     ? "running"
     : failedSubmitCount > 0
       ? "failed"
       : batch.status === "queued" ? "running" : batch.status;
-  const saved = await writeBatch(context, { ...batch, status: nextStatus, tasks });
+  const saved = await writeBatch(context, {
+    ...batch,
+    status: nextStatus,
+    tasks,
+    startedAt: batch.startedAt || (submittedCount > 0 ? now : undefined)
+  });
   await writeTaskMaps(context, saved);
   for (const task of saved.tasks.filter((item) => item.startedAt === now && item.status === "waiting_upstream")) {
     await recordTelemetryEvent(context, "generation_task_submitted", {

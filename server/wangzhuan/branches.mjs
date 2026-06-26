@@ -16,6 +16,19 @@ function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function mergeLanguageMap(base = {}, override = {}) {
+  const merged = {};
+  for (const [key, value] of Object.entries(isObject(base) ? base : {})) {
+    const text = cleanString(value);
+    if (text) merged[key] = text;
+  }
+  for (const [key, value] of Object.entries(isObject(override) ? override : {})) {
+    const text = cleanString(value);
+    if (text) merged[key] = text;
+  }
+  return merged;
+}
+
 function mergeAssetMap(base = {}, override = {}) {
   const merged = {};
   for (const key of ASSET_KEYS) {
@@ -75,6 +88,16 @@ export function normalizeBranchDrafts(draft = {}, overrides = undefined) {
       customPrompt: cleanString(branch.customPrompt) || cleanString(base.customPrompt),
       negativePrompt: cleanString(branch.negativePrompt) || cleanString(base.negativePrompt),
       variantPrompt: cleanString(branch.variantPrompt) || cleanString(base.variantPrompt),
+      disclaimer: cleanString(branch.disclaimer) || cleanString(base.disclaimer),
+      disclaimerPreset: cleanString(branch.disclaimerPreset) || cleanString(base.disclaimerPreset),
+      disclaimerPresetId: cleanString(branch.disclaimerPresetId) || cleanString(base.disclaimerPresetId),
+      disclaimerLanguage: cleanString(branch.disclaimerLanguage) || cleanString(base.disclaimerLanguage),
+      disclaimerEnabled: branch.disclaimerEnabled ?? base.disclaimerEnabled,
+      disclaimerOverlay: {
+        ...(isObject(base.disclaimerOverlay) ? base.disclaimerOverlay : {}),
+        ...(isObject(branch.disclaimerOverlay) ? branch.disclaimerOverlay : {})
+      },
+      disclaimerByLanguage: mergeLanguageMap(base.disclaimerByLanguage, branch.disclaimerByLanguage),
       assetFileNames: mergeAssetMap(base.assetFileNames, branch.assetFileNames),
       assetUrls: mergeAssetMap(base.assetUrls, branch.assetUrls),
       assetStorageKeys: mergeAssetMap(base.assetStorageKeys, branch.assetStorageKeys),

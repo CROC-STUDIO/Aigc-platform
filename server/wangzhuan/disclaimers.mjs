@@ -26,3 +26,31 @@ export function buildDisclaimerByLanguage(languages = [], preset = "auto") {
     resolveDisclaimerText(language, preset)
   ]));
 }
+
+export function resolveEffectiveDisclaimer({
+  language = "",
+  preset = "auto",
+  customText = ""
+} = {}) {
+  const manual = String(customText || "").trim();
+  if (manual) return manual;
+  return resolveDisclaimerText(language, preset);
+}
+
+export function buildEffectiveDisclaimerByLanguage(
+  languages = [],
+  { preset = "auto", customByLanguage = null, customText = "" } = {}
+) {
+  const source = Array.isArray(languages) ? languages : String(languages || "").split(",");
+  const normalized = source.map((item) => String(item || "").trim()).filter(Boolean);
+  const entries = normalized.length ? normalized : ["en-US"];
+  const customMap = customByLanguage && typeof customByLanguage === "object" ? customByLanguage : {};
+  return Object.fromEntries(entries.map((language) => {
+    const customValue = String(customMap[language] || "").trim();
+    return [language, resolveEffectiveDisclaimer({
+      language,
+      preset,
+      customText: customValue || customText
+    })];
+  }));
+}

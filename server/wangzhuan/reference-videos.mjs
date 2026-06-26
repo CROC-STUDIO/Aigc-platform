@@ -17,6 +17,10 @@ import {
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { buildPublicUrl } from "../object-storage.mjs";
+import {
+  DECOMPOSITION_SYSTEM_PROMPT,
+  buildDecompositionUserPrompt
+} from "./decomposition-prompt.mjs";
 import { flattenDecompositionFieldValue } from "./decomposition-text.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
@@ -35,32 +39,6 @@ const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
   "quality",
   "hook"
 ]);
-
-const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
-  scene: "视频主要场景，必须具体说明空间、时间段、人物所在环境、App 页面状态和关键可见元素，避免只写“App 演示/奖励页面”",
-  subject: "画面主体，必须具体说明人物性别/年龄段/人种或外观、服装、手持物、手机、产品 UI 或奖励元素",
-  action: "核心动作，按时间顺序说明人物动作、口播/字幕功能、点击路径、镜头推进、奖励反馈和转折",
-  camera: "镜头语言，说明景别、构图、运镜、切镜节奏、手机/人物在画面中的位置",
-  lighting: "光线和画面氛围，说明室内/室外、冷暖、明暗、真实拍摄或广告质感",
-  style: "素材风格，例如真人口播、手持演示、UGC、App demo，并说明字幕、口播、音效/背景音是否是核心表达",
-  quality: "画质和生成质量要求，说明清晰度、稳定性、UI 可读性、人物一致性和需要避免的失真",
-  hook: "前三秒钩子，保留结构但不要照搬竞品文案，说明钩子靠人物、字幕、奖励反馈还是问题痛点触发",
-  phoneUi: "可选，手机界面/产品界面重点，具体到页面模块、按钮、数字/金币/进度条/提现入口等可见信息",
-  protagonist: "可选但能判断时必须填写，具体人物身份、年龄段、外观、服装、情绪、姿态、手持物和是否延续到后续镜头",
-  voiceover: "可选但能判断时必须填写，口播/旁白的功能、语气、节奏和大意，不要复述竞品原文案",
-  onscreenText: "可选但能判断时必须填写，屏幕字幕/贴纸/按钮文案的出现时机、位置、功能和视觉层级",
-  ctaMoment: "可选，CTA 出现的具体时刻、触发画面、按钮/字幕/口播承接方式",
-  endingMoment: "可选，Ending 的收束画面、品牌/下载/奖励结果展示方式",
-  continuityAnchors: "可选，后续裂变或 30s 分段需要保持一致的主角、服装、地点、手机 UI 状态、最后关键帧",
-  actionReference: "Seedance 动作参考，提炼可复用的人物/手部/手机操作/奖励反馈动作链，不照搬竞品品牌和原文案",
-  cameraReference: "Seedance 运镜参考，提炼景别、构图、镜头移动、切镜节奏、主体和手机位置",
-  textElements: "Seedance 文字生成参考，说明字幕、气泡台词、按钮文案、CTA 的位置/层级/功能，不照搬竞品原文案",
-  effectReference: "Seedance 特效参考，说明转场、金币/余额反馈、弹窗、强调动画、音效/节奏点等可迁移效果",
-  doNotCopyElements: "不得复刻的竞品元素，包括品牌、logo、水印、UI 细节、原字幕/口播文案、人物身份或独有包装",
-  rewardFeedback: "可选，奖励反馈或转化刺激点，说明金币、余额、进度、到账感、弹窗或按钮反馈如何出现",
-  cta: "可选，行动号召结构，说明 CTA 出现时机、位置、按钮/字幕/口播表达方式",
-  disclaimer: "可选，合规提醒或不能夸大的点，说明是否已有免责声明、出现位置和需要补充的限制"
-});
 
 const DECOMPOSITION_FIELD_ALIASES = Object.freeze({
   scene: ["scene", "场景", "主要场景", "视频场景"],
@@ -85,7 +63,6 @@ const DECOMPOSITION_FIELD_ALIASES = Object.freeze({
   doNotCopyElements: ["doNotCopyElements", "do_not_copy_elements", "不要复制元素", "不得复刻元素", "竞品禁用元素"],
   rewardFeedback: ["rewardFeedback", "reward_feedback", "奖励反馈", "收益反馈", "金币反馈"],
   cta: ["cta", "CTA", "行动号召", "下载引导"],
-  disclaimer: ["disclaimer", "合规提醒", "免责声明", "限制说明"]
 });
 
 const DECOMPOSITION_CONTAINER_KEYS = Object.freeze([
@@ -582,40 +559,7 @@ function videoProbePrompt(probe) {
 }
 
 function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionInputs = {}) {
-  const notes = String(request.knowledgeNotes || "").trim();
-  const promptText = [
-    "请根据参考视频文件和抽样画面帧，生成网赚素材脚本拆解 JSON 草稿。",
-    "",
-    "参考视频信息：",
-    videoProbePrompt(probe),
-    "",
-    "字段说明：",
-    JSON.stringify(DECOMPOSITION_JSON_SCHEMA_HINT, null, 2),
-    "",
-    "Seedance decomposition dimensions:",
-    "- actionReference = 动作参考：提炼人物/手部/手机操作/奖励反馈的可复用动作链。",
-    "- cameraReference = 运镜参考：提炼景别、构图、镜头移动、切镜节奏。",
-    "- textElements = 文字生成：提炼字幕、气泡台词、按钮文案、CTA 的位置、层级和功能，不照搬竞品原文案。",
-    "- effectReference = 特效参考：提炼金币/余额反馈、弹窗、转场、强调动画、音效节奏点。",
-    "- doNotCopyElements = 不得复刻：竞品品牌、logo、水印、UI 细节、原字幕/口播文案、人物身份或独有包装。",
-    "",
-    notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
-    "",
-    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
-    "",
-    "要求：",
-    "1. 必须结合上传视频/抽帧画面判断镜头、节奏、产品露出、CTA 和 ending，不要只依据元数据。",
-    "2. hook 写结构化钩子，不要写竞品品牌或照搬字幕。",
-    "3. scene/subject/action/camera/lighting/style/quality 要能直接被后续脚本裂变使用，每个字段都要具体到参考视频里的真实可见内容。",
-    "4. subject 必须描述具体人物：性别、年龄段、人种/肤色或外观、服装、姿态、手持物；如果没有真人，也要明确说明没有真人、主体是什么。",
-    "5. action 必须按时间顺序拆：开头钩子、人物/手部动作、口播功能、字幕功能、手机 UI 操作、奖励反馈、CTA/ending。",
-    "6. style 必须说明是否是真人口播、字幕驱动、手持演示、App demo、剧情/UGC 形态；如果有口播，必须描述口播内容功能，不能只写“自然口播”。",
-    "7. protagonist/voiceover/onscreenText 能判断时必须填写：人物要到身份/外观/服装/情绪，口播要到话术功能和节奏，字幕要到位置、层级和承担的转化功能。",
-    "8. phoneUi/rewardFeedback/ctaMoment/endingMoment/disclaimer 能判断时必须填写，按钮位置、奖励数字/金币/进度条/提现入口、CTA 触发画面和 Ending 收束画面要尽量具体。",
-    "9. continuityAnchors 必须总结后续裂变或 30s 分段应保持一致的主角、服装、地点、手机 UI 状态和最后关键帧。",
-    "10. 不要写成泛泛的“手机奖励 App 页面”“用户点击按钮”“高清广告风格”；要写成可直接指导脚本改写和生成镜头的细节。",
-    "11. 只返回 JSON 对象。"
-  ].join("\n");
+  const promptText = buildDecompositionUserPrompt(probe, request, llmConfig, videoProbePrompt);
   const userContent = [
     { type: "text", text: promptText }
   ];
@@ -645,12 +589,7 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
   return [
     {
       role: "system",
-      content: [
-        "你是网赚广告素材拆解专家，只做结构化拆解，不生成侵权复刻内容。",
-        "你必须输出严格 JSON 对象，不要 markdown，不要解释。",
-        "拆解目标是学习镜头结构、节奏、话术功能和转化逻辑，规避竞品品牌、人物、水印和原文案照搬。",
-        "输出字段必须至少包含：scene, subject, action, camera, lighting, style, quality, hook。"
-      ].join("\n")
+      content: DECOMPOSITION_SYSTEM_PROMPT
     },
     {
       role: "user",

@@ -296,6 +296,7 @@ async function collectGeneratedVideoVisionInputs(context, output, options = {}) 
   const qcLlmConfig = resolveQcLlmConfig(context.config || {});
   const preferVideoUrl = llmSupportsVideoUrl(qcLlmConfig);
   const forceInlineVideo = options.forceInlineVideo === true;
+  const forceFramesOnly = options.forceFramesOnly === true;
   const skipRemoteVideoUrl = forceInlineVideo;
   const videoPath = resolveUserPath(context, output.filePath);
   const mimeType = output.mimeType || mimeForExt(extname(videoPath).toLowerCase());
@@ -319,6 +320,20 @@ async function collectGeneratedVideoVisionInputs(context, output, options = {}) 
     });
   }
   const usableFrames = usableVisionFrames(frames);
+  if (forceFramesOnly && usableFrames.length) {
+    warnings.push({
+      code: "generated_video_frames_only_fallback",
+      message: "视频文件输入不兼容，已退化为仅传抽帧画面给质检模型",
+      reason: "video_file_input_incompatible"
+    });
+    return {
+      fileName: basename(videoPath),
+      mimeType,
+      frames: usableFrames,
+      timestampsSec,
+      warnings
+    };
+  }
   if (output.storageUrl && !fileUrl) {
     warnings.push({
       code: "generated_video_storage_url_not_external",
@@ -1179,8 +1194,26 @@ async function qcReportForOutput(context, batch, output) {
       if (modelCheck) checks.push(modelCheck);
     } catch (error) {
       const shouldRetryInline = error?.data?.inputMode === "file_url"
-        || String(error?.data?.upstreamMessage || error?.message || "").includes("file_data");
+        || String(error?.data?.upstreamMessage || error?.message || "").includes("file_data")
+        || String(error?.data?.upstreamMessage || error?.message || "").includes("Invalid PDF input");
+      let shouldRetryFramesOnly = false;
       if (shouldRetryInline) {
+        try {
+          const fallbackVisionInputs = await collectGeneratedVideoVisionInputs(context, output, { forceFramesOnly: true });
+          shouldRetryFramesOnly = (fallbackVisionInputs.frames?.length || 0) > 0;
+        } catch {
+          shouldRetryFramesOnly = false;
+        }
+      }
+      if (shouldRetryFramesOnly) {
+        try {
+          modelReview = await runModelVideoQc(context, batch, output, tasks, scripts, { forceFramesOnly: true });
+          const modelCheck = modelReviewCheck(modelReview);
+          if (modelCheck) checks.push(modelCheck);
+        } catch (retryError) {
+          error = retryError;
+        }
+      } else if (shouldRetryInline) {
         try {
           modelReview = await runModelVideoQc(context, batch, output, tasks, scripts, { forceInlineVideo: true });
           const modelCheck = modelReviewCheck(modelReview);

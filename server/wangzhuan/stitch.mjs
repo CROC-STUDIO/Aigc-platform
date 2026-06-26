@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 
 import { WangzhuanError } from "./http.mjs";
 import { makeOutputId } from "./ids.mjs";
+import { buildOutputDisplayName } from "./output-naming.mjs";
 import {
   hasWangzhuanFactsStore,
   loadBatchDetailFromMysql,
@@ -128,7 +129,7 @@ function resolveDisclaimerOverlay(batch, branchDraft = null) {
     fontSize: Number(branchDraft?.disclaimerOverlay?.fontSize || request.disclaimerOverlay?.fontSize || draft.disclaimerOverlay?.fontSize || 22),
     boxHeight: Number(branchDraft?.disclaimerOverlay?.boxHeight || request.disclaimerOverlay?.boxHeight || draft.disclaimerOverlay?.boxHeight || 88),
     bottomMargin: Number(branchDraft?.disclaimerOverlay?.bottomMargin || request.disclaimerOverlay?.bottomMargin || draft.disclaimerOverlay?.bottomMargin || 64),
-    horizontalMargin: Number(branchDraft?.disclaimerOverlay?.horizontalMargin || request.disclaimerOverlay?.horizontalMargin || draft.disclaimerOverlay?.horizontalMargin || 80)
+    horizontalMargin: Number(branchDraft?.disclaimerOverlay?.horizontalMargin || request.disclaimerOverlay?.horizontalMargin || draft.disclaimerOverlay?.horizontalMargin || 50)
   };
 }
 
@@ -150,7 +151,7 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
     const boxHeight = Math.max(56, Number(overlay.boxHeight || 88));
     const fontSize = Math.max(18, Number(overlay.fontSize || 22));
     const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 64));
-    const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 80));
+    const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 50));
     const alignLeft = overlay.position === "bottom_left";
     const fontFile = pickDisclaimerFont();
     const pythonScript = [
@@ -438,6 +439,12 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         durationSec: 15,
         kind: "segment_video",
         filePath,
+        displayFileName: buildOutputDisplayName({
+          batch,
+          script: entry.script,
+          outputId,
+          durationSec: 15
+        }),
         previewUrl: storage.storageUrl,
         storageKey: storage.storageKey,
         storageUrl: storage.storageUrl,
@@ -538,6 +545,12 @@ async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAU
 async function createSucceededStitchOutput(context, batch, group, segmentOutputs, preflight, sequenceState) {
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
+  const displayFileName = buildOutputDisplayName({
+    batch,
+    script: group.entries[0]?.script,
+    outputId,
+    durationSec: 30
+  });
   const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
   try {
     await concatSegmentVideos(target, segmentPaths);
@@ -576,6 +589,7 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       durationSec: 30,
       kind: "stitched_video",
       filePath,
+      displayFileName,
       previewUrl: storage.storageUrl,
       storageKey: storage.storageKey,
       storageUrl: storage.storageUrl,
