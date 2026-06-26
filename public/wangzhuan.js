@@ -2305,7 +2305,7 @@ function applyLlmConfigDefaults() {
   const config = state.llmDefaults;
   if (!config) return;
   if (!els.llmProvider.value.trim()) els.llmProvider.value = config.provider || "skylink";
-  if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gpt-5.4";
+  if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gemini-3.5-flash";
   if (!els.llmEndpoint.value.trim()) els.llmEndpoint.value = config.endpoint || "https://skylink-gateway.com/api/v1";
   if (!els.llmTemperature.value.trim()) els.llmTemperature.value = String(config.temperature ?? 0.2);
   renderLlmServiceStatus();
@@ -3406,7 +3406,7 @@ async function planBatch() {
         estimateId: estimate.estimateId,
         llmConfig: {
           provider: els.llmProvider.value.trim() || llmDefaults.provider || "skylink",
-          model: els.llmModel.value.trim() || llmDefaults.model || "gpt-5.4",
+          model: els.llmModel.value.trim() || llmDefaults.model || "gemini-3.5-flash",
           endpoint: els.llmEndpoint.value.trim() || llmDefaults.endpoint || "https://skylink-gateway.com/api/v1",
           temperature: Number(els.llmTemperature.value || llmDefaults.temperature || 0.2)
         },

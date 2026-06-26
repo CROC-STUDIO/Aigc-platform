@@ -3,7 +3,7 @@
     "llm": {
       "provider": "skylink",
       "endpoint": "https://skylink-gateway.com/api/v1",
-      "model": "gpt-5.4",
+      "model": "gemini-3.5-flash",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 180000
     },
