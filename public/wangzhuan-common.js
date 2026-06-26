@@ -727,6 +727,36 @@ export function restorePreviewPlayback(snapshot, root = document) {
   });
 }
 
+export function outputPreviewItemsFingerprint(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const key = item.outputId || item.storageKey || `idx_${index}`;
+      const url = outputPreviewUrl(item);
+      return [key, item.qcStatus || "", url, item.downloadEligible ? "1" : "0"].join(":");
+    })
+    .join("|");
+}
+
+export function galleryStateFingerprint(gallery = {}) {
+  const pagination = gallery.pagination || {};
+  return `${outputPreviewItemsFingerprint(gallery.items)}::${pagination.page || 1}:${pagination.pageSize || 0}:${pagination.total || 0}`;
+}
+
+export function isAnyPreviewVideoPlaying(root) {
+  if (!root?.querySelectorAll) return false;
+  for (const video of root.querySelectorAll(".wz-output-video")) {
+    if (!video.paused && !video.ended) return true;
+  }
+  return false;
+}
+
+export function bindPreviewPlaybackGuard(root, flush) {
+  if (!root || typeof flush !== "function" || root.dataset.previewGuardBound) return;
+  root.dataset.previewGuardBound = "1";
+  root.addEventListener("pause", flush, true);
+  root.addEventListener("ended", flush, true);
+}
+
 const DECOMPOSITION_NESTED_LABELS = Object.freeze({
   main: "主体",
   appearance: "外观",
