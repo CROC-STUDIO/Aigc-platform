@@ -159,7 +159,7 @@
                     <p class="wz-field-hint">仅在切换模型或排查故障时使用，日常制作可忽略。</p>
                     <div class="wz-inline-form">
                       <label>模型服务商 <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
-                      <label>模型名称 <input id="wzLlmModel" type="text" value="gpt-5.4" placeholder="服务端配置的模型名" /></label>
+                      <label>模型名称 <input id="wzLlmModel" type="text" value="gemini-3.5-flash" placeholder="服务端配置的模型名" /></label>
                       <label>接口地址 <input id="wzLlmEndpoint" type="url" value="https://skylink-gateway.com/api/v1" placeholder="模型 API 地址" /></label>
                       <label>创意随机度 <input id="wzLlmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" title="数值越低输出越稳定，越高越有变化" /></label>
                     </div>
@@ -474,19 +474,16 @@
                 </div>
                 <div class="wz-node-body">
                   <div id="wzBatchBox" class="wz-list empty-line">暂无批次</div>
+                  <div id="wzBatchOutputsBox" class="wz-batch-outputs" hidden></div>
                 </div>
               </section>
               <section class="wz-node" id="wzNodeOutput" data-node="output">
                 <div class="panel-head">
-                  <h2>结果与下载</h2>
-                  <button id="wzRefreshGalleryBtn" class="mini ghost" type="button">刷新图库</button>
+                  <h2>任务归档</h2>
+                  <a id="wzTaskDetailLink" class="mini ghost" href="/wangzhuan-tasks.html">打开任务管理</a>
                 </div>
                 <div class="wz-node-body">
-                  <div class="modal-actions wz-actions">
-                    <button id="wzDownloadBtn" type="button" disabled>下载完整交付包</button>
-                    <label class="wz-check"><input id="wzIncludeSegments" type="checkbox" /> partial_failed 下载可用分段</label>
-                  </div>
-                  <div id="wzGalleryBox" class="wz-gallery empty-line">暂无可展示结果</div>
+                  <div id="wzTaskArchiveBox" class="wz-list empty-line">当前工作流提交为任务后，最终结果、质检报告、交付包和历史记录统一在任务管理中查看。</div>
                 </div>
               </section>
             </div>

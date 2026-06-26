@@ -8,6 +8,7 @@ import {
   batchGenerationTaskStatusLabels,
   batchStatusDisplayLabel,
   batchStatusLabels,
+  branchPlanCoverage,
   formatWorkflowEvent,
   isBatchGenerationActive,
   isBatchQcRunnable,
@@ -27,7 +28,10 @@ import {
   renderError,
   renderFailureReasons,
   renderKeyValues,
-  renderOutputPreviewCards,
+  bindPreviewInteractionGuard,
+  galleryStateFingerprint,
+  outputPreviewItemsFingerprint,
+  patchOutputPreviewCards,
   restorePreviewPlayback,
   setBusy,
   showErrorModal,
@@ -35,6 +39,7 @@ import {
   showToast,
   snapshotPreviewPlayback,
   syncActionHint,
+  taskSpaceHref,
   taskProgressHtml,
   strongTruthFields,
   terminalBatchStatus,
@@ -156,6 +161,9 @@ const els = {
   retryStitchBtn: $("#wzRetryStitchBtn"),
   batchBadge: $("#wzBatchBadge"),
   batchBox: $("#wzBatchBox"),
+  batchOutputsBox: $("#wzBatchOutputsBox"),
+  taskArchiveBox: $("#wzTaskArchiveBox"),
+  taskDetailLink: $("#wzTaskDetailLink"),
   refreshGalleryBtn: $("#wzRefreshGalleryBtn"),
   galleryBox: $("#wzGalleryBox"),
   downloadBtn: $("#wzDownloadBtn"),
@@ -187,6 +195,10 @@ const state = {
   runtimeClockTimer: 0,
   pollIntervalMs: 2000
 };
+
+let galleryRenderFingerprint = "";
+let batchRenderFingerprint = "";
+let batchOutputsRenderFingerprint = "";
 
 let referenceObjectUrl = "";
 
@@ -1029,6 +1041,18 @@ function isSeedancePlanConfirmed(batch = state.batchDetail?.batch) {
   return plans.some((plan) => plan.status === "confirmed");
 }
 
+function currentPlanCoverage(batch = state.batchDetail?.batch) {
+  return branchPlanCoverage(collectBranchDrafts(), Array.isArray(batch?.plans) ? batch.plans : []);
+}
+
+function isCurrentPlanPreviewStale(batch = state.batchDetail?.batch) {
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  if (batch?.status !== "preview_required" || !plans.length) return false;
+  const coverage = currentPlanCoverage(batch);
+  if (!coverage.ok) return true;
+  return Boolean(batch.planBranchSignature && batch.planBranchSignature !== coverage.signature);
+}
+
 function isUpstreamWorkflowLocked() {
   return isSeedancePlanConfirmed();
 }
@@ -1096,7 +1120,8 @@ function syncBatchActionButtons() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
-  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required";
+  const stalePlanPreview = isCurrentPlanPreviewStale(batch);
+  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required" && !stalePlanPreview;
   const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
 
@@ -1111,13 +1136,14 @@ function syncBatchActionButtons() {
     || qcPending
     || estimate.hardBlocked
     || (estimate.confirmationRequired && !els.confirmLimits.checked);
-  els.confirmPlanBtn.disabled = frozen || batch?.status !== "preview_required" || !plans.length;
+  els.confirmPlanBtn.disabled = frozen || stalePlanPreview || batch?.status !== "preview_required" || !plans.length;
 }
 
 function syncBatchActionHints() {
   const estimate = state.estimate?.estimate;
   const batch = state.batchDetail?.batch;
-  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required";
+  const stalePlanPreview = isCurrentPlanPreviewStale(batch);
+  const locked = hasActivePipelineBatch() && batch?.status !== "preview_required" && !stalePlanPreview;
   const frozen = isUpstreamWorkflowLocked();
   const qcPending = isQcBatchPending(batch);
   syncActionHint(
@@ -1139,6 +1165,8 @@ function syncBatchActionHints() {
       ? "Seedance 已提交生成，前序步骤已锁定"
       : qcPending
       ? `当前批次 ${batchDisplayName(batch)} 待质检，请先运行视频质检或放弃批次`
+      : stalePlanPreview
+      ? "第 3 步裂变子节点已变化，请重新生成 Seedance 预案"
       : locked
       ? `当前批次 ${batchDisplayName(batch)} 进行中（${batchStatusLabels[batch.status] || batch.status}），请先确认预案、等待完成或停止后再新建`
       : !estimate ? "需先完成拆解和批次估算" : estimate.hardBlocked ? "当前估算存在硬阻塞，请检查渠道规则" : estimate.confirmationRequired && !els.confirmLimits.checked ? "请先勾选二次确认后再生成预案" : "",
@@ -1148,8 +1176,10 @@ function syncBatchActionHints() {
     els.confirmPlanBtn,
     frozen
       ? "Seedance 已提交生成，前序步骤已锁定"
+      : stalePlanPreview
+      ? "当前预案未覆盖全部裂变子节点，请先重新生成 Seedance 预案"
       : batch?.status === "preview_required" ? "确认后将提交 Seedance 批量生成" : !estimate ? "需先生成 Seedance 预案" : "",
-    { tone: frozen ? "warn" : "muted" }
+    { tone: frozen || stalePlanPreview ? "warn" : "muted" }
   );
 }
 
@@ -2389,7 +2419,7 @@ function applyLlmConfigDefaults() {
   const config = state.llmDefaults;
   if (!config) return;
   if (!els.llmProvider.value.trim()) els.llmProvider.value = config.provider || "skylink";
-  if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gpt-5.4";
+  if (!els.llmModel.value.trim()) els.llmModel.value = config.model || "gemini-3.5-flash";
   if (!els.llmEndpoint.value.trim()) els.llmEndpoint.value = config.endpoint || "https://skylink-gateway.com/api/v1";
   if (!els.llmTemperature.value.trim()) els.llmTemperature.value = String(config.temperature ?? 0.2);
   renderLlmServiceStatus();
@@ -2649,6 +2679,9 @@ function renderEstimate() {
 function renderPlanPreview(batch) {
   if (!els.planBox) return;
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  const coverage = branchPlanCoverage(collectBranchDrafts(), plans);
+  const signatureChanged = Boolean(batch?.planBranchSignature && batch.planBranchSignature !== coverage.signature);
+  const stalePlanPreview = batch?.status === "preview_required" && plans.length && (!coverage.ok || signatureChanged);
   if (!plans.length) {
     els.planBox.className = "wz-list empty-line";
     els.planBox.textContent = batch?.status === "preview_required"
@@ -2665,12 +2698,19 @@ function renderPlanPreview(batch) {
     return;
   }
   if (els.planHint) {
-    els.planHint.textContent = batch?.status === "preview_required"
-      ? `共 ${plans.length} 条预案，确认后将提交 Seedance 生成`
-      : `${plans.length} 条预案已生成`;
+    els.planHint.textContent = stalePlanPreview
+      ? signatureChanged
+        ? "第 3 步裂变子节点内容已变化，请重新生成 Seedance 预案"
+        : `第 3 步已有 ${coverage.currentBranchCount} 个裂变子节点，当前预案只覆盖 ${coverage.planBranchCount} 个；请重新生成 Seedance 预案`
+      : batch?.status === "preview_required"
+        ? `共 ${plans.length} 条预案，确认后将提交 Seedance 生成`
+        : `${plans.length} 条预案已生成`;
   }
   els.planBox.className = "wz-list";
-  els.planBox.innerHTML = plans.map((plan) => `
+  const staleNotice = stalePlanPreview
+    ? `<div class="wz-warning">${signatureChanged ? "第 3 步裂变子节点内容已变化" : `当前预案未覆盖：${escapeHtml(coverage.missingBranchIds.join("、") || "最新分支")}`}。请点击「生成 Seedance 预案」刷新后再确认。</div>`
+    : "";
+  els.planBox.innerHTML = `${staleNotice}${plans.map((plan) => `
     <article class="wz-row wz-plan-editor" data-plan-id="${escapeHtml(plan.planId || "")}">
       <div>
         <strong>${escapeHtml(plan.branchLabel || plan.branchId || "分支")} / 变体 ${escapeHtml(plan.branchVariantIndex || plan.variantIndex || "-")} / 分段 ${escapeHtml(plan.segmentIndex || "-")}</strong>
@@ -2699,7 +2739,7 @@ function renderPlanPreview(batch) {
       </div>
       ${renderPlanReferencePreview(batch, plan)}
     </div>
-  `).join("");
+  `).join("")}`;
   syncBatchActionButtons();
   renderBatchStepProgress();
   syncFlowHints();
@@ -2837,6 +2877,83 @@ function syncBatchNodeStatus(status = "") {
   else delete batchNode.dataset.batchStatus;
 }
 
+function batchRenderFingerprintFrom(detail, tasks = [], outputs = [], events = []) {
+  const batch = detail?.batch || {};
+  return [
+    batch.status || "",
+    batch.batchId || "",
+    outputPreviewItemsFingerprint(outputs),
+    tasks.map((task) => [
+      task.generationTaskId || "",
+      task.status || "",
+      task.progress ?? "",
+      task.seedanceTaskId || "",
+      task.errorMessage || ""
+    ].join(":")).join("|"),
+    events.length,
+    detail?.downloadSummary?.packageReady ? "1" : "0",
+    batch.qcSummary?.passed ?? "",
+    batch.qcSummary?.failed ?? "",
+    els.includeSegments?.checked ? "1" : "0"
+  ].join("||");
+}
+
+function batchTaskArchiveMessage(batch = {}, detail = {}) {
+  const summary = detail.downloadSummary || {};
+  if (!batch.batchId) return "当前工作流提交为任务后，最终结果、质检报告、交付包和历史记录统一在任务管理中查看。";
+  if (batch.status === "qc") return "视频已生成完成，请到任务管理中运行或查看质检，并在质检后下载交付包。";
+  if (batch.status === "partial_failed") return "任务部分失败，请到任务管理中查看可用输出、下载可用分段或处理失败项。";
+  if (batch.status === "succeeded") return "任务已完成，最终输出集合、质检报告和交付包已归口到任务管理。";
+  if (batch.status === "failed") return "任务失败，请到任务管理查看失败原因、过程事件和可恢复动作。";
+  if (summary.packageReady) return "交付包已就绪，请到任务管理查看最终结果并下载。";
+  return "当前任务正在办理中，最终结果集合和交付包会统一归档到任务管理。";
+}
+
+function renderTaskArchive(batch = state.batchDetail?.batch) {
+  if (!els.taskArchiveBox && !els.taskDetailLink) return;
+  const detail = state.batchDetail || {};
+  const batchId = batch?.batchId || "";
+  const href = taskSpaceHref("batch", batchId);
+  if (els.taskDetailLink) {
+    els.taskDetailLink.href = href;
+    els.taskDetailLink.classList.toggle("disabled", !batchId);
+    els.taskDetailLink.setAttribute("aria-disabled", batchId ? "false" : "true");
+  }
+  if (!els.taskArchiveBox) return;
+  if (!batchId) {
+    els.taskArchiveBox.className = "wz-list empty-line";
+    els.taskArchiveBox.textContent = batchTaskArchiveMessage();
+    return;
+  }
+  const summary = detail.downloadSummary || {};
+  els.taskArchiveBox.className = "wz-list";
+  els.taskArchiveBox.innerHTML = `
+    <article class="wz-row wz-task-archive-card">
+      <div>
+        <strong>${escapeHtml(batchDisplayName(batch) || batchId)}</strong>
+        <small>${escapeHtml(batchId)} · ${escapeHtml(batch.createdAt || "")}</small>
+        <p>${escapeHtml(batchTaskArchiveMessage(batch, detail))}</p>
+      </div>
+      ${badge(batch.status, {
+        ...batchStatusLabels,
+        [batch.status]: batchStatusDisplayLabel(batch)
+      })}
+    </article>
+    <div class="wz-kv-grid">
+      ${renderKeyValues([
+        ["输出总数", summary.outputsTotal ?? batch.outputs?.length ?? 0],
+        ["可下载", summary.downloadEligibleCount ?? 0],
+        ["交付包", summary.packageReady ? "ready" : "not_ready"],
+        ["结果归口", "任务管理"]
+      ])}
+    </div>
+    <div class="modal-actions wz-actions wz-task-archive-actions">
+      <a class="mini" href="${escapeHtml(href)}">查看任务详情</a>
+      <a class="mini ghost" href="${escapeHtml(taskSpaceHref("batch"))}">打开任务管理</a>
+    </div>
+  `;
+}
+
 function renderBatch() {
   const detail = state.batchDetail;
   const batch = detail?.batch;
@@ -2845,9 +2962,16 @@ function renderBatch() {
     els.batchBadge.textContent = "未开始";
     els.batchBox.className = "wz-list empty-line";
     els.batchBox.textContent = "暂无批次";
+    batchRenderFingerprint = "";
+    batchOutputsRenderFingerprint = "";
+    if (els.batchOutputsBox) {
+      els.batchOutputsBox.hidden = true;
+      els.batchOutputsBox.innerHTML = "";
+    }
     els.stopBatchBtn.disabled = true;
     els.runQcBtn.disabled = true;
     renderPlanPreview(null);
+    renderTaskArchive(null);
     syncMetrics();
     renderBatchStepProgress();
     syncFlowHints();
@@ -2872,6 +2996,21 @@ function renderBatch() {
   const generationActive = isBatchGenerationActive(batch, tasks);
   const logNode = document.getElementById("wzNodeLog");
   if (logNode) logNode.classList.toggle("wz-generation-live", generationActive);
+  const renderFingerprint = batchRenderFingerprintFrom(detail, tasks, outputs, events);
+  if (renderFingerprint === batchRenderFingerprint) {
+    renderBatchOutputPreviews(outputs);
+    if (els.downloadBtn && els.includeSegments) {
+      els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
+    }
+    renderTaskArchive(batch);
+    renderPlanPreview(batch);
+    syncMetrics();
+    renderBatchReadiness();
+    renderBatchStepProgress();
+    syncFlowHints();
+    syncStartNewTaskButton();
+    return;
+  }
   const previewPlayback = snapshotPreviewPlayback(els.batchBox);
   els.batchBox.className = "wz-list";
   const retryActions = batch.status === "preview_required"
@@ -2919,7 +3058,6 @@ function renderBatch() {
         ["模型视频质检", modelQcStatusLabel(outputs, qcRunnable)]
       ])}
     </div>
-    ${renderOutputPreviewCards(outputs, { emptyText: "Seedance 输出生成后会显示在这里" })}
     <div class="wz-task-list">
       ${tasks.slice(0, 12).map((task) => `
         <div>
@@ -2932,7 +3070,12 @@ function renderBatch() {
     ${events.length ? `<div class="wz-events"><strong>过程事件</strong>${events.slice(-8).map((event) => `<small>${escapeHtml(formatWorkflowEvent(event))} · ${escapeHtml(formatTimestamp(event.createdAt))}</small>`).join("")}</div>` : ""}
   `;
   restorePreviewPlayback(previewPlayback, els.batchBox);
-  els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
+  batchRenderFingerprint = renderFingerprint;
+  renderBatchOutputPreviews(outputs);
+  if (els.downloadBtn && els.includeSegments) {
+    els.downloadBtn.disabled = !detail.downloadSummary?.packageReady && !(batch.status === "partial_failed" && els.includeSegments.checked);
+  }
+  renderTaskArchive(batch);
   renderPlanPreview(batch);
   syncMetrics();
   renderBatchReadiness();
@@ -2943,8 +3086,31 @@ function renderBatch() {
   else syncRuntimeClock();
 }
 
-function renderGallery() {
+function renderBatchOutputPreviews(outputs = [], { force = false } = {}) {
+  const box = els.batchOutputsBox;
+  if (!box) return;
+  const items = Array.isArray(outputs) ? outputs.filter(Boolean) : [];
+  const fingerprint = outputPreviewItemsFingerprint(items);
+  if (!force && fingerprint === batchOutputsRenderFingerprint) return;
+  batchOutputsRenderFingerprint = fingerprint;
+  if (!items.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  patchOutputPreviewCards(box, items, { emptyText: "Seedance 输出生成后会显示在这里" });
+}
+
+function renderGallery({ force = false } = {}) {
+  if (!els.galleryBox) {
+    syncMetrics();
+    return;
+  }
   const gallery = state.gallery;
+  const fingerprint = galleryStateFingerprint(gallery);
+  if (!force && fingerprint === galleryRenderFingerprint) return;
+  galleryRenderFingerprint = fingerprint;
   if (!gallery?.items?.length) {
     els.galleryBox.className = "wz-gallery empty-line";
     els.galleryBox.innerHTML = `
@@ -2955,12 +3121,29 @@ function renderGallery() {
     return;
   }
   els.galleryBox.className = "wz-gallery";
-  const previewPlayback = snapshotPreviewPlayback(els.galleryBox);
-  els.galleryBox.innerHTML = `
-    ${renderOutputPreviewCards(gallery.items)}
-    ${galleryPaginationHtml(gallery)}
-  `;
-  restorePreviewPlayback(previewPlayback, els.galleryBox);
+  let hasPreviewRoot = false;
+  for (const child of els.galleryBox.children) {
+    if (child.classList.contains("wz-output-previews") && !child.classList.contains("empty-line")) {
+      hasPreviewRoot = true;
+      break;
+    }
+  }
+  if (!hasPreviewRoot) {
+    for (const node of [...els.galleryBox.children]) {
+      if (!node.classList.contains("wz-gallery-pager")) node.remove();
+    }
+  }
+  patchOutputPreviewCards(els.galleryBox, gallery.items);
+  let pager = null;
+  for (const child of els.galleryBox.children) {
+    if (child.classList.contains("wz-gallery-pager")) {
+      pager = child;
+      break;
+    }
+  }
+  const pagerHtml = galleryPaginationHtml(gallery);
+  if (pager) pager.outerHTML = pagerHtml;
+  else els.galleryBox.insertAdjacentHTML("beforeend", pagerHtml);
   syncMetrics();
 }
 
@@ -3427,7 +3610,7 @@ async function estimateBatch() {
   }
 }
 
-async function loadBatchDetail() {
+async function loadBatchDetail({ quiet = false } = {}) {
   const batchId = state.batchDetail?.batch?.batchId;
   if (!batchId) return null;
   const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
@@ -3445,6 +3628,10 @@ function startPolling() {
       await loadGallerySafely();
       const batch = detail?.batch;
       if (!batch || terminalBatchStatus(batch.status)) {
+        if (batch) {
+          renderBatchOutputPreviews(batch.outputs || [], { force: true });
+          await loadGallery({ force: true }).catch(() => {});
+        }
         if (batch && batch.status !== previousStatus) {
           if (batch.status === "succeeded") {
             showToast("批次生成完成，可下载交付包", { type: "success" });
@@ -3456,7 +3643,12 @@ function startPolling() {
       }
       state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     } catch (error) {
-      renderError(els.globalError, error, "批次轮询失败");
+      if (state.batchDetail?.batch) {
+        renderBatchOutputPreviews(state.batchDetail.batch.outputs || [], { force: true });
+      }
+      if (error?.code !== "internal_error" || !state.batchDetail?.batch) {
+        renderError(els.globalError, error, "批次轮询失败");
+      }
       state.pollTimer = window.setTimeout(tick, state.pollIntervalMs);
     }
   };
@@ -3498,7 +3690,7 @@ async function planBatch() {
         estimateId: estimate.estimateId,
         llmConfig: {
           provider: els.llmProvider.value.trim() || llmDefaults.provider || "skylink",
-          model: els.llmModel.value.trim() || llmDefaults.model || "gpt-5.4",
+          model: els.llmModel.value.trim() || llmDefaults.model || "gemini-3.5-flash",
           endpoint: els.llmEndpoint.value.trim() || llmDefaults.endpoint || "https://skylink-gateway.com/api/v1",
           temperature: Number(els.llmTemperature.value || llmDefaults.temperature || 0.2)
         },
@@ -3506,6 +3698,8 @@ async function planBatch() {
         ...(estimate.confirmationToken ? { confirmationToken: estimate.confirmationToken } : {})
       })
     });
+    const planBranchSignature = branchPlanCoverage(collectBranchDrafts(), data.batch?.plans || data.plans || []).signature;
+    if (data.batch) data.batch.planBranchSignature = planBranchSignature;
     state.batchDetail = {
       batch: data.batch,
       events: [],
@@ -3513,6 +3707,7 @@ async function planBatch() {
     };
     if (data.batch?.batchId) {
       state.batchDetail = await loadBatchDetail();
+      if (state.batchDetail?.batch) state.batchDetail.batch.planBranchSignature = planBranchSignature;
     }
     renderBatch();
     focusBatchStep();
@@ -3531,6 +3726,20 @@ async function confirmPlanBatch() {
   if (!batchId || !plans.length) return;
   if (isUpstreamWorkflowLocked()) return;
   clearError(els.globalError);
+  if (isCurrentPlanPreviewStale()) {
+    const coverage = currentPlanCoverage();
+    renderError(els.globalError, {
+      code: "stale_seedance_plan",
+      message: "第 3 步裂变子节点已变化，请重新生成 Seedance 预案后再确认生成",
+      data: {
+        missingFields: coverage.missingBranchIds,
+        currentBranchCount: coverage.currentBranchCount,
+        planBranchCount: coverage.planBranchCount
+      }
+    }, "预案已过期");
+    renderPlanPreview(state.batchDetail?.batch);
+    return;
+  }
   setBusy(els.confirmPlanBtn, true, "确认中");
   try {
     try {
@@ -3658,6 +3867,11 @@ function emptyGalleryState() {
 }
 
 async function loadGallery(options = {}) {
+  if (!els.galleryBox) {
+    state.gallery = emptyGalleryState();
+    syncMetrics();
+    return;
+  }
   const requestedPage = Number(options.page || state.galleryPage || 1);
   state.galleryPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
   const query = new URLSearchParams({
@@ -3668,10 +3882,11 @@ async function loadGallery(options = {}) {
   const params = `?${query}`;
   state.gallery = await apiEnvelope(`/api/wangzhuan/gallery${params}`);
   state.galleryPage = state.gallery?.pagination?.page || state.galleryPage;
-  renderGallery();
+  renderGallery({ force: Boolean(options.force) });
 }
 
 async function loadGallerySafely(options = {}) {
+  if (!els.galleryBox) return;
   try {
     await loadGallery(options);
   } catch (error) {
@@ -3683,7 +3898,7 @@ async function loadGallerySafely(options = {}) {
 
 async function downloadPackage() {
   const batchId = state.batchDetail?.batch?.batchId;
-  if (!batchId) return;
+  if (!batchId || !els.downloadBtn || !els.includeSegments) return;
   clearError(els.globalError);
   setBusy(els.downloadBtn, true, "打包中");
   try {
@@ -3804,7 +4019,18 @@ function bindEvents() {
     renderTemplates({ applySelection: false });
     setSaveTemplateButtonsDisabled(isTemplateCommitted());
     renderTemplateSaveStatus();
+    if (!state.suppressTemplateUnlock) clearRewriteProgress();
     renderRewriteStatus();
+    renderPlanPreview(state.batchDetail?.batch);
+  });
+  window.addEventListener("wz:branch-removed", () => {
+    markBranchFields();
+    if (!state.suppressTemplateUnlock) clearRewriteProgress();
+    renderTemplates({ applySelection: false });
+    setSaveTemplateButtonsDisabled(isTemplateCommitted());
+    renderTemplateSaveStatus();
+    renderRewriteStatus();
+    renderPlanPreview(state.batchDetail?.batch);
   });
   els.loadRulesBtn.addEventListener("click", () => loadRules().catch((error) => renderError(els.globalError, error, "规则刷新失败")));
   els.useSampleVideoBtn?.addEventListener("click", () => {
@@ -3870,34 +4096,60 @@ function bindEvents() {
   });
   els.runQcBtn.addEventListener("click", runVideoQc);
   els.retryStitchBtn.addEventListener("click", retryStitch);
-  els.refreshGalleryBtn.addEventListener("click", () => loadGallery().catch((error) => renderError(els.globalError, error, "图库刷新失败")));
-  els.galleryBox.addEventListener("click", (event) => {
-    if (!(event.target instanceof Element)) return;
-    const button = event.target.closest("[data-gallery-page]");
-    if (!button || button.disabled) return;
-    loadGallery({ page: Number(button.dataset.galleryPage) })
-      .catch((error) => renderError(els.globalError, error, "图库刷新失败"));
+  els.refreshGalleryBtn?.addEventListener("click", () => loadGallery({ force: true }).catch((error) => renderError(els.globalError, error, "图库刷新失败")));
+  bindPreviewInteractionGuard(els.batchBox);
+  bindPreviewInteractionGuard(els.batchOutputsBox);
+  if (els.galleryBox) {
+    bindPreviewInteractionGuard(els.galleryBox);
+    els.galleryBox.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest("[data-gallery-page]");
+      if (!button || button.disabled) return;
+      loadGallery({ page: Number(button.dataset.galleryPage) })
+        .catch((error) => renderError(els.globalError, error, "图库刷新失败"));
+    });
+  }
+  els.includeSegments?.addEventListener("change", renderBatch);
+  els.downloadBtn?.addEventListener("click", downloadPackage);
+  els.taskDetailLink?.addEventListener("click", (event) => {
+    if (state.batchDetail?.batch?.batchId) return;
+    event.preventDefault();
   });
-  els.includeSegments.addEventListener("change", renderBatch);
-  els.downloadBtn.addEventListener("click", downloadPackage);
 }
 
 async function loadInitialData() {
   clearError(els.globalError);
   clearActiveLockBanner(lockHost());
+  clearWorkflowSession();
+
   await loadLlmConfig();
   await loadTemplates();
   await loadRules();
+
+  // Page refresh starts a fresh workflow form. Only keep an in-progress batch
+  // for the run/results panel and lock banner — never refill steps 1-4.
   await loadActiveBatch();
-  if (state.batchDetail?.batch) {
-    restoreWorkflowFromBatch(state.batchDetail);
+  if (state.batchDetail?.batch && isBlockingPipelineBatch()) {
     const lock = activeLockFromBatch(state.batchDetail.batch);
     if (lock) renderActiveLockBanner(lockHost(), lock);
+    renderBatchOutputPreviews(state.batchDetail.batch.outputs || [], { force: true });
+    await loadGallerySafely();
   } else {
-    await restoreWorkflowSession();
+    state.batchDetail = null;
+    batchRenderFingerprint = "";
+    batchOutputsRenderFingerprint = "";
+    renderBatch();
+    if (els.batchOutputsBox) {
+      els.batchOutputsBox.hidden = true;
+      els.batchOutputsBox.innerHTML = "";
+    }
+    await loadGallerySafely();
   }
-  if (!state.batchDetail) await loadGallerySafely();
-  restoreUserBatchName();
+
+  ensureNewTaskBatchName();
+  renderReference();
+  renderRewriteStatus();
+  renderEstimate();
   renderBatchReadiness();
   syncStartNewTaskButton();
   syncMetrics();

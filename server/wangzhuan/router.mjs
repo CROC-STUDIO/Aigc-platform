@@ -41,6 +41,10 @@ import {
   getVideoOpsJobResult,
   retryVideoOpsJob
 } from "./video-ops.mjs";
+import {
+  archiveVideoOpsSubmission,
+  syncVideoOpsJobArchive
+} from "./video-ops-archive.mjs";
 
 function buildContext(context) {
   return {
@@ -182,23 +186,39 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     const videoOps = videoOpsRoute(url.pathname);
     if (videoOps && req.method === "POST" && videoOps.action === "collection") {
-      return sendOk(res, await createVideoOpsJob(scoped, await context.readJson(req)), requestId);
+      const payload = await context.readJson(req);
+      const job = await createVideoOpsJob(scoped, payload);
+      return sendOk(res, await archiveVideoOpsSubmission(scoped, payload, job), requestId);
     }
     if (videoOps && req.method === "GET" && videoOps.action === "detail") {
-      return sendOk(res, await getVideoOpsJob(scoped, videoOps.jobId, queryObject(url)), requestId);
+      const job = await getVideoOpsJob(scoped, videoOps.jobId, queryObject(url));
+      return sendOk(res, await syncVideoOpsJobArchive(scoped, job), requestId);
     }
     if (videoOps && req.method === "GET" && videoOps.action === "result") {
-      return sendOk(res, await getVideoOpsJobResult(scoped, videoOps.jobId, queryObject(url)), requestId);
+      const result = await getVideoOpsJobResult(scoped, videoOps.jobId, queryObject(url));
+      const job = await getVideoOpsJob(scoped, videoOps.jobId, queryObject(url));
+      let outputBuffer = null;
+      if (job?.status === "succeeded" || job?.status === "review_required") {
+        try {
+          outputBuffer = await downloadVideoOpsJob(scoped, videoOps.jobId);
+        } catch {
+          outputBuffer = null;
+        }
+      }
+      const archived = await syncVideoOpsJobArchive(scoped, job, { result, outputBuffer });
+      return sendOk(res, { ...result, remixId: archived.remixId, remix_id: archived.remixId, taskManagementUrl: archived.taskManagementUrl }, requestId);
     }
     if (videoOps && req.method === "GET" && videoOps.action === "download") {
       const output = await downloadVideoOpsJob(scoped, videoOps.jobId);
       return sendBinary(res, output, requestId, `video-ops-${videoOps.jobId}.bin`);
     }
     if (videoOps && req.method === "POST" && videoOps.action === "cancel") {
-      return sendOk(res, await cancelVideoOpsJob(scoped, videoOps.jobId), requestId);
+      const job = await cancelVideoOpsJob(scoped, videoOps.jobId);
+      return sendOk(res, await syncVideoOpsJobArchive(scoped, job), requestId);
     }
     if (videoOps && req.method === "POST" && videoOps.action === "retry") {
-      return sendOk(res, await retryVideoOpsJob(scoped, videoOps.jobId), requestId);
+      const job = await retryVideoOpsJob(scoped, videoOps.jobId);
+      return sendOk(res, await syncVideoOpsJobArchive(scoped, job), requestId);
     }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {

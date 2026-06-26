@@ -245,9 +245,11 @@
   function wireBranch(node) {
     ensureCollapseButtons();
     node.querySelector(".wz-branch-remove")?.addEventListener("click", () => {
+      const branchId = node.dataset.branchId || "";
       node.remove();
       renumberBranches();
       scheduleDraw();
+      window.dispatchEvent(new CustomEvent("wz:branch-removed", { detail: { branchId } }));
     });
     if ("ResizeObserver" in window) {
       try {
@@ -407,9 +409,9 @@
         return badge && badge !== "未开始" ? `批次状态：${badge}` : "暂无批次日志";
       }
       case "wzNodeOutput": {
-        const gallery = document.getElementById("wzGalleryBox");
-        if (gallery && !gallery.classList.contains("empty-line")) return "已有可下载结果";
-        return "结果待生成";
+        const archive = document.getElementById("wzTaskArchiveBox");
+        if (archive && !archive.classList.contains("empty-line")) return "结果已归档到任务管理";
+        return "结果待归档";
       }
       default:
         if (node.classList.contains("wz-node-branch")) {
@@ -713,8 +715,8 @@
     {
       step: "5",
       nodes: ["wzNodeLog", "wzNodeOutput"],
-      // results gallery populated by server
-      done: () => hasData("wzGalleryBox")
+      // final outputs are converged into task management
+      done: () => hasData("wzTaskArchiveBox")
     }
   ];
 
@@ -818,7 +820,7 @@
   window.addEventListener("wz:decomposition-confirmed-changed", refreshPipelineState);
   if ("MutationObserver" in window) {
     const mo = new MutationObserver(refreshPipelineState);
-    for (const id of ["wzReferenceBox", "wzRewriteStatus", "wzBatchBadge", "wzBatchBox", "wzGalleryBox"]) {
+    for (const id of ["wzReferenceBox", "wzRewriteStatus", "wzBatchBadge", "wzBatchBox", "wzTaskArchiveBox"]) {
       const el = document.getElementById(id);
       if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     }

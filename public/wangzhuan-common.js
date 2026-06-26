@@ -353,6 +353,101 @@ export const strongTruthFields = [
   ["sourceOrUpdatedAt", "规则来源/更新时间"]
 ];
 
+function stableBranchId(item = {}, index = 0) {
+  const raw = String(item?.branchId || item?.id || "").trim();
+  return raw || `branch_${index + 1}`;
+}
+
+function planBranchId(item = {}, index = 0) {
+  const raw = String(item?.branchId || item?.branch?.branchId || "").trim();
+  return raw || `branch_${index + 1}`;
+}
+
+function uniqueValues(values = []) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function compactList(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function stableObject(value) {
+  if (Array.isArray(value)) return value.map(stableObject);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .filter((key) => value[key] !== undefined && value[key] !== "")
+        .map((key) => [key, stableObject(value[key])])
+    );
+  }
+  return value;
+}
+
+function branchSignatureItem(branch = {}, index = 0) {
+  return stableObject({
+    branchId: stableBranchId(branch, index),
+    productName: String(branch.productName || "").trim(),
+    productLink: String(branch.productLink || "").trim(),
+    cta: String(branch.cta || "").trim(),
+    ending: String(branch.ending || "").trim(),
+    currencySymbol: String(branch.currencySymbol || "").trim(),
+    language: String(branch.language || "").trim(),
+    languages: compactList(branch.languages || branch.language).sort(),
+    regions: compactList(branch.regions || branch.targetRegions || branch.targetRegion).sort(),
+    targetChannels: compactList(branch.targetChannels || branch.targetChannel).sort(),
+    promiseLevel: String(branch.promiseLevel || "").trim(),
+    materialDirection: String(branch.materialDirection || "").trim(),
+    voiceoverStyle: String(branch.voiceoverStyle || "").trim(),
+    variantPrompt: String(branch.variantPrompt || "").trim(),
+    customPrompt: String(branch.customPrompt || "").trim(),
+    negativePrompt: String(branch.negativePrompt || "").trim(),
+    assetFileNames: stableObject(branch.assetFileNames || {}),
+    assetUrls: stableObject(branch.assetUrls || {}),
+    assetStorageKeys: stableObject(branch.assetStorageKeys || {}),
+    assetStoredPaths: stableObject(branch.assetStoredPaths || {}),
+    truthRules: stableObject(branch.truthRules || {})
+  });
+}
+
+export function branchPlanSignature(branches = [], plans = []) {
+  const branchKeys = (Array.isArray(branches) ? branches : [])
+    .map(branchSignatureItem)
+    .sort((left, right) => String(left.branchId).localeCompare(String(right.branchId)));
+  const planKeys = (Array.isArray(plans) ? plans : [])
+    .map((plan, index) => [
+      planBranchId(plan, index),
+      plan.branchVariantIndex || plan.variantIndex || "",
+      plan.segmentIndex || ""
+    ].join(":"))
+    .sort();
+  return JSON.stringify({ branchKeys, planKeys });
+}
+
+export function branchPlanCoverage(branches = [], plans = []) {
+  const currentBranchIds = uniqueValues((Array.isArray(branches) ? branches : []).map(stableBranchId)).sort();
+  const planBranchIds = uniqueValues((Array.isArray(plans) ? plans : []).map(planBranchId)).sort();
+  const planBranchSet = new Set(planBranchIds);
+  const currentBranchSet = new Set(currentBranchIds);
+  const missingBranchIds = currentBranchIds.filter((branchId) => !planBranchSet.has(branchId));
+  const staleBranchIds = planBranchIds.filter((branchId) => !currentBranchSet.has(branchId));
+  return {
+    ok: currentBranchIds.length > 0
+      && planBranchIds.length > 0
+      && missingBranchIds.length === 0
+      && staleBranchIds.length === 0,
+    currentBranchCount: currentBranchIds.length,
+    planBranchCount: planBranchIds.length,
+    currentBranchIds,
+    planBranchIds,
+    missingBranchIds,
+    staleBranchIds,
+    signature: branchPlanSignature(branches, plans)
+  };
+}
+
 export function $(selector, root = document) {
   return root.querySelector(selector);
 }
@@ -638,48 +733,196 @@ function isImagePreview(output = {}) {
     || kind.includes("image");
 }
 
+function outputPreviewCardKey(output = {}, index = 0) {
+  if (output.outputId) return String(output.outputId);
+  const base = output.storageKey || outputPreviewUrl(output) || "output";
+  return `${base}::${index}`;
+}
+
+function outputPreviewMediaFingerprint(output = {}, index = 0) {
+  const url = outputPreviewUrl(output);
+  return [outputPreviewCardKey(output, index), url, output.kind || ""].join("|");
+}
+
+function outputPreviewCardFingerprint(output = {}, index = 0) {
+  const url = outputPreviewUrl(output);
+  return [
+    outputPreviewMediaFingerprint(output, index),
+    output.qcStatus || "",
+    output.downloadEligible ? "1" : "0",
+    output.previewConfirmed ? "1" : "0",
+    output.errorMessage || "",
+    output.modelQcSummary?.score ?? "",
+    output.modelQcSummary?.summary || ""
+  ].join("|");
+}
+
+function renderOutputPreviewCardBody(output = {}, index = 0, { confirmable = false } = {}) {
+  const url = outputPreviewUrl(output);
+  const statusMap = { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" };
+  const meta = [
+    output.kind,
+    output.durationSec ? `${output.durationSec}s` : "",
+    output.downloadEligible ? "可下载" : "",
+    output.previewConfirmed ? "已确认" : ""
+  ].filter(Boolean).join(" · ");
+  return `
+    <div>
+      <strong>${escapeHtml(output.displayBatchName || output.userBatchName || output.outputId || `输出 ${index + 1}`)}</strong>
+      ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+    </div>
+    ${badge(output.qcStatus || "not_started", statusMap)}
+    ${output.modelQcSummary ? `<small>模型质检 ${escapeHtml(output.modelQcSummary.score ?? "-")} · ${escapeHtml(output.modelQcSummary.summary || "")}</small>` : ""}
+    ${output.errorMessage ? `<small class="wz-output-error">${escapeHtml(output.errorMessage)}</small>` : ""}
+    <div class="wz-output-card-actions">
+      ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开文件</a>` : ""}
+      ${confirmable && output.qcStatus === "manual_required" ? `<span>待人工确认</span>` : ""}
+    </div>
+  `;
+}
+
+function renderOutputPreviewCard(output = {}, index = 0, { confirmable = false } = {}) {
+  const url = outputPreviewUrl(output);
+  const key = outputPreviewCardKey(output, index);
+  const fingerprint = outputPreviewCardFingerprint(output, index);
+  const mediaFingerprint = outputPreviewMediaFingerprint(output, index);
+  return `
+    <article class="wz-output-card" data-output-id="${escapeHtml(key)}" data-preview-fingerprint="${escapeHtml(fingerprint)}" data-media-fingerprint="${escapeHtml(mediaFingerprint)}">
+      <div class="wz-output-card-media">
+        ${url
+          ? isImagePreview(output)
+            ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(output.outputId || "输出预览")}" loading="lazy" />`
+            : `<video class="wz-output-video" data-preview-key="${escapeHtml(key)}" src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(output.outputId || "输出视频预览")}"></video>`
+          : `<div class="wz-output-card-empty">暂无预览地址</div>`}
+      </div>
+      <div class="wz-output-card-body">
+        ${renderOutputPreviewCardBody(output, index, { confirmable })}
+      </div>
+    </article>
+  `;
+}
+
+function updateOutputPreviewCardInPlace(card, output = {}, index = 0, { confirmable = false } = {}) {
+  card.dataset.previewFingerprint = outputPreviewCardFingerprint(output, index);
+  card.dataset.mediaFingerprint = outputPreviewMediaFingerprint(output, index);
+  const body = card.querySelector(".wz-output-card-body");
+  if (body) body.innerHTML = renderOutputPreviewCardBody(output, index, { confirmable });
+}
+
+function listDirectOutputPreviewCards(root) {
+  if (!root) return [];
+  return [...root.children].filter((node) => node.classList?.contains("wz-output-card") && node.dataset.outputId);
+}
+
+function findDirectOutputPreviewRoot(container) {
+  for (const child of container.children) {
+    if (child.classList.contains("wz-output-previews") && !child.classList.contains("empty-line")) return child;
+  }
+  return null;
+}
+
+function findDirectGalleryPager(container) {
+  for (const child of container.children) {
+    if (child.classList.contains("wz-gallery-pager")) return child;
+  }
+  return null;
+}
+
 export function renderOutputPreviewCards(outputs = [], { emptyText = "暂无输出", confirmable = false } = {}) {
   const items = (Array.isArray(outputs) ? outputs : []).filter(Boolean);
   if (!items.length) return `<div class="wz-output-previews empty-line">${escapeHtml(emptyText)}</div>`;
   return `
     <div class="wz-output-previews">
-      ${items.map((output, index) => {
-        const url = outputPreviewUrl(output);
-        const key = output.outputId || output.storageKey || url || `output_${index + 1}`;
-        const statusMap = { pass: "QC 通过", warn: "QC 警告", fail: "QC 失败", manual_required: "需人工确认", not_started: "未质检" };
-        const meta = [
-          output.kind,
-          output.durationSec ? `${output.durationSec}s` : "",
-          output.downloadEligible ? "可下载" : "",
-          output.previewConfirmed ? "已确认" : ""
-        ].filter(Boolean).join(" · ");
-        return `
-          <article class="wz-output-card" data-output-id="${escapeHtml(key)}">
-            <div class="wz-output-card-media">
-              ${url
-                ? isImagePreview(output)
-                  ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(output.outputId || "输出预览")}" loading="lazy" />`
-                  : `<video class="wz-output-video" data-preview-key="${escapeHtml(key)}" src="${escapeHtml(url)}" controls preload="metadata" playsinline aria-label="${escapeHtml(output.outputId || "输出视频预览")}"></video>`
-                : `<div class="wz-output-card-empty">暂无预览地址</div>`}
-            </div>
-            <div class="wz-output-card-body">
-              <div>
-                <strong>${escapeHtml(output.displayBatchName || output.userBatchName || output.outputId || `输出 ${index + 1}`)}</strong>
-                ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
-              </div>
-              ${badge(output.qcStatus || "not_started", statusMap)}
-              ${output.modelQcSummary ? `<small>模型质检 ${escapeHtml(output.modelQcSummary.score ?? "-")} · ${escapeHtml(output.modelQcSummary.summary || "")}</small>` : ""}
-              ${output.errorMessage ? `<small class="wz-output-error">${escapeHtml(output.errorMessage)}</small>` : ""}
-              <div class="wz-output-card-actions">
-                ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开文件</a>` : ""}
-                ${confirmable && output.qcStatus === "manual_required" ? `<span>待人工确认</span>` : ""}
-              </div>
-            </div>
-          </article>
-        `;
-      }).join("")}
+      ${items.map((output, index) => renderOutputPreviewCard(output, index, { confirmable })).join("")}
     </div>
   `;
+}
+
+function ensureOutputPreviewRoot(container) {
+  let root = findDirectOutputPreviewRoot(container);
+  if (root) return root;
+  for (const child of [...container.children]) {
+    if (child.classList.contains("wz-output-previews") && child.classList.contains("empty-line")) child.remove();
+  }
+  root = document.createElement("div");
+  root.className = "wz-output-previews";
+  const pager = findDirectGalleryPager(container);
+  if (pager) container.insertBefore(root, pager);
+  else container.appendChild(root);
+  return root;
+}
+
+export function patchOutputPreviewCards(container, outputs = [], { emptyText = "暂无输出", confirmable = false } = {}) {
+  if (!container) return;
+  const items = (Array.isArray(outputs) ? outputs : []).filter(Boolean);
+  if (!items.length) {
+    findDirectOutputPreviewRoot(container)?.remove();
+    let empty = null;
+    for (const child of container.children) {
+      if (child.classList.contains("wz-output-previews") && child.classList.contains("empty-line")) {
+        empty = child;
+        break;
+      }
+    }
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.className = "wz-output-previews empty-line";
+      const pager = findDirectGalleryPager(container);
+      if (pager) container.insertBefore(empty, pager);
+      else container.appendChild(empty);
+    }
+    empty.textContent = emptyText;
+    return;
+  }
+
+  const root = ensureOutputPreviewRoot(container);
+  const existing = new Map();
+  for (const card of listDirectOutputPreviewCards(root)) {
+    existing.set(card.dataset.outputId, card);
+  }
+
+  const nextKeys = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const output = items[index];
+    const key = outputPreviewCardKey(output, index);
+    const fingerprint = outputPreviewCardFingerprint(output, index);
+    const mediaFingerprint = outputPreviewMediaFingerprint(output, index);
+    nextKeys.push(key);
+    const current = existing.get(key);
+    if (current?.dataset.previewFingerprint === fingerprint) {
+      root.appendChild(current);
+      continue;
+    }
+    if (current?.dataset.mediaFingerprint === mediaFingerprint) {
+      updateOutputPreviewCardInPlace(current, output, index, { confirmable });
+      root.appendChild(current);
+      continue;
+    }
+    const html = renderOutputPreviewCard(output, index, { confirmable }).trim();
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    const next = holder.firstElementChild;
+    if (!next) continue;
+    if (current) current.replaceWith(next);
+    else root.appendChild(next);
+  }
+
+  for (const [key, card] of existing) {
+    if (!nextKeys.includes(key)) card.remove();
+  }
+}
+
+export function bindPreviewInteractionGuard(root) {
+  if (!root || root.dataset.previewInteractionBound) return;
+  root.dataset.previewInteractionBound = "1";
+  for (const type of ["click", "pointerdown"]) {
+    root.addEventListener(type, (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(".wz-output-card-media, .wz-output-video, .wz-output-card-actions")) {
+        event.stopPropagation();
+      }
+    }, true);
+  }
 }
 
 function compactFailureRows(rows = []) {
@@ -767,6 +1010,17 @@ export function restorePreviewPlayback(snapshot, root = document) {
       if (!previous.paused) video.play?.().catch(() => {});
     }
   });
+}
+
+export function outputPreviewItemsFingerprint(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => outputPreviewCardFingerprint(item, index))
+    .join("|");
+}
+
+export function galleryStateFingerprint(gallery = {}) {
+  const pagination = gallery.pagination || {};
+  return `${outputPreviewItemsFingerprint(gallery.items)}::${pagination.page || 1}:${pagination.pageSize || 0}:${pagination.total || 0}`;
 }
 
 const DECOMPOSITION_NESTED_LABELS = Object.freeze({

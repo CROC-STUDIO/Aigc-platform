@@ -174,8 +174,10 @@
         return badge && badge !== "未提交" ? `任务状态：${badge}` : "暂无任务";
       }
       case "remixNodeResult": {
-        const status = document.getElementById("videoOpsResultStatus")?.textContent?.trim();
-        return status && status !== "未读取" ? `结果：${status}` : "结果待读取";
+        const link = document.getElementById("videoOpsTaskDetailLink");
+        const box = document.getElementById("videoOpsResultBox");
+        if (link && link.getAttribute("aria-disabled") === "false") return "结果已归档到任务管理";
+        return box?.textContent?.trim() || "结果待归档";
       }
       default:
         return node.querySelector(".panel-head h2")?.textContent?.trim() || "";

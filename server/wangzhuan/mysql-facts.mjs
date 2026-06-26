@@ -2191,7 +2191,7 @@ async function loadRemixByRunRow(conn, facts, run) {
     storage_url: run.source_storage_url,
     created_at: run.source_created_at,
     updated_at: run.source_updated_at
-  }));
+  })) || withAssetPreviewUrl(request.source);
   const regions = regionRows.map(regionRowToRegion).filter(Boolean);
   const remix = {
     remixId: run.run_uid,
@@ -2241,6 +2241,37 @@ export async function loadRemixDetailFromMysql(context, remixId) {
     return run ? await loadRemixByRunRow(conn, facts, run) : null;
   } catch (error) {
     console.warn(`[mysql-facts] failed to load remix detail ${remixId}: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function loadRemixDetailByProviderJobIdFromMysql(context, providerJobId) {
+  const pool = await getPool();
+  const safeJobId = String(providerJobId || "").trim();
+  if (!pool || !safeJobId) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT wr.run_uid
+      FROM workflow_runs wr
+      INNER JOIN workflow_tasks wt ON wt.run_id = wr.id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_type = 'remix'
+        AND (wt.provider_job_id = ? OR wt.seedance_task_id = ?)
+      ORDER BY wr.updated_at DESC, wr.id DESC
+      LIMIT 1`,
+      [facts.projectId, facts.userId, safeJobId, safeJobId]
+    );
+    const remixId = rows[0]?.run_uid;
+    if (!remixId) return null;
+    const run = await loadRemixRunRows(conn, facts, remixId);
+    return run ? await loadRemixByRunRow(conn, facts, run) : null;
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load remix by provider job ${safeJobId}: ${error.message}`);
     return null;
   } finally {
     conn.release();

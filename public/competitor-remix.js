@@ -7,7 +7,8 @@ import {
   renderKeyValues,
   setBusy,
   showLogin,
-  showToast
+  showToast,
+  taskSpaceHref
 } from "./wangzhuan-common.js";
 
 const POLL_INTERVAL_MS = 3000;
@@ -116,7 +117,7 @@ const els = {
   downloadBtn: $("#videoOpsDownloadBtn"),
   cancelBtn: $("#videoOpsCancelBtn"),
   retryBtn: $("#videoOpsRetryBtn"),
-  resultStatus: $("#videoOpsResultStatus"),
+  taskDetailLink: $("#videoOpsTaskDetailLink"),
   resultBox: $("#videoOpsResultBox")
 };
 
@@ -403,6 +404,14 @@ function jobId() {
   return state.job?.jobId || state.job?.job_id || state.job?.providerJob?.job_id || "";
 }
 
+function remixArchiveId() {
+  return state.job?.remixId || state.job?.remix_id || state.result?.remixId || state.result?.remix_id || "";
+}
+
+function archiveHref() {
+  return state.job?.taskManagementUrl || state.result?.taskManagementUrl || taskSpaceHref("remix", remixArchiveId());
+}
+
 function jobFailureMessage(job = {}) {
   const provider = job.providerJob || job;
   const candidates = [
@@ -451,23 +460,53 @@ function renderJob() {
   const id = jobId();
   const terminal = TERMINAL_STATUSES.has(job?.status);
   if (els.refreshBtn) els.refreshBtn.disabled = !id || state.loadingJob;
-  if (els.resultBtn) els.resultBtn.disabled = !id;
-  if (els.downloadBtn) els.downloadBtn.disabled = !id || !(job?.status === "succeeded" || job?.status === "review_required");
+  if (els.resultBtn) {
+    els.resultBtn.disabled = !id;
+    els.resultBtn.textContent = "同步诊断";
+  }
+  if (els.downloadBtn) {
+    els.downloadBtn.disabled = !id;
+    els.downloadBtn.textContent = "打开任务管理";
+  }
   if (els.cancelBtn) els.cancelBtn.disabled = !id || terminal;
   if (els.retryBtn) els.retryBtn.disabled = !id || job?.status !== "failed";
+  if (els.taskDetailLink) {
+    els.taskDetailLink.href = archiveHref();
+    els.taskDetailLink.classList.toggle("disabled", !id);
+    els.taskDetailLink.setAttribute("aria-disabled", id ? "false" : "true");
+  }
   renderSubmitState();
 }
 
 function renderResult() {
-  if (els.resultStatus) els.resultStatus.textContent = state.result ? "已读取" : "未读取";
   if (!els.resultBox) return;
-  if (!state.result) {
+  const id = jobId();
+  const href = archiveHref();
+  if (!id) {
     els.resultBox.className = "wz-list empty-line";
-    els.resultBox.textContent = "任务成功后可读取 result、stage_timings、engine_trace。";
+    els.resultBox.textContent = "任务提交后，最终结果、预览确认、诊断摘要和交付下载统一在任务管理中查看。";
     return;
   }
-  els.resultBox.className = "wz-list video-ops-result-box";
-  els.resultBox.innerHTML = `<pre>${escapeHtml(JSON.stringify(state.result, null, 2))}</pre>`;
+  els.resultBox.className = "wz-list";
+  const result = state.result || {};
+  const diagnosticRows = state.result
+    ? [
+      ["诊断", "已同步"],
+      ["stage_timings", result.stage_timings ? "available" : "-"],
+      ["engine_trace", result.engine_trace ? "available" : "-"]
+    ]
+    : [["诊断", "未同步"]];
+  els.resultBox.innerHTML = `
+    <article class="wz-row">
+      <div>
+        <strong>任务管理归档</strong>
+        <small>${escapeHtml(id)}</small>
+        <p>最终输出集合、预览确认、质检和下载入口统一在任务管理中处理。</p>
+      </div>
+      <a class="mini" href="${escapeHtml(href)}">查看任务详情</a>
+    </article>
+    <div class="wz-kv-grid">${renderKeyValues(diagnosticRows)}</div>
+  `;
 }
 
 function syncVideoPreviews() {
@@ -958,7 +997,11 @@ function bindEvents() {
   els.resultBtn?.addEventListener("click", () => loadResult());
   els.downloadBtn?.addEventListener("click", () => {
     const id = jobId();
-    if (id) window.open(`/api/wangzhuan/video-ops/jobs/${encodeURIComponent(id)}/download`, "_blank", "noopener");
+    if (id) location.assign(archiveHref());
+  });
+  els.taskDetailLink?.addEventListener("click", (event) => {
+    if (jobId()) return;
+    event.preventDefault();
   });
   els.cancelBtn?.addEventListener("click", cancelJob);
   els.retryBtn?.addEventListener("click", retryJob);
