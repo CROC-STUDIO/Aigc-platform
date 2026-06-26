@@ -38,7 +38,7 @@ services:
     env_file:
       - ./.env
     ports:
-      - "${AIGC_HOST_PORT:-8000}:8000"
+      - "0.0.0.0:${AIGC_HOST_PORT:-5177}:8000"
     environment:
       HOST: 0.0.0.0
       PORT: 8000
@@ -54,6 +54,6 @@ services:
       AIGC_PROJECT_ROOT_COOKIE_NAME: ${AIGC_PROJECT_ROOT_COOKIE_NAME:-ad_project_root_codex}
       TAI_ENTRY: /usr/local/lib/node_modules/tai-ai/dist/tai.min.js
     volumes:
-      - ./config.json:/data/app/config.json
-      - ./users.json:/data/users/users.json
-      - ../project-data:/data/project-data
+      - /opt/ad-picture-web-codex/config.json:/data/app/config.json
+      - /opt/ad-picture-web/users.json:/data/users/users.json
+      - /opt/ad-picture-web-data:/data/project-data
