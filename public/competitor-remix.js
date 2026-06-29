@@ -159,6 +159,12 @@ function formatUploadLimit(bytes = MAX_UPLOAD_VIDEO_BYTES) {
   return `${Math.round(bytes / 1024 / 1024)} MB`;
 }
 
+function isImageFile(file) {
+  if (!file) return false;
+  if (/^image\//i.test(file.type || "")) return true;
+  return /\.(png|jpe?g|webp)$/i.test(file.name || "");
+}
+
 function validateSubmitReady() {
   try {
     buildPayload();
@@ -285,7 +291,7 @@ function sourceInputPayload() {
 
 function buildRegionSpec() {
   if (!state.region.box) throw new Error("请在视频画面中框选需要遮挡或模糊的区域");
-  return { type: "box", ...state.region.box, coordinate_space: "normalized" };
+  return [{ type: "box", ...state.region.box, coordinate_space: "normalized" }];
 }
 
 function buildInteractionPrompt() {
@@ -746,14 +752,29 @@ async function handleManualMaskChange(file) {
     renderPayloadPreview();
     return;
   }
-  if (!/^image\//i.test(file.type || "")) {
+  if (!isImageFile(file)) {
     setFormError("mask 只支持图片文件");
     if (els.manualMaskFile) els.manualMaskFile.value = "";
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = "未上传 mask";
+    renderPayloadPreview();
     return;
   }
-  state.manualMaskDataUrl = await dataUrlFromFile(file);
-  if (els.manualMaskStatus) els.manualMaskStatus.textContent = `${file.name} · ${Math.round(file.size / 1024)} KB`;
-  renderPayloadPreview();
+  setFormError("");
+  if (els.manualMaskStatus) els.manualMaskStatus.textContent = "正在读取 mask...";
+  renderSubmitState();
+  try {
+    const dataUrl = await dataUrlFromFile(file);
+    if (!dataUrl.startsWith("data:image/")) throw new Error("mask 图片读取失败");
+    state.manualMaskDataUrl = dataUrl;
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = `${file.name} · ${Math.round(file.size / 1024)} KB`;
+  } catch (error) {
+    state.manualMaskDataUrl = "";
+    if (els.manualMaskFile) els.manualMaskFile.value = "";
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = "mask 读取失败";
+    setFormError(error.message || "mask 图片读取失败");
+  } finally {
+    renderPayloadPreview();
+  }
 }
 
 function stopPolling() {

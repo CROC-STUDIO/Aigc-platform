@@ -1,7 +1,7 @@
 ﻿import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from "node:fs";
+import { access, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -319,6 +319,25 @@ async function ensureProjectStructure(root = projectRoot) {
   ];
   await mkdir(root, { recursive: true });
   await Promise.all(names.map((name) => mkdir(join(root, name), { recursive: true })));
+}
+
+async function canUseProjectRoot(root) {
+  const target = resolve(String(root || "").trim() || ".");
+  try {
+    await mkdir(target, { recursive: true });
+    await access(target, fsConstants.R_OK | fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function firstUsableProjectRoot(preferredRoot = projectRoot) {
+  if (await canUseProjectRoot(preferredRoot)) return resolve(preferredRoot);
+  for (const item of savedProjects) {
+    if (await canUseProjectRoot(item.path)) return item.path;
+  }
+  return resolve(preferredRoot);
 }
 
 async function saveConfig() {
@@ -1931,7 +1950,12 @@ async function updateConfig(body) {
   if (runState.running) throw new Error("Batch is running; cannot change project root now");
   const nextRoot = resolve(String(body.projectRoot ?? "").trim());
   if (!nextRoot) throw new Error("Project root is required");
-  await mkdir(nextRoot, { recursive: true });
+  try {
+    await mkdir(nextRoot, { recursive: true });
+    await access(nextRoot, fsConstants.R_OK | fsConstants.W_OK);
+  } catch {
+    throw new Error(`项目目录不可写：${nextRoot}`);
+  }
   const name = String(body.name ?? basename(nextRoot)).trim() || basename(nextRoot);
   savedProjects = normalizeProjects([{ name, path: nextRoot }, ...savedProjects.filter((item) => item.path !== nextRoot)]);
   await saveConfig();
@@ -1948,7 +1972,12 @@ async function switchProject(body) {
   if (runState.running) throw new Error("Batch is running; cannot switch project now");
   const nextRoot = resolve(String(body.projectRoot ?? "").trim());
   if (!nextRoot) throw new Error("Project root is required");
-  await mkdir(nextRoot, { recursive: true });
+  try {
+    await mkdir(nextRoot, { recursive: true });
+    await access(nextRoot, fsConstants.R_OK | fsConstants.W_OK);
+  } catch {
+    throw new Error(`项目目录不可写：${nextRoot}`);
+  }
   const existing = savedProjects.find((item) => item.path === nextRoot);
   const name = String(body.name ?? existing?.name ?? basename(nextRoot)).trim() || basename(nextRoot);
   savedProjects = normalizeProjects([{ name, path: nextRoot }, ...savedProjects.filter((item) => item.path !== nextRoot)]);
@@ -2849,7 +2878,8 @@ async function withRequestScope(req, res, handler, options = {}) {
   }
   const userId = user.username;
   const cookieBase = cookies[PROJECT_ROOT_COOKIE_NAME] ? resolve(cookies[PROJECT_ROOT_COOKIE_NAME]) : projectRoot;
-  const allowedBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
+  const configuredBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
+  const allowedBase = await firstUsableProjectRoot(configuredBase);
   if (cookies[PROJECT_ROOT_COOKIE_NAME] !== allowedBase) {
     appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(allowedBase)}; Path=/; Max-Age=31536000; SameSite=Lax`);
   }
