@@ -1,13 +1,20 @@
 import { claimSchedulerJob, completeSchedulerJob, failSchedulerJob, rescheduleSchedulerJob } from "./mysql-facts.mjs";
 import { retryFailedGenerationTask } from "./pipeline.mjs";
+import { runBatchQc } from "./qc.mjs";
 import { pollUpstreamBatch } from "./upstream-poll.mjs";
+
+const DEFAULT_DEPS = Object.freeze({
+  retryFailedGenerationTask,
+  pollUpstreamBatch,
+  runBatchQc
+});
 
 function retryDelayMs(job) {
   const attempts = Math.max(1, Number(job?.attempts || 1));
   return Math.min(10 * 60_000, 30_000 * 2 ** (attempts - 1));
 }
 
-async function runTaskRetryJob(context, job) {
+async function runTaskRetryJob(context, job, deps = DEFAULT_DEPS) {
   const batchId = job.payload?.batchId || job.runUid;
   const taskUid = job.payload?.taskUid || job.taskUid;
   if (!batchId || !taskUid) {
@@ -15,17 +22,27 @@ async function runTaskRetryJob(context, job) {
     error.code = "invalid_scheduler_payload";
     throw error;
   }
-  return retryFailedGenerationTask(context, batchId, taskUid);
+  return deps.retryFailedGenerationTask(context, batchId, taskUid);
 }
 
-async function runUpstreamPollJob(context, job) {
+export async function runUpstreamPollJob(context, job, deps = DEFAULT_DEPS) {
   const batchId = job.payload?.batchId || job.runUid;
   if (!batchId) {
     const error = new Error("scheduler upstream_poll payload missing batchId");
     error.code = "invalid_scheduler_payload";
     throw error;
   }
-  return pollUpstreamBatch(context, batchId);
+  const result = await deps.pollUpstreamBatch(context, batchId);
+  const batch = result.batch;
+  if (!result.needsPoll && batch?.status === "qc") {
+    const qc = await deps.runBatchQc(context, batchId);
+    return {
+      ...result,
+      batch: qc.batch || batch,
+      qc
+    };
+  }
+  return result;
 }
 
 export async function runDueSchedulerJob(context, options = {}) {
