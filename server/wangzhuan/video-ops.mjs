@@ -94,13 +94,13 @@ function validatePoint(point = {}, index = 0) {
   };
 }
 
-function validateBox(box = {}) {
+function validateBox(box = {}, field = "params.interaction_prompt.box") {
   const x1 = Number(box.x1);
   const y1 = Number(box.y1);
   const x2 = Number(box.x2);
   const y2 = Number(box.y2);
   if (![x1, y1, x2, y2].every(Number.isFinite) || x2 <= x1 || y2 <= y1) {
-    validation("box 坐标必须满足 x2 > x1 且 y2 > y1", { field: "params.interaction_prompt.box" });
+    validation("box 坐标必须满足 x2 > x1 且 y2 > y1", { field });
   }
   return {
     x1,
@@ -109,6 +109,10 @@ function validateBox(box = {}) {
     y2,
     coordinate_space: box.coordinate_space === "pixel" ? "pixel" : "normalized"
   };
+}
+
+function validateBoxForField(box = {}, field) {
+  return validateBox(box, field);
 }
 
 function validateInteractionPrompt(raw = null) {
@@ -141,10 +145,14 @@ function validateTimeRanges(ranges = []) {
 }
 
 function validateRegionSpec(raw = null) {
+  if (Array.isArray(raw)) {
+    if (!raw.length) validation("mask_edit 需要至少一个 region_spec", { field: "params.region_spec" });
+    return raw.map((region, index) => ({ type: "box", ...validateBoxForField(region, `params.region_spec[${index}]`) }));
+  }
   if (!raw || typeof raw !== "object") {
     validation("mask_edit 需要 region_spec", { field: "params.region_spec" });
   }
-  return { type: "box", ...validateBox(raw) };
+  return [{ type: "box", ...validateBoxForField(raw, "params.region_spec") }];
 }
 
 function validateSubtitleRoi(value) {

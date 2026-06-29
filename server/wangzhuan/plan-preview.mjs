@@ -17,7 +17,6 @@ const REQUIRED_PLAN_FIELDS = Object.freeze([
   "body",
   "seedancePrompt",
   "imagePrompt",
-  "cta",
   "negativePrompt"
 ]);
 
@@ -26,10 +25,10 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   body: "Main script body in primary language for this 15s segment",
   voiceover: "Spoken lines in primary language",
   subtitles: ["Short subtitle lines in primary language, one beat per line"],
-  cta: "Call to action in primary language",
-  ending: "Ending beat in primary language",
-  imagePrompt: "First-frame image prompt; explicitly state protagonist profession/identity, clothing and props; if reference assets exist, use 图片n labels from slot guide",
-  seedancePrompt: "15s 9:16 Seedance omni_reference prompt; explicitly state protagonist profession/identity; use 图片n/视频n labels when reference assets exist",
+  cta: "Optional call to action in primary language; leave empty when the reference structure or branch does not need a CTA",
+  ending: "Optional ending beat in primary language; leave empty when no ending card/beat is needed",
+  imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
+  seedancePrompt: "15s 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
   negativePrompt: "Things to avoid in generation",
   mediaRefs: {
     productIcon: "URL or empty",
@@ -111,33 +110,46 @@ function regionLabel(code = "") {
 export function formatProtagonistFissionGuide(decomposition = {}, branchVariantIndex = 1, variantPrompt = "") {
   const subject = cleanString(decomposition.subject);
   const protagonist = cleanString(decomposition.protagonist);
+  const scene = cleanString(decomposition.scene);
+  const action = cleanString(decomposition.action);
+  const camera = cleanString(decomposition.camera);
+  const lighting = cleanString(decomposition.lighting);
+  const style = cleanString(decomposition.style);
+  const quality = cleanString(decomposition.quality);
   const voiceover = cleanString(decomposition.voiceover);
   const continuity = cleanString(decomposition.continuityAnchors);
   const variantIndex = Number(branchVariantIndex) || 1;
   const customVariantPrompt = cleanString(variantPrompt);
 
   const lines = [
-    "人物与职业裂变规则：",
+    "画面骨架与人物场景重构规则：",
+    "参考拆解只提供可迁移的画面骨架，不提供可照搬的人物、职业、场景、服装或道具。",
+    "重点参考字段：scene、subject、action、camera、lighting、style、quality。",
     `- 参考拆解 subject：${subject || "未提供"}`,
     protagonist ? `- 参考拆解 protagonist：${protagonist}` : "",
+    scene ? `- 参考拆解 scene：${scene}` : "",
+    action ? `- 参考拆解 action：${action}` : "",
+    camera ? `- 参考拆解 camera：${camera}` : "",
+    lighting ? `- 参考拆解 lighting：${lighting}` : "",
+    style ? `- 参考拆解 style：${style}` : "",
+    quality ? `- 参考拆解 quality：${quality}` : "",
     voiceover ? `- 参考拆解口播功能：${voiceover}` : "",
     continuity ? `- 连续性锚点：${continuity}` : "",
     "",
-    variantIndex === 1
-      ? "本变体 branchVariantIndex=1：使用参考视频拆解中的原始职业/身份作为主人物设定；seedancePrompt 与 imagePrompt 必须明确写出该职业、对应服装/道具/场景。"
-      : `本变体 branchVariantIndex=${variantIndex}：在保留参考视频镜头结构、口播功能与转化节奏的前提下，将主角替换为「相似职业」裂变，不要复刻竞品人物 identity。`,
-    variantIndex === 1
-      ? "口播与字幕按参考拆解的功能结构改写为目标语言，人物职业与 subject/protagonist 一致。"
-      : [
-          "相似职业裂变要求：",
-          "1. 新职业需与参考职业同属一个生活场景/人群带，例如：外卖员→快递员/跑腿员/配送员；网约车司机→出租车司机/货车司机；宝妈→全职妈妈/带娃年轻妈妈；便利店店员→超市收银员/快餐店员；上班族→白领/销售/文员；退休大爷→退休阿姨/老年夫妇；健身博主→瑜伽教练/跑步爱好者。",
-          "2. 不要跳到完全无关身份（如 外卖员→医生、宝妈→程序员），除非参考视频本身就是该类型。",
-          "3. seedancePrompt 与 imagePrompt 必须明确写出本变体选用的新职业，并体现在场景、服装、道具、口播语气与字幕细节中。",
-          "4. 口播/字幕的转化功能（痛点/质疑/惊喜/引导下载）保持不变，只调整与新职业匹配的细节表达。",
-          customVariantPrompt
-            ? `5. 用户为本变体指定了 variantPrompt，人物/职业设定优先遵循：${customVariantPrompt}`
-            : `5. 若用户填写了 variantPrompt，优先遵循用户对第 ${variantIndex} 个变体的人物/职业要求。`
-        ].join("\n")
+    `本变体 branchVariantIndex=${variantIndex}：只复用参考视频的结构、节奏、镜头功能和转化逻辑；人物身份、职业/人群、具体场景、服装、道具和具体情节必须全部重构，不能继承原人物或限制为相似职业。`,
+    [
+      "重构要求：",
+      "1. 必须改变参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达。",
+      "2. 不复刻竞品人物 identity、原场景、原 UI 细节、品牌、水印或原文案。",
+      "3. seedancePrompt 与 imagePrompt 必须明确写出本变体的新人物/身份、场景、服装、道具和环境，不能只写“用户/年轻人/女性”。",
+      "4. 口播/字幕只保留参考拆解的功能位置和转化作用（如开场吸引、痛点、质疑、反馈、引导），具体人设、场景和表达必须重写。",
+      "5. scene 只参考场景功能，必须换成新的具体场景；subject 只参考主体在转化链路中的作用，必须换成新人群。",
+      "6. action 重点复用动作节奏和转化功能，但动作表现要重写；camera、lighting、style、quality 作为镜头语言、光线、风格和质量约束。",
+      "7. ending 和 CTA 不是必选；只有参考结构、渠道规则或业务分支需要时才写入，不要为了凑结构强行添加。",
+      customVariantPrompt
+        ? `8. 用户为本变体指定了 variantPrompt，人物、场景和表达优先遵循：${customVariantPrompt}`
+        : `8. 若用户填写了 variantPrompt，优先遵循用户对第 ${variantIndex} 个变体的人物、场景和表达要求。`
+    ].join("\n")
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -198,7 +210,7 @@ export function formatPlanLocaleGuide(context = {}) {
     context.voiceoverStyle ? `口播风格 voiceoverStyle=${context.voiceoverStyle}` : "",
     "",
     "语言与地区输出规则：",
-    `1. hook、body、voiceover、subtitles、cta、ending 必须使用主语言 ${context.primaryLanguage} 撰写。`,
+    `1. hook、body、voiceover、subtitles 必须使用主语言 ${context.primaryLanguage} 撰写；cta、ending 如存在也必须使用主语言。`,
     context.languages?.length > 1
       ? `2. 若存在多语言配置（${context.languages.join(", ")}），仍以前述主语言输出本段预案，不要混用语言。`
       : "2. 全部用户可见文案保持单一主语言，不要混用竞品原语言。",
@@ -213,7 +225,7 @@ export function formatPlanLocaleGuide(context = {}) {
       : "5. subtitles 为主语言短句，每条对应一个镜头节点。",
     "6. 参考视频若为其他语言，必须完整改写为目标语言，不得保留原文。",
     "7. seedancePrompt 与 imagePrompt 中的 UI 文案、口播、字幕描述也使用主语言。",
-    "8. seedancePrompt 与 imagePrompt 必须明确写出主角职业/身份、服装与关键道具，不能只写“用户/年轻人/女性”。",
+    "8. seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，不能只写“用户/年轻人/女性”。",
     "9. 免责声明只写入 complianceNotes（如需），不要写入 seedancePrompt。"
   ];
   return lines.filter(Boolean).join("\n");
@@ -304,6 +316,8 @@ export function buildSeedancePlanMessages({
   const requiredDisclaimers = [...new Set((channelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
   const promptText = [
     "你要复用参考视频的结构、节奏、镜头功能和转化逻辑。",
+    "你必须重构参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达。",
+    "参考拆解中的 scene、subject、action、camera、lighting、style、quality 只作为画面骨架和镜头约束，不得作为照搬内容。",
     "不得复刻竞品品牌、原文案、人物身份、水印、UI 细节。",
     "必须替换为我方产品资产和业务规则。",
     "不得编造收益金额、到账承诺或提现门槛。",
@@ -343,7 +357,7 @@ export function buildSeedancePlanMessages({
     referenceSlotGuideText,
     "",
     referenceSlotGuide.length
-      ? "输出要求：imagePrompt 与 seedancePrompt 必须明确使用上述 图片n/视频n 指代已上传素材；mediaRefs 填写对应 URL。"
+      ? "输出要求：imagePrompt 与 seedancePrompt 必须明确使用上述 图片n/视频n 指代已上传素材，并说明参考该素材的主体、构图、UI、动作、运镜或特效；mediaRefs 填写对应 URL。"
       : "输出要求：未上传参考素材时，imagePrompt 与 seedancePrompt 不要使用 图片n/视频n 指代。",
     "",
     "渠道规则：",
@@ -359,10 +373,15 @@ export function buildSeedancePlanMessages({
     JSON.stringify(SEEDANCE_PLAN_SCHEMA_HINT, null, 2),
     "",
     "Seedance prompt 补充要求：",
-    "1. seedancePrompt 必须按参考拆解 action 的时间节奏写镜头，并明确主角职业/身份。",
-    "2. branchVariantIndex>1 时使用相似职业裂变，同步调整服装、场景细节与口播语气，但保持转化结构不变。",
-    "3. voiceover/subtitles 的每段功能需对应参考拆解中的口播/字幕功能，不要写成通用广告话术。",
-    "4. imagePrompt 首帧必须锁定本变体的人物职业、外观与服装，便于后续视频生成保持一致。",
+    "1. seedancePrompt 必须按镜头拆分，每个镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",
+    "2. 每个镜头必须说明该镜头的转化功能，例如开场吸引、痛点、产品动作、反馈、疑虑消除、自然收束或引导。",
+    "3. subject 只保留主体功能，必须换成新的具体人物/人群；scene 只保留场景功能，必须换成新的具体场景。",
+    "4. action 必须复用节奏和转化功能，但动作表现、人物行为和口播表达必须重写。",
+    "5. camera、lighting、style、quality 分别作为运镜/切镜、光线、风格和画面质量约束写入 seedancePrompt。",
+    "6. voiceover/subtitles 的每段功能需对应参考拆解中的口播/字幕功能，但具体文案必须重写，不要写成通用广告话术。",
+    "7. imagePrompt 首帧必须锁定本变体的新人物/身份、新场景、新服装、新道具和产品露出，便于后续视频生成保持一致。",
+    "8. 如果生成字幕、Slogan 或 CTA 文字，必须写清文字内容、出现时机、出现位置、出现方式、文字风格；字幕需与口播/音频节奏同步。",
+    "9. ending 和 CTA 不是必选；不需要时 cta/ending 可为空，不要为了凑结构强行添加。",
     "",
     "只返回 JSON 对象。"
   ].filter(Boolean).join("\n");
@@ -372,10 +391,11 @@ export function buildSeedancePlanMessages({
       role: "system",
       content: [
         "你是网赚广告 Seedance 前置参数策划专家。",
-        "你要基于参考结构和我方业务元素生成可执行的 Seedance 分镜与 prompt。",
-        "必须继承参考拆解中的人物职业/身份设定；branchVariantIndex=1 用原职业，branchVariantIndex>1 可在相同人群带内替换为相似职业裂变。",
-        "seedancePrompt 与 imagePrompt 必须明确写出主角职业、服装与关键道具，禁止“用户/年轻人”等泛化人物描述。",
-        "所有 hook、body、voiceover、subtitles、cta、ending 必须使用指定主语言，并符合目标地区表达习惯。",
+        "你要基于参考视频的结构、节奏、镜头功能和转化逻辑，为我方业务重构可执行的 Seedance 分镜与 prompt。",
+        "必须改变参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达；禁止沿用原人物或把变化限制在相近职业。",
+        "seedancePrompt 必须逐镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",
+        "seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，禁止“用户/年轻人”等泛化人物描述。",
+        "所有 hook、body、voiceover、subtitles 必须使用指定主语言；cta、ending 如存在也必须使用指定主语言，并符合目标地区表达习惯。",
         "若提供了参考素材 slot 映射，imagePrompt 与 seedancePrompt 必须使用 图片1、图片2、视频1 等指代，并与 slot 顺序一致。",
         "必须输出严格 JSON 对象，不要 markdown，不要解释。"
       ].join("\n")

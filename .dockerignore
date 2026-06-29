@@ -14,3 +14,4 @@ project-data
 mysql-data
 video_frames
 .release/*.tar.gz
+.superpowers
