@@ -170,6 +170,7 @@ export async function consumeSkylinkSseResponse(response, { onDelta, onRawEvent 
 
 async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { mode, controller, fetchOptions = {} }) {
   handlers.onRequest?.({ url, mode });
+  const inputMode = modelInputMode(body?.messages || []);
   const headers = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${llmConfig.apiKey}`
@@ -190,7 +191,7 @@ async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { m
       provider: llmConfig.provider,
       model: llmConfig.model,
       status: response.status,
-      inputMode: mode,
+      inputMode,
       upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
     });
   }
@@ -205,7 +206,7 @@ async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { m
     }
     throw new WangzhuanError("model_failed", "上游未返回 SSE 流", {
       status: response.status,
-      inputMode: mode
+      inputMode
     });
   }
 
@@ -225,7 +226,7 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
   }
 
   const controller = new AbortController();
-  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || 180000;
+  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || 300000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const chatPayload = {
@@ -247,6 +248,7 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
     && !shouldForceChatForFileUrl(llmConfig, messages)
     && !llmUsesSkylinkGeminiChatBridge(llmConfig);
   const chatUrl = chatCompletionsUrl(llmConfig.endpoint);
+  const inputMode = modelInputMode(messages);
 
   try {
     if (useResponses) {
@@ -275,7 +277,7 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
-      inputMode: useResponses ? "responses.stream" : "chat.completions.stream",
+      inputMode,
       reason
     });
   } finally {
@@ -303,9 +305,10 @@ export async function callGeminiCompatibleLlmStream(llmConfig, messages, handler
   }
 
   const controller = new AbortController();
-  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || 180000;
+  const timeoutMs = numberOrZero(llmConfig.timeoutMs) || 300000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const body = typeof bodyFactory === "function" ? bodyFactory(messages) : bodyFactory;
+  const inputMode = modelInputMode(messages);
   const url = geminiStreamGenerateContentUrl(llmConfig.endpoint, llmConfig.model);
   const headers = {
     "Content-Type": "application/json",
@@ -327,7 +330,7 @@ export async function callGeminiCompatibleLlmStream(llmConfig, messages, handler
         provider: llmConfig.provider,
         model: llmConfig.model,
         status: response.status,
-        inputMode: "gemini_contents.stream",
+        inputMode,
         upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
       });
     }
@@ -341,7 +344,7 @@ export async function callGeminiCompatibleLlmStream(llmConfig, messages, handler
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
-      inputMode: "gemini_contents.stream",
+      inputMode,
       reason
     });
   } finally {

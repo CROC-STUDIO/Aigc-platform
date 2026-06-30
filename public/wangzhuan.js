@@ -2630,9 +2630,8 @@ function draftFromForm() {
 
 function missingStrongFields(draft) {
   if (draft.promiseLevel !== "strong_commitment") return [];
-  return strongTruthFields
-    .filter(([key]) => !draft.truthRules[key])
-    .map(([key, label]) => label || key);
+  const hasAnyRule = strongTruthFields.some(([key]) => String(draft.truthRules?.[key] || "").trim());
+  return hasAnyRule ? [] : ["至少一条真实收益规则"];
 }
 
 function selectedTemplateNameChanged(draft = {}) {

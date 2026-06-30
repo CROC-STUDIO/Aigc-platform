@@ -3,7 +3,8 @@ export const DEFAULT_LLM_CONFIG = Object.freeze({
   endpoint: "https://skylink-gateway.com/api/v1",
   model: "gemini-3.5-flash",
   temperature: 0.2,
-  timeoutMs: 180000
+  timeoutMs: 300000,
+  maxRetries: 3
 });
 
 export const DEFAULT_QC_LLM_CONFIG = Object.freeze({
@@ -28,6 +29,23 @@ function cleanTimeoutMs(value) {
   return Number.isFinite(number) && number >= 30000 && number <= 600000
     ? Math.trunc(number)
     : DEFAULT_LLM_CONFIG.timeoutMs;
+}
+
+function cleanMaxRetries(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 10
+    ? Math.trunc(number)
+    : DEFAULT_LLM_CONFIG.maxRetries;
+}
+
+export function isRetryableLlmError(error) {
+  if (!(error instanceof Error)) return false;
+  const code = error.code || error?.data?.code;
+  if (code !== "model_failed") return false;
+  const reason = error.data?.reason;
+  if (reason === "timeout" || reason === "request_failed") return true;
+  const status = Number(error.data?.status || 0);
+  return status >= 500;
 }
 
 function normalizeModel(provider, model) {
@@ -91,6 +109,7 @@ function mergeLlmSection(config = {}, sectionKey, defaults, overrides = {}) {
     model: normalizeModel(provider, merged.model || defaults.model),
     temperature: cleanTemperature(merged.temperature ?? defaults.temperature),
     timeoutMs: cleanTimeoutMs(merged.timeoutMs ?? defaults.timeoutMs),
+    maxRetries: cleanMaxRetries(merged.maxRetries ?? defaults.maxRetries),
     apiKeyEnv: configuredApiKeyEnv(merged),
     apiKey: configuredApiKey(merged),
     preferVideoUrl: merged.preferVideoUrl !== false && (
@@ -139,6 +158,7 @@ function publicLlmConfigShape(llmConfig = {}) {
     model: llmConfig.model,
     temperature: llmConfig.temperature,
     timeoutMs: llmConfig.timeoutMs,
+    maxRetries: llmConfig.maxRetries,
     apiKeyEnv: llmConfig.apiKeyEnv,
     hasApiKey: Boolean(llmConfig.apiKey),
     preferVideoUrl: llmSupportsVideoUrl(llmConfig)

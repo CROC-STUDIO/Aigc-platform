@@ -1055,12 +1055,6 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
 
 export async function confirmBatchAssets(context, batchId, request = {}) {
   const batch = await readBatch(context, batchId);
-  if (batch.status !== "preview_required") {
-    throw new WangzhuanError("validation_error", "当前批次不在预案确认阶段，无法确认 Seedance 素材审核结果", {
-      batchId,
-      status: batch.status
-    });
-  }
   const rawBranchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
     ? request.branchDrafts
     : batch.branchDrafts || batch.request?.branches || [];

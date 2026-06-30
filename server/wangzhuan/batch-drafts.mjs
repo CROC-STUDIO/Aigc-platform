@@ -60,8 +60,8 @@ function hasUsableDecomposition(value) {
   return Boolean(value.scene || value.hook || value.action || value.subject);
 }
 
-function ensureReferenceVideo(request = {}) {
-  const referenceVideo = cleanObject(request.referenceVideo);
+export function ensureReferenceVideo(request = {}) {
+  const referenceVideo = cleanObject(request.referenceVideo) || {};
   if (!referenceVideo.referenceVideoId) {
     throw new WangzhuanError("validation_error", "referenceVideo.referenceVideoId 必填", {
       field: "referenceVideo.referenceVideoId"

@@ -1,4 +1,4 @@
-import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
+import { hasAnyStrongTruthRule } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makePlanId } from "./ids.mjs";
 import { llmUsesGeminiNativeApi, resolveLlmConfig } from "./llm-config.mjs";
@@ -25,8 +25,8 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   body: "Main script body in primary language for this 15s segment",
   voiceover: "Spoken lines in primary language",
   subtitles: ["Short subtitle lines in primary language, one beat per line"],
-  cta: "Optional call to action in primary language; leave empty when the reference structure or branch does not need a CTA",
-  ending: "Optional ending beat in primary language; leave empty when no ending card/beat is needed",
+  cta: "Optional call to action in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require a CTA",
+  ending: "Optional ending beat in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require an ending card/beat",
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
   seedancePrompt: "15s 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
   negativePrompt: "Things to avoid in generation",
@@ -38,7 +38,7 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
     personAsset: "URL or empty",
     rewardElement: "URL or empty"
   },
-  complianceNotes: ["Policy-safe reminders in primary language; do not paste disclaimer overlay text into seedancePrompt"]
+  complianceNotes: ["Policy-safe reminders in primary language; do not paste disclaimer overlay text into seedancePrompt; record any omitted CTA/amount/claim risks here"]
 });
 
 const LANGUAGE_LABELS = Object.freeze({
@@ -234,12 +234,11 @@ export function formatPlanLocaleGuide(context = {}) {
 export function validateBranchTruthRulesForPlan(branches = []) {
   for (const branch of branches) {
     if (branch.promiseLevel !== "strong_commitment") continue;
-    const missingFields = REQUIRED_STRONG_TRUTH_FIELDS.filter((field) => !isNonEmptyString(branch.truthRules?.[field]));
-    if (missingFields.length) {
+    if (!hasAnyStrongTruthRule(branch.truthRules)) {
       throw new WangzhuanError("strong_rule_missing", "强承诺需要补齐真实收益规则", {
         branchId: branch.branchId,
         branchLabel: branch.branchLabel,
-        missingFields
+        field: "truthRules"
       });
     }
   }
@@ -321,6 +320,11 @@ export function buildSeedancePlanMessages({
     "不得复刻竞品品牌、原文案、人物身份、水印、UI 细节。",
     "必须替换为我方产品资产和业务规则。",
     "不得编造收益金额、到账承诺或提现门槛。",
+    "默认不要生成 CTA 或 ending；只有 channelRules、branch.customPrompt 或 truthRules 明确要求时才填写，否则 cta 和 ending 必须为空字符串。",
+    "不得在 hook、body、voiceover、subtitles、imagePrompt、seedancePrompt、cta、ending 或 UI 文案中编造任何金额、积分点数、奖励数值、余额、提现档位、到账路径或时间。",
+    "若 truthRules 没有提供明确金额、积分点数、奖励数值或门槛，禁止出现具体金额、点数增长、余额增长、提现金额、R$ 数字，或任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强承诺语义。",
+    "承诺强度规则：当 promiseLevel 不是 strong_commitment 时，只能使用弱承诺表达，禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；当 promiseLevel 是 strong_commitment 时，可以表达强承诺，但必须严格受 truthRules 约束，不得新增 truthRules 未写明的金额、到账速度、保证性词汇、提现资格或限制条件。",
+    "可以表达为“按规则完成任务后累积奖励/积分/进度”，但必须避免让用户理解为必然赚钱、固定金额或 guaranteed cashout。",
     "",
     "参考视频拆解：",
     JSON.stringify(decomposition || {}, null, 2),
@@ -340,6 +344,7 @@ export function buildSeedancePlanMessages({
       languages: localeContext.languages,
       regions: localeContext.regions,
       currencySymbol: localeContext.currencySymbol,
+      targetChannel: localeContext.targetChannel,
       targetChannels: branch.targetChannels || (localeContext.targetChannel ? [localeContext.targetChannel] : []),
       outputRatio: localeContext.outputRatio,
       promiseLevel: branch.promiseLevel || draft.promiseLevel,
@@ -381,7 +386,9 @@ export function buildSeedancePlanMessages({
     "6. voiceover/subtitles 的每段功能需对应参考拆解中的口播/字幕功能，但具体文案必须重写，不要写成通用广告话术。",
     "7. imagePrompt 首帧必须锁定本变体的新人物/身份、新场景、新服装、新道具和产品露出，便于后续视频生成保持一致。",
     "8. 如果生成字幕、Slogan 或 CTA 文字，必须写清文字内容、出现时机、出现位置、出现方式、文字风格；字幕需与口播/音频节奏同步。",
-    "9. ending 和 CTA 不是必选；不需要时 cta/ending 可为空，不要为了凑结构强行添加。",
+    "9. ending 和 CTA 默认不生成；除非 channelRules、branch.customPrompt 或 truthRules 明确要求，否则 cta/ending 必须为空，不要为了凑结构强行添加。",
+    "10. 奖励数字与收益承诺约束：只有 truthRules 明确给出的金额、积分点数、奖励数值、门槛、到账条件才能出现在用户可见文案或 UI 描述中；未提供时不要写任何具体金额、点数增长、余额增长、提现档位、到账时间或保证性收益。",
+    "11. 承诺强度按 promiseLevel 控制：非 strong_commitment 分支只能使用弱承诺（任务、积分、进度、奖励反馈、按规则可查看/申请/兑换），禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；strong_commitment 分支可以表达强承诺，但必须逐项来自 truthRules，不得扩写或增强。",
     "",
     "只返回 JSON 对象。"
   ].filter(Boolean).join("\n");

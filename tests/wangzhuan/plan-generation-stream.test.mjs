@@ -31,6 +31,28 @@ test("buildPlanPreviewBatch creates empty preview_required draft batch", () => {
   assert.equal(batch.request.branches.length, 1);
 });
 
+test("buildPlanPreviewBatch does not reuse terminal draft batch ids", () => {
+  const batch = buildPlanPreviewBatch(
+    { userId: "u1", projectName: "demo_project" },
+    {
+      estimate: { estimateId: "est_1", variantCount: 1 },
+      request: { batchName: "重新生成预案", targetChannel: "generic" },
+      templateSnapshot: { draft: {} },
+      referenceVideo: { referenceVideoId: "ref_20260629_001" },
+      decomposition: { scene: "street" }
+    },
+    {
+      batchId: "wzb_20260629093333_0596",
+      status: "stopped",
+      createdAt: "2026-06-29T09:33:33.000Z"
+    },
+    [{ branchId: "branch_1", branchLabel: "改写 1" }]
+  );
+
+  assert.notEqual(batch.batchId, "wzb_20260629093333_0596");
+  assert.equal(batch.status, "preview_required");
+});
+
 test("enrichPlanGenerationError attaches batchId to WangzhuanError data", () => {
   const error = enrichPlanGenerationError(
     new WangzhuanError("model_failed", "upstream failed", { upstreamMessage: "bad key" }),
