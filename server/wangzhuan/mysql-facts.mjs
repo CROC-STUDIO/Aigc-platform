@@ -1746,6 +1746,7 @@ function taskRowToTask(row) {
   if (request.promptStorageUrl || row.prompt_storage_url) task.promptStorageUrl = request.promptStorageUrl || row.prompt_storage_url;
   if (response.outputStorageKey || row.output_storage_key) task.outputStorageKey = response.outputStorageKey || row.output_storage_key;
   if (response.outputStorageUrl || row.output_storage_url) task.outputStorageUrl = response.outputStorageUrl || row.output_storage_url;
+  if (request.continuityReference || response.continuityReference) task.continuityReference = request.continuityReference || response.continuityReference;
   if (Object.keys(request).length) task.requestSummary = request;
   if (Object.keys(response).length) task.responseSummary = response;
   return task;
@@ -3735,6 +3736,7 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         ...(task.segmentIndex ? { segmentIndex: task.segmentIndex } : {}),
         ...(task.planId ? { planId: task.planId } : {}),
         ...(task.durationSec ? { durationSec: task.durationSec } : {}),
+        ...(task.continuityReference ? { continuityReference: task.continuityReference } : {}),
         ...(task.promptStorageKey ? { promptStorageKey: task.promptStorageKey } : {}),
         ...(task.promptStorageUrl ? { promptStorageUrl: task.promptStorageUrl } : {})
       };

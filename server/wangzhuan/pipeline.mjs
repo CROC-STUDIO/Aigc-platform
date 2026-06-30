@@ -96,8 +96,8 @@ async function writeBatchWithTrigger(context, batch, triggerName = "batch_write"
   return next;
 }
 
-async function writeBatch(context, batch) {
-  return writeBatchWithTrigger(context, batch, "batch_write");
+export async function writeBatch(context, batch, triggerName = "batch_write") {
+  return writeBatchWithTrigger(context, batch, triggerName);
 }
 
 function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaimers = []) {
@@ -254,7 +254,10 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
   }
   const promptTarget = join(context.userProjectRoot, promptRelPath);
   const prompt = await readFile(promptTarget, "utf8");
-  const media = collectSeedanceMedia(batch, task);
+  const media = [
+    ...collectSeedanceMedia(batch, task),
+    ...continuityReferenceMedia(task)
+  ];
   return buildSeedanceGenerationPayload({
     model: resolveSeedanceModel(batch, provider, task),
     prompt,
@@ -353,6 +356,48 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
     requestSummary: summarizeSeedanceRequest(payload, provider),
     responseSummary: summarizeSeedanceResponse(result)
   };
+}
+
+function taskSegmentKey(task = {}) {
+  return [
+    task.branchId || "default",
+    String(task.branchVariantIndex || task.variantIndex || 1)
+  ].join(":");
+}
+
+function previousSegmentDownloaded(tasks = [], task = {}) {
+  const segmentIndex = Number(task.segmentIndex || 1);
+  if (segmentIndex <= 1) return true;
+  return tasks.some((candidate) => {
+    return taskSegmentKey(candidate) === taskSegmentKey(task)
+      && Number(candidate.segmentIndex || 1) === segmentIndex - 1
+      && candidate.status === "downloaded"
+      && Boolean(candidate.outputPath);
+  });
+}
+
+function isApprovedContinuityReference(reference = {}) {
+  const status = String(reference.review?.status || "").toLowerCase();
+  return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
+}
+
+export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
+  if (task.status !== "pending") return false;
+  if (Number(batch.estimate?.durationSec || 15) !== 30) return true;
+  if (!previousSegmentDownloaded(Array.isArray(batch.tasks) ? batch.tasks : [], task)) return false;
+  if (Number(task.segmentIndex || 1) <= 1) return true;
+  return isApprovedContinuityReference(task.continuityReference);
+}
+
+function continuityReferenceMedia(task = {}) {
+  if (!isApprovedContinuityReference(task.continuityReference)) return [];
+  return [{
+    type: "image_asset",
+    assetId: task.continuityReference.review.assetId,
+    assetKey: "continuityFrame",
+    assetRole: "reference",
+    storedPath: task.continuityReference.storedPath || ""
+  }];
 }
 
 async function ensureEventFile(context, batchId) {
@@ -779,7 +824,7 @@ export async function submitPendingGenerationTasks(context, batchId) {
   const tasks = [...originalTasks];
   const pendingIndexes = [];
   for (let index = 0; index < originalTasks.length; index += 1) {
-    if (originalTasks[index]?.status === "pending") pendingIndexes.push(index);
+    if (isGenerationTaskSubmitReady(batch, originalTasks[index])) pendingIndexes.push(index);
   }
   for (let offset = 0; offset < pendingIndexes.length; offset += limit) {
     const chunk = pendingIndexes.slice(offset, offset + limit);
@@ -1110,6 +1155,5 @@ export async function getActiveBatch(context) {
 
 export {
   readBatch,
-  writeBatch,
   writeTaskMaps
 };

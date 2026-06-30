@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-JMS_HOST="${JMS_HOST:-jump.corp.touka.plus}"
-JMS_PORT="${JMS_PORT:-2222}"
-JMS_KEY="${JMS_KEY:-$HOME/.ssh/jumpserver_rsa}"
-JMS_LOGIN="${JMS_LOGIN:-huting@dev@8.219.102.128}"
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=env.defaults.sh
+source "$ROOT/.release/env.defaults.sh"
+if [ -f "$ROOT/.release/env.local.sh" ]; then
+  # shellcheck source=/dev/null
+  source "$ROOT/.release/env.local.sh"
+fi
 RELEASE_TAR="$ROOT/.release/aigc-platform-release.tar.gz"
 DEPLOY_SH="$ROOT/.release/deploy-remote.sh"
 PROD_ENV="${PROD_ENV:-}"

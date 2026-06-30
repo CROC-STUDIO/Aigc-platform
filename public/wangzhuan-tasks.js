@@ -102,7 +102,7 @@ function renderListEmpty(message) {
       <p>${escapeHtml(hint)}</p>
       ${showCreateActions ? `
         <div class="wz-tasks-empty-actions">
-          <a class="mini" href="/wangzhuan.html">去网赚管线创建</a>
+          <a class="mini" href="/wangzhuan-v2.html">去网赚管线创建</a>
           <a class="mini ghost" href="/competitor-remix.html">去竞品改造创建</a>
         </div>
       ` : ""}
@@ -266,12 +266,8 @@ function detailSignature(detail) {
   ].join("|");
 }
 
-function hasActiveTasksOnPage() {
-  return state.items.some((item) => item.isActive);
-}
-
 function shouldPollPage() {
-  return hasActiveTasksOnPage() || shouldPollDetail(state.detail);
+  return shouldPollDetail(state.detail);
 }
 
 function stopPagePolling() {
@@ -284,7 +280,7 @@ function updatePagePolling() {
   if (!shouldPollPage()) return;
   state.stopPagePoll = schedulePoll({
     load: async () => {
-      await refreshTasksPage({ silent: true });
+      await loadSelectedDetail({ silent: true });
       return state.detail;
     },
     shouldStop: () => !shouldPollPage(),

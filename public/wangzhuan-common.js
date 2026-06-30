@@ -1639,7 +1639,7 @@ export function readWorkbenchRestoreRequest() {
 }
 
 export function workbenchHref(type, status = "", id = "") {
-  const base = type === "remix" ? "/competitor-remix.html" : "/wangzhuan.html";
+  const base = type === "remix" ? "/competitor-remix.html" : "/wangzhuan-v2.html";
   const hash = workbenchFocusHash(type, status);
   const taskId = String(id || "").trim();
   if (!taskId) return `${base}${hash}`;

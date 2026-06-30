@@ -11,8 +11,8 @@ async function readText(path) {
 test("wangzhuan v2 page keeps old page separate and exposes dense workbench regions", async () => {
   const html = await readText("public/wangzhuan-v2.html");
   assert.match(html, /<title>[^<]*网赚素材管线 v2/);
-  assert.match(html, /href="\/wangzhuan\.html"[\s\S]*网赚素材管线/);
-  assert.match(html, /href="\/wangzhuan-v2\.html"[\s\S]*网赚素材管线 v2/);
+  assert.doesNotMatch(html, /href="\/wangzhuan\.html"/);
+  assert.match(html, /href="\/wangzhuan-v2\.html"[\s\S]*网赚素材管线/);
   assert.match(html, /id="wzV2TaskQueue"/);
   assert.match(html, /id="wzSaveDraftBtn"/);
   assert.match(html, /id="wzGlobalError"/);
@@ -140,6 +140,44 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /negativePrompt:\s*value\(els\.negativePrompt\)/);
   assert.match(js, /批次轮询暂时断开，正在重连/);
   assert.match(js, /批次轮询已恢复/);
+  assert.match(js, /TERMINAL_BATCH_STATUSES/);
+  assert.doesNotMatch(js, /location\.reload\(/);
+  assert.match(js, /VISIBLE_LOG_LIMIT\s*=\s*50/);
+  assert.match(js, /state\.visibleLogs\.length\s*>\s*VISIBLE_LOG_LIMIT/);
+  assert.match(js, /loadOlderLogs/);
+  assert.match(js, /RECENT_PAGE_SIZE\s*=\s*5/);
+  assert.match(js, /\/api\/wangzhuan\/tasks\?\$\{query\}/);
+  assert.match(js, /pageSize:\s*String\(RECENT_PAGE_SIZE\)/);
+  assert.match(js, /openRecentResult/);
+  assert.match(js, /loadBatchDetail\(id\)/);
+  assert.match(js, /restoreV2FromBatchDetail\(detail\)/);
+  assert.match(js, /const form = new FormData\(\)/);
+  assert.match(js, /form\.append\("file", file, file\.name\)/);
+  assert.doesNotMatch(js, /const content = await fileToDataUrl\(file\);\s*const data = await api\("\/api\/wangzhuan\/reference-videos\/check"/);
+});
+
+test("wangzhuan v2 restores task-manager backflow links in place", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  assert.match(js, /readWorkbenchRestoreRequest/);
+  assert.match(js, /async function restoreWorkbenchFromUrl\(\)/);
+  assert.match(js, /const restoreRequest = readWorkbenchRestoreRequest\(\)/);
+  assert.match(js, /\/api\/wangzhuan\/batches\/\$\{encodeURIComponent\(batchId\)\}/);
+  assert.match(js, /function restoreV2FromBatchDetail\(detail = \{\}\)/);
+  assert.match(js, /referenceVideoFromBatch\(batch\)/);
+  assert.match(js, /decompositionFromBatch\(batch\)/);
+  assert.match(js, /branchDraftsFromBatch\(batch\)/);
+  assert.match(js, /renderPlanEditors\(Array\.isArray\(batch\.plans\) \? batch\.plans : \[\]\)/);
+  assert.match(js, /已从任务管理恢复批次/);
+  assert.match(js, /restoreWorkbenchFromUrl\(\)/);
+});
+
+test("wangzhuan v2 page exposes bounded logs and lazy recent result controls", async () => {
+  const html = await readText("public/wangzhuan-v2.html");
+  assert.match(html, /id="wzLoadOlderLogsBtn"/);
+  assert.match(html, /id="wzRecentResults"/);
+  assert.match(html, /只加载最近 5 条摘要/);
+  assert.match(html, /id="wzRecentPager"/);
+  assert.match(html, /id="wzRefreshRecentBtn"/);
 });
 
 test("confirming Seedance asset reviews is not blocked by preview stage", async () => {

@@ -25,3 +25,10 @@ video_frames/
 Thumbs.db
 ad-picture-web-backups-*
 .release/*.tar.gz
+docs/
+mysql-data/
+.release/env.local.sh
+.superpowers/
+output/
+project-data/
+config.json

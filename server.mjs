@@ -2056,6 +2056,75 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function readRequestBuffer(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+function parseMultipartBoundary(contentType = "") {
+  const match = String(contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  return (match?.[1] || match?.[2] || "").trim();
+}
+
+function parseContentDisposition(value = "") {
+  const result = {};
+  for (const part of String(value || "").split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    const key = rawKey.trim().toLowerCase();
+    if (!key) continue;
+    const joined = rawValue.join("=").trim();
+    result[key] = joined.replace(/^"|"$/g, "");
+  }
+  return result;
+}
+
+async function readMultipart(req) {
+  const contentType = req.headers["content-type"] || "";
+  const boundary = parseMultipartBoundary(contentType);
+  if (!boundary) throw new Error("multipart boundary missing");
+  const body = await readRequestBuffer(req);
+  const delimiter = Buffer.from(`--${boundary}`);
+  const fields = {};
+  const files = {};
+  let cursor = 0;
+  while (cursor < body.length) {
+    const start = body.indexOf(delimiter, cursor);
+    if (start < 0) break;
+    let partStart = start + delimiter.length;
+    if (body.slice(partStart, partStart + 2).toString() === "--") break;
+    if (body.slice(partStart, partStart + 2).toString() === "\r\n") partStart += 2;
+    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), partStart);
+    if (headerEnd < 0) break;
+    const rawHeaders = body.slice(partStart, headerEnd).toString("utf8");
+    let partEnd = body.indexOf(delimiter, headerEnd + 4);
+    if (partEnd < 0) partEnd = body.length;
+    let content = body.slice(headerEnd + 4, partEnd);
+    if (content.slice(-2).toString() === "\r\n") content = content.slice(0, -2);
+    cursor = partEnd;
+
+    const headers = {};
+    for (const line of rawHeaders.split("\r\n")) {
+      const index = line.indexOf(":");
+      if (index <= 0) continue;
+      headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+    }
+    const disposition = parseContentDisposition(headers["content-disposition"]);
+    const name = disposition.name;
+    if (!name) continue;
+    if (disposition.filename != null) {
+      files[name] = {
+        fileName: basename(disposition.filename || "upload.bin"),
+        mimeType: headers["content-type"] || "application/octet-stream",
+        buffer: content
+      };
+    } else {
+      fields[name] = content.toString("utf8");
+    }
+  }
+  return { fields, files };
+}
+
 async function readUpload(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -2914,6 +2983,7 @@ async function handleRequest(req, res) {
     if (url.pathname.startsWith("/api/wangzhuan/")) {
       return handleWangzhuanRequest(req, res, url, {
         readJson,
+        readMultipart,
         currentUser,
         currentUserId,
         currentProjectRoot,

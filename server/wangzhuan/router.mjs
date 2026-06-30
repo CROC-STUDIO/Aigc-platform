@@ -63,6 +63,24 @@ function queryObject(url) {
   return Object.fromEntries(url.searchParams.entries());
 }
 
+async function readReferenceVideoCheckRequest(context, req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!contentType.startsWith("multipart/form-data")) return context.readJson(req);
+  const form = await context.readMultipart(req);
+  const file = form.files?.file || form.files?.referenceVideo || Object.values(form.files || {})[0];
+  if (!file?.buffer?.length) {
+    throw new WangzhuanError("validation_error", "上传素材读取失败，请重新选择素材", { field: "file" });
+  }
+  const mimeType = String(file.mimeType || form.fields?.mimeType || "").trim();
+  return {
+    ...form.fields,
+    fileName: form.fields?.fileName || file.fileName,
+    name: form.fields?.name || file.fileName,
+    mimeType,
+    content: `data:${mimeType || "application/octet-stream"};base64,${file.buffer.toString("base64")}`
+  };
+}
+
 function batchRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch|qc|confirm-plan|confirm-assets))?$/);
   if (!match) return null;
@@ -144,7 +162,8 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       }, requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/check") {
-      return sendOk(res, await checkReferenceVideo(scoped, await context.readJson(req)), requestId);
+      const runCheck = scoped.checkReferenceVideo || context.checkReferenceVideo || checkReferenceVideo;
+      return sendOk(res, await runCheck(scoped, await readReferenceVideoCheckRequest(context, req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/draft-decomposition/stream") {
       const body = await context.readJson(req);

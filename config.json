@@ -5,7 +5,8 @@
       "endpoint": "https://skylink-gateway.com/api/v1",
       "model": "gemini-3.5-flash",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
-      "timeoutMs": 180000
+      "timeoutMs": 300000,
+      "maxRetries": 3
     },
     "qcLlm": {
       "provider": "skylink",
@@ -56,8 +57,16 @@
       "watermark": false
     }
   },
-  "projectRoot": "/opt/ad-picture-web-data/cwz",
+  "projectRoot": "../project-data/PROJECT_ROOT_P",
   "projects": [
+    {
+      "name": "puzzle",
+      "path": "../project-data/puzzle"
+    },
+    {
+      "name": "PROJECT_ROOT_P",
+      "path": "../project-data/PROJECT_ROOT_P"
+    },
     {
       "name": "网赚业务",
       "path": "/opt/ad-picture-web-data/cwz"
@@ -81,10 +90,6 @@
     {
       "name": "包包4",
       "path": "/opt/ad-picture-web-data/包包4"
-    },
-    {
-      "name": "puzzle",
-      "path": "../project-data/puzzle"
     },
     {
       "name": "三国",

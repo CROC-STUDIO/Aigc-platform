@@ -5198,6 +5198,7 @@ button.wz-tasks-item.is-live:not(.selected) .wz-tasks-item-rail {
   height: 100%;
   min-height: 360px;
   object-fit: contain;
+  pointer-events: none;
 }
 
 .video-ops-prompt-layer,
@@ -5205,6 +5206,7 @@ button.wz-tasks-item.is-live:not(.selected) .wz-tasks-item-rail {
   position: absolute;
   inset: 0;
   cursor: crosshair;
+  pointer-events: none;
 }
 
 .video-ops-prompt-box,
@@ -9947,6 +9949,68 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
 .wz-v2-side .wz-actions .mini,
 .wz-v2-side .wz-actions a {
   flex: 1 1 auto;
+}
+
+.wz-v2-side .wz-actions.compact {
+  margin: -4px 0 6px;
+}
+
+.wz-v2-side .wz-actions.compact .mini {
+  flex: 0 0 auto;
+}
+
+.wz-v2-results-head,
+.wz-v2-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wz-v2-pager span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wz-v2-recent-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wz-v2-recent-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-align: left;
+}
+
+.wz-v2-recent-item span {
+  display: grid;
+  min-width: 0;
+}
+
+.wz-v2-recent-item b,
+.wz-v2-recent-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wz-v2-recent-item small,
+.wz-v2-recent-item em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
 }
 
 @media (max-width: 1100px) {

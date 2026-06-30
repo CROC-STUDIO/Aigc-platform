@@ -12,6 +12,7 @@ users.json
 config.json
 project-data
 mysql-data
+others
 video_frames
 .release/*.tar.gz
 .superpowers

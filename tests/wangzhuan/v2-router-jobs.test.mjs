@@ -32,10 +32,28 @@ function contextFor(body) {
     sharedProjectRoot: process.cwd(),
     config: {},
     readJson: async () => body,
+    readMultipart: async () => ({
+      fields: { fileName: "reference.mp4", mimeType: "video/mp4" },
+      files: {
+        file: {
+          fileName: "reference.mp4",
+          mimeType: "video/mp4",
+          buffer: Buffer.from("video-bytes")
+        }
+      }
+    }),
     currentUser: () => ({ username: "tester", permissions: { "wangzhuan:view": true } }),
     currentUserId: () => "tester",
     currentProjectRoot: () => process.cwd(),
     currentBaseProjectRoot: () => process.cwd(),
+    checkReferenceVideo: async (_scoped, request) => ({
+      referenceVideo: {
+        referenceVideoId: "ref_20260630_001",
+        fileName: request.fileName,
+        mimeType: request.mimeType,
+        contentPrefix: String(request.content || "").slice(0, 22)
+      }
+    }),
     draftReferenceVideoDecomposition: async (_scoped, request) => ({
       referenceVideoId: request.referenceVideoId,
       decomposition: { scene: "office", subject: "phone", action: "tap" }
@@ -153,6 +171,25 @@ test("returns not found for unknown decomposition job", async () => {
 
   assert.equal(response.statusCode, 404);
   assert.equal(response.payload.code, "job_not_found");
+});
+
+test("reference video check accepts multipart upload payloads", async () => {
+  const context = contextFor({});
+  const req = { method: "POST", headers: { "content-type": "multipart/form-data; boundary=test" } };
+  const res = new TestResponse();
+  await handleWangzhuanRequest(
+    req,
+    res,
+    new URL("http://127.0.0.1/api/wangzhuan/reference-videos/check"),
+    context
+  );
+  const payload = JSON.parse(res.body);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(payload.code, "ok");
+  assert.equal(payload.data.referenceVideo.fileName, "reference.mp4");
+  assert.equal(payload.data.referenceVideo.mimeType, "video/mp4");
+  assert.equal(payload.data.referenceVideo.contentPrefix, "data:video/mp4;base64,");
 });
 
 test("creates and polls Seedance plan job with draft signature", async () => {

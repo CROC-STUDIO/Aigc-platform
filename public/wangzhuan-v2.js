@@ -1,4 +1,4 @@
-import { WangzhuanApiError, isBatchQcRunnable, strongTruthFields } from "./wangzhuan-common.js";
+import { WangzhuanApiError, isBatchQcRunnable, readWorkbenchRestoreRequest, strongTruthFields } from "./wangzhuan-common.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const signatureFields = [
@@ -83,6 +83,10 @@ const els = {
   taskQueue: $("#wzV2TaskQueue"),
   reminders: $("#wzV2Reminders"),
   logs: $("#wzV2Logs"),
+  loadOlderLogsBtn: $("#wzLoadOlderLogsBtn"),
+  recentResults: $("#wzRecentResults"),
+  recentPager: $("#wzRecentPager"),
+  refreshRecentBtn: $("#wzRefreshRecentBtn"),
   longTaskStatus: $("#wzV2LongTaskStatus"),
   runStatusBox: $("#wzRunStatusBox"),
   badge: $("#wzCurrentUserBadge"),
@@ -108,7 +112,13 @@ const state = {
   branchDraft: { branchId: "branch_1", branchIndex: 1, branchLabel: "改写 3.1", assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetReviews: {} },
   draftSignature: "",
   stalePlanPreview: false,
-  decompositionEditedFields: new Set()
+  decompositionEditedFields: new Set(),
+  visibleLogs: [],
+  archivedLogs: [],
+  recentResults: [],
+  recentPagination: null,
+  recentPage: 1,
+  recentLoading: false
 };
 
 let batchPollTimer = 0;
@@ -116,12 +126,26 @@ let batchPollNetworkErrorActive = false;
 const DECOMPOSITION_JOB_TIMEOUT_MS = 180_000;
 const DECOMPOSITION_LLM_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1500;
+const VISIBLE_LOG_LIMIT = 50;
+const OLDER_LOG_PAGE_SIZE = 50;
+const RECENT_PAGE_SIZE = 5;
+const TERMINAL_BATCH_STATUSES = new Set(["succeeded", "failed", "partial_failed", "stopped", "skipped"]);
+let activeReferencePreviewUrl = "";
 
 document.getElementById("wzDecomposeBtn")?.remove();
 document.getElementById("wzConfirmReferenceBtn")?.remove();
 
 function value(el) {
   return String(el?.value || "").trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function currencyValue() {
@@ -282,30 +306,19 @@ async function clientPlanDraftSignature(input = planSignatureInput()) {
 }
 
 async function api(path, options = {}) {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(path, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) }
+    headers: {
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...(options.headers || {})
+    }
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
     throw new WangzhuanApiError(payload, response.status);
   }
   return payload.data;
-}
-
-function log(message) {
-  const row = document.createElement("div");
-  row.textContent = `${new Date().toLocaleTimeString()} ${message}`;
-  els.logs?.prepend(row);
-}
-
-function renderVideoPreview(url) {
-  if (!els.referencePreview) return;
-  if (!url) {
-    els.referencePreview.textContent = "未上传参考视频";
-    return;
-  }
-  els.referencePreview.innerHTML = `<video controls playsinline src="${url}"></video>`;
 }
 
 function fileToDataUrl(file) {
@@ -315,6 +328,80 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function log(message) {
+  const entry = `${new Date().toLocaleTimeString()} ${message}`;
+  state.visibleLogs.unshift(entry);
+  if (state.visibleLogs.length > VISIBLE_LOG_LIMIT) {
+    state.archivedLogs.unshift(...state.visibleLogs.splice(VISIBLE_LOG_LIMIT));
+  }
+  renderLogs();
+}
+
+function renderLogs() {
+  if (!els.logs) return;
+  els.logs.textContent = "";
+  const fragment = document.createDocumentFragment();
+  for (const entry of state.visibleLogs) {
+    const row = document.createElement("div");
+    row.textContent = entry;
+    fragment.append(row);
+  }
+  els.logs.append(fragment);
+  if (els.loadOlderLogsBtn) {
+    els.loadOlderLogsBtn.hidden = !state.archivedLogs.length;
+    els.loadOlderLogsBtn.textContent = `加载更早日志（${state.archivedLogs.length}）`;
+  }
+}
+
+function loadOlderLogs() {
+  const chunk = state.archivedLogs.splice(0, OLDER_LOG_PAGE_SIZE);
+  state.visibleLogs.push(...chunk);
+  renderLogs();
+}
+
+function renderVideoPreview(url) {
+  if (!els.referencePreview) return;
+  if (activeReferencePreviewUrl?.startsWith("blob:") && activeReferencePreviewUrl !== url) {
+    URL.revokeObjectURL(activeReferencePreviewUrl);
+  }
+  activeReferencePreviewUrl = url || "";
+  if (!url) {
+    els.referencePreview.textContent = "未上传参考视频";
+    return;
+  }
+  const video = document.createElement("video");
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.src = url;
+  els.referencePreview.replaceChildren(video);
+}
+
+function fileUrlFromStoredPath(storedPath = "") {
+  const clean = String(storedPath || "").trim();
+  return clean ? `/file?path=${encodeURIComponent(clean)}` : "";
+}
+
+function referenceVideoPreviewUrl(referenceVideo = {}) {
+  return referenceVideo.previewUrl
+    || referenceVideo.storageUrl
+    || referenceVideo.publicUrl
+    || referenceVideo.url
+    || fileUrlFromStoredPath(referenceVideo.storedPath || referenceVideo.path)
+    || "";
+}
+
+function describeReferenceVideo(referenceVideo = {}) {
+  if (!referenceVideo?.referenceVideoId) return "未上传参考视频";
+  const parts = [
+    referenceVideo.referenceVideoId,
+    referenceVideo.durationSec ? `${referenceVideo.durationSec}s` : "",
+    referenceVideo.ratio || "",
+    referenceVideo.fileName || referenceVideo.originalName || ""
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 const assetInputs = [
@@ -478,6 +565,109 @@ function loadBranchToForm(branch = activeBranch()) {
   }
   syncMaterialDirectionCustom();
   renderAssetReviewState();
+}
+
+function firstPresent(...values) {
+  return values.find((item) => item !== undefined && item !== null && String(item).trim() !== "");
+}
+
+function draftFromBatch(batch = {}) {
+  return batch.templateSnapshot?.draft
+    || batch.request?.templateSnapshot?.draft
+    || batch.estimate?.request?.templateSnapshot?.draft
+    || {};
+}
+
+function branchDraftsFromBatch(batch = {}) {
+  const draft = draftFromBatch(batch);
+  const branches = batch.branchDrafts
+    || batch.request?.branchDrafts
+    || batch.request?.branches
+    || batch.estimate?.request?.branchDrafts
+    || batch.estimate?.request?.branches
+    || draft.branches
+    || [];
+  if (Array.isArray(branches) && branches.length) {
+    return branches.map((branch, index) => defaultBranchDraft(index, {
+      ...draft,
+      ...branch,
+      displayName: branch.displayName || draft.displayName || ""
+    }));
+  }
+  return [defaultBranchDraft(0, draft)];
+}
+
+function decompositionFromBatch(batch = {}) {
+  return batch.decomposition
+    || batch.request?.decomposition
+    || batch.estimate?.request?.decomposition
+    || batch.referenceVideo?.decomposition
+    || null;
+}
+
+function referenceVideoFromBatch(batch = {}) {
+  return batch.referenceVideo
+    || batch.request?.referenceVideo
+    || batch.estimate?.request?.referenceVideo
+    || null;
+}
+
+function restoreRewriteConfirmedFromBatch(batch = {}) {
+  const request = batch.estimate?.request || batch.request || {};
+  const sourceStep = String(request.sourceStep || "");
+  return Boolean(batch.estimate?.estimateId || ["rewrite_confirmed", "estimate", "template_saved"].includes(sourceStep));
+}
+
+function restoreV2FromBatchDetail(detail = {}) {
+  const batch = detail.batch || detail;
+  if (!batch?.batchId) return false;
+  const draft = draftFromBatch(batch);
+  const request = batch.request || batch.estimate?.request || {};
+  const referenceVideo = referenceVideoFromBatch(batch);
+  if (referenceVideo?.referenceVideoId) {
+    state.referenceVideo = referenceVideo;
+    renderVideoPreview(referenceVideoPreviewUrl(referenceVideo));
+    els.referenceBox.textContent = describeReferenceVideo(referenceVideo);
+    els.referenceUploadStatus.textContent = "已从任务管理恢复参考视频。";
+    els.draftDecompositionBtn.disabled = false;
+  }
+
+  const decomposition = decompositionFromBatch(batch);
+  if (decomposition && Object.values(decomposition).some((item) => String(item || "").trim())) {
+    state.decompositionDraft = decomposition;
+    state.decompositionEditedFields.clear();
+    renderDecompositionForm(decomposition, { preserveUserInput: false });
+    els.decompositionStatus.textContent = "已从任务管理恢复 AI 拆解结果。";
+  }
+
+  const batchName = firstPresent(batch.userBatchName, batch.displayBatchName, request.userBatchName, request.batchName, batch.batchName, batch.batchId);
+  if ($("#wzBatchName")) $("#wzBatchName").value = batchName || "";
+  if ($("#wzProjectName")) $("#wzProjectName").value = firstPresent(batch.projectName, request.projectName, $("#wzProjectName").value) || "";
+
+  state.estimate = batch.estimate || null;
+  state.branches = branchDraftsFromBatch(batch);
+  state.activeBranchIndex = 0;
+  activeBranch();
+  loadBranchToForm(state.branchDraft);
+  if (draft.seedanceModel && els.seedanceModel) els.seedanceModel.value = draft.seedanceModel;
+  if (request.durationSec && els.duration) els.duration.value = String(request.durationSec);
+  if (request.outputRatio && els.outputRatio) els.outputRatio.value = request.outputRatio;
+  if (request.seedanceModel && els.seedanceModel) els.seedanceModel.value = request.seedanceModel;
+  if (request.variantCount && els.variantCount) els.variantCount.value = String(request.variantCount);
+  if (request.requestedConcurrency && els.requestedConcurrency) els.requestedConcurrency.value = String(request.requestedConcurrency);
+  if (batch.draftSignature) state.draftSignature = batch.draftSignature;
+  state.rewriteConfirmed = restoreRewriteConfirmedFromBatch(batch);
+  state.stalePlanPreview = false;
+  renderBranchTabs();
+  renderAssetReviewState();
+  renderPlanEditors(Array.isArray(batch.plans) ? batch.plans : []);
+  if (state.estimate) {
+    const scriptCount = state.estimate.scriptCount || request.variantCount || 0;
+    const seedanceCount = state.estimate.seedanceSegmentCount || 0;
+    els.estimateBox.textContent = `估算结果：${scriptCount} 条脚本 · ${seedanceCount} 段 Seedance · ${state.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟（变体数 * 同时生成数量 * 3min）。`;
+  }
+  renderTasks();
+  return true;
 }
 
 function collectBranchDrafts() {
@@ -661,14 +851,14 @@ async function uploadReferenceVideo() {
   renderVideoPreview(localUrl);
   els.referenceUploadStatus.textContent = "正在上传并检查参考视频...";
   try {
-    const content = await fileToDataUrl(file);
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("fileName", file.name);
+    form.append("mimeType", file.type || "application/octet-stream");
     const data = await api("/api/wangzhuan/reference-videos/check", {
       method: "POST",
-      body: JSON.stringify({
-        fileName: file.name,
-        mimeType: file.type,
-        content
-      })
+      headers: {},
+      body: form
     });
     state.referenceVideo = data.referenceVideo;
     resetDecompositionDraft({ clearForm: true });
@@ -963,6 +1153,88 @@ function renderTasks() {
     : "尚未开始生成";
   els.longTaskStatus.textContent = tasks.map((task) => `${task.title}:${task.status}`).join(" · ");
   renderReminders({ batch, plans });
+}
+
+function taskPrimaryId(item = {}) {
+  return item.type === "remix" ? item.remixId : item.batchId;
+}
+
+function recentResultTitle(item = {}) {
+  return item.productName || item.batchName || item.operationType || taskPrimaryId(item) || "未命名任务";
+}
+
+function renderRecentResults() {
+  if (!els.recentResults) return;
+  const items = state.recentResults || [];
+  if (state.recentLoading) {
+    els.recentResults.className = "wz-list empty-line";
+    els.recentResults.textContent = "正在加载最近结果摘要...";
+    return;
+  }
+  if (!items.length) {
+    els.recentResults.className = "wz-list empty-line";
+    els.recentResults.textContent = "暂无最近结果";
+  } else {
+    els.recentResults.className = "wz-list wz-v2-recent-list";
+    els.recentResults.innerHTML = items.map((item) => {
+      const id = taskPrimaryId(item);
+      const type = item.type || "batch";
+      return `
+        <button type="button" class="wz-v2-recent-item" data-recent-type="${escapeHtml(type)}" data-recent-id="${escapeHtml(id)}">
+          <span><b>${escapeHtml(recentResultTitle(item))}</b><small>${escapeHtml(id)}</small></span>
+          <em>${escapeHtml(item.status || "-")}</em>
+        </button>
+      `;
+    }).join("");
+  }
+  const pagination = state.recentPagination;
+  if (!els.recentPager) return;
+  if (!pagination?.total || pagination.totalPages <= 1) {
+    els.recentPager.hidden = true;
+    els.recentPager.textContent = "";
+    return;
+  }
+  els.recentPager.hidden = false;
+  els.recentPager.innerHTML = `
+    <button type="button" class="mini ghost" data-recent-page="${pagination.page - 1}" ${pagination.hasPrev ? "" : "disabled"}>上一页</button>
+    <span>${escapeHtml(pagination.page)} / ${escapeHtml(pagination.totalPages)}</span>
+    <button type="button" class="mini ghost" data-recent-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
+  `;
+}
+
+async function loadRecentResults(page = state.recentPage || 1) {
+  state.recentLoading = true;
+  renderRecentResults();
+  try {
+    const query = new URLSearchParams({
+      scope: "all",
+      runType: "pipeline",
+      page: String(page),
+      pageSize: String(RECENT_PAGE_SIZE)
+    });
+    const data = await api(`/api/wangzhuan/tasks?${query}`);
+    state.recentResults = data.items || [];
+    state.recentPagination = data.pagination || null;
+    state.recentPage = state.recentPagination?.page || page;
+  } finally {
+    state.recentLoading = false;
+    renderRecentResults();
+  }
+}
+
+async function openRecentResult(type, id) {
+  if (!id) return;
+  if (type === "remix") {
+    location.href = `/wangzhuan-tasks.html?remixId=${encodeURIComponent(id)}`;
+    return;
+  }
+  const detail = await loadBatchDetail(id);
+  restoreV2FromBatchDetail(detail);
+  const batch = state.batchDetail?.batch || state.batchDetail || {};
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  els.runStatusBox.textContent = `${batch.batchId || id} · ${batch.status || "-"} · ${tasks.length} 子任务 · ${outputs.length} 输出`;
+  log(`已加载最近结果摘要详情：${id}`);
 }
 
 function failBackgroundJob(type, message, data = {}) {
@@ -1267,6 +1539,7 @@ async function loadBatchDetail(batchId) {
 function startBatchPolling(batchId) {
   window.clearTimeout(batchPollTimer);
   batchPollNetworkErrorActive = false;
+  let lastStatus = "";
   const tick = async () => {
     try {
       const detail = await loadBatchDetail(batchId);
@@ -1275,9 +1548,12 @@ function startBatchPolling(batchId) {
         batchPollNetworkErrorActive = false;
       }
       const status = detail?.batch?.status;
-      if (!["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(status)) {
+      if (!TERMINAL_BATCH_STATUSES.has(status)) {
         batchPollTimer = window.setTimeout(tick, 2000);
+      } else if (status && status !== lastStatus) {
+        log(`批次已进入终态：${status}`);
       }
+      lastStatus = status || lastStatus;
     } catch (error) {
       const isNetworkError = /failed to fetch|networkerror|load failed/i.test(String(error?.message || ""));
       if (isNetworkError) {
@@ -1292,6 +1568,26 @@ function startBatchPolling(batchId) {
     }
   };
   batchPollTimer = window.setTimeout(tick, 1200);
+}
+
+async function restoreWorkbenchFromUrl() {
+  const restoreRequest = readWorkbenchRestoreRequest();
+  if (!restoreRequest?.id) return false;
+  if (restoreRequest.type === "remix") {
+    location.href = `/competitor-remix.html?restore=1&remixId=${encodeURIComponent(restoreRequest.id)}#remixNodeDelivery`;
+    return true;
+  }
+  const detail = await loadBatchDetail(restoreRequest.id);
+  const restored = restoreV2FromBatchDetail(detail);
+  const batch = detail?.batch || detail || {};
+  if (restored) {
+    log(`已从任务管理恢复批次：${batch.batchId || restoreRequest.id}`);
+    if (batch.batchId && !TERMINAL_BATCH_STATUSES.has(batch.status)) startBatchPolling(batch.batchId);
+    if (location.hash) {
+      requestAnimationFrame(() => document.querySelector(location.hash)?.scrollIntoView({ block: "start" }));
+    }
+  }
+  return restored;
 }
 
 async function confirmPlanAndGenerate() {
@@ -1359,7 +1655,7 @@ function startNewTask() {
   state.stalePlanPreview = false;
   $("#wzBatchName").value = generatedBatchName();
   els.referenceFile.value = "";
-  els.referencePreview.textContent = "未上传参考视频";
+  renderVideoPreview("");
   els.referenceBox.textContent = "未上传参考视频";
   els.referenceUploadStatus.textContent = "选中文件后自动上传、检查和预览。";
   els.draftDecompositionBtn.disabled = true;
@@ -1463,6 +1759,20 @@ els.runQcBtn?.addEventListener("click", () => runVideoQc().catch((error) => show
 els.saveDraftBtn?.addEventListener("click", () => saveDraftBatch().catch((error) => showError(error, "草稿保存失败")));
 els.uploadSeedanceAssetsBtn?.addEventListener("click", () => uploadSeedanceAssetsForReview().catch((error) => showError(error, "Seedance 素材上传失败")));
 els.confirmAssetsBtn?.addEventListener("click", () => confirmSeedanceAssetReviews().catch((error) => showError(error, "确认审核结果失败")));
+els.loadOlderLogsBtn?.addEventListener("click", loadOlderLogs);
+els.refreshRecentBtn?.addEventListener("click", () => loadRecentResults(1).catch((error) => showError(error, "最近结果加载失败")));
+els.recentResults?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-recent-id]");
+  if (!button) return;
+  openRecentResult(button.dataset.recentType, button.dataset.recentId)
+    .catch((error) => showError(error, "最近结果详情加载失败"));
+});
+els.recentPager?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-recent-page]");
+  if (!button || button.disabled) return;
+  loadRecentResults(Number(button.dataset.recentPage) || 1)
+    .catch((error) => showError(error, "最近结果加载失败"));
+});
 els.loginBtn?.addEventListener("click", login);
 els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showError(error, "退出失败")));
 
@@ -1514,7 +1824,17 @@ renderBranchTabs();
 renderAssetReviewState();
 renderPlanEditors([]);
 renderTasks();
+renderLogs();
+renderRecentResults();
 renderTemplates();
 loadAuth()
-  .then((authenticated) => authenticated ? loadTemplates() : null)
+  .then(async (authenticated) => {
+    if (!authenticated) return null;
+    await loadTemplates();
+    await Promise.all([
+      loadRecentResults(1),
+      restoreWorkbenchFromUrl()
+    ]);
+    return null;
+  })
   .catch((error) => showError(error, "初始化失败"));

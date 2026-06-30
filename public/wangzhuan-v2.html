@@ -29,13 +29,9 @@
           <span>✦</span>
           <b>漫剧工作台</b>
         </a>
-        <a class="platform-nav-item" href="/wangzhuan.html">
-          <span>▣</span>
-          <b>网赚素材管线</b>
-        </a>
         <a class="platform-nav-item active" href="/wangzhuan-v2.html">
           <span>▤</span>
-          <b>网赚素材管线 v2</b>
+          <b>网赚素材管线</b>
         </a>
         <a class="platform-nav-item" href="/competitor-remix.html">
           <span>◇</span>
@@ -374,6 +370,9 @@
           </section>
           <section>
             <h2>查看日志</h2>
+            <div class="modal-actions wz-actions compact">
+              <button id="wzLoadOlderLogsBtn" class="mini ghost" type="button" hidden>加载更早日志</button>
+            </div>
             <div id="wzV2Logs" class="wz-v2-log"></div>
           </section>
           <section>
@@ -383,6 +382,12 @@
               <a class="mini ghost" href="/wangzhuan-tasks.html">打开任务管理</a>
             </div>
             <div id="wzRunStatusBox" class="wz-list empty-line">尚未开始生成</div>
+            <div class="wz-v2-results-head">
+              <strong>最近结果</strong>
+              <button id="wzRefreshRecentBtn" class="mini ghost" type="button">刷新</button>
+            </div>
+            <div id="wzRecentResults" class="wz-list empty-line">只加载最近 5 条摘要</div>
+            <div id="wzRecentPager" class="wz-v2-pager" hidden></div>
           </section>
         </aside>
       </section>
