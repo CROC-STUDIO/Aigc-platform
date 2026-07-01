@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildThirtySecondSeedancePlanMessages,
   buildSeedancePlanMessages,
+  generateThirtySecondSeedancePlans,
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "../../server/wangzhuan/plan-preview.mjs";
@@ -79,6 +81,11 @@ test("Seedance plan prompt requires visual reconstruction with Seedance formula"
   assert.match(text, /投放渠道 targetChannel=tiktok/);
   assert.match(text, /"targetChannel": "tiktok"/);
   assert.match(text, /"targetChannels": \[\s*"tiktok"\s*\]/);
+  assert.match(text, /地区强控制：人物外观、人种\/肤色范围、发型、生活场景、职业身份、服装道具、城市\/室内环境/);
+  assert.match(text, /用户可见文字强控制：seedancePrompt 与 imagePrompt 中出现的所有用户可见文字/);
+  assert.match(text, /手机 UI、按钮、Slogan、CTA、弹窗、任务卡、奖励提示、进度条标签、页面标题/);
+  assert.match(text, /币种强控制：所有用户可见金额、余额、提现档位、奖励金额、UI 金额符号/);
+  assert.match(text, /不得混用其他币种符号或其他国家货币名称/);
   assert.match(text, /图片1 = 产品 Logo/);
   assert.match(text, /图片2 = 产品截图/);
   assert.match(text, /视频1 = 产品录屏/);
@@ -94,6 +101,179 @@ test("Seedance plan prompt requires visual reconstruction with Seedance formula"
   assert.doesNotMatch(text, /branchVariantIndex=1 用原职业/);
   assert.doesNotMatch(text, /相似职业裂变/);
   assert.doesNotMatch(text, /必须继承参考拆解中的人物职业/);
+});
+
+test("Seedance plan prompt strongly binds locale to people, visible text, and currency", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260630120000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Reward App",
+          language: "en-US",
+          regions: ["US"],
+          currencySymbol: "$"
+        }
+      },
+      estimate: {
+        request: {
+          targetChannel: "meta_ads",
+          targetRegions: ["BR"],
+          languages: ["pt-BR"],
+          currencySymbol: "R$"
+        }
+      }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "Brazil localized",
+      productName: "Reward App",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      targetChannels: ["meta_ads"],
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "worker discovers app after a stressful shift",
+      subject: "worker with phone",
+      action: "opens app and sees task feedback",
+      camera: "vertical close-up",
+      lighting: "natural",
+      style: "UGC ad",
+      quality: "clear"
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /主语言 primaryLanguage=pt-BR \(Portuguese \(Brazil\)\)/);
+  assert.match(text, /目标地区 regions=BR \(Brazil\)/);
+  assert.match(text, /货币符号 currencySymbol=R\$/);
+  assert.match(text, /人物外观、人种\/肤色范围、发型、生活场景、职业身份、服装道具、城市\/室内环境/);
+  assert.match(text, /全部使用 primaryLanguage/);
+  assert.match(text, /不得混用非主语言文字/);
+  assert.match(text, /所有用户可见金额、余额、提现档位、奖励金额、UI 金额符号、字幕金额和口播金额只能使用 currencySymbol/);
+});
+
+test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {
+  const messages = buildThirtySecondSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260701093000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Reward App",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$"
+        }
+      },
+      estimate: {
+        durationSec: 30,
+        request: {
+          targetChannel: "meta_ads"
+        }
+      }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "Brazil 30s",
+      productName: "Reward App",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      targetChannels: ["meta_ads"],
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "stressful daily-life hook followed by app demo",
+      subject: "person with phone",
+      action: "problem, discovery, demo, reaction",
+      camera: "vertical close-up and UI macro shots",
+      lighting: "natural to bright UI contrast",
+      style: "UGC ad",
+      quality: "clear"
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /30s 连续预案覆盖规则/);
+  assert.match(text, /必须先生成一个完整 0-30s 总分镜计划 overallStoryboard，再拆成两个连续的 15s Seedance prompt/);
+  assert.match(text, /segment 1 覆盖 0-15s/);
+  assert.match(text, /segment 2 覆盖 15-30s/);
+  assert.match(text, /不能重新开场、换人、跳场、重置 UI 或重复钩子/);
+  assert.match(text, /以上一段尾帧\/continuity frame 作为首帧连续性参考/);
+  assert.match(text, /"overallStoryboard"/);
+  assert.match(text, /"segments"/);
+  assert.match(text, /分段编号 segmentIndex=1-2/);
+});
+
+test("30s Seedance plan parser validates two segment payloads from one LLM response", async () => {
+  let callCount = 0;
+  const plans = await generateThirtySecondSeedancePlans({
+    callWangzhuanLlm: async ({ messages }) => {
+      callCount += 1;
+      assert.match(messagesText(messages), /overallStoryboard/);
+      return JSON.stringify({
+        overallStoryboard: "0-15s sets up a new local character and problem; 15-30s continues from the same phone UI state into product feedback.",
+        segments: [
+          {
+            segmentIndex: 1,
+            hook: "Comeco tenso",
+            body: "A new cafe worker checks the phone during a short break.",
+            voiceover: "Ela tenta uma tarefa simples no intervalo.",
+            subtitles: ["Tarefa simples", "Feedback no app"],
+            cta: "",
+            ending: "",
+            imagePrompt: "Brazilian cafe worker in a small break room holding a phone, local cafe props, clear product screen.",
+            seedancePrompt: "0-5s: cafe worker enters break room; 5-10s: phone close-up; 10-15s: UI feedback appears, camera holds on the phone as continuity boundary.",
+            negativePrompt: "No competitor brand, no payout guarantee.",
+            mediaRefs: {},
+            complianceNotes: []
+          },
+          {
+            segmentIndex: 2,
+            hook: "Continua do celular",
+            body: "Continue from the previous tail frame and show the same worker following the app flow.",
+            voiceover: "Depois ela acompanha o progresso dentro do app.",
+            subtitles: ["Mesmo celular", "Progresso no app"],
+            cta: "",
+            ending: "",
+            imagePrompt: "Same Brazilian cafe worker and phone UI continuing from the prior tail frame.",
+            seedancePrompt: "Use the previous segment tail frame as continuity reference. 15-20s: same phone UI continues; 20-25s: worker reacts naturally; 25-30s: product feedback settles without adding a CTA.",
+            negativePrompt: "No scene reset, no new character, no invented money.",
+            mediaRefs: {},
+            complianceNotes: []
+          }
+        ]
+      });
+    }
+  }, {
+    batch: {
+      batchId: "wzb_20260701093000_abcd",
+      templateSnapshot: { draft: { productName: "Reward App" } },
+      estimate: { durationSec: 30, request: {} }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "Brazil 30s",
+      productName: "Reward App",
+      truthRules: {}
+    },
+    decomposition: {},
+    channelRules: { rules: [] },
+    branchVariantIndex: 1
+  });
+
+  assert.equal(callCount, 1);
+  assert.equal(plans.length, 2);
+  assert.equal(plans[0].hook, "Comeco tenso");
+  assert.equal(plans[1].hook, "Continua do celular");
+  assert.match(plans[1].seedancePrompt, /previous segment tail frame/);
 });
 
 test("Seedance plan validation allows optional CTA and ending", () => {

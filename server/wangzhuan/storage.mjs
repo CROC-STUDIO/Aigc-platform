@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, rename, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
@@ -28,6 +29,7 @@ export function wangzhuanPaths(context) {
     userRoot,
     referenceVideosDir: join(userRoot, "reference-videos"),
     estimatesDir: join(userRoot, "estimates"),
+    jobsDir: join(userRoot, "jobs"),
     batchesDir: join(userRoot, "batches"),
     remixSourcesDir: join(userRoot, "remix-sources"),
     remixEstimatesDir: join(userRoot, "remix-estimates"),
@@ -194,7 +196,7 @@ export async function ensureParent(target) {
 
 export async function writeAtomicJson(target, value) {
   await ensureParent(target);
-  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}`;
   const body = `${JSON.stringify(value, null, 2)}\n`;
   let handle;
   try {

@@ -29,6 +29,7 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
   formatProtagonistFissionGuide,
+  generateThirtySecondSeedancePlans,
   generateSeedancePlan,
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
@@ -520,7 +521,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   }
   let sequence = 1;
   const variantCount = Number(batch.estimate?.variantCount || 0);
-  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * segmentMultiplier : 0;
+  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (segmentMultiplier === 2 ? 1 : segmentMultiplier) : 0;
   let planSequence = 0;
 
   for (const branch of branchDrafts) {
@@ -529,6 +530,26 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
     const channelRules = await getChannelRules(context, { channel: branchChannel, promiseLevel: branchPromiseLevel });
     const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
     for (let branchVariantIndex = 1; branchVariantIndex <= Number(batch.estimate?.variantCount || 0); branchVariantIndex += 1) {
+      let thirtySecondPlanPayloads = null;
+      if (useLlmPlans && segmentMultiplier === 2) {
+        planSequence += 1;
+        options.onPlanProgress?.({
+          index: planSequence,
+          total: totalPlans,
+          branchLabel: branch.branchLabel || branch.branchId,
+          branchVariantIndex,
+          segmentIndex: "1-2"
+        });
+        thirtySecondPlanPayloads = await generateThirtySecondSeedancePlans(context, {
+          batch,
+          branch,
+          decomposition: batch.decomposition,
+          channelRules,
+          branchVariantIndex,
+          knowledgeNotes: options.knowledgeNotes,
+          llmConfig: options.llmConfig || {}
+        });
+      }
       for (let segmentIndex = 1; segmentIndex <= segmentMultiplier; segmentIndex += 1) {
         const scriptId = makeScriptId(batch.batchId, sequence);
         const generationTaskId = makeGenerationTaskId(batch.batchId, sequence);
@@ -550,24 +571,27 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
         let planRecord = null;
 
         if (useLlmPlans) {
-          planSequence += 1;
-          options.onPlanProgress?.({
-            index: planSequence,
-            total: totalPlans,
-            branchLabel: branch.branchLabel || branch.branchId,
-            branchVariantIndex,
-            segmentIndex
-          });
-          const planPayload = await generateSeedancePlan(context, {
-            batch,
-            branch,
-            decomposition: batch.decomposition,
-            channelRules,
-            branchVariantIndex,
-            segmentIndex,
-            knowledgeNotes: options.knowledgeNotes,
-            llmConfig: options.llmConfig || {}
-          });
+          let planPayload = thirtySecondPlanPayloads?.[segmentIndex - 1];
+          if (!planPayload) {
+            planSequence += 1;
+            options.onPlanProgress?.({
+              index: planSequence,
+              total: totalPlans,
+              branchLabel: branch.branchLabel || branch.branchId,
+              branchVariantIndex,
+              segmentIndex
+            });
+            planPayload = await generateSeedancePlan(context, {
+              batch,
+              branch,
+              decomposition: batch.decomposition,
+              channelRules,
+              branchVariantIndex,
+              segmentIndex,
+              knowledgeNotes: options.knowledgeNotes,
+              llmConfig: options.llmConfig || {}
+            });
+          }
           hook = planPayload.hook;
           body = planPayload.body;
           cta = planPayload.cta;

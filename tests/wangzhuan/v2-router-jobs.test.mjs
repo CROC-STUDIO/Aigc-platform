@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { planDraftSignature, resetBackgroundJobsForTest } from "../../server/wangzhuan/background-jobs.mjs";
@@ -24,12 +27,13 @@ class TestResponse extends EventEmitter {
   }
 }
 
-function contextFor(body) {
+async function contextFor(body) {
+  const root = await mkdtemp(join(tmpdir(), "wz-router-jobs-"));
   return {
     user: { username: "tester", permissions: { "wangzhuan:view": true } },
     userId: "tester",
-    userProjectRoot: process.cwd(),
-    sharedProjectRoot: process.cwd(),
+    userProjectRoot: root,
+    sharedProjectRoot: root,
     config: {},
     readJson: async () => body,
     readMultipart: async () => ({
@@ -44,8 +48,8 @@ function contextFor(body) {
     }),
     currentUser: () => ({ username: "tester", permissions: { "wangzhuan:view": true } }),
     currentUserId: () => "tester",
-    currentProjectRoot: () => process.cwd(),
-    currentBaseProjectRoot: () => process.cwd(),
+    currentProjectRoot: () => root,
+    currentBaseProjectRoot: () => root,
     checkReferenceVideo: async (_scoped, request) => ({
       referenceVideo: {
         referenceVideoId: "ref_20260630_001",
@@ -69,14 +73,15 @@ function contextFor(body) {
   };
 }
 
-async function call(method, pathname, body) {
+async function call(method, pathname, body, providedContext = null) {
   const req = { method };
   const res = new TestResponse();
+  const context = providedContext || await contextFor(body);
   await handleWangzhuanRequest(
     req,
     res,
     new URL(`http://127.0.0.1${pathname}`),
-    contextFor(body)
+    context
   );
   return { statusCode: res.statusCode, payload: JSON.parse(res.body) };
 }
@@ -130,13 +135,17 @@ test("decomposition job records model retry events", async () => {
     knowledgeNotes: "keep hook",
     llmConfig: { model: "gpt-5.4", maxRetries: 1 }
   };
+  const baseContext = await contextFor(body);
   const context = {
-    ...contextFor(body),
+    ...baseContext,
     draftReferenceVideoDecomposition: async (_scoped, request, options = {}) => {
       options.streamHandlers?.onRetry?.({
         attempt: 1,
         maxRetries: request.llmConfig?.maxRetries || 1,
-        reason: "timeout"
+        reason: "timeout",
+        upstreamMessage: "Request timed out after 180s",
+        code: "model_failed",
+        status: 504
       });
       return {
         referenceVideoId: request.referenceVideoId,
@@ -162,7 +171,12 @@ test("decomposition job records model retry events", async () => {
   assert.ok(polled.payload.data.events.some((event) => event.message === "拆解模型重试 1/1"));
   assert.deepEqual(
     polled.payload.data.events.find((event) => event.message === "拆解模型重试 1/1")?.data,
-    { reason: "timeout" }
+    {
+      reason: "timeout",
+      upstreamMessage: "Request timed out after 180s",
+      code: "model_failed",
+      status: 504
+    }
   );
 });
 
@@ -173,8 +187,37 @@ test("returns not found for unknown decomposition job", async () => {
   assert.equal(response.payload.code, "job_not_found");
 });
 
+test("persisted decomposition job remains queryable after in-memory reset", async () => {
+  const sharedContext = await contextFor({});
+  const created = await call("POST", "/api/wangzhuan/reference-videos/decomposition-jobs", {
+    referenceVideoId: "ref_20260629_001",
+    knowledgeNotes: "keep hook",
+    llmConfig: { model: "gpt-5.4" }
+  }, sharedContext);
+  const jobId = created.payload.data.decompositionJobId;
+  const startedAt = Date.now();
+  let polled = null;
+  while (Date.now() - startedAt < 1000) {
+    polled = await call("GET", `/api/wangzhuan/reference-videos/decomposition-jobs/${jobId}`, {}, sharedContext);
+    if (polled.payload.data.status === "succeeded") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(polled?.payload.data.status, "succeeded");
+  const persistedStartedAt = Date.now();
+  while (Date.now() - persistedStartedAt < 1000) {
+    const persisted = await call("GET", `/api/wangzhuan/reference-videos/decomposition-jobs/${jobId}`, {}, sharedContext);
+    if (persisted.payload.data.status === "succeeded") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  resetBackgroundJobsForTest();
+  const resumed = await call("GET", `/api/wangzhuan/reference-videos/decomposition-jobs/${jobId}`, {}, sharedContext);
+  assert.equal(resumed.statusCode, 200);
+  assert.equal(resumed.payload.data.status, "succeeded");
+});
+
 test("reference video check accepts multipart upload payloads", async () => {
-  const context = contextFor({});
+  const context = await contextFor({});
   const req = { method: "POST", headers: { "content-type": "multipart/form-data; boundary=test" } };
   const res = new TestResponse();
   await handleWangzhuanRequest(

@@ -7,7 +7,10 @@
 JMS_HOST="${JMS_HOST:-jump.corp.touka.plus}"
 JMS_PORT="${JMS_PORT:-2222}"
 JMS_KEY="${JMS_KEY:-$HOME/.ssh/jumpserver_rsa}"
-JMS_LOGIN="${JMS_LOGIN:-liuxuan@dev@8.219.102.128}"
+JMS_USER="${JMS_USER:-liuxuan}"
+ASSET_USER="${ASSET_USER:-dev}"
+ASSET="${ASSET:-8.219.102.128}"
+JMS_LOGIN="${JMS_LOGIN:-${JMS_USER}@${ASSET_USER}@${ASSET}}"
 
 PROD_APP_ROOT="${PROD_APP_ROOT:-/opt/ad-picture-web-codex}"
 PROD_HOST_PORT="${PROD_HOST_PORT:-5177}"

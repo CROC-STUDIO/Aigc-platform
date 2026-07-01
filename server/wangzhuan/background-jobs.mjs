@@ -1,4 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { join } from "node:path";
+
+import { readJsonOrDefault, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 
 const JOBS = new Map();
 const MAX_EVENTS = 80;
@@ -59,6 +62,33 @@ function publicJob(job) {
   };
 }
 
+function jobFileTarget(context, jobId) {
+  if (!context?.userProjectRoot || !context?.sharedProjectRoot) return "";
+  return join(wangzhuanPaths(context).jobsDir, `${jobId}.json`);
+}
+
+async function persistJob(context, job) {
+  const target = jobFileTarget(context, job.id);
+  if (!target) return;
+  await writeAtomicJson(target, publicJob(job));
+}
+
+function queuePersist(context, job) {
+  const previous = job.persistPromise || Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(() => persistJob(context, job));
+  job.persistPromise = next;
+  return next;
+}
+
+async function loadPersistedJob(context, jobId) {
+  const target = jobFileTarget(context, jobId);
+  if (!target) return null;
+  const loaded = await readJsonOrDefault(target, null);
+  return loaded && typeof loaded === "object" ? loaded : null;
+}
+
 function pushEvent(job, event) {
   job.events.push({
     at: nowIso(),
@@ -87,6 +117,7 @@ function clampProgress(value, ceiling = 99) {
 
 export function createBackgroundJob(type, runner, options = {}) {
   const idPrefix = type === "seedance_plan" ? "planjob" : "decompjob";
+  const context = options.context || null;
   const job = {
     id: `${idPrefix}_${Date.now()}_${randomBytes(4).toString("hex")}`,
     type,
@@ -102,6 +133,7 @@ export function createBackgroundJob(type, runner, options = {}) {
   };
   JOBS.set(job.id, job);
   pushEvent(job, { type: "queued", message: job.message });
+  void queuePersist(context, job);
 
   queueMicrotask(async () => {
     if (FINAL_STATUSES.has(job.status)) return;
@@ -110,6 +142,7 @@ export function createBackgroundJob(type, runner, options = {}) {
     job.message = "任务运行中";
     job.updatedAt = nowIso();
     pushEvent(job, { type: "running", message: job.message });
+    await queuePersist(context, job);
 
     try {
       const result = await runner({
@@ -118,6 +151,7 @@ export function createBackgroundJob(type, runner, options = {}) {
           pushEvent(job, { type: "log", message: safeMessage, data });
           job.message = safeMessage;
           job.updatedAt = nowIso();
+          void queuePersist(context, job);
         },
         progress(progress, message) {
           const next = clampProgress(progress);
@@ -129,6 +163,7 @@ export function createBackgroundJob(type, runner, options = {}) {
             message: job.message,
             data: { progress: job.progress }
           });
+          void queuePersist(context, job);
         }
       });
       job.status = "succeeded";
@@ -137,6 +172,7 @@ export function createBackgroundJob(type, runner, options = {}) {
       job.result = result || {};
       job.updatedAt = nowIso();
       pushEvent(job, { type: "succeeded", message: job.message });
+      await queuePersist(context, job);
     } catch (error) {
       job.status = "failed";
       job.progress = 100;
@@ -148,15 +184,22 @@ export function createBackgroundJob(type, runner, options = {}) {
         message: job.error.message,
         data: { code: job.error.code }
       });
+      await queuePersist(context, job);
     }
   });
 
   return publicJob(job);
 }
 
-export function getBackgroundJob(jobId) {
+export async function getBackgroundJob(context, jobId) {
   const job = JOBS.get(String(jobId || ""));
-  return job ? publicJob(job) : null;
+  if (job) {
+    if (context && FINAL_STATUSES.has(job.status) && job.persistPromise) {
+      await job.persistPromise.catch(() => {});
+    }
+    return publicJob(job);
+  }
+  return loadPersistedJob(context, String(jobId || ""));
 }
 
 export function resetBackgroundJobsForTest() {

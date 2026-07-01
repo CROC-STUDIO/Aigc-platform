@@ -51,7 +51,7 @@ export function isRetryableLlmError(error) {
 function normalizeModel(provider, model) {
   const cleanModel = cleanString(model, DEFAULT_LLM_CONFIG.model);
   const cleanProvider = cleanString(provider).toLowerCase();
-  if (cleanProvider === "skylink" && /^GPT-5\.4(?:-(?:mini|nano))?$/i.test(cleanModel)) {
+  if (cleanProvider === "skylink" && /^GPT-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(cleanModel)) {
     return cleanModel.toLowerCase();
   }
   return cleanModel;

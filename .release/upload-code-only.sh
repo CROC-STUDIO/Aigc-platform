@@ -30,8 +30,11 @@ SFTP_BATCH="$(mktemp)"
   printf 'bye\n'
 } > "$SFTP_BATCH"
 
-sftp -P "$JMS_PORT" -o IdentitiesOnly=yes -i "$JMS_KEY" -o "User=$JMS_LOGIN" -b "$SFTP_BATCH" "$JMS_HOST"
+bash "$ROOT/scripts/jms-ops.sh" put-batch "$SFTP_BATCH"
 rm -f "$SFTP_BATCH"
+
+echo "[verify] sha256"
+bash "$ROOT/scripts/jms-ops.sh" sha256-up "$PKG" "$REMOTE_PKG"
 
 echo
 echo "Uploaded: $REMOTE_PKG"

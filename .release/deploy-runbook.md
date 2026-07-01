@@ -34,8 +34,7 @@
 # 可选：复制并覆盖本地连接变量
 cp .release/env.defaults.sh .release/env.local.sh
 
-ssh -p 2222 -o IdentitiesOnly=yes -i "$HOME/.ssh/jumpserver_rsa" \
-  -l "liuxuan@dev@8.219.102.128" jump.corp.touka.plus
+bash scripts/jms-ops.sh ssh
 ```
 
 进入后：
@@ -62,6 +61,7 @@ bash .release/deploy-local.sh
 等价步骤：
 
 ```bash
+bash scripts/jms-ops.sh check
 bash scripts/package-code-only.sh
 bash .release/upload-code-only.sh
 ```
@@ -100,8 +100,8 @@ source .release/env.defaults.sh
 [ -f .release/env.local.sh ] && source .release/env.local.sh
 set +a
 
-ssh -p "$JMS_PORT" -o IdentitiesOnly=yes -i "$JMS_KEY" -l "$JMS_LOGIN" "$JMS_HOST" \
-  "sudo bash -lc 'chmod +x /tmp/deploy-code-only-aigc-platform.sh && bash /tmp/deploy-code-only-aigc-platform.sh /tmp/$(basename "$PKG")'"
+bash scripts/jms-ops.sh sudo-exec -- \
+  "chmod +x /tmp/deploy-code-only-aigc-platform.sh && bash /tmp/deploy-code-only-aigc-platform.sh /tmp/$(basename "$PKG")"
 ```
 
 ### 正式机执行
@@ -237,6 +237,7 @@ curl -I http://127.0.0.1:5177/
 | 脚本 | 作用 |
 |---|---|
 | `.release/env.defaults.sh` | 连接与路径默认值（可复制为 `env.local.sh`） |
+| `scripts/jms-ops.sh` | JumpServer 标准连接 / 上传 / 远端执行封装 |
 | `.release/deploy-local.sh` | 本地一键打包+上传 |
 | `scripts/package-code-only.sh` | 打 code-only 包 |
 | `.release/upload-code-only.sh` | 上传 code-only 包 + 远端脚本 |

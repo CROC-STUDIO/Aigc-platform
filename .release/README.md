@@ -18,6 +18,14 @@
 bash .release/deploy-local.sh
 ```
 
+发布链路现在统一走 JumpServer 标准封装：
+
+- `bash scripts/jms-ops.sh check`
+- `bash scripts/jms-ops.sh put ...`
+- `bash scripts/jms-ops.sh sudo-exec -- '...'`
+
+`.release` 目录不再各自手写 SSH/SFTP 细节。
+
 默认 code-only 包只包含运行时白名单：
 
 - `public/`
@@ -42,6 +50,8 @@ bash .release/deploy-local.sh full
 
 - `deploy-local.sh`
   - 本地总入口。负责打包并上传。
+- `../scripts/jms-ops.sh`
+  - JumpServer 连接、上传、hash 校验、远端执行统一封装。
 - `upload-code-only.sh`
   - 上传 code-only 包和远端部署脚本。
 - `deploy-code-only-remote.sh`
@@ -65,6 +75,15 @@ bash .release/deploy-local.sh full
 
 ```bash
 cp .release/env.defaults.sh .release/env.local.sh
+```
+
+推荐按拆分字段覆盖，而不是只改整条登录串：
+
+```bash
+JMS_USER=liuxuan
+ASSET_USER=dev
+ASSET=8.219.102.128
+JMS_KEY=$HOME/.ssh/jumpserver_rsa
 ```
 
 `env.local.sh` 不提交到 Git。

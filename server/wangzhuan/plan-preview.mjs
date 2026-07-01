@@ -210,22 +210,22 @@ export function formatPlanLocaleGuide(context = {}) {
     context.voiceoverStyle ? `口播风格 voiceoverStyle=${context.voiceoverStyle}` : "",
     "",
     "语言与地区输出规则：",
-    `1. hook、body、voiceover、subtitles 必须使用主语言 ${context.primaryLanguage} 撰写；cta、ending 如存在也必须使用主语言。`,
+    `1. 主语言强控制：hook、body、voiceover、subtitles 必须使用主语言 ${context.primaryLanguage} 撰写；cta、ending 如存在也必须使用主语言。`,
     context.languages?.length > 1
       ? `2. 若存在多语言配置（${context.languages.join(", ")}），仍以前述主语言输出本段预案，不要混用语言。`
       : "2. 全部用户可见文案保持单一主语言，不要混用竞品原语言。",
     context.regions?.length
-      ? `3. 叙事、奖励反馈、生活场景与金额表达需符合 ${context.regions.join(", ")} 当地习惯与合规预期。`
-      : "3. 叙事与奖励表达需符合目标市场习惯。",
+      ? `3. 地区强控制：人物外观、人种/肤色范围、发型、生活场景、职业身份、服装道具、城市/室内环境、街景细节、叙事语境、奖励反馈和金额表达必须参考目标地区 ${context.regions.join(", ")}${regionLabels.length ? `（${regionLabels.join(", ")}）` : ""} 的常见真实人群与生活环境。`
+      : "3. 地区强控制：人物外观、人种/肤色范围、生活场景、职业身份、服装道具、城市/室内环境、街景细节、叙事语境与奖励反馈必须符合目标市场习惯。",
     context.currencySymbol
-      ? `4. 所有金额、奖励数值使用 ${context.currencySymbol}，并与 truthRules 一致，禁止编造。`
-      : "4. 如涉及金额，需与 truthRules 一致，禁止编造。",
+      ? `4. 币种强控制：所有用户可见金额、余额、提现档位、奖励金额、UI 金额符号、字幕金额和口播金额只能使用 ${context.currencySymbol}，并与 truthRules 一致，禁止编造；不得混用其他币种符号或其他国家货币名称。`
+      : "4. 币种强控制：如涉及金额，必须与 truthRules 一致，禁止编造；未指定 currencySymbol 时不要生成具体金额或货币符号。",
     context.voiceoverStyle
       ? `5. voiceover 采用 ${context.voiceoverStyle} 口吻；subtitles 为主语言短句，每条对应一个镜头节点。`
       : "5. subtitles 为主语言短句，每条对应一个镜头节点。",
     "6. 参考视频若为其他语言，必须完整改写为目标语言，不得保留原文。",
-    "7. seedancePrompt 与 imagePrompt 中的 UI 文案、口播、字幕描述也使用主语言。",
-    "8. seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，不能只写“用户/年轻人/女性”。",
+    "7. 用户可见文字强控制：seedancePrompt 与 imagePrompt 中出现的所有用户可见文字，包括口播、字幕、手机 UI、按钮、Slogan、CTA、弹窗、任务卡、奖励提示、进度条标签、页面标题，都必须使用主语言；除产品名/品牌名外，不得出现竞品原语言、英文默认按钮或其他非主语言文字。",
+    "8. seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，并让人物外观、人种/肤色范围、生活环境、职业身份、服装道具和城市/室内环境符合目标地区；不能只写“用户/年轻人/女性”。",
     "9. 免责声明只写入 complianceNotes（如需），不要写入 seedancePrompt。"
   ];
   return lines.filter(Boolean).join("\n");
@@ -385,10 +385,12 @@ export function buildSeedancePlanMessages({
     "5. camera、lighting、style、quality 分别作为运镜/切镜、光线、风格和画面质量约束写入 seedancePrompt。",
     "6. voiceover/subtitles 的每段功能需对应参考拆解中的口播/字幕功能，但具体文案必须重写，不要写成通用广告话术。",
     "7. imagePrompt 首帧必须锁定本变体的新人物/身份、新场景、新服装、新道具和产品露出，便于后续视频生成保持一致。",
-    "8. 如果生成字幕、Slogan 或 CTA 文字，必须写清文字内容、出现时机、出现位置、出现方式、文字风格；字幕需与口播/音频节奏同步。",
-    "9. ending 和 CTA 默认不生成；除非 channelRules、branch.customPrompt 或 truthRules 明确要求，否则 cta/ending 必须为空，不要为了凑结构强行添加。",
-    "10. 奖励数字与收益承诺约束：只有 truthRules 明确给出的金额、积分点数、奖励数值、门槛、到账条件才能出现在用户可见文案或 UI 描述中；未提供时不要写任何具体金额、点数增长、余额增长、提现档位、到账时间或保证性收益。",
-    "11. 承诺强度按 promiseLevel 控制：非 strong_commitment 分支只能使用弱承诺（任务、积分、进度、奖励反馈、按规则可查看/申请/兑换），禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；strong_commitment 分支可以表达强承诺，但必须逐项来自 truthRules，不得扩写或增强。",
+    "8. 地区强控制：每个真人镜头的人物外观、人种/肤色范围、发型、职业身份、服装道具、生活场景、城市/室内环境和街景细节都必须参考 regions；不得使用与目标地区明显不匹配的人群、建筑、货币环境或社会语境。",
+    "9. 主语言强控制：如果生成字幕、Slogan、CTA、按钮、手机 UI、任务卡、弹窗、奖励提示、进度条标签、页面标题或任何屏幕内文字，必须写清文字内容、出现时机、出现位置、出现方式、文字风格，且全部使用 primaryLanguage；除产品名/品牌名外，不得混用非主语言文字。",
+    "10. 币种强控制：所有用户可见金额、余额、提现档位、奖励金额、UI 金额符号、字幕金额和口播金额只能使用 currencySymbol；未提供 currencySymbol 或 truthRules 未给出金额时，不得写具体金额或货币符号。",
+    "11. ending 和 CTA 默认不生成；除非 channelRules、branch.customPrompt 或 truthRules 明确要求，否则 cta/ending 必须为空，不要为了凑结构强行添加。",
+    "12. 奖励数字与收益承诺约束：只有 truthRules 明确给出的金额、积分点数、奖励数值、门槛、到账条件才能出现在用户可见文案或 UI 描述中；未提供时不要写任何具体金额、点数增长、余额增长、提现档位、到账时间或保证性收益。",
+    "13. 承诺强度按 promiseLevel 控制：非 strong_commitment 分支只能使用弱承诺（任务、积分、进度、奖励反馈、按规则可查看/申请/兑换），禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；strong_commitment 分支可以表达强承诺，但必须逐项来自 truthRules，不得扩写或增强。",
     "",
     "只返回 JSON 对象。"
   ].filter(Boolean).join("\n");
@@ -412,6 +414,40 @@ export function buildSeedancePlanMessages({
       content: promptText
     }
   ];
+}
+
+export function buildThirtySecondSeedancePlanMessages(input = {}) {
+  const messages = buildSeedancePlanMessages({
+    ...input,
+    segmentIndex: "1-2"
+  });
+  const userMessage = messages.find((message) => message.role === "user");
+  if (userMessage) {
+    userMessage.content = [
+      userMessage.content,
+      "",
+      "30s 连续预案覆盖规则：",
+      "1. 本次不是分别独立生成两个 15s 预案；必须先生成一个完整 0-30s 总分镜计划 overallStoryboard，再拆成两个连续的 15s Seedance prompt。",
+      "2. overallStoryboard 必须覆盖 0-30s 的完整结构、节奏、镜头、转化逻辑、人物状态、场景状态、UI/产品反馈状态和情绪递进。",
+      "3. segment 1 覆盖 0-15s，必须自然结束在可作为第二段首帧的连续性边界；写清最后一帧的人物姿势、手机/UI 状态、场景、光线、镜头位置和运动方向。",
+      "4. segment 2 覆盖 15-30s，必须从 segment 1 的最后一帧继续，不能重新开场、换人、跳场、重置 UI 或重复钩子。",
+      "5. segment 2 的 seedancePrompt 必须明确写出“以上一段尾帧/continuity frame 作为首帧连续性参考”，并延续同一变体的新人物、新场景、新服装、新道具和产品状态。",
+      "6. 两段都必须遵守同一个 0-30s 总分镜，不得互相矛盾；segment 2 只推进后半段转化，不要重复 segment 1 的痛点铺垫。",
+      "7. 如果 ending/CTA 未被明确要求，两个 segment 的 cta/ending 都保持空字符串；不要因为 30s 自动添加结尾卡。",
+      "",
+      "30s 输出 JSON 结构覆盖上述单段字段说明：",
+      JSON.stringify({
+        overallStoryboard: "完整 0-30s 总分镜计划，按 0-15s 和 15-30s 写清连续叙事与边界状态",
+        segments: [
+          { segmentIndex: 1, ...SEEDANCE_PLAN_SCHEMA_HINT },
+          { segmentIndex: 2, ...SEEDANCE_PLAN_SCHEMA_HINT }
+        ]
+      }, null, 2),
+      "",
+      "只返回上述 30s JSON 对象，不要返回 markdown，不要解释。"
+    ].join("\n");
+  }
+  return messages;
 }
 
 async function callPlanLlm(context, messages, llmConfig) {
@@ -463,6 +499,41 @@ export async function generateSeedancePlan(context, input = {}) {
     segmentIndex: input.segmentIndex
   });
   return parsed;
+}
+
+function normalizePlanSegments(value = {}) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value.segments)) return value.segments;
+  if (Array.isArray(value.plans)) return value.plans;
+  return [];
+}
+
+export async function generateThirtySecondSeedancePlans(context, input = {}) {
+  const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
+  const messages = buildThirtySecondSeedancePlanMessages(input);
+  const content = await callPlanLlm({
+    ...context,
+    currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+  }, messages, llmConfig);
+  const parsed = parseLlmJsonContent(content);
+  const segments = normalizePlanSegments(parsed);
+  if (segments.length < 2) {
+    throw new WangzhuanError("schema_invalid", "30s Seedance 预案必须包含两个连续 15s segment", {
+      branchId: input.branch?.branchId,
+      branchVariantIndex: input.branchVariantIndex,
+      segmentCount: segments.length
+    });
+  }
+  return [1, 2].map((segmentIndex) => {
+    const segment = segments.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
+      || segments[segmentIndex - 1];
+    return validateSeedancePlan(segment, {
+      branch: input.branch || {},
+      branchId: input.branch?.branchId,
+      branchVariantIndex: input.branchVariantIndex,
+      segmentIndex
+    });
+  });
 }
 
 export function buildGenerationPlanRecord({

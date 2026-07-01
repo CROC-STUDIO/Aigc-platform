@@ -183,9 +183,14 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         const result = await runDraft(scoped, body, {
           requestId,
           streamHandlers: {
-            onRetry: ({ attempt, maxRetries, reason }) => log(
+            onRetry: ({ attempt, maxRetries, reason, upstreamMessage, code, status }) => log(
               `拆解模型重试 ${attempt}/${maxRetries}`,
-              reason ? { reason } : undefined
+              {
+                ...(reason ? { reason } : {}),
+                ...(upstreamMessage ? { upstreamMessage } : {}),
+                ...(code ? { code } : {}),
+                ...(status ? { status } : {})
+              }
             ),
             onFallback: ({ from, to, reason }) => log(
               "拆解模型输入回退",
@@ -195,12 +200,12 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         });
         progress(95, "正在整理拆解字段");
         return result;
-      });
+      }, { context: scoped });
       return sendOk(res, { ...job, decompositionJobId: job.id }, requestId);
     }
     const decompositionJob = decompositionJobRoute(url.pathname);
     if (decompositionJob && req.method === "GET") {
-      const job = getBackgroundJob(decompositionJob.jobId);
+      const job = await getBackgroundJob(scoped, decompositionJob.jobId);
       if (!job) throw new WangzhuanError("job_not_found", "拆解任务不存在或已过期", { jobId: decompositionJob.jobId }, 404);
       return sendOk(res, {
         ...job,
@@ -246,12 +251,12 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         const result = await runPlan(scoped, body);
         progress(95, "正在写入预案草稿");
         return result;
-      }, { draftSignature });
+      }, { draftSignature, context: scoped });
       return sendOk(res, { ...job, planJobId: job.id, draftSignature }, requestId);
     }
     const planJob = planJobRoute(url.pathname);
     if (planJob && req.method === "GET") {
-      const job = getBackgroundJob(planJob.jobId);
+      const job = await getBackgroundJob(scoped, planJob.jobId);
       if (!job) throw new WangzhuanError("job_not_found", "Seedance 预案任务不存在或已过期", { jobId: planJob.jobId }, 404);
       const batch = job.result?.batch || null;
       return sendOk(res, {

@@ -24,6 +24,7 @@ cd "$ROOT"
 
 case "$MODE" in
   code-only)
+    bash scripts/jms-ops.sh check
     bash scripts/package-code-only.sh
     bash .release/upload-code-only.sh
     PKG="$(ls -t .release/ad-picture-web-codex-code-only-*.tar.gz | head -1)"
@@ -31,6 +32,7 @@ case "$MODE" in
     REMOTE_CMD="chmod +x /tmp/deploy-code-only-aigc-platform.sh && bash /tmp/deploy-code-only-aigc-platform.sh /tmp/${PKG_NAME}"
     ;;
   full)
+    bash scripts/jms-ops.sh check
     bash .release/pack-release.sh
     bash .release/upload-release.sh
     REMOTE_CMD="chmod +x /tmp/deploy-aigc-platform.sh && bash /tmp/deploy-aigc-platform.sh"
@@ -44,7 +46,7 @@ esac
 if [ "$RUN_REMOTE" = "--remote" ]; then
   echo
   echo "Running remote deploy via SSH..."
-  ssh -p "$JMS_PORT" -o IdentitiesOnly=yes -i "$JMS_KEY" -l "$JMS_LOGIN" "$JMS_HOST" "sudo bash -lc $(printf '%q' "$REMOTE_CMD")"
+  bash scripts/jms-ops.sh sudo-exec -- "$REMOTE_CMD"
 else
   echo
   echo "Next on production (root shell):"

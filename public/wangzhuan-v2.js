@@ -34,6 +34,7 @@ const els = {
   draftDecompositionBtn: $("#wzDraftDecompositionBtn"),
   decompositionStatus: $("#wzDecompositionStatus"),
   decompositionForm: $("#wzDecompositionForm"),
+  geminiDecompositionHint: $("#wzGeminiDecompositionHint"),
   llmServiceStatus: $("#wzLlmServiceStatus"),
   templateSelect: $("#wzTemplateSelect"),
   displayName: $("#wzDisplayName"),
@@ -123,13 +124,78 @@ const state = {
 
 let batchPollTimer = 0;
 let batchPollNetworkErrorActive = false;
-const DECOMPOSITION_JOB_TIMEOUT_MS = 180_000;
 const DECOMPOSITION_LLM_TIMEOUT_MS = 180_000;
+const GEMINI_DECOMPOSITION_TIMEOUT_MS = 300_000;
 const POLL_INTERVAL_MS = 1500;
 const VISIBLE_LOG_LIMIT = 50;
 const OLDER_LOG_PAGE_SIZE = 50;
 const RECENT_PAGE_SIZE = 5;
 const TERMINAL_BATCH_STATUSES = new Set(["succeeded", "failed", "partial_failed", "stopped", "skipped"]);
+const PLAN_UPSTREAM_LOCK_SELECTOR = [
+  "#wzBatchName",
+  "#wzSaveDraftBtn",
+  "#wzReferenceFile",
+  "#wzCheckReferenceBtn",
+  "#wzProjectName",
+  "#wzLlmProvider",
+  "#wzLlmModel",
+  "#wzLlmEndpoint",
+  "#wzLlmTemperature",
+  "#wzKnowledgeNotes",
+  "#wzDraftDecompositionBtn",
+  "#wzTemplateSelect",
+  "#wzDisplayName",
+  "#wzProductName",
+  "#wzProductLink",
+  "#wzCreateTemplateBtn",
+  "#wzAddBranchBtn",
+  "#wzRemoveBranchBtn",
+  "#wzTargetChannel",
+  "#wzTargetRegion",
+  "#wzLanguage",
+  "#wzMaterialDirection",
+  "#wzMaterialDirectionCustom",
+  "#wzVoiceoverStyle",
+  "#wzPromiseLevel",
+  "#wzCurrencySymbol",
+  "#wzCurrencyCustom",
+  "#wzCta",
+  "#wzEnding",
+  "#wzUploadSeedanceAssetsBtn",
+  "#wzConfirmAssetsBtn",
+  "#wzVariantPrompt",
+  "#wzCustomPrompt",
+  "#wzNegativePrompt",
+  "#wzDisclaimerPreset",
+  "#wzDisclaimerEnabled",
+  "#wzDisclaimer",
+  "#wzDisclaimerOverlayPosition",
+  "#wzDisclaimerOverlayFontSize",
+  "#wzDisclaimerOverlayBoxHeight",
+  "#wzDisclaimerOverlayBottomMargin",
+  "#wzDisclaimerOverlayHorizontalMargin",
+  "#wzDuration",
+  "#wzOutputRatio",
+  "#wzVariantCount",
+  "#wzRequestedConcurrency",
+  "#wzSeedanceModel",
+  "#wzPlanLlmProvider",
+  "#wzPlanLlmModel",
+  "#wzPlanLlmEndpoint",
+  "#wzPlanLlmTemperature",
+  "#wzEstimateBtn",
+  "#wzConfirmLimits",
+  "#wzPlanBatchBtn",
+  "#wzProductIconFile",
+  "#wzProductScreenshotFile",
+  "#wzProductRecordingFile",
+  "#wzPersonAssetFile",
+  "#wzRewardElementFile",
+  "#wzCtaAssetFile",
+  "#wzEndingAssetFile",
+  "#wzTruthFields [data-truth-field]",
+  "#wzDecompositionForm [data-decomposition-field]"
+].join(", ");
 let activeReferencePreviewUrl = "";
 
 document.getElementById("wzDecomposeBtn")?.remove();
@@ -175,6 +241,33 @@ function setCurrencyValue(symbol = "$") {
 function syncCurrencyCustom() {
   const wrap = $("#wzCurrencyCustomWrap");
   if (wrap) wrap.hidden = value(els.currencySymbol) !== "custom";
+}
+
+function selectedDecompositionModel() {
+  return value($("#wzLlmModel"));
+}
+
+function isGeminiDecompositionModel(model = selectedDecompositionModel()) {
+  return String(model || "").trim().toLowerCase().startsWith("gemini-");
+}
+
+function decompositionTimeoutMs(model = selectedDecompositionModel()) {
+  return isGeminiDecompositionModel(model) ? GEMINI_DECOMPOSITION_TIMEOUT_MS : DECOMPOSITION_LLM_TIMEOUT_MS;
+}
+
+function decompositionMaxRetries(model = selectedDecompositionModel()) {
+  return isGeminiDecompositionModel(model) ? 3 : 0;
+}
+
+function decompositionJobTimeoutWindowMs(model = selectedDecompositionModel()) {
+  const timeoutMs = decompositionTimeoutMs(model);
+  const retries = decompositionMaxRetries(model);
+  return timeoutMs * (retries + 1);
+}
+
+function syncGeminiDecompositionHint() {
+  if (!els.geminiDecompositionHint) return;
+  els.geminiDecompositionHint.hidden = !isGeminiDecompositionModel();
 }
 
 function renderTruthFields() {
@@ -828,6 +921,36 @@ function renderPlanEditors(plans = []) {
   `).join("");
 }
 
+function hasGeneratedSeedancePlan(batch = state.batchDetail?.batch || state.batchDetail || {}) {
+  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  return plans.length > 0 || ["running", "succeeded"].includes(state.planJob?.status);
+}
+
+function setPlanUpstreamLocked(locked) {
+  document.body?.classList.toggle("wz-v2-plan-locked", Boolean(locked));
+  for (const el of document.querySelectorAll(PLAN_UPSTREAM_LOCK_SELECTOR)) {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement || el instanceof HTMLButtonElement)) continue;
+    if (!el.dataset.wzPlanLockOriginal) {
+      el.dataset.wzPlanLockOriginal = JSON.stringify({
+        disabled: el.disabled,
+        readOnly: "readOnly" in el ? el.readOnly : false
+      });
+    }
+    if (locked) {
+      if (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement || el.type === "file" || el.type === "checkbox") {
+        el.disabled = true;
+      } else if ("readOnly" in el) {
+        el.readOnly = true;
+      }
+      continue;
+    }
+    const original = JSON.parse(el.dataset.wzPlanLockOriginal || "{}");
+    el.disabled = Boolean(original.disabled);
+    if ("readOnly" in el) el.readOnly = Boolean(original.readOnly);
+    delete el.dataset.wzPlanLockOriginal;
+  }
+}
+
 function collectEditablePlans() {
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
@@ -1145,7 +1268,10 @@ function renderTasks() {
     </div>
   `).join("");
   els.planStaleNotice.hidden = !state.stalePlanPreview;
-  els.confirmPlanBtn.disabled = !state.batchDetail || state.stalePlanPreview;
+  const planUpstreamLocked = hasGeneratedSeedancePlan(batch);
+  setPlanUpstreamLocked(planUpstreamLocked);
+  els.planBatchBtn.disabled = planUpstreamLocked || !state.estimate?.estimateId || state.stalePlanPreview;
+  els.confirmPlanBtn.disabled = !plans.length || state.stalePlanPreview;
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
   els.runQcBtn.disabled = !batch?.batchId || !isBatchQcRunnable(batch, tasksInBatch, outputsInBatch);
   els.runStatusBox.textContent = batch?.batchId
@@ -1260,6 +1386,29 @@ function failBackgroundJob(type, message, data = {}) {
     els.planBatchBtn.disabled = false;
   }
   log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}失败：${job.error.message}`);
+  renderTasks();
+}
+
+function markBackgroundJobTimeout(type, message, data = {}) {
+  const job = {
+    id: data.jobId || "",
+    type,
+    status: "running",
+    progress: type === "decomposition" ? 30 : 90,
+    message: message || "后台任务仍在运行",
+    error: null,
+    result: null,
+    events: []
+  };
+  if (type === "decomposition") {
+    state.decompositionJob = job;
+    els.draftDecompositionBtn.disabled = false;
+    els.decompositionStatus.textContent = message || "AI 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。";
+  } else {
+    state.planJob = job;
+    els.planBatchBtn.disabled = false;
+  }
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}仍在后台运行：${message}`);
   renderTasks();
 }
 
@@ -1426,9 +1575,14 @@ async function confirmSeedanceAssetReviews() {
 
 async function startDecompositionJob() {
   if (!state.referenceVideo?.referenceVideoId) return;
+  const model = selectedDecompositionModel();
+  const timeoutMs = decompositionTimeoutMs(model);
+  const maxRetries = decompositionMaxRetries(model);
   state.decompositionEditedFields.clear();
   els.draftDecompositionBtn.disabled = true;
-  els.decompositionStatus.textContent = "AI 拆解已进入后台任务，继续填写第 3 步。";
+  els.decompositionStatus.textContent = isGeminiDecompositionModel(model)
+    ? "AI 拆解已进入后台任务。Gemini 视频拆解可能持续数分钟，请继续填写第 3 步。"
+    : "AI 拆解已进入后台任务，继续填写第 3 步。";
   const job = await api("/api/wangzhuan/reference-videos/decomposition-jobs", {
     method: "POST",
     body: JSON.stringify({
@@ -1436,18 +1590,26 @@ async function startDecompositionJob() {
       knowledgeNotes: value($("#wzKnowledgeNotes")),
       llmConfig: {
         provider: value($("#wzLlmProvider")),
-        model: value($("#wzLlmModel")),
+        model,
         endpoint: value($("#wzLlmEndpoint")),
         temperature: Number(value($("#wzLlmTemperature")) || 0.2),
-        timeoutMs: DECOMPOSITION_LLM_TIMEOUT_MS,
-        maxRetries: 0
+        timeoutMs,
+        maxRetries
       }
     })
   });
+  job.model = model;
+  job.timeoutMs = timeoutMs;
+  job.maxRetries = maxRetries;
   state.decompositionJob = job;
   log("AI 拆解任务已提交");
   renderTasks();
-  pollJob("decomposition", job.decompositionJobId);
+  pollJob("decomposition", job.decompositionJobId, {
+    timeoutMs: decompositionJobTimeoutWindowMs(model),
+    timeoutLabel: isGeminiDecompositionModel(model)
+      ? "Gemini 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。"
+      : `任务超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`
+  });
 }
 
 async function startPlanJob() {
@@ -1470,20 +1632,21 @@ async function startPlanJob() {
   state.draftSignature = job.draftSignature;
   state.stalePlanPreview = false;
   log("Seedance 预案任务已提交");
+  setPlanUpstreamLocked(true);
   renderTasks();
   pollJob("plan", job.planJobId);
 }
 
-async function pollJob(type, jobId) {
+async function pollJob(type, jobId, options = {}) {
   const path = type === "decomposition"
     ? `/api/wangzhuan/reference-videos/decomposition-jobs/${encodeURIComponent(jobId)}`
     : `/api/wangzhuan/batches/plan-jobs/${encodeURIComponent(jobId)}`;
   const startedAt = Date.now();
-  const maxWaitMs = type === "decomposition" ? DECOMPOSITION_JOB_TIMEOUT_MS : 0;
+  const maxWaitMs = type === "decomposition" ? (options.timeoutMs || decompositionJobTimeoutWindowMs()) : 0;
   const timer = setInterval(async () => {
     if (maxWaitMs && Date.now() - startedAt > maxWaitMs) {
       clearInterval(timer);
-      failBackgroundJob(type, "任务超过 180 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解", {
+      markBackgroundJobTimeout(type, options.timeoutLabel || `任务超过 ${Math.round(maxWaitMs / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`, {
         code: "job_poll_timeout",
         jobId
       });
@@ -1498,9 +1661,10 @@ async function pollJob(type, jobId) {
         if (type === "decomposition") {
           state.decompositionDraft = job.decomposition || {};
           renderDecompositionForm(state.decompositionDraft, { preserveUserInput: true });
+          els.draftDecompositionBtn.disabled = hasGeneratedSeedancePlan();
           els.decompositionStatus.textContent = state.decompositionEditedFields.size
-            ? "AI 结果可用，已回填未手动编辑字段，后续估算会直接读取当前表单。"
-            : "AI 结果可用，已回填到页面，后续估算会直接读取当前表单。";
+            ? "AI 结果可用，已回填未手动编辑字段，后续估算会直接读取当前表单；如需调整，可重新拆解。"
+            : "AI 结果可用，已回填到页面，后续估算会直接读取当前表单；如需调整，可重新拆解。";
         } else {
           state.batchDetail = job.batch;
           state.draftSignature = job.draftSignature;
@@ -1510,6 +1674,7 @@ async function pollJob(type, jobId) {
       }
       if (job.status === "failed") {
         clearInterval(timer);
+        if (type === "plan") setPlanUpstreamLocked(false);
         failBackgroundJob(type, job.error?.message || "未知错误", {
           ...(job.error?.data || {}),
           code: job.error?.code || "job_failed",
@@ -1642,6 +1807,7 @@ async function runVideoQc() {
 
 function startNewTask() {
   window.clearTimeout(batchPollTimer);
+  setPlanUpstreamLocked(false);
   state.referenceVideo = null;
   resetDecompositionDraft({ clearForm: true });
   state.estimate = null;
@@ -1740,6 +1906,7 @@ els.branchTabs?.addEventListener("click", (event) => {
   switchBranch(Number(button.dataset.branchIndex));
 });
 els.draftDecompositionBtn?.addEventListener("click", () => startDecompositionJob().catch((error) => showError(error, "AI 拆解提交失败")));
+$("#wzLlmModel")?.addEventListener("change", syncGeminiDecompositionHint);
 els.confirmRewriteBtn?.addEventListener("click", confirmRewriteInfo);
 els.templateSelect?.addEventListener("change", () => {
   const selected = state.templates.find((template) => template.versionId === els.templateSelect.value);
@@ -1820,6 +1987,7 @@ for (const [, selector] of assetInputs) {
 syncMaterialDirectionCustom();
 syncCurrencyCustom();
 syncTruthDetails();
+syncGeminiDecompositionHint();
 renderBranchTabs();
 renderAssetReviewState();
 renderPlanEditors([]);

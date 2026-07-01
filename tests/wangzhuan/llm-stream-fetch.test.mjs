@@ -64,7 +64,7 @@ test("callOpenAiCompatibleLlmStream falls back from responses stream to chat str
   }
 });
 
-test("callOpenAiCompatibleLlmStream uses chat stream directly for gpt-5.4 video prompts", async () => {
+test("callOpenAiCompatibleLlmStream uses chat stream directly for GPT-5.x video prompts", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
@@ -83,7 +83,7 @@ test("callOpenAiCompatibleLlmStream uses chat stream directly for gpt-5.4 video 
       {
         provider: "skylink",
         endpoint: "https://example.test/api/v1",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         temperature: 0.2,
         timeoutMs: 30000,
         apiKey: "test-key"

@@ -18,6 +18,15 @@ function responsesUrl(endpoint) {
   return `${clean}/responses`;
 }
 
+export function geminiStreamGenerateContentUrl(endpoint, model) {
+  const clean = String(endpoint || "").replace(/\/+$/, "");
+  const encoded = encodeURIComponent(String(model || "").trim());
+  if (clean.endsWith("/v1beta")) return `${clean}/models/${encoded}:streamGenerateContent?alt=sse`;
+  if (clean.endsWith("/api")) return `${clean}/v1beta/models/${encoded}:streamGenerateContent?alt=sse`;
+  if (clean.endsWith("/v1")) return `${clean}beta/models/${encoded}:streamGenerateContent?alt=sse`;
+  return `${clean}/v1beta/models/${encoded}:streamGenerateContent?alt=sse`;
+}
+
 function responsesInputFromMessages(messages = []) {
   return messages.map((message) => ({
     role: message.role,
@@ -54,7 +63,7 @@ function modelInputMode(messages = []) {
 function shouldForceChatForFileUrl(llmConfig, messages) {
   return modelInputMode(messages) === "file_url"
     && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
-    && /^gpt-5\.4(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
+    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
 }
 
 function shouldFallbackFromResponsesStream(error) {
@@ -150,7 +159,7 @@ export async function consumeSkylinkSseResponse(response, { onDelta, onRawEvent 
       } catch {
         continue;
       }
-      onRawEvent?.(payload, item);
+      await onRawEvent?.(payload, item);
       if (payload?.error) {
         throw new WangzhuanError("model_failed", "模型拆解请求失败", {
           status: response.status,
@@ -160,7 +169,7 @@ export async function consumeSkylinkSseResponse(response, { onDelta, onRawEvent 
       const delta = extractTextFromSkylinkSsePayload(payload);
       if (delta) {
         fullText += delta;
-        onDelta?.(delta, fullText);
+        await onDelta?.(delta, fullText);
       }
     }
   }
@@ -169,7 +178,7 @@ export async function consumeSkylinkSseResponse(response, { onDelta, onRawEvent 
 }
 
 async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { mode, controller, fetchOptions = {} }) {
-  handlers.onRequest?.({ url, mode });
+  await handlers.onRequest?.({ url, mode });
   const inputMode = modelInputMode(body?.messages || []);
   const headers = {
     "Content-Type": "application/json",
@@ -201,7 +210,8 @@ async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { m
     const payload = await response.json().catch(() => ({}));
     const message = nonStreamTextFromPayload(payload);
     if (typeof message === "string" && message) {
-      handlers.onDelta?.(message, message);
+      await handlers.onDelta?.(message, message);
+      await handlers.onComplete?.({ text: message, mode });
       return message;
     }
     throw new WangzhuanError("model_failed", "上游未返回 SSE 流", {
@@ -210,9 +220,11 @@ async function consumeOpenAiCompatibleStream(url, body, llmConfig, handlers, { m
     });
   }
 
-  return consumeSkylinkSseResponse(response, {
+  const text = await consumeSkylinkSseResponse(response, {
     onDelta: handlers.onDelta
   });
+  await handlers.onComplete?.({ text, mode });
+  return text;
 }
 
 export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handlers = {}, fetchOptions = {}) {
@@ -261,7 +273,10 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
           { mode: "responses.stream", controller, fetchOptions }
         );
       } catch (error) {
-        if (!shouldFallbackFromResponsesStream(error)) throw error;
+        if (!shouldFallbackFromResponsesStream(error)) {
+          await handlers.onError?.({ error, mode: "responses.stream" });
+          throw error;
+        }
       }
     }
     return await consumeOpenAiCompatibleStream(
@@ -272,6 +287,9 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
       { mode: "chat.completions.stream", controller, fetchOptions }
     );
   } catch (error) {
+    if (!shouldFallbackFromResponsesStream(error)) {
+      await handlers.onError?.({ error, mode: "chat.completions.stream" });
+    }
     if (error instanceof WangzhuanError) throw error;
     const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
@@ -283,15 +301,6 @@ export async function callOpenAiCompatibleLlmStream(llmConfig, messages, handler
   } finally {
     clearTimeout(timer);
   }
-}
-
-function geminiStreamGenerateContentUrl(endpoint, model) {
-  const clean = String(endpoint || "").replace(/\/+$/, "");
-  const encoded = encodeURIComponent(String(model || "").trim());
-  if (clean.endsWith("/v1beta")) return `${clean}/models/${encoded}:streamGenerateContent?alt=sse`;
-  if (clean.endsWith("/api")) return `${clean}/v1beta/models/${encoded}:streamGenerateContent?alt=sse`;
-  if (clean.endsWith("/v1")) return `${clean}beta/models/${encoded}:streamGenerateContent?alt=sse`;
-  return `${clean}/v1beta/models/${encoded}:streamGenerateContent?alt=sse`;
 }
 
 export async function callGeminiCompatibleLlmStream(llmConfig, messages, handlers = {}, bodyFactory) {
@@ -316,7 +325,7 @@ export async function callGeminiCompatibleLlmStream(llmConfig, messages, handler
   };
 
   try {
-    handlers.onRequest?.({ url, mode: "gemini.streamGenerateContent" });
+    await handlers.onRequest?.({ url, mode: "gemini.streamGenerateContent" });
     const response = await fetch(url, {
       method: "POST",
       headers,
@@ -335,10 +344,13 @@ export async function callGeminiCompatibleLlmStream(llmConfig, messages, handler
       });
     }
 
-    return await consumeSkylinkSseResponse(response, {
+    const text = await consumeSkylinkSseResponse(response, {
       onDelta: handlers.onDelta
     });
+    await handlers.onComplete?.({ text, mode: "gemini.streamGenerateContent" });
+    return text;
   } catch (error) {
+    await handlers.onError?.({ error, mode: "gemini.streamGenerateContent" });
     if (error instanceof WangzhuanError) throw error;
     const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
