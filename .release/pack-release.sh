@@ -14,6 +14,7 @@ tar -czf "$TMP_TAR" \
   --exclude='./node_modules' \
   --exclude='./mysql-data' \
   --exclude='./project-data' \
+  --exclude='./others' \
   --exclude='./.git' \
   --exclude='./.env' \
   --exclude='./.env.*' \

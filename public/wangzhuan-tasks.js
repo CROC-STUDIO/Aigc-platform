@@ -102,7 +102,7 @@ function renderListEmpty(message) {
       <p>${escapeHtml(hint)}</p>
       ${showCreateActions ? `
         <div class="wz-tasks-empty-actions">
-          <a class="mini" href="/wangzhuan.html">去网赚管线创建</a>
+          <a class="mini" href="/wangzhuan-v2.html">去网赚管线创建</a>
           <a class="mini ghost" href="/competitor-remix.html">去竞品改造创建</a>
         </div>
       ` : ""}
@@ -266,12 +266,8 @@ function detailSignature(detail) {
   ].join("|");
 }
 
-function hasActiveTasksOnPage() {
-  return state.items.some((item) => item.isActive);
-}
-
 function shouldPollPage() {
-  return hasActiveTasksOnPage() || shouldPollDetail(state.detail);
+  return shouldPollDetail(state.detail);
 }
 
 function stopPagePolling() {
@@ -284,7 +280,7 @@ function updatePagePolling() {
   if (!shouldPollPage()) return;
   state.stopPagePoll = schedulePoll({
     load: async () => {
-      await refreshTasksPage({ silent: true });
+      await loadSelectedDetail({ silent: true });
       return state.detail;
     },
     shouldStop: () => !shouldPollPage(),
@@ -340,6 +336,18 @@ function sortedOutputs(outputs = []) {
     });
 }
 
+function isIntermediateOutput(output = {}) {
+  return output.kind === "segment_video" || output.kind === "segment";
+}
+
+function splitOutputGroups(outputs = []) {
+  const items = sortedOutputs(outputs);
+  return {
+    finalOutputs: items.filter((output) => !isIntermediateOutput(output)),
+    intermediateOutputs: items.filter(isIntermediateOutput)
+  };
+}
+
 function outputStatusText(output = {}) {
   const parts = [];
   if (output.kind) parts.push(output.kind);
@@ -365,41 +373,56 @@ function renderOutputQcIssues(output = {}) {
   `;
 }
 
-function renderOutputCollection(outputs = []) {
-  const items = sortedOutputs(outputs);
-  if (!items.length) {
-    return `
-      <section class="wz-tasks-output-stage" aria-label="交付结果">
-        <header class="wz-tasks-media-stage-head">
-          <h2>交付结果</h2>
-          <p>最终输出会在任务完成后归档到这里</p>
-        </header>
-        <div class="wz-list empty-line">暂无输出</div>
-      </section>
-    `;
-  }
+function renderOutputCards(items = []) {
   return `
-    <section class="wz-tasks-output-stage" aria-label="交付结果">
+    <div class="wz-tasks-output-grid">
+      ${items.map((output) => `
+        <article class="wz-tasks-output-card">
+          <div class="wz-tasks-output-card-head">
+            <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
+            ${output.downloadEligible ? badge("succeeded", { succeeded: "可下载" }) : badge("pending", { pending: "归档中" })}
+          </div>
+          ${renderMediaPlayer(output, "该输出暂不可预览")}
+          <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
+          ${renderOutputQcIssues(output)}
+          ${assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOutputStage({ title, description, items = [], emptyText, className = "" }) {
+  return `
+    <section class="wz-tasks-output-stage ${escapeHtml(className)}" aria-label="${escapeHtml(title)}">
       <header class="wz-tasks-media-stage-head">
-        <h2>交付结果</h2>
-        <p>当前任务的全部输出、质检状态和下载资格</p>
+        <h2>${escapeHtml(title)}</h2>
+        <p>${escapeHtml(description)}</p>
       </header>
-      <div class="wz-tasks-output-grid">
-        ${items.map((output) => `
-          <article class="wz-tasks-output-card">
-            <div class="wz-tasks-output-card-head">
-              <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
-              ${output.downloadEligible ? badge("succeeded", { succeeded: "可下载" }) : badge("pending", { pending: "归档中" })}
-            </div>
-            ${renderMediaPlayer(output, "该输出暂不可预览")}
-            <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
-            ${renderOutputQcIssues(output)}
-            ${assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
-          </article>
-        `).join("")}
-      </div>
+      ${items.length ? renderOutputCards(items) : `<div class="wz-list empty-line">${escapeHtml(emptyText)}</div>`}
     </section>
   `;
+}
+
+function renderOutputCollection(outputs = []) {
+  const { finalOutputs, intermediateOutputs } = splitOutputGroups(outputs);
+  const hasAnyOutput = finalOutputs.length || intermediateOutputs.length;
+  const finalStage = renderOutputStage({
+    title: "交付结果",
+    description: "最终成片、改造视频等面向交付的结果",
+    items: finalOutputs,
+    emptyText: hasAnyOutput ? "最终结果尚未生成" : "暂无输出"
+  });
+  const intermediateStage = intermediateOutputs.length
+    ? renderOutputStage({
+        title: "中间结果",
+        description: "分段视频、诊断过程文件等中间产物，不作为最终交付成片",
+        items: intermediateOutputs,
+        emptyText: "暂无中间结果",
+        className: "is-intermediate"
+      })
+    : "";
+  return `${finalStage}${intermediateStage}`;
 }
 
 function renderDiagnosticArchive(providerJob = {}) {
@@ -561,6 +584,27 @@ function detailNotice(type, status) {
   return "";
 }
 
+function backgroundJobRetryLabel(jobType = "") {
+  return jobType === "decomposition" ? "重试查询拆解结果" : "重试查询预案结果";
+}
+
+function renderBackgroundJobNotice(job, title) {
+  if (!job) return "";
+  const recoverable = Boolean(job.error?.recoverable);
+  const reason = job.error?.message || job.message || "";
+  const statusLabel = recoverable ? "可重试查询" : (job.status || "-");
+  const action = recoverable
+    ? `<a class="mini ghost" href="${escapeHtml(workbenchHref("batch", "running", state.selectedId, { jobType: job.type === "seedance_plan" ? "plan" : job.type, jobId: job.id }))}">${escapeHtml(backgroundJobRetryLabel(job.type))}</a>`
+    : "";
+  return `
+    <div class="wz-warning wz-tasks-notice">
+      <strong>${escapeHtml(title)}</strong>
+      <div>${escapeHtml(statusLabel)}${reason ? `：${reason}` : ""}</div>
+      ${action ? `<div>${action}</div>` : ""}
+    </div>
+  `;
+}
+
 function renderBatchDetail(detail) {
   const batch = detail?.batch;
   if (!batch) return "";
@@ -569,6 +613,8 @@ function renderBatchDetail(detail) {
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   const qcRunnable = isBatchQcRunnable(batch, tasks, outputs);
   const notice = detailNotice("batch", batch.status);
+  const planJobNotice = renderBackgroundJobNotice(detail?.backgroundJobs?.latestPlanJob, "Seedance 预案后台任务");
+  const decompositionJobNotice = renderBackgroundJobNotice(detail?.backgroundJobs?.latestDecompositionJob, "AI 拆解后台任务");
   const outputAsset = pickPrimaryOutput(batch.outputs);
   const outputLabel = outputAsset?.kind === "stitched_video" ? "拼接成片" : "输出视频";
   return `
@@ -583,6 +629,8 @@ function renderBatchDetail(detail) {
       </div>
     </article>
     ${notice ? `<div class="wz-warning wz-tasks-notice">${escapeHtml(notice)}</div>` : ""}
+    ${decompositionJobNotice}
+    ${planJobNotice}
     ${renderTaskMediaCompare({
       inputAsset: batch.referenceVideo,
       outputAsset,
@@ -903,20 +951,22 @@ async function downloadSelectedTask() {
   const button = $("#wzTasksDownloadBtn");
   setBusy(button, true, "打包中");
   try {
+    let result;
     if (state.selectedType === "remix") {
-      await downloadZip({
+      result = await downloadZip({
         remixIds: [state.selectedId],
         includeFailed: false,
         includeRemoteUrls: false
       });
     } else {
-      await downloadZip({
+      result = await downloadZip({
         batchIds: [state.selectedId],
         includeSegments: Boolean($("#wzTasksIncludeSegments")?.checked),
         includeFailed: false,
         includeRemoteUrls: false
       });
     }
+    showToast(`已开始下载 ${result?.fileName || "交付包"}`, { type: "success" });
   } catch (error) {
     renderError(els.globalError, error, "下载失败");
   } finally {

@@ -1,18 +1,22 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 
-import { readBatch, writeBatch, writeTaskMaps } from "./pipeline.mjs";
+import { reviewSeedanceAsset } from "./asset-review.mjs";
+import { readBatch, submitPendingGenerationTasks, writeBatch, writeTaskMaps } from "./pipeline.mjs";
 import {
   createSeedanceProviderClient,
   normalizeSeedanceTaskStatus,
   summarizeSeedancePollResponse
 } from "./seedance-provider.mjs";
 import { finalizeFifteenSecondBatch, stitchBatchSegments } from "./stitch.mjs";
-import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
+import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { WangzhuanError } from "./http.mjs";
 
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
 const MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS = 30;
+const execFileAsync = promisify(execFile);
 
 function userRelative(context, fullPath) {
   return toProjectRelative(context.userProjectRoot, fullPath);
@@ -20,6 +24,10 @@ function userRelative(context, fullPath) {
 
 function taskSegmentPath(context, batchId, generationTaskId) {
   return join(wangzhuanPaths(context).batchesDir, batchId, "segments", `${generationTaskId}.mp4`);
+}
+
+function continuityFramePath(context, batchId, generationTaskId) {
+  return join(wangzhuanPaths(context).batchesDir, batchId, "continuity", `${generationTaskId}_last_frame.jpg`);
 }
 
 function isLegacyMockGenerationTask(task = {}) {
@@ -54,6 +62,51 @@ async function writeSegmentBuffer(context, batchId, generationTaskId, buffer) {
   return userRelative(context, target);
 }
 
+async function extractContinuityFrame(context, batch, sourceTask) {
+  const sourcePath = sourceTask.outputPath ? join(context.userProjectRoot, sourceTask.outputPath) : "";
+  if (!sourcePath) {
+    throw new WangzhuanError("missing_required_file", "缺少第一段视频，无法生成第二段连续性参考帧", {
+      batchId: batch.batchId,
+      generationTaskId: sourceTask.generationTaskId
+    });
+  }
+  const target = continuityFramePath(context, batch.batchId, sourceTask.generationTaskId);
+  await mkdir(dirname(target), { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-sseof", "-0.2",
+    "-i", sourcePath,
+    "-frames:v", "1",
+    "-q:v", "2",
+    target
+  ], {
+    timeout: 30000,
+    windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  const storage = await syncWangzhuanAsset(context, target, "pipeline_continuity_frame", { required: true });
+  const storedPath = userRelative(context, target);
+  const buffer = await readFile(target);
+  const review = await reviewSeedanceAsset(context, {
+    branchId: sourceTask.branchId || "",
+    assetKey: "continuityFrame",
+    fileName: `${sourceTask.generationTaskId}_last_frame.jpg`,
+    mimeType: "image/jpeg",
+    buffer,
+    storageUrl: storage.storageUrl,
+    storageKey: storage.storageKey,
+    storedPath
+  });
+  return {
+    sourceGenerationTaskId: sourceTask.generationTaskId,
+    storedPath,
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl,
+    review,
+    createdAt: new Date().toISOString()
+  };
+}
+
 function shouldPollTaskStatus(task = {}) {
   if (task.status === "waiting_upstream") return true;
   return task.status === "failed"
@@ -69,6 +122,87 @@ function generationTaskPollChanged(before = {}, after = {}) {
     || Number(before.missingVideoUrlPolls || 0) !== Number(after.missingVideoUrlPolls || 0)
     || Boolean(before.responseSummary?.waitingForVideoUrl) !== Boolean(after.responseSummary?.waitingForVideoUrl)
     || Boolean(before.responseSummary?.videoUrlStored) !== Boolean(after.responseSummary?.videoUrlStored);
+}
+
+function taskSegmentKey(task = {}) {
+  return [
+    task.branchId || "default",
+    String(task.branchVariantIndex || task.variantIndex || 1)
+  ].join(":");
+}
+
+function isApprovedContinuityReference(reference = {}) {
+  const status = String(reference.review?.status || "").toLowerCase();
+  return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
+}
+
+async function attachContinuityReferences(context, batch, tasks, now) {
+  if (Number(batch.estimate?.durationSec || 15) !== 30) return { tasks, changed: false };
+  const nextTasks = [...tasks];
+  let changed = false;
+  for (let index = 0; index < nextTasks.length; index += 1) {
+    const task = nextTasks[index];
+    if (task.status !== "pending" || Number(task.segmentIndex || 1) <= 1 || task.continuityReference) continue;
+    const previous = nextTasks.find((candidate) => {
+      return taskSegmentKey(candidate) === taskSegmentKey(task)
+        && Number(candidate.segmentIndex || 1) === Number(task.segmentIndex || 1) - 1
+        && candidate.status === "downloaded"
+        && Boolean(candidate.outputPath);
+    });
+    if (!previous) continue;
+    try {
+      const continuityReference = await extractContinuityFrame(context, batch, previous);
+      if (!isApprovedContinuityReference(continuityReference)) {
+        nextTasks[index] = {
+          ...task,
+          status: "failed",
+          finishedAt: now,
+          errorCode: "continuity_reference_failed",
+          errorMessage: continuityReference.review?.reviewReason || "第一段尾帧审核未通过，无法提交第二段生成",
+          responseSummary: {
+            ...(task.responseSummary || {}),
+            continuityReference
+          }
+        };
+      } else {
+        nextTasks[index] = {
+          ...task,
+          continuityReference,
+          requestSummary: {
+            ...(task.requestSummary || {}),
+            continuityReference: {
+              sourceGenerationTaskId: continuityReference.sourceGenerationTaskId,
+              storedPath: continuityReference.storedPath,
+              assetId: continuityReference.review.assetId,
+              status: continuityReference.review.status
+            }
+          }
+        };
+      }
+      changed = true;
+    } catch (error) {
+      nextTasks[index] = {
+        ...task,
+        status: "failed",
+        finishedAt: now,
+        errorCode: error?.code || "continuity_reference_failed",
+        errorMessage: error?.message || "第一段尾帧生成失败，无法提交第二段生成"
+      };
+      changed = true;
+    }
+  }
+  return { tasks: nextTasks, changed };
+}
+
+export function statusAfterTaskWrite(batch, tasks) {
+  if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return batch.status;
+  if (tasks.some((task) => task.status === "pending" || task.status === "waiting_upstream")) return batch.status;
+  // `downloaded_output` is a task-level persistence trigger. Keep the run
+  // in its current non-terminal state and let later workflow triggers
+  // (`generation_completed` / `stitch_progress` / `qc_completed`) settle the
+  // final run status.
+  if (tasks.some((task) => task.status === "failed")) return batch.status;
+  return batch.status;
 }
 
 async function pollGenerationTask(context, batch, task, provider, now) {
@@ -227,14 +361,26 @@ export async function pollUpstreamBatch(context, batchId) {
     nextTasks.push(polledTask);
   }
 
-  if (tasksChanged) {
-    batch = await writeBatch(context, { ...batch, tasks: nextTasks });
+  const durationSec = Number(batch.estimate?.durationSec || 15);
+  const continuity = durationSec === 30
+    ? await attachContinuityReferences(context, batch, nextTasks, now)
+    : { tasks: nextTasks, changed: false };
+  if (tasksChanged || continuity.changed) {
+    batch = await writeBatch(context, {
+      ...batch,
+      status: statusAfterTaskWrite(batch, continuity.tasks),
+      tasks: continuity.tasks
+    }, "downloaded_output");
     await writeTaskMaps(context, batch);
   }
 
-  const durationSec = Number(batch.estimate?.durationSec || 15);
   let advanced = false;
   if (durationSec === 30) {
+    if (tasksChanged && (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) {
+      const submitted = await submitPendingGenerationTasks(context, batchId);
+      batch = submitted.batch;
+      if (submitted.submittedCount > 0) advanced = true;
+    }
     const beforeStatus = batch.status;
     batch = await advanceThirtySecondBatch(context, batchId);
     advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video");

@@ -5,7 +5,8 @@
       "endpoint": "https://skylink-gateway.com/api/v1",
       "model": "gemini-3.5-flash",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
-      "timeoutMs": 180000
+      "timeoutMs": 300000,
+      "maxRetries": 3
     },
     "qcLlm": {
       "provider": "skylink",

@@ -4,7 +4,7 @@ param(
   [string]$JmsHost = "jump.corp.touka.plus",
   [string]$JmsPort = "2222",
   [string]$JmsKey = "$env:USERPROFILE\.ssh\jumpserver_rsa",
-  [string]$JmsLogin = "huting@dev@8.219.102.128"
+  [string]$JmsLogin = "liuxuan@dev@8.219.102.128"
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +17,7 @@ $LatestTar = Join-Path $ReleaseDir "aigc-platform-release.tar.gz"
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
 $exclude = @(
-  "node_modules", "mysql-data", "project-data", ".git",
+  "node_modules", "mysql-data", "project-data", "others", ".git",
   ".env", ".env.*", "env.export.txt", "users.json", "config.json",
   ".understand-anything", ".release\*.tar.gz"
 )

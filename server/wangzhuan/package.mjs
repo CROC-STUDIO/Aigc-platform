@@ -79,14 +79,15 @@ function addStringFile(files, zipPath, value) {
 async function addDiskFile(context, files, missingFiles, zipPath, relativePath) {
   if (!relativePath) {
     missingFiles.push(zipPath);
-    return;
+    return false;
   }
   const target = resolveUserPath(context, relativePath);
   if (!existsSync(target)) {
     missingFiles.push(zipPath);
-    return;
+    return false;
   }
   files.push({ zipPath: zipSafeName(zipPath), data: await readFile(target) });
+  return true;
 }
 
 async function bufferFromStream(stream) {
@@ -100,7 +101,7 @@ async function addStoredFile(context, files, missingFiles, zipPath, asset = {}) 
     try {
       const object = await openWangzhuanObjectStream(context, asset.storageKey);
       files.push({ zipPath: zipSafeName(zipPath), data: await bufferFromStream(object.body) });
-      return;
+      return true;
     } catch {
       // Fall through to the local processing cache below.
     }
@@ -110,10 +111,11 @@ async function addStoredFile(context, files, missingFiles, zipPath, asset = {}) 
     const target = relativePath ? resolveUserPath(context, relativePath) : "";
     if (target && existsSync(target)) {
       files.push({ zipPath: zipSafeName(zipPath), data: await readFile(target) });
-      return;
+      return true;
     }
   }
   missingFiles.push(zipPath);
+  return false;
 }
 
 function outputPackagePath(batchRoot, output) {
@@ -238,7 +240,7 @@ function sanitizedRemix(remix) {
   };
 }
 
-async function collectBatchFiles(context, batch, request, packageItems, missingFiles) {
+async function collectBatchFiles(context, batch, request, packageItems, missingFiles, requiredMissingFiles) {
   const files = [];
   const batchRoot = `batches/${batch.batchId}`;
   const selectedOutputs = packageOutputSelection(batch, request);
@@ -246,7 +248,7 @@ async function collectBatchFiles(context, batch, request, packageItems, missingF
 
   addStringFile(files, `${batchRoot}/batch.json`, sanitizedBatch(batch));
   const referenceExt = extname(batch.referenceVideo?.storedPath || "") || ".mp4";
-  await addDiskFile(context, files, missingFiles, `${batchRoot}/original-reference/original${referenceExt}`, batch.referenceVideo?.storedPath);
+  await addStoredFile(context, files, missingFiles, `${batchRoot}/original-reference/original${referenceExt}`, batch.referenceVideo || {});
   addStringFile(files, `${batchRoot}/original-reference/reference-video-probe.json`, batch.referenceVideo);
   addStringFile(files, `${batchRoot}/scripts/decomposition.json`, batch.decomposition);
 
@@ -256,15 +258,21 @@ async function collectBatchFiles(context, batch, request, packageItems, missingF
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     const seedanceName = `${task.generationTaskId}_seedance.txt`;
     const imageName = `${task.generationTaskId}_image.txt`;
-    await addDiskFile(context, files, missingFiles, `${batchRoot}/prompts/${seedanceName}`, task.promptPath);
-    await addDiskFile(context, files, missingFiles, `${batchRoot}/prompts/${imageName}`, join(task.promptPath.split(/[\\/]/).slice(0, -1).join("/"), imageName));
+    await addStoredFile(context, files, missingFiles, `${batchRoot}/prompts/${seedanceName}`, {
+      promptPath: task.promptPath,
+      storageKey: task.promptStorageKey,
+      storageUrl: task.promptStorageUrl
+    });
+    const imagePromptPath = task.promptPath ? join(task.promptPath.split(/[\\/]/).slice(0, -1).join("/"), imageName) : "";
+    await addStoredFile(context, files, missingFiles, `${batchRoot}/prompts/${imageName}`, { promptPath: imagePromptPath });
   }
 
   const outputPathById = new Map();
   for (const output of selectedOutputs) {
     const zipPath = outputPackagePath(batchRoot, output);
     outputPathById.set(output.outputId, zipPath);
-    await addDiskFile(context, files, missingFiles, zipPath, output.filePath);
+    const outputAdded = await addStoredFile(context, files, missingFiles, zipPath, output);
+    if (!outputAdded) requiredMissingFiles.push(zipPath);
     packageItems.push({
       sourceType: "pipeline",
       batchId: batch.batchId,
@@ -289,7 +297,7 @@ async function collectBatchFiles(context, batch, request, packageItems, missingF
 
   for (const output of Array.isArray(batch.outputs) ? batch.outputs : []) {
     if (output.kind !== "segment_video") continue;
-    await addDiskFile(context, files, missingFiles, outputPackagePath(batchRoot, output), output.filePath);
+    await addStoredFile(context, files, missingFiles, outputPackagePath(batchRoot, output), output);
   }
 
   for (const report of Array.isArray(batch.stitchReports) ? batch.stitchReports : []) {
@@ -299,7 +307,7 @@ async function collectBatchFiles(context, batch, request, packageItems, missingF
   return { files, selectedOutputs };
 }
 
-async function collectRemixFiles(context, remix, request, packageItems, missingFiles) {
+async function collectRemixFiles(context, remix, request, packageItems, missingFiles, requiredMissingFiles) {
   const files = [];
   const remixRoot = `remix/${remix.remixId}`;
   const selectedOutputs = packageRemixOutputSelection(remix, request);
@@ -313,7 +321,8 @@ async function collectRemixFiles(context, remix, request, packageItems, missingF
   for (const output of selectedOutputs) {
     const zipPath = `${remixRoot}/outputs/${output.outputId}${extname(output.filePath) || ".mp4"}`;
     outputPathById.set(output.outputId, zipPath);
-    await addStoredFile(context, files, missingFiles, zipPath, output);
+    const outputAdded = await addStoredFile(context, files, missingFiles, zipPath, output);
+    if (!outputAdded) requiredMissingFiles.push(zipPath);
     packageItems.push({
       sourceType: "remix",
       remixId: remix.remixId,
@@ -448,17 +457,18 @@ export async function buildDownloadPackage(context, request = {}) {
 
   const packageItems = [];
   const missingFiles = [];
+  const requiredMissingFiles = [];
   const files = [];
   let selectedCount = 0;
   for (const batchId of batchIds) {
     const batch = await readBatch(context, batchId);
-    const collected = await collectBatchFiles(context, batch, request, packageItems, missingFiles);
+    const collected = await collectBatchFiles(context, batch, request, packageItems, missingFiles, requiredMissingFiles);
     selectedCount += collected.selectedOutputs.length;
     files.push(...collected.files);
   }
   for (const remixId of remixIds) {
     const remix = await readRemix(context, remixId);
-    const collected = await collectRemixFiles(context, remix, request, packageItems, missingFiles);
+    const collected = await collectRemixFiles(context, remix, request, packageItems, missingFiles, requiredMissingFiles);
     selectedCount += collected.selectedOutputs.length;
     files.push(...collected.files);
   }
@@ -482,8 +492,8 @@ export async function buildDownloadPackage(context, request = {}) {
     missingFiles
   };
 
-  if (missingFiles.length) {
-    throw new WangzhuanError("missing_required_file", "交付包缺少必需文件，请重建或联系管理员", { missingFiles, manifest });
+  if (requiredMissingFiles.length) {
+    throw new WangzhuanError("missing_required_file", "交付包缺少最终视频文件，请重建或联系管理员", { missingFiles: requiredMissingFiles, manifest });
   }
 
   addStringFile(files, "package-manifest.json", manifest);

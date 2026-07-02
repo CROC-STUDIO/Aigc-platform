@@ -1631,21 +1631,25 @@ export function workbenchFocusHash(type, status = "") {
 export function readWorkbenchRestoreRequest() {
   const params = new URLSearchParams(location.search);
   if (params.get("restore") !== "1") return null;
+  const jobType = String(params.get("jobType") || "").trim();
+  const jobId = String(params.get("jobId") || "").trim();
   const remixId = String(params.get("remixId") || "").trim();
-  if (remixId) return { type: "remix", id: remixId };
+  if (remixId) return { type: "remix", id: remixId, jobType, jobId };
   const batchId = String(params.get("batchId") || "").trim();
-  if (batchId) return { type: "batch", id: batchId };
+  if (batchId) return { type: "batch", id: batchId, jobType, jobId };
   return null;
 }
 
-export function workbenchHref(type, status = "", id = "") {
-  const base = type === "remix" ? "/competitor-remix.html" : "/wangzhuan.html";
+export function workbenchHref(type, status = "", id = "", options = {}) {
+  const base = type === "remix" ? "/competitor-remix.html" : "/wangzhuan-v2.html";
   const hash = workbenchFocusHash(type, status);
   const taskId = String(id || "").trim();
   if (!taskId) return `${base}${hash}`;
   const params = new URLSearchParams({ restore: "1" });
   if (type === "remix") params.set("remixId", taskId);
   else params.set("batchId", taskId);
+  if (options.jobType) params.set("jobType", String(options.jobType));
+  if (options.jobId) params.set("jobId", String(options.jobId));
   return `${base}?${params}${hash}`;
 }
 

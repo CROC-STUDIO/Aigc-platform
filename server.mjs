@@ -1,7 +1,7 @@
 ﻿import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from "node:fs";
+import { access, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -319,6 +319,25 @@ async function ensureProjectStructure(root = projectRoot) {
   ];
   await mkdir(root, { recursive: true });
   await Promise.all(names.map((name) => mkdir(join(root, name), { recursive: true })));
+}
+
+async function canUseProjectRoot(root) {
+  const target = resolve(String(root || "").trim() || ".");
+  try {
+    await mkdir(target, { recursive: true });
+    await access(target, fsConstants.R_OK | fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function firstUsableProjectRoot(preferredRoot = projectRoot) {
+  if (await canUseProjectRoot(preferredRoot)) return resolve(preferredRoot);
+  for (const item of savedProjects) {
+    if (await canUseProjectRoot(item.path)) return item.path;
+  }
+  return resolve(preferredRoot);
 }
 
 async function saveConfig() {
@@ -1931,7 +1950,12 @@ async function updateConfig(body) {
   if (runState.running) throw new Error("Batch is running; cannot change project root now");
   const nextRoot = resolve(String(body.projectRoot ?? "").trim());
   if (!nextRoot) throw new Error("Project root is required");
-  await mkdir(nextRoot, { recursive: true });
+  try {
+    await mkdir(nextRoot, { recursive: true });
+    await access(nextRoot, fsConstants.R_OK | fsConstants.W_OK);
+  } catch {
+    throw new Error(`项目目录不可写：${nextRoot}`);
+  }
   const name = String(body.name ?? basename(nextRoot)).trim() || basename(nextRoot);
   savedProjects = normalizeProjects([{ name, path: nextRoot }, ...savedProjects.filter((item) => item.path !== nextRoot)]);
   await saveConfig();
@@ -1948,7 +1972,12 @@ async function switchProject(body) {
   if (runState.running) throw new Error("Batch is running; cannot switch project now");
   const nextRoot = resolve(String(body.projectRoot ?? "").trim());
   if (!nextRoot) throw new Error("Project root is required");
-  await mkdir(nextRoot, { recursive: true });
+  try {
+    await mkdir(nextRoot, { recursive: true });
+    await access(nextRoot, fsConstants.R_OK | fsConstants.W_OK);
+  } catch {
+    throw new Error(`项目目录不可写：${nextRoot}`);
+  }
   const existing = savedProjects.find((item) => item.path === nextRoot);
   const name = String(body.name ?? existing?.name ?? basename(nextRoot)).trim() || basename(nextRoot);
   savedProjects = normalizeProjects([{ name, path: nextRoot }, ...savedProjects.filter((item) => item.path !== nextRoot)]);
@@ -2025,6 +2054,75 @@ async function readJson(req) {
   for await (const chunk of req) chunks.push(chunk);
   if (!chunks.length) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function readRequestBuffer(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+function parseMultipartBoundary(contentType = "") {
+  const match = String(contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  return (match?.[1] || match?.[2] || "").trim();
+}
+
+function parseContentDisposition(value = "") {
+  const result = {};
+  for (const part of String(value || "").split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    const key = rawKey.trim().toLowerCase();
+    if (!key) continue;
+    const joined = rawValue.join("=").trim();
+    result[key] = joined.replace(/^"|"$/g, "");
+  }
+  return result;
+}
+
+async function readMultipart(req) {
+  const contentType = req.headers["content-type"] || "";
+  const boundary = parseMultipartBoundary(contentType);
+  if (!boundary) throw new Error("multipart boundary missing");
+  const body = await readRequestBuffer(req);
+  const delimiter = Buffer.from(`--${boundary}`);
+  const fields = {};
+  const files = {};
+  let cursor = 0;
+  while (cursor < body.length) {
+    const start = body.indexOf(delimiter, cursor);
+    if (start < 0) break;
+    let partStart = start + delimiter.length;
+    if (body.slice(partStart, partStart + 2).toString() === "--") break;
+    if (body.slice(partStart, partStart + 2).toString() === "\r\n") partStart += 2;
+    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), partStart);
+    if (headerEnd < 0) break;
+    const rawHeaders = body.slice(partStart, headerEnd).toString("utf8");
+    let partEnd = body.indexOf(delimiter, headerEnd + 4);
+    if (partEnd < 0) partEnd = body.length;
+    let content = body.slice(headerEnd + 4, partEnd);
+    if (content.slice(-2).toString() === "\r\n") content = content.slice(0, -2);
+    cursor = partEnd;
+
+    const headers = {};
+    for (const line of rawHeaders.split("\r\n")) {
+      const index = line.indexOf(":");
+      if (index <= 0) continue;
+      headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+    }
+    const disposition = parseContentDisposition(headers["content-disposition"]);
+    const name = disposition.name;
+    if (!name) continue;
+    if (disposition.filename != null) {
+      files[name] = {
+        fileName: basename(disposition.filename || "upload.bin"),
+        mimeType: headers["content-type"] || "application/octet-stream",
+        buffer: content
+      };
+    } else {
+      fields[name] = content.toString("utf8");
+    }
+  }
+  return { fields, files };
 }
 
 async function readUpload(req) {
@@ -2849,7 +2947,8 @@ async function withRequestScope(req, res, handler, options = {}) {
   }
   const userId = user.username;
   const cookieBase = cookies[PROJECT_ROOT_COOKIE_NAME] ? resolve(cookies[PROJECT_ROOT_COOKIE_NAME]) : projectRoot;
-  const allowedBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
+  const configuredBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
+  const allowedBase = await firstUsableProjectRoot(configuredBase);
   if (cookies[PROJECT_ROOT_COOKIE_NAME] !== allowedBase) {
     appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(allowedBase)}; Path=/; Max-Age=31536000; SameSite=Lax`);
   }
@@ -2884,6 +2983,7 @@ async function handleRequest(req, res) {
     if (url.pathname.startsWith("/api/wangzhuan/")) {
       return handleWangzhuanRequest(req, res, url, {
         readJson,
+        readMultipart,
         currentUser,
         currentUserId,
         currentProjectRoot,

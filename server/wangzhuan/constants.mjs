@@ -48,6 +48,12 @@ export const REQUIRED_STRONG_TRUTH_FIELDS = Object.freeze([
   "sourceOrUpdatedAt"
 ]);
 
+export function hasAnyStrongTruthRule(truthRules = {}) {
+  return REQUIRED_STRONG_TRUTH_FIELDS.some((field) => {
+    return String(truthRules?.[field] || "").trim().length > 0;
+  });
+}
+
 function rule(channel, promiseLevel, ctaStrength, forbiddenTerms, requiredDisclaimers = []) {
   return {
     ruleId: `rule_${channel}_${promiseLevel}_v1`,

@@ -5,7 +5,7 @@ import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { getChannelRules } from "./channel-rules.mjs";
-import { REQUIRED_STRONG_TRUTH_FIELDS } from "./constants.mjs";
+import { hasAnyStrongTruthRule } from "./constants.mjs";
 import { mergeDisclaimerWithChannelRequirements } from "./disclaimers.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { llmUsesGeminiNativeApi, llmSupportsVideoUrl, resolveQcLlmConfig } from "./llm-config.mjs";
@@ -1179,13 +1179,12 @@ function currencyLocaleCheck(batch) {
 function strongPromiseTruthRulesCheck(batch) {
   const draft = batch.templateSnapshot?.draft || {};
   if (draft.promiseLevel !== "strong_commitment") {
-    return check("strong_promise_truth_rules", "pass", "非强承诺模板无需七字段检查");
+    return check("strong_promise_truth_rules", "pass", "非强承诺模板无需真实收益规则检查");
   }
-  const missing = REQUIRED_STRONG_TRUTH_FIELDS.filter((field) => !String(draft.truthRules?.[field] || "").trim());
-  if (missing.length) {
-    return check("strong_promise_truth_rules", "fail", `强承诺缺少字段：${missing.join(",")}`, "truthRules");
+  if (!hasAnyStrongTruthRule(draft.truthRules)) {
+    return check("strong_promise_truth_rules", "fail", "强承诺至少需要填写一条真实收益规则", "truthRules");
   }
-  return check("strong_promise_truth_rules", "pass", "强承诺真实规则完整");
+  return check("strong_promise_truth_rules", "pass", "强承诺真实规则已提供");
 }
 
 async function channelRuleCheck(context, batch, tasks) {

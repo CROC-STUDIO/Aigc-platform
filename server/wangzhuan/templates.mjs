@@ -1,7 +1,7 @@
 import {
+  hasAnyStrongTruthRule,
   PROMISE_LEVELS,
   REQUIRED_DRAFT_FIELDS,
-  REQUIRED_STRONG_TRUTH_FIELDS,
   TARGET_CHANNELS,
   TEMPLATE_ADMIN_ACTIONS,
   TEMPLATE_SAVE_MODES
@@ -86,9 +86,8 @@ export function validateTemplateDraft(draft) {
     throw new WangzhuanError("validation_error", "defaultOutputRatio 首期只支持 9:16", { field: "defaultOutputRatio" });
   }
   if (draft.promiseLevel === "strong_commitment") {
-    const missingTruthFields = REQUIRED_STRONG_TRUTH_FIELDS.filter((field) => !isNonEmptyString(draft.truthRules?.[field]));
-    if (missingTruthFields.length) {
-      throw new WangzhuanError("validation_error", "强承诺需要补齐真实收益规则", { missingFields: missingTruthFields });
+    if (!hasAnyStrongTruthRule(draft.truthRules)) {
+      throw new WangzhuanError("validation_error", "强承诺至少需要填写一条真实收益规则", { field: "truthRules" });
     }
   }
 }

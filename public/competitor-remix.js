@@ -61,6 +61,7 @@ const els = {
   seedanceResolution: $("#seedanceResolution"),
   seedanceSegmentSeconds: $("#seedanceSegmentSeconds"),
   autoRemoveMaskThreshold: $("#autoRemoveMaskThreshold"),
+  frameBox: $("#videoOpsFrameBox"),
   frameCanvas: $("#videoOpsFrameCanvas"),
   promptLayer: $("#videoOpsPromptLayer"),
   interactiveFrameIndex: $("#interactiveFrameIndex"),
@@ -84,6 +85,7 @@ const els = {
   manualStartMs: $("#manualStartMs"),
   manualEndMs: $("#manualEndMs"),
   manualMaskThreshold: $("#manualMaskThreshold"),
+  regionBox: $("#videoOpsRegionBox"),
   regionOverlay: $("#videoOpsRegionOverlay"),
   useCurrentRegionFrameBtn: $("#useCurrentRegionFrameBtn"),
   clearRegionBtn: $("#clearRegionBtn"),
@@ -157,6 +159,12 @@ function clamp(value, min = 0, max = 1) {
 
 function formatUploadLimit(bytes = MAX_UPLOAD_VIDEO_BYTES) {
   return `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+function isImageFile(file) {
+  if (!file) return false;
+  if (/^image\//i.test(file.type || "")) return true;
+  return /\.(png|jpe?g|webp)$/i.test(file.name || "");
 }
 
 function validateSubmitReady() {
@@ -285,7 +293,7 @@ function sourceInputPayload() {
 
 function buildRegionSpec() {
   if (!state.region.box) throw new Error("请在视频画面中框选需要遮挡或模糊的区域");
-  return { type: "box", ...state.region.box, coordinate_space: "normalized" };
+  return [{ type: "box", ...state.region.box, coordinate_space: "normalized" }];
 }
 
 function buildInteractionPrompt() {
@@ -555,6 +563,11 @@ function usableRect(target) {
   return null;
 }
 
+function interactionSurface(kind = "prompt") {
+  if (kind === "region") return els.regionBox || els.regionOverlay;
+  return els.frameBox || els.promptLayer;
+}
+
 function updateFrameSlider() {
   if (!els.video || !els.interactiveFrameSlider) return;
   const totalFrames = Math.max(0, Math.floor(Number(els.video.duration || 0) * 30));
@@ -702,7 +715,7 @@ function setBoxFromDrag(kind, start, end) {
 
 function ensureInteractiveSurfaceReady(kind = "prompt") {
   ensureInputNodeVisible();
-  const target = kind === "region" ? els.regionOverlay : els.promptLayer;
+  const target = interactionSurface(kind);
   const rect = usableRect(target);
   if (rect) return true;
   setFormError(kind === "region" ? "区域框选画布尚未完成布局，请稍后再试" : "K 帧画布尚未完成布局，请稍后再试");
@@ -746,14 +759,29 @@ async function handleManualMaskChange(file) {
     renderPayloadPreview();
     return;
   }
-  if (!/^image\//i.test(file.type || "")) {
+  if (!isImageFile(file)) {
     setFormError("mask 只支持图片文件");
     if (els.manualMaskFile) els.manualMaskFile.value = "";
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = "未上传 mask";
+    renderPayloadPreview();
     return;
   }
-  state.manualMaskDataUrl = await dataUrlFromFile(file);
-  if (els.manualMaskStatus) els.manualMaskStatus.textContent = `${file.name} · ${Math.round(file.size / 1024)} KB`;
-  renderPayloadPreview();
+  setFormError("");
+  if (els.manualMaskStatus) els.manualMaskStatus.textContent = "正在读取 mask...";
+  renderSubmitState();
+  try {
+    const dataUrl = await dataUrlFromFile(file);
+    if (!dataUrl.startsWith("data:image/")) throw new Error("mask 图片读取失败");
+    state.manualMaskDataUrl = dataUrl;
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = `${file.name} · ${Math.round(file.size / 1024)} KB`;
+  } catch (error) {
+    state.manualMaskDataUrl = "";
+    if (els.manualMaskFile) els.manualMaskFile.value = "";
+    if (els.manualMaskStatus) els.manualMaskStatus.textContent = "mask 读取失败";
+    setFormError(error.message || "mask 图片读取失败");
+  } finally {
+    renderPayloadPreview();
+  }
 }
 
 function stopPolling() {
@@ -947,9 +975,9 @@ function bindEvents() {
     state.prompt.box = null;
     renderPrompt();
   });
-  els.promptLayer?.addEventListener("pointerdown", (event) => {
+  els.frameBox?.addEventListener("pointerdown", (event) => {
     if (!ensureInteractiveSurfaceReady("prompt")) return;
-    const start = pointFromEvent(event, els.promptLayer);
+    const start = pointFromEvent(event, interactionSurface("prompt"));
     if (!start) return;
     if ((els.interactivePromptType?.value || "box") === "point") {
       state.prompt.points.push({ ...start, label: els.interactivePointLabel?.value || "positive" });
@@ -957,33 +985,33 @@ function bindEvents() {
       return;
     }
     state.prompt.drag = start;
-    els.promptLayer.setPointerCapture?.(event.pointerId);
+    els.frameBox?.setPointerCapture?.(event.pointerId);
   });
-  els.promptLayer?.addEventListener("pointermove", (event) => {
+  els.frameBox?.addEventListener("pointermove", (event) => {
     if (!state.prompt.drag) return;
-    setBoxFromDrag("prompt", state.prompt.drag, pointFromEvent(event, els.promptLayer));
+    setBoxFromDrag("prompt", state.prompt.drag, pointFromEvent(event, interactionSurface("prompt")));
     renderPrompt();
   });
-  els.promptLayer?.addEventListener("pointerup", (event) => {
+  els.frameBox?.addEventListener("pointerup", (event) => {
     if (!state.prompt.drag) return;
-    setBoxFromDrag("prompt", state.prompt.drag, pointFromEvent(event, els.promptLayer));
+    setBoxFromDrag("prompt", state.prompt.drag, pointFromEvent(event, interactionSurface("prompt")));
     state.prompt.drag = null;
     renderPrompt();
   });
-  els.regionOverlay?.addEventListener("pointerdown", (event) => {
+  els.regionBox?.addEventListener("pointerdown", (event) => {
     if (!ensureInteractiveSurfaceReady("region")) return;
-    state.region.drag = pointFromEvent(event, els.regionOverlay);
+    state.region.drag = pointFromEvent(event, interactionSurface("region"));
     if (!state.region.drag) return;
-    els.regionOverlay.setPointerCapture?.(event.pointerId);
+    els.regionBox?.setPointerCapture?.(event.pointerId);
   });
-  els.regionOverlay?.addEventListener("pointermove", (event) => {
+  els.regionBox?.addEventListener("pointermove", (event) => {
     if (!state.region.drag) return;
-    setBoxFromDrag("region", state.region.drag, pointFromEvent(event, els.regionOverlay));
+    setBoxFromDrag("region", state.region.drag, pointFromEvent(event, interactionSurface("region")));
     renderRegion();
   });
-  els.regionOverlay?.addEventListener("pointerup", (event) => {
+  els.regionBox?.addEventListener("pointerup", (event) => {
     if (!state.region.drag) return;
-    setBoxFromDrag("region", state.region.drag, pointFromEvent(event, els.regionOverlay));
+    setBoxFromDrag("region", state.region.drag, pointFromEvent(event, interactionSurface("region")));
     state.region.drag = null;
     renderRegion();
   });

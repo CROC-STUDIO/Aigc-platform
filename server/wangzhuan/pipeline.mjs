@@ -29,10 +29,12 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
   formatProtagonistFissionGuide,
+  generateThirtySecondSeedancePlans,
   generateSeedancePlan,
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "./plan-preview.mjs";
+import { listBackgroundJobs } from "./background-jobs.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
@@ -96,8 +98,8 @@ async function writeBatchWithTrigger(context, batch, triggerName = "batch_write"
   return next;
 }
 
-async function writeBatch(context, batch) {
-  return writeBatchWithTrigger(context, batch, "batch_write");
+export async function writeBatch(context, batch, triggerName = "batch_write") {
+  return writeBatchWithTrigger(context, batch, triggerName);
 }
 
 function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaimers = []) {
@@ -254,7 +256,10 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
   }
   const promptTarget = join(context.userProjectRoot, promptRelPath);
   const prompt = await readFile(promptTarget, "utf8");
-  const media = collectSeedanceMedia(batch, task);
+  const media = [
+    ...collectSeedanceMedia(batch, task),
+    ...continuityReferenceMedia(task)
+  ];
   return buildSeedanceGenerationPayload({
     model: resolveSeedanceModel(batch, provider, task),
     prompt,
@@ -353,6 +358,48 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
     requestSummary: summarizeSeedanceRequest(payload, provider),
     responseSummary: summarizeSeedanceResponse(result)
   };
+}
+
+function taskSegmentKey(task = {}) {
+  return [
+    task.branchId || "default",
+    String(task.branchVariantIndex || task.variantIndex || 1)
+  ].join(":");
+}
+
+function previousSegmentDownloaded(tasks = [], task = {}) {
+  const segmentIndex = Number(task.segmentIndex || 1);
+  if (segmentIndex <= 1) return true;
+  return tasks.some((candidate) => {
+    return taskSegmentKey(candidate) === taskSegmentKey(task)
+      && Number(candidate.segmentIndex || 1) === segmentIndex - 1
+      && candidate.status === "downloaded"
+      && Boolean(candidate.outputPath);
+  });
+}
+
+function isApprovedContinuityReference(reference = {}) {
+  const status = String(reference.review?.status || "").toLowerCase();
+  return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
+}
+
+export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
+  if (task.status !== "pending") return false;
+  if (Number(batch.estimate?.durationSec || 15) !== 30) return true;
+  if (!previousSegmentDownloaded(Array.isArray(batch.tasks) ? batch.tasks : [], task)) return false;
+  if (Number(task.segmentIndex || 1) <= 1) return true;
+  return isApprovedContinuityReference(task.continuityReference);
+}
+
+function continuityReferenceMedia(task = {}) {
+  if (!isApprovedContinuityReference(task.continuityReference)) return [];
+  return [{
+    type: "image_asset",
+    assetId: task.continuityReference.review.assetId,
+    assetKey: "continuityFrame",
+    assetRole: "reference",
+    storedPath: task.continuityReference.storedPath || ""
+  }];
 }
 
 async function ensureEventFile(context, batchId) {
@@ -475,7 +522,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   }
   let sequence = 1;
   const variantCount = Number(batch.estimate?.variantCount || 0);
-  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * segmentMultiplier : 0;
+  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (segmentMultiplier === 2 ? 1 : segmentMultiplier) : 0;
   let planSequence = 0;
 
   for (const branch of branchDrafts) {
@@ -484,6 +531,26 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
     const channelRules = await getChannelRules(context, { channel: branchChannel, promiseLevel: branchPromiseLevel });
     const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
     for (let branchVariantIndex = 1; branchVariantIndex <= Number(batch.estimate?.variantCount || 0); branchVariantIndex += 1) {
+      let thirtySecondPlanPayloads = null;
+      if (useLlmPlans && segmentMultiplier === 2) {
+        planSequence += 1;
+        options.onPlanProgress?.({
+          index: planSequence,
+          total: totalPlans,
+          branchLabel: branch.branchLabel || branch.branchId,
+          branchVariantIndex,
+          segmentIndex: "1-2"
+        });
+        thirtySecondPlanPayloads = await generateThirtySecondSeedancePlans(context, {
+          batch,
+          branch,
+          decomposition: batch.decomposition,
+          channelRules,
+          branchVariantIndex,
+          knowledgeNotes: options.knowledgeNotes,
+          llmConfig: options.llmConfig || {}
+        });
+      }
       for (let segmentIndex = 1; segmentIndex <= segmentMultiplier; segmentIndex += 1) {
         const scriptId = makeScriptId(batch.batchId, sequence);
         const generationTaskId = makeGenerationTaskId(batch.batchId, sequence);
@@ -505,24 +572,27 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
         let planRecord = null;
 
         if (useLlmPlans) {
-          planSequence += 1;
-          options.onPlanProgress?.({
-            index: planSequence,
-            total: totalPlans,
-            branchLabel: branch.branchLabel || branch.branchId,
-            branchVariantIndex,
-            segmentIndex
-          });
-          const planPayload = await generateSeedancePlan(context, {
-            batch,
-            branch,
-            decomposition: batch.decomposition,
-            channelRules,
-            branchVariantIndex,
-            segmentIndex,
-            knowledgeNotes: options.knowledgeNotes,
-            llmConfig: options.llmConfig || {}
-          });
+          let planPayload = thirtySecondPlanPayloads?.[segmentIndex - 1];
+          if (!planPayload) {
+            planSequence += 1;
+            options.onPlanProgress?.({
+              index: planSequence,
+              total: totalPlans,
+              branchLabel: branch.branchLabel || branch.branchId,
+              branchVariantIndex,
+              segmentIndex
+            });
+            planPayload = await generateSeedancePlan(context, {
+              batch,
+              branch,
+              decomposition: batch.decomposition,
+              channelRules,
+              branchVariantIndex,
+              segmentIndex,
+              knowledgeNotes: options.knowledgeNotes,
+              llmConfig: options.llmConfig || {}
+            });
+          }
           hook = planPayload.hook;
           body = planPayload.body;
           cta = planPayload.cta;
@@ -699,6 +769,55 @@ async function enrichBatchWorkbenchContext(context, detail) {
   };
 }
 
+function backgroundJobSummary(job = null) {
+  if (!job) return null;
+  return {
+    id: job.id || "",
+    type: job.type || "",
+    subjectType: job.subjectType || "",
+    subjectId: job.subjectId || "",
+    status: job.status || "",
+    progress: Number(job.progress || 0),
+    message: job.message || "",
+    draftSignature: job.draftSignature || "",
+    createdAt: job.createdAt || null,
+    updatedAt: job.updatedAt || null,
+    error: job.error ? {
+      code: job.error.code || "",
+      message: job.error.message || "",
+      recoverable: Boolean(job.error.recoverable),
+      data: job.error.data && typeof job.error.data === "object" ? job.error.data : {}
+    } : null
+  };
+}
+
+async function attachBackgroundJobSummaries(context, detail) {
+  const batch = detail?.batch;
+  if (!batch?.batchId) return detail;
+  const referenceVideoId = batch.referenceVideo?.referenceVideoId || batch.request?.referenceVideoId || "";
+  const [planJobs, decompositionJobs] = await Promise.all([
+    listBackgroundJobs(context, {
+      type: "seedance_plan",
+      subjectType: "batch",
+      subjectId: batch.batchId
+    }).catch(() => []),
+    referenceVideoId
+      ? listBackgroundJobs(context, {
+        type: "decomposition",
+        subjectType: "reference_video",
+        subjectId: referenceVideoId
+      }).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  return {
+    ...detail,
+    backgroundJobs: {
+      latestPlanJob: backgroundJobSummary(planJobs[0] || null),
+      latestDecompositionJob: backgroundJobSummary(decompositionJobs[0] || null)
+    }
+  };
+}
+
 export async function getBatchDetail(context, batchId) {
   const initial = await readBatch(context, batchId);
   const { pollUpstreamBatch, shouldPollUpstreamBatch } = await import("./upstream-poll.mjs");
@@ -712,6 +831,7 @@ export async function getBatchDetail(context, batchId) {
   let detail = await loadBatchDetailFromMysql(context, batchId);
   if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   detail = await enrichBatchWorkbenchContext(context, detail);
+  detail = await attachBackgroundJobSummaries(context, detail);
   return detail;
 }
 
@@ -779,7 +899,7 @@ export async function submitPendingGenerationTasks(context, batchId) {
   const tasks = [...originalTasks];
   const pendingIndexes = [];
   for (let index = 0; index < originalTasks.length; index += 1) {
-    if (originalTasks[index]?.status === "pending") pendingIndexes.push(index);
+    if (isGenerationTaskSubmitReady(batch, originalTasks[index])) pendingIndexes.push(index);
   }
   for (let offset = 0; offset < pendingIndexes.length; offset += limit) {
     const chunk = pendingIndexes.slice(offset, offset + limit);
@@ -1055,12 +1175,6 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
 
 export async function confirmBatchAssets(context, batchId, request = {}) {
   const batch = await readBatch(context, batchId);
-  if (batch.status !== "preview_required") {
-    throw new WangzhuanError("validation_error", "当前批次不在预案确认阶段，无法确认 Seedance 素材审核结果", {
-      batchId,
-      status: batch.status
-    });
-  }
   const rawBranchSource = Array.isArray(request.branchDrafts) && request.branchDrafts.length
     ? request.branchDrafts
     : batch.branchDrafts || batch.request?.branches || [];
@@ -1105,6 +1219,10 @@ export async function getActiveBatch(context) {
   return {
     batch: null,
     events: [],
+    backgroundJobs: {
+      latestPlanJob: null,
+      latestDecompositionJob: null
+    },
     downloadSummary: {
       outputsTotal: 0,
       downloadEligibleCount: 0,
@@ -1116,6 +1234,5 @@ export async function getActiveBatch(context) {
 
 export {
   readBatch,
-  writeBatch,
   writeTaskMaps
 };

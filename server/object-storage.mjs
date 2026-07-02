@@ -4,12 +4,14 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, parse, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 const RECORD_DIR = "批处理记录";
 const ASSET_INDEX_FILE = "object-storage-assets.json";
 const DEFAULT_PREFIX = "uploads";
 const DEFAULT_API_PREFIX = "/api";
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
+const DEFAULT_S3_TIMEOUT_MS = 45_000;
 const IMAGE_MIME_BY_EXT = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -32,6 +34,7 @@ function truthy(value) {
 }
 
 export function objectStorageSettings(env = process.env) {
+  const uploadTimeoutMs = Number(env.S3_UPLOAD_TIMEOUT_MS || env.S3_TIMEOUT_MS || DEFAULT_S3_TIMEOUT_MS);
   return {
     bucket: String(env.S3_BUCKET || "").trim(),
     region: String(env.AWS_REGION || env.AWS_DEFAULT_REGION || "").trim(),
@@ -41,7 +44,8 @@ export function objectStorageSettings(env = process.env) {
     publicBaseUrl: String(env.S3_PUBLIC_BASE_URL || "").trim(),
     apiPublicBaseUrl: String(env.PUBLIC_BASE_URL || "").trim(),
     apiPrefix: String(env.API_PREFIX || DEFAULT_API_PREFIX).trim() || DEFAULT_API_PREFIX,
-    forcePathStyle: truthy(env.S3_FORCE_PATH_STYLE)
+    forcePathStyle: truthy(env.S3_FORCE_PATH_STYLE),
+    uploadTimeoutMs: Number.isFinite(uploadTimeoutMs) && uploadTimeoutMs > 0 ? uploadTimeoutMs : DEFAULT_S3_TIMEOUT_MS
   };
 }
 
@@ -57,8 +61,35 @@ export function createObjectStorageClient(settings = objectStorageSettings()) {
   return new S3Client({
     region: settings.region,
     ...(settings.endpoint ? { endpoint: settings.endpoint } : {}),
-    ...(settings.forcePathStyle ? { forcePathStyle: true } : {})
+    ...(settings.forcePathStyle ? { forcePathStyle: true } : {}),
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: Math.min(settings.uploadTimeoutMs, 10_000),
+      requestTimeout: settings.uploadTimeoutMs,
+      socketTimeout: settings.uploadTimeoutMs,
+      throwOnRequestTimeout: true
+    })
   });
+}
+
+async function sendS3WithTimeout(s3, command, timeoutMs, operation = "s3 request") {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`${operation} timed out after ${timeoutMs}ms`)), timeoutMs);
+  try {
+    return await s3.send(command, {
+      abortSignal: controller.signal,
+      requestTimeout: timeoutMs
+    });
+  } catch (error) {
+    if (controller.signal.aborted && !error?.name?.includes("Timeout")) {
+      const timeoutError = new Error(`${operation} timed out after ${timeoutMs}ms`);
+      timeoutError.name = "TimeoutError";
+      timeoutError.cause = error;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function normalizeFilename(filename, fallback = "file") {
@@ -192,7 +223,7 @@ export async function uploadObjectBuffer({ buffer, storageKey, contentType, env 
     CacheControl: CACHE_CONTROL,
     ...(settings.acl ? { ACL: settings.acl } : {})
   });
-  await s3.send(command);
+  await sendS3WithTimeout(s3, command, settings.uploadTimeoutMs, "S3 object upload");
   return storageKey;
 }
 
@@ -207,7 +238,7 @@ export async function uploadObjectFile({ filePath, storageKey, contentType, env 
     CacheControl: CACHE_CONTROL,
     ...(settings.acl ? { ACL: settings.acl } : {})
   });
-  await s3.send(command);
+  await sendS3WithTimeout(s3, command, settings.uploadTimeoutMs, "S3 object upload");
   return storageKey;
 }
 

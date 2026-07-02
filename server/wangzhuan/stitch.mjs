@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { WangzhuanError } from "./http.mjs";
@@ -24,16 +24,11 @@ const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded"
 const execFileAsync = promisify(execFile);
 const DEFAULT_STITCH_TIMEOUT_MS = 120000;
 const DEFAULT_OVERLAY_TIMEOUT_MS = 120000;
-const DISCLAIMER_FONT_CANDIDATES = Object.freeze([
-  "/System/Library/Fonts/PingFang.ttc",
-  "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-  "/Library/Fonts/Arial Unicode.ttf",
-  "/System/Library/Fonts/Supplemental/Arial.ttf",
-  "C:/Windows/Fonts/msyh.ttc",
-  "C:/Windows/Fonts/msyhbd.ttc",
-  "C:/Windows/Fonts/arial.ttf",
-  "C:/Windows/Fonts/Arial.ttf"
-]);
+const DISCLAIMER_TEMPLATE_IMAGES = Object.freeze({
+  en: "public/assets/wangzhuan/disclaimers/en.png",
+  pt: "public/assets/wangzhuan/disclaimers/pt.png",
+  zh: "public/assets/wangzhuan/disclaimers/zh.png"
+});
 
 function ffmpegAvailableSync() {
   try {
@@ -84,24 +79,54 @@ function firstNonEmptyString(...values) {
   return "";
 }
 
-function normalizeDisclaimerText(text) {
-  return cleanString(text).replace(/\s+/g, " ");
-}
-
-function pickDisclaimerFont() {
-  return DISCLAIMER_FONT_CANDIDATES.find((candidate) => existsSync(candidate)) || "";
-}
-
-function resolvePythonCommand() {
-  for (const command of ["python3", "python"]) {
-    try {
-      execFileSync(command, ["-c", "import PIL"], { stdio: "ignore", timeout: 5000, windowsHide: true });
-      return command;
-    } catch {
-      // try next candidate
-    }
+async function probeVideoWidth(filePath) {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width",
+      "-of", "csv=p=0",
+      filePath
+    ], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024
+    });
+    const width = Number(String(stdout || "").trim().split(/\s+/)[0]);
+    return Number.isFinite(width) && width > 0 ? Math.trunc(width) : 720;
+  } catch {
+    return 720;
   }
-  return "python3";
+}
+
+function resolveTemplatePreset(language = "", preset = "auto") {
+  const selected = cleanString(preset);
+  if (selected && selected !== "auto" && DISCLAIMER_TEMPLATE_IMAGES[selected]) return selected;
+  const normalized = cleanString(language).toLowerCase();
+  if (normalized.startsWith("pt")) return "pt";
+  if (normalized.startsWith("zh") || normalized.includes("chinese")) return "zh";
+  return "en";
+}
+
+function resolveRepoPath(relativePath) {
+  return resolve(process.cwd(), relativePath);
+}
+
+function resolveUserAssetPath(context, storedPath = "") {
+  const relativePath = cleanString(storedPath).replace(/^[\\/]+/, "");
+  if (!relativePath) return "";
+  const fullPath = resolve(context.userProjectRoot, relativePath);
+  if (!fullPath.startsWith(resolve(context.userProjectRoot))) return "";
+  return fullPath;
+}
+
+function resolveDisclaimerOverlayImagePath(context, overlay) {
+  const customPath = resolveUserAssetPath(context, overlay.imageStoredPath || overlay.storedPath);
+  if (customPath && existsSync(customPath)) return customPath;
+  const preset = resolveTemplatePreset(overlay.language, overlay.preset || overlay.templateId);
+  const templatePath = resolveRepoPath(DISCLAIMER_TEMPLATE_IMAGES[preset] || DISCLAIMER_TEMPLATE_IMAGES.en);
+  return existsSync(templatePath) ? templatePath : "";
 }
 
 function resolveDisclaimerOverlay(batch, branchDraft = null) {
@@ -113,27 +138,27 @@ function resolveDisclaimerOverlay(batch, branchDraft = null) {
   if (branchEnabled === false || requestEnabled === false || draftEnabled === false) {
     return { applied: false, text: "" };
   }
-  const text = firstNonEmptyString(
-    branchDraft?.disclaimer,
-    request.disclaimer,
-    draft.disclaimer
-  );
-  if (!text) return { applied: false, text: "" };
+  const branchOverlay = branchDraft?.disclaimerOverlay || {};
+  const requestOverlay = request.disclaimerOverlay || {};
+  const draftOverlay = draft.disclaimerOverlay || {};
+  const imageStoredPath = firstNonEmptyString(branchOverlay.imageStoredPath, requestOverlay.imageStoredPath, draftOverlay.imageStoredPath);
   return {
     applied: true,
-    text,
+    imageStoredPath,
+    imageStorageKey: firstNonEmptyString(branchOverlay.imageStorageKey, requestOverlay.imageStorageKey, draftOverlay.imageStorageKey),
+    imageFileName: firstNonEmptyString(branchOverlay.imageFileName, requestOverlay.imageFileName, draftOverlay.imageFileName),
     preset: firstNonEmptyString(branchDraft?.disclaimerPreset, request.disclaimerPreset, draft.disclaimerPreset),
     language: firstNonEmptyString(branchDraft?.disclaimerLanguage, request.disclaimerLanguage, draft.disclaimerLanguage),
-    position: firstNonEmptyString(branchDraft?.disclaimerOverlay?.position, request.disclaimerOverlay?.position, draft.disclaimerOverlay?.position) || "bottom_center",
-    fontSize: Number(branchDraft?.disclaimerOverlay?.fontSize || request.disclaimerOverlay?.fontSize || draft.disclaimerOverlay?.fontSize || 22),
-    boxHeight: Number(branchDraft?.disclaimerOverlay?.boxHeight || request.disclaimerOverlay?.boxHeight || draft.disclaimerOverlay?.boxHeight || 88),
-    bottomMargin: Number(branchDraft?.disclaimerOverlay?.bottomMargin || request.disclaimerOverlay?.bottomMargin || draft.disclaimerOverlay?.bottomMargin || 64),
-    horizontalMargin: Number(branchDraft?.disclaimerOverlay?.horizontalMargin || request.disclaimerOverlay?.horizontalMargin || draft.disclaimerOverlay?.horizontalMargin || 50)
+    templateId: firstNonEmptyString(branchOverlay.templateId, requestOverlay.templateId, draftOverlay.templateId),
+    position: firstNonEmptyString(branchOverlay.position, requestOverlay.position, draftOverlay.position) || "bottom_center",
+    boxHeight: Number(branchOverlay.boxHeight || requestOverlay.boxHeight || draftOverlay.boxHeight || 88),
+    bottomMargin: Number(branchOverlay.bottomMargin || requestOverlay.bottomMargin || draftOverlay.bottomMargin || 3),
+    horizontalMargin: Number(branchOverlay.horizontalMargin || requestOverlay.horizontalMargin || draftOverlay.horizontalMargin || 50)
   };
 }
 
-async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeoutMs = DEFAULT_OVERLAY_TIMEOUT_MS } = {}) {
-  if (!overlay?.applied || !cleanString(overlay.text)) {
+async function applyDisclaimerOverlay(context, sourcePath, targetPath, overlay, { timeoutMs = DEFAULT_OVERLAY_TIMEOUT_MS } = {}) {
+  if (!overlay?.applied) {
     return { applied: false, targetPath: sourcePath };
   }
   if (!ffmpegAvailableSync()) {
@@ -142,87 +167,42 @@ async function applyDisclaimerOverlay(sourcePath, targetPath, overlay, { timeout
   if (!existsSync(sourcePath)) {
     throw new WangzhuanError("missing_required_file", "免责声明贴片所需的视频文件不存在", { sourcePath });
   }
-  const tmpDir = await mkdtemp(join(tmpdir(), "wz-disclaimer-"));
-  try {
-    const imagePath = join(tmpDir, "disclaimer.png");
-    const disclaimerText = normalizeDisclaimerText(overlay.text);
-    await mkdir(dirname(targetPath), { recursive: true });
-    const boxHeight = Math.max(56, Number(overlay.boxHeight || 88));
-    const fontSize = Math.max(18, Number(overlay.fontSize || 22));
-    const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 64));
-    const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 50));
-    const alignLeft = overlay.position === "bottom_left";
-    const fontFile = pickDisclaimerFont();
-    const pythonCommand = resolvePythonCommand();
-    const pythonScript = [
-      "from PIL import Image, ImageDraw, ImageFont",
-      "import sys",
-      "target, font_path, text, font_size, box_h, margin_x, align_left, canvas_w = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), sys.argv[7] == '1', int(sys.argv[8])",
-      "text = ' '.join(text.split())",
-      "available_w = max(1, canvas_w - margin_x * 2)",
-      "min_font_size = 12",
-      "def load_font(size):",
-      "    return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()",
-      "probe = ImageDraw.Draw(Image.new('RGBA', (1, 1), (0, 0, 0, 0)))",
-      "while font_size > min_font_size:",
-      "    font = load_font(font_size)",
-      "    bbox = probe.textbbox((0, 0), text, font=font)",
-      "    if max(0, bbox[2] - bbox[0]) <= available_w:",
-      "        break",
-      "    font_size -= 1",
-      "font = load_font(font_size)",
-      "canvas = Image.new('RGBA', (canvas_w, box_h), (0, 0, 0, 0))",
-      "draw = ImageDraw.Draw(canvas)",
-      "bbox = draw.textbbox((0, 0), text, font=font)",
-      "width = max(0, bbox[2] - bbox[0])",
-      "height = max(0, bbox[3] - bbox[1])",
-      "x = max(0, margin_x) if align_left else max(0, (canvas_w - width) // 2)",
-      "y = max(0, (box_h - height) // 2)",
-      "draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))",
-      "canvas.save(target)"
-    ].join("\n");
-    await execFileAsync(pythonCommand, [
-      "-c",
-      pythonScript,
-      imagePath,
-      fontFile,
-      disclaimerText,
-      String(fontSize),
-      String(boxHeight),
-      String(horizontalMargin),
-      alignLeft ? "1" : "0",
-      "720"
-    ], {
-      timeout: 30000,
-      windowsHide: true,
-      maxBuffer: 4 * 1024 * 1024
+  const imagePath = resolveDisclaimerOverlayImagePath(context, overlay);
+  if (!imagePath) {
+    throw new WangzhuanError("missing_required_file", "免责声明贴片 PNG 不存在，请选择模板或上传 PNG", {
+      imageStoredPath: overlay.imageStoredPath || ""
     });
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-i", sourcePath,
-      "-loop", "1",
-      "-framerate", "30",
-      "-i", imagePath,
-      "-filter_complex", `[0:v][1:v]overlay=x=0:y=H-h-${bottomMargin}:format=auto:shortest=1[vout]`,
-      "-map", "[vout]",
-      "-map", "0:a?",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "18",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "copy",
-      "-shortest",
-      "-movflags", "+faststart",
-      targetPath
-    ], {
-      timeout: timeoutMs,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024
-    });
-    return { applied: true, targetPath };
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+  await mkdir(dirname(targetPath), { recursive: true });
+  const boxHeight = Math.max(24, Number(overlay.boxHeight || 88));
+  const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 3));
+  const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 50));
+  const canvasWidth = await probeVideoWidth(sourcePath);
+  const overlayWidth = Math.max(1, canvasWidth - horizontalMargin * 2);
+  const xExpr = overlay.position === "bottom_left" ? String(horizontalMargin) : "(W-w)/2";
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-i", sourcePath,
+    "-loop", "1",
+    "-framerate", "30",
+    "-i", imagePath,
+    "-filter_complex", `[1:v]scale=${overlayWidth}:${boxHeight}:force_original_aspect_ratio=decrease[ov];[0:v][ov]overlay=x=${xExpr}:y=H-h-${bottomMargin}:format=auto:shortest=1[vout]`,
+    "-map", "[vout]",
+    "-map", "0:a?",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "18",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "copy",
+    "-shortest",
+    "-movflags", "+faststart",
+    targetPath
+  ], {
+    timeout: timeoutMs,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return { applied: true, targetPath, imagePath };
 }
 
 async function readBatch(context, batchId) {
@@ -418,7 +398,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         await copyFile(taskSource, target);
         if (disclaimerOverlay.applied) {
           const overlayTarget = `${target}.overlay.mp4`;
-          await applyDisclaimerOverlay(target, overlayTarget, disclaimerOverlay);
+          await applyDisclaimerOverlay(context, target, overlayTarget, disclaimerOverlay);
           await rm(target, { force: true });
           await rename(overlayTarget, target);
         }
@@ -566,7 +546,7 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
   const disclaimerOverlay = resolveDisclaimerOverlay(batch, group.entries[0]?.script?.branchDraft);
   if (disclaimerOverlay.applied) {
     const overlayTarget = `${target}.overlay.mp4`;
-    await applyDisclaimerOverlay(target, overlayTarget, disclaimerOverlay);
+    await applyDisclaimerOverlay(context, target, overlayTarget, disclaimerOverlay);
     await rm(target, { force: true });
     await rename(overlayTarget, target);
   }
@@ -780,3 +760,10 @@ export async function retryStitch(context, batchId, request = {}) {
   });
   return result;
 }
+
+export const __stitchTestHooks = {
+  probeVideoWidth,
+  resolveDisclaimerOverlay,
+  resolveDisclaimerOverlayImagePath,
+  applyDisclaimerOverlay
+};

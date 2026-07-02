@@ -8,7 +8,7 @@ import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
 import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
-import { uploadProductAsset } from "./product-assets.mjs";
+import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
 import { runBatchQc } from "./qc.mjs";
 import { detectRemixRegions } from "./remix-detection.mjs";
 import { buildRemixPlan } from "./remix-plan.mjs";
@@ -47,6 +47,7 @@ import {
   archiveVideoOpsSubmission,
   syncVideoOpsJobArchive
 } from "./video-ops-archive.mjs";
+import { createBackgroundJob, getBackgroundJob, isPlanSignatureStale, planDraftSignature } from "./background-jobs.mjs";
 
 function buildContext(context) {
   return {
@@ -60,6 +61,24 @@ function buildContext(context) {
 
 function queryObject(url) {
   return Object.fromEntries(url.searchParams.entries());
+}
+
+async function readReferenceVideoCheckRequest(context, req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!contentType.startsWith("multipart/form-data")) return context.readJson(req);
+  const form = await context.readMultipart(req);
+  const file = form.files?.file || form.files?.referenceVideo || Object.values(form.files || {})[0];
+  if (!file?.buffer?.length) {
+    throw new WangzhuanError("validation_error", "上传素材读取失败，请重新选择素材", { field: "file" });
+  }
+  const mimeType = String(file.mimeType || form.fields?.mimeType || "").trim();
+  return {
+    ...form.fields,
+    fileName: form.fields?.fileName || file.fileName,
+    name: form.fields?.name || file.fileName,
+    mimeType,
+    content: `data:${mimeType || "application/octet-stream"};base64,${file.buffer.toString("base64")}`
+  };
 }
 
 function batchRoute(pathname) {
@@ -84,6 +103,18 @@ function referenceVideoRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/(ref_\d{8}_\d{3})\/workflow-state$/);
   if (!match) return null;
   return { referenceVideoId: match[1] };
+}
+
+function decompositionJobRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/decomposition-jobs\/([^/]+)$/);
+  if (!match) return null;
+  return { jobId: decodeURIComponent(match[1]) };
+}
+
+function planJobRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/batches\/plan-jobs\/([^/]+)$/);
+  if (!match) return null;
+  return { jobId: decodeURIComponent(match[1]) };
 }
 
 function sendZip(res, zip, requestId) {
@@ -131,7 +162,8 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       }, requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/check") {
-      return sendOk(res, await checkReferenceVideo(scoped, await context.readJson(req)), requestId);
+      const runCheck = scoped.checkReferenceVideo || context.checkReferenceVideo || checkReferenceVideo;
+      return sendOk(res, await runCheck(scoped, await readReferenceVideoCheckRequest(context, req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/draft-decomposition/stream") {
       const body = await context.readJson(req);
@@ -142,6 +174,49 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/draft-decomposition") {
       return sendOk(res, await draftReferenceVideoDecomposition(scoped, await context.readJson(req), { requestId }), requestId);
     }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/decomposition-jobs") {
+      const body = await context.readJson(req);
+      const job = createBackgroundJob("decomposition", async ({ log, progress }) => {
+        log("AI 拆解视频已开始");
+        progress(30, "正在调用拆解模型");
+        const runDraft = scoped.draftReferenceVideoDecomposition || context.draftReferenceVideoDecomposition || draftReferenceVideoDecomposition;
+        const result = await runDraft(scoped, body, {
+          requestId,
+          streamHandlers: {
+            onRetry: ({ attempt, maxRetries, reason, upstreamMessage, code, status }) => log(
+              `拆解模型重试 ${attempt}/${maxRetries}`,
+              {
+                ...(reason ? { reason } : {}),
+                ...(upstreamMessage ? { upstreamMessage } : {}),
+                ...(code ? { code } : {}),
+                ...(status ? { status } : {})
+              }
+            ),
+            onFallback: ({ from, to, reason }) => log(
+              "拆解模型输入回退",
+              { from, to, reason }
+            )
+          }
+        });
+        progress(95, "正在整理拆解字段");
+        return result;
+      }, {
+        context: scoped,
+        subjectType: "reference_video",
+        subjectId: String(body.referenceVideoId || "")
+      });
+      return sendOk(res, { ...job, decompositionJobId: job.id }, requestId);
+    }
+    const decompositionJob = decompositionJobRoute(url.pathname);
+    if (decompositionJob && req.method === "GET") {
+      const job = await getBackgroundJob(scoped, decompositionJob.jobId);
+      if (!job) throw new WangzhuanError("job_not_found", "拆解任务不存在或已过期", { jobId: decompositionJob.jobId }, 404);
+      return sendOk(res, {
+        ...job,
+        decompositionJobId: job.id,
+        decomposition: job.result?.decomposition || job.result?.draft?.decomposition || job.result?.draft || null
+      }, requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/decompose") {
       return sendOk(res, await decomposeReferenceVideo(scoped, await context.readJson(req)), requestId);
     }
@@ -151,6 +226,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-assets/upload") {
       return sendOk(res, await uploadProductAsset(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/disclaimer-overlays/upload") {
+      return sendOk(res, await uploadDisclaimerOverlayAsset(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/draft") {
       return sendOk(res, await saveBatchDraft(scoped, await context.readJson(req)), requestId);
@@ -169,6 +247,36 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/plan") {
       return sendOk(res, await prepareBatchPlanFromEstimate(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/plan-jobs") {
+      const body = await context.readJson(req);
+      const draftSignature = planDraftSignature(body.draftSignatureInput || body);
+      const job = createBackgroundJob("seedance_plan", async ({ log, progress }) => {
+        log("Seedance 预案生成已开始");
+        progress(25, "正在生成脚本与 Seedance prompt");
+        const runPlan = scoped.prepareBatchPlanFromEstimate || context.prepareBatchPlanFromEstimate || prepareBatchPlanFromEstimate;
+        const result = await runPlan(scoped, body);
+        progress(95, "正在写入预案草稿");
+        return result;
+      }, {
+        draftSignature,
+        context: scoped,
+        subjectType: "batch",
+        subjectId: String(body.batchId || "")
+      });
+      return sendOk(res, { ...job, planJobId: job.id, draftSignature }, requestId);
+    }
+    const planJob = planJobRoute(url.pathname);
+    if (planJob && req.method === "GET") {
+      const job = await getBackgroundJob(scoped, planJob.jobId);
+      if (!job) throw new WangzhuanError("job_not_found", "Seedance 预案任务不存在或已过期", { jobId: planJob.jobId }, 404);
+      const batch = job.result?.batch || null;
+      return sendOk(res, {
+        ...job,
+        planJobId: job.id,
+        batch,
+        plans: batch?.plans || job.result?.plans || []
+      }, requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/start") {
       const started = await startBatchFromEstimate(scoped, await context.readJson(req));
@@ -248,7 +356,14 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       return sendOk(res, await runBatchQc(scoped, batch.batchId), requestId);
     }
     if (batch && req.method === "POST" && batch.action === "confirm-plan") {
-      const confirmed = await confirmBatchPlan(scoped, batch.batchId, await context.readJson(req));
+      const body = await context.readJson(req);
+      if (body.draftSignature && body.draftSignatureInput && isPlanSignatureStale(body.draftSignature, body.draftSignatureInput)) {
+        throw new WangzhuanError("validation_error", "Seedance 预案已失效，请重新生成", {
+          field: "draftSignature",
+          reason: "stale_seedance_plan"
+        });
+      }
+      const confirmed = await confirmBatchPlan(scoped, batch.batchId, body);
       const submitted = await submitPendingGenerationTasks(scoped, batch.batchId);
       const polled = await pollUpstreamBatch(scoped, batch.batchId);
       return sendOk(res, { ...submitted, batch: polled.batch, confirmedBatch: confirmed.batch }, requestId);

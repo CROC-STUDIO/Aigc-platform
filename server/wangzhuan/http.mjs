@@ -38,6 +38,8 @@ export const ERROR_HTTP_STATUS = Object.freeze({
   remix_not_found: 404,
   output_not_found: 404,
   missing_required_file: 409,
+  object_storage_required: 503,
+  object_storage_upload_failed: 502,
   empty_download_set: 400,
   upstream_rate_limited: 429,
   upstream_failed: 502,

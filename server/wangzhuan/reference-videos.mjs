@@ -1,12 +1,12 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { callLlmStreaming } from "./llm-stream.mjs";
-import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, resolveLlmConfig } from "./llm-config.mjs";
+import { callLlmStreaming, geminiStreamGenerateContentUrl } from "./llm-stream.mjs";
+import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, isRetryableLlmError, resolveLlmConfig } from "./llm-config.mjs";
 import { writeSseDelta, writeSseDone, writeSseError, writeSseLog } from "./sse.mjs";
 import {
   hasWangzhuanFactsStore,
@@ -28,9 +28,15 @@ import { flattenDecompositionFieldValue } from "./decomposition-text.mjs";
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
 const execFileAsync = promisify(execFile);
-const DEFAULT_LLM_TIMEOUT_MS = 180000;
+const DEFAULT_LLM_TIMEOUT_MS = 300000;
 const DEFAULT_REFERENCE_FRAME_COUNT = 5;
-const MAX_REFERENCE_FRAME_COUNT = 8;
+const MAX_REFERENCE_FRAME_COUNT = 90;
+const DEFAULT_PROXY_TARGET_BYTES = 8 * 1024 * 1024;
+const DEFAULT_PROXY_CRF = 35;
+const PROXY_CRF_LADDER = Object.freeze([35, 38, 41, 44]);
+const PROXY_MAX_HEIGHT = 854;
+const PROXY_FPS = 15;
+const PROXY_AUDIO_BITRATE = "64k";
 const DECOMPOSITION_REQUIRED_FIELDS = Object.freeze([
   "scene",
   "subject",
@@ -223,6 +229,75 @@ async function probeReferenceVideo(context, filePath, request) {
   return ffprobeReferenceVideo(filePath, { timeoutMs });
 }
 
+function referenceProxySettings(context = {}) {
+  const config = context.config?.wangzhuan?.referenceVideoProxy || {};
+  const targetBytes = numberOrZero(config.targetBytes) || DEFAULT_PROXY_TARGET_BYTES;
+  const initialCrf = clampInteger(config.crf, DEFAULT_PROXY_CRF, 18, 48);
+  const configuredLadder = Array.isArray(config.crfLadder)
+    ? config.crfLadder.map((item) => clampInteger(item, initialCrf, 18, 48))
+    : [];
+  return {
+    targetBytes,
+    crfLadder: [...new Set([initialCrf, ...configuredLadder, ...PROXY_CRF_LADDER])].sort((a, b) => a - b),
+    maxHeight: clampInteger(config.maxHeight, PROXY_MAX_HEIGHT, 360, 1280),
+    fps: clampInteger(config.fps, PROXY_FPS, 8, 30),
+    audioBitrate: String(config.audioBitrate || PROXY_AUDIO_BITRATE)
+  };
+}
+
+function shouldCreateReferenceProxy(bufferLength, probe, settings) {
+  const sizeBytes = numberOrZero(bufferLength);
+  if (sizeBytes > settings.targetBytes) return true;
+  if (numberOrZero(probe.width) > 720 || numberOrZero(probe.height) > 1280) return true;
+  if (numberOrZero(probe.fps) > settings.fps) return true;
+  return false;
+}
+
+async function statSizeBytes(filePath) {
+  const { size } = await stat(filePath);
+  return size;
+}
+
+async function createReferenceVideoProxy(context, originalPath, targetPath, settings) {
+  if (typeof context.createReferenceVideoProxy === "function") {
+    return context.createReferenceVideoProxy({ originalPath, targetPath, settings });
+  }
+  let lastResult = null;
+  for (const crf of settings.crfLadder) {
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i",
+      originalPath,
+      "-vf",
+      `scale='2*trunc(min(iw,${settings.maxHeight}*dar)/2)':'2*trunc(min(ih,${settings.maxHeight})/2)',fps=${settings.fps},format=yuv420p`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      String(crf),
+      "-c:a",
+      "aac",
+      "-b:a",
+      settings.audioBitrate,
+      "-ac",
+      "1",
+      "-movflags",
+      "+faststart",
+      targetPath
+    ], {
+      encoding: "utf8",
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: numberOrZero(context.config?.wangzhuan?.referenceVideoProxy?.timeoutMs) || 120000,
+      windowsHide: true
+    });
+    const sizeBytes = await statSizeBytes(targetPath);
+    lastResult = { path: targetPath, crf, sizeBytes };
+    if (sizeBytes <= settings.targetBytes) return lastResult;
+  }
+  return lastResult;
+}
+
 export async function checkReferenceVideo(context, request = {}) {
   const paths = wangzhuanPaths(context);
   const limits = effectiveLimits(context.config || {});
@@ -241,7 +316,9 @@ export async function checkReferenceVideo(context, request = {}) {
     });
   }
 
-  const referenceVideoId = await nextReferenceVideoIdFromMysql(context);
+  const referenceVideoId = typeof context.nextReferenceVideoId === "function"
+    ? await context.nextReferenceVideoId()
+    : await nextReferenceVideoIdFromMysql(context);
   if (!referenceVideoId) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存参考视频状态");
   }
@@ -250,9 +327,39 @@ export async function checkReferenceVideo(context, request = {}) {
   await mkdir(referenceDir, { recursive: true });
   const originalPath = join(referenceDir, `original${ext}`);
   await writeFile(originalPath, buffer);
-  const storage = await syncWangzhuanAsset(context, originalPath, "reference_video", { required: true });
 
   const mediaProbe = await probeReferenceVideo(context, originalPath, request);
+  const proxySettings = referenceProxySettings(context);
+  const proxyRequired = shouldCreateReferenceProxy(buffer.length, mediaProbe, proxySettings);
+  let uploadPath = originalPath;
+  let proxyInfo = null;
+  if (proxyRequired) {
+    const proxyPath = join(referenceDir, "decomposition-proxy.mp4");
+    const proxyResult = await createReferenceVideoProxy(context, originalPath, proxyPath, proxySettings);
+    if (proxyResult?.path) {
+      uploadPath = proxyResult.path;
+      const proxyProbe = await probeReferenceVideo(context, proxyResult.path, request);
+      proxyInfo = {
+        enabled: true,
+        crf: proxyResult.crf,
+        targetBytes: proxySettings.targetBytes,
+        sizeBytes: proxyResult.sizeBytes,
+        storedPath: toProjectRelative(context.userProjectRoot, proxyResult.path),
+        durationSec: proxyProbe.durationSec,
+        width: proxyProbe.width,
+        height: proxyProbe.height,
+        fps: proxyProbe.fps,
+        bitRateBps: proxyProbe.bitRateBps,
+        videoCodec: proxyProbe.videoCodec,
+        audioStreamCount: proxyProbe.audioStreams.length
+      };
+    }
+  }
+  const uploadSizeBytes = proxyInfo?.sizeBytes || buffer.length;
+  const storage = await syncWangzhuanAsset(context, uploadPath, "reference_video", {
+    required: true,
+    preferRemote: true
+  });
   const durationSec = mediaProbe.durationSec;
   const width = mediaProbe.width;
   const height = mediaProbe.height;
@@ -276,7 +383,7 @@ export async function checkReferenceVideo(context, request = {}) {
     referenceVideoId,
     fileName,
     mimeType: mimeType || mimeForExt(ext),
-    sizeBytes: buffer.length,
+    sizeBytes: uploadSizeBytes,
     durationSec,
     width,
     height,
@@ -292,17 +399,25 @@ export async function checkReferenceVideo(context, request = {}) {
     canExtractFrame,
     status: issues.some((item) => item.severity === "error") ? "fail" : issues.length ? "warn" : "pass",
     issues,
-    storedPath: toProjectRelative(context.userProjectRoot, originalPath),
+    storedPath: toProjectRelative(context.userProjectRoot, uploadPath),
     storageKey: storage.storageKey,
-    storageUrl: storage.storageUrl
+    storageUrl: storage.storageUrl,
+    originalStoredPath: toProjectRelative(context.userProjectRoot, originalPath),
+    originalSizeBytes: buffer.length,
+    ...(proxyInfo ? { decompositionProxy: proxyInfo } : {})
   };
 
   await writeAtomicJson(join(referenceDir, "probe.json"), probe);
-  const synced = await syncReferenceVideoFact(context, probe);
+  const synced = typeof context.syncReferenceVideoFact === "function"
+    ? await context.syncReferenceVideoFact(probe)
+    : await syncReferenceVideoFact(context, probe);
   if (synced?.skipped) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存参考视频状态");
   }
-  await recordTelemetryEvent(context, "reference_video_checked", {
+  const recordEvent = typeof context.recordTelemetryEvent === "function"
+    ? context.recordTelemetryEvent
+    : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+  await recordEvent("reference_video_checked", {
     referenceVideoId,
     status: probe.status,
     durationSec: probe.durationSec,
@@ -323,6 +438,10 @@ function mimeForExt(ext) {
 export async function loadReferenceVideoProbe(context, referenceVideoId) {
   if (!/^ref_\d{8}_\d{3}$/.test(String(referenceVideoId || ""))) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
+  }
+  if (typeof context.loadReferenceVideoProbe === "function") {
+    const probe = await context.loadReferenceVideoProbe(referenceVideoId);
+    if (probe) return probe;
   }
   if (!await hasWangzhuanFactsStore()) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取参考视频状态");
@@ -417,6 +536,27 @@ function referenceFrameTimestamps(durationSec, frameCount) {
   });
 }
 
+function oneFramePerSecondTimestamps(durationSec) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0) return [];
+  const wholeSeconds = Math.max(1, Math.ceil(duration));
+  return Array.from({ length: wholeSeconds }, (_, index) => {
+    const timestamp = Math.min(index + 0.5, Math.max(0, duration - 0.1));
+    return Math.round(timestamp * 100) / 100;
+  });
+}
+
+function llmUsesGptFrameOnlyDecomposition(llmConfig = {}) {
+  return String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
+    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
+}
+
+function llmUsesGeminiDecompositionUrlWithFrames(llmConfig = {}) {
+  const model = String(llmConfig.model || "").trim().toLowerCase();
+  const provider = String(llmConfig.provider || "").trim().toLowerCase();
+  return provider === "gemini" || provider === "google" || model.startsWith("gemini-");
+}
+
 async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
   const frames = [];
   const frameDir = join(parse(filePath).dir, "llm-frames");
@@ -470,17 +610,21 @@ async function extractReferenceFrames(context, filePath, timestampsSec) {
   return ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs });
 }
 
-async function collectReferenceVideoVisionInputs(context, probe) {
+async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {}) {
   const videoPath = resolveStoredVideoPath(context, probe.storedPath);
   const mimeType = probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
-  const fileUrl = resolveModelFileUrl(probe);
-  const frameCount = clampInteger(
+  const forceFramesOnly = llmUsesGptFrameOnlyDecomposition(llmConfig);
+  const useOneFramePerSecond = forceFramesOnly || llmUsesGeminiDecompositionUrlWithFrames(llmConfig);
+  const fileUrl = forceFramesOnly ? "" : resolveModelFileUrl(probe);
+  const configuredFrameCount = clampInteger(
     context.config?.wangzhuan?.llm?.referenceFrameCount,
     DEFAULT_REFERENCE_FRAME_COUNT,
     1,
     MAX_REFERENCE_FRAME_COUNT
   );
-  const timestampsSec = referenceFrameTimestamps(probe.durationSec, frameCount);
+  const timestampsSec = useOneFramePerSecond
+    ? oneFramePerSecondTimestamps(probe.durationSec)
+    : referenceFrameTimestamps(probe.durationSec, configuredFrameCount);
   const warnings = [];
   let frames = [];
   try {
@@ -499,11 +643,12 @@ async function collectReferenceVideoVisionInputs(context, probe) {
       reason: "storage_url_not_http"
     });
   }
-  const videoBuffer = fileUrl ? null : await readFile(videoPath);
+  const videoBuffer = fileUrl || forceFramesOnly ? null : await readFile(videoPath);
   return {
     fileName: probe.fileName || basename(videoPath),
     mimeType,
-    ...(fileUrl ? { fileUrl } : { fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}` }),
+    ...(fileUrl ? { fileUrl } : {}),
+    ...(!fileUrl && !forceFramesOnly ? { fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}` } : {}),
     frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
     timestampsSec,
     warnings
@@ -600,6 +745,61 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
   ];
 }
 
+async function inlineReferenceVideoVisionInput(context, probe, visionInputs = {}, reason = "file_url_unavailable") {
+  const videoPath = resolveStoredVideoPath(context, probe.storedPath);
+  const mimeType = visionInputs.mimeType || probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
+  const videoBuffer = await readFile(videoPath);
+  return {
+    ...visionInputs,
+    fileUrl: "",
+    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
+    warnings: [
+      ...(Array.isArray(visionInputs.warnings) ? visionInputs.warnings : []),
+      {
+        code: "reference_video_file_url_fallback",
+        message: "模型无法读取参考视频链接，已回退为 base64 文件输入",
+        reason
+      }
+    ]
+  };
+}
+
+function isModelFileUrlUnavailableError(error) {
+  if (!error || error?.data?.inputMode !== "file_url") return false;
+  const text = [
+    error.message,
+    error.data?.upstreamMessage,
+    error.data?.reason
+  ].filter(Boolean).join(" ").toLowerCase();
+  return [
+    "file_url",
+    "file url",
+    "file_uri",
+    "file uri",
+    "fileurl",
+    "url",
+    "uri",
+    "link",
+    "download",
+    "fetch",
+    "access",
+    "accessible",
+    "unreachable",
+    "not found",
+    "404",
+    "403",
+    "invalid file",
+    "video link",
+    "视频链接",
+    "链接不可用",
+    "无法访问",
+    "无法读取",
+    "下载失败",
+    "不可访问",
+    "不存在"
+  ].some((needle) => text.includes(needle));
+}
+
 function parseLlmJsonContent(content) {
   const text = String(content || "").trim();
   if (!text) {
@@ -686,6 +886,12 @@ function modelInputMode(messages = []) {
   const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
     && message.content.some((part) => part?.type === "file" && part.file?.file_data));
   return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
+}
+
+function shouldForceChatForFileUrl(llmConfig, messages) {
+  return modelInputMode(messages) === "file_url"
+    && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
+    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
 }
 
 function redactedModelRequestBody(body) {
@@ -800,11 +1006,55 @@ function redactedModelRequest({ requestId, inputMode, url, headers, body }) {
   };
 }
 
+function safeResponseErrorPayload(error, fallbackReason) {
+  return {
+    ok: false,
+    error: {
+      name: error?.name || "",
+      message: String(error?.message || fallbackReason || ""),
+      ...(error?.data && typeof error.data === "object" ? { data: error.data } : {})
+    }
+  };
+}
+
 async function maybeDumpModelRequest(context, probe, request) {
   const requestId = String(request?.requestId || "").trim();
   if (!requestId || !context?.userProjectRoot || !probe?.referenceVideoId) return;
   const target = join(wangzhuanPaths(context).referenceVideosDir, probe.referenceVideoId, `llm-request-${requestId}.json`);
   await writeAtomicJson(target, request);
+}
+
+async function maybeDumpModelResponse(context, probe, response) {
+  const requestId = String(response?.requestId || "").trim();
+  if (!requestId || !context?.userProjectRoot || !probe?.referenceVideoId) return;
+  const target = join(wangzhuanPaths(context).referenceVideosDir, probe.referenceVideoId, `llm-response-${requestId}.json`);
+  await writeAtomicJson(target, response);
+}
+
+function buildStreamingDumpHooks(context, probe, llmConfig, requestId) {
+  let requestDumped = false;
+  let responseDumped = false;
+  return {
+    async dumpRequest(payload) {
+      if (requestDumped) return;
+      requestDumped = true;
+      await maybeDumpModelRequest(context, probe, payload);
+    },
+    async dumpResponse(payload) {
+      responseDumped = true;
+      await maybeDumpModelResponse(context, probe, payload);
+    },
+    async dumpError(error, inputMode = "") {
+      if (responseDumped) return;
+      responseDumped = true;
+      await maybeDumpModelResponse(context, probe, {
+        requestId,
+        createdAt: new Date().toISOString(),
+        inputMode,
+        response: safeResponseErrorPayload(error, error?.data?.reason || "request_failed")
+      });
+    }
+  };
 }
 
 async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
@@ -837,12 +1087,9 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
     text: { format: { type: "json_object" } }
   };
   const inputMode = modelInputMode(messages);
-  const hasFileUrlInput = inputMode === "file_url";
-  const forceChatForFileUrl = hasFileUrlInput
-    && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
-    && /^gpt-5\.4(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
-  // gpt-5.4 /responses rejects input_file.file_url (probe 2026-06-22); chat/completions
-  // accepts { type: "file", file: { file_url } } together with frame image_url parts.
+  const forceChatForFileUrl = shouldForceChatForFileUrl(llmConfig, messages);
+  // GPT-5.x via Skylink /responses rejects input_file.file_url (probe 2026-06-22);
+  // chat/completions accepts { type: "file", file: { file_url } } together with frame image_url parts.
   const chatMessages = messages;
   const chatPayload = {
     model: llmConfig.model,
@@ -880,8 +1127,34 @@ async function callOpenAiCompatibleLlm(llmConfig, messages, options = {}) {
       });
       payload = await response.json().catch(() => ({}));
     }
+    if (typeof options.dumpResponse === "function") {
+      await options.dumpResponse({
+        requestId: options.requestId,
+        createdAt: new Date().toISOString(),
+        inputMode,
+        response: {
+          status: response.status,
+          ok: response.ok,
+          body: payload
+        }
+      });
+    }
   } catch (error) {
     const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    if (typeof options.dumpResponse === "function") {
+      await options.dumpResponse({
+        requestId: options.requestId,
+        createdAt: new Date().toISOString(),
+        inputMode,
+        response: {
+          ok: false,
+          error: {
+            name: error?.name || "",
+            message: String(error?.message || reason)
+          }
+        }
+      });
+    }
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
@@ -922,6 +1195,7 @@ async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
       temperature: llmConfig.temperature
     }
   };
+  const inputMode = modelInputMode(messages);
   const url = geminiGenerateContentUrl(llmConfig.endpoint, llmConfig.model);
   const headers = {
     "Content-Type": "application/json",
@@ -930,7 +1204,7 @@ async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
   if (typeof options.dumpRequest === "function") {
     await options.dumpRequest(redactedModelRequest({
       requestId: options.requestId,
-      inputMode: "gemini_contents",
+      inputMode,
       url,
       headers: {
         "Content-Type": "application/json",
@@ -949,12 +1223,38 @@ async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
       signal: controller.signal
     });
     payload = await response.json().catch(() => ({}));
+    if (typeof options.dumpResponse === "function") {
+      await options.dumpResponse({
+        requestId: options.requestId,
+        createdAt: new Date().toISOString(),
+        inputMode,
+        response: {
+          status: response.status,
+          ok: response.ok,
+          body: payload
+        }
+      });
+    }
   } catch (error) {
     const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    if (typeof options.dumpResponse === "function") {
+      await options.dumpResponse({
+        requestId: options.requestId,
+        createdAt: new Date().toISOString(),
+        inputMode,
+        response: {
+          ok: false,
+          error: {
+            name: error?.name || "",
+            message: String(error?.message || reason)
+          }
+        }
+      });
+    }
     throw new WangzhuanError("model_failed", reason === "timeout" ? "模型拆解请求超时" : "模型拆解请求失败", {
       provider: llmConfig.provider,
       model: llmConfig.model,
-      inputMode: "gemini_contents",
+      inputMode,
       reason
     });
   } finally {
@@ -965,7 +1265,7 @@ async function callGeminiCompatibleLlm(llmConfig, messages, options = {}) {
       provider: llmConfig.provider,
       model: llmConfig.model,
       status: response.status,
-      inputMode: "gemini_contents",
+      inputMode,
       upstreamMessage: String(payload?.error?.message || payload?.message || "").slice(0, 300)
     });
   }
@@ -981,17 +1281,9 @@ export function buildGeminiRequestBody(messages, temperature) {
   };
 }
 
-async function invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options = {}) {
+async function invokeDecompositionLlmOnce(context, probe, request, llmConfig, visionInputs, options = {}) {
   const messages = buildDecompositionMessages(probe, request, llmConfig, visionInputs);
-  const streamHandlers = options.streamHandlers;
-  if (streamHandlers) {
-    return callLlmStreaming(
-      llmConfig,
-      messages,
-      streamHandlers,
-      (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
-    );
-  }
+  const dumpHooks = buildStreamingDumpHooks(context, probe, llmConfig, options.requestId);
   if (typeof context.callWangzhuanLlm === "function") {
     return context.callWangzhuanLlm({
       messages,
@@ -1012,15 +1304,118 @@ async function invokeDecompositionLlm(context, probe, request, llmConfig, vision
       visionInputs
     });
   }
+  const streamHandlers = options.streamHandlers;
+  if (streamHandlers) {
+    const inputMode = modelInputMode(messages);
+    const streamMode = llmUsesGeminiNativeApi(llmConfig) ? "gemini.streamGenerateContent" : "chat.completions.stream";
+    const streamUrl = llmUsesGeminiNativeApi(llmConfig)
+      ? geminiStreamGenerateContentUrl(llmConfig.endpoint, llmConfig.model)
+      : chatCompletionsUrl(llmConfig.endpoint);
+    await dumpHooks.dumpRequest(redactedModelRequest({
+      requestId: options.requestId,
+      inputMode,
+      url: streamUrl,
+      headers: llmUsesGeminiNativeApi(llmConfig)
+        ? {
+          "Content-Type": "application/json",
+          "x-goog-api-key": `<REDACTED:${llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY"}>`
+        }
+        : {
+          "Content-Type": "application/json",
+          Authorization: `Bearer <REDACTED:${llmConfig.apiKeyEnv || "WANGZHUAN_LLM_API_KEY"}>`
+        },
+      body: llmUsesGeminiNativeApi(llmConfig)
+        ? buildGeminiRequestBody(messages, llmConfig.temperature)
+        : {
+          model: llmConfig.model,
+          messages,
+          temperature: llmConfig.temperature,
+          response_format: { type: "json_object" },
+          stream: true
+        }
+    }));
+    return callLlmStreaming(
+      llmConfig,
+      messages,
+      {
+        ...streamHandlers,
+        onComplete: async ({ text, mode }) => {
+          await dumpHooks.dumpResponse({
+            requestId: options.requestId,
+            createdAt: new Date().toISOString(),
+            inputMode,
+            response: {
+              ok: true,
+              mode: mode || streamMode,
+              text
+            }
+          });
+          await streamHandlers.onComplete?.({ text, mode });
+        },
+        onError: async ({ error, mode }) => {
+          await dumpHooks.dumpError(error, inputMode, mode || streamMode);
+          await streamHandlers.onError?.({ error, mode });
+        }
+      },
+      (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
+    );
+  }
   return llmUsesGeminiNativeApi(llmConfig)
     ? callGeminiCompatibleLlm(llmConfig, messages, {
       requestId: options.requestId,
-      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump),
+      dumpResponse: (dump) => maybeDumpModelResponse(context, probe, dump)
     })
     : callOpenAiCompatibleLlm(llmConfig, messages, {
       requestId: options.requestId,
-      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump)
+      dumpRequest: (dump) => maybeDumpModelRequest(context, probe, dump),
+      dumpResponse: (dump) => maybeDumpModelResponse(context, probe, dump)
     });
+}
+
+async function invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options = {}) {
+  const maxRetries = Number.isFinite(Number(llmConfig.maxRetries))
+    ? Math.max(0, Math.trunc(Number(llmConfig.maxRetries)))
+    : 3;
+  let lastError;
+  let activeVisionInputs = visionInputs;
+  let fellBackToInlineFile = false;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      if (attempt > 0 && options.streamHandlers?.onRetry) {
+        options.streamHandlers.onRetry({
+          attempt,
+          maxRetries,
+          inputMode: activeVisionInputs.fileUrl ? "file_url" : "file_data",
+          reason: lastError?.data?.reason || "",
+          upstreamMessage: String(lastError?.data?.upstreamMessage || lastError?.message || "").slice(0, 300),
+          code: String(lastError?.code || ""),
+          status: Number(lastError?.data?.status || 0) || undefined
+        });
+      }
+      return await invokeDecompositionLlmOnce(context, probe, request, llmConfig, activeVisionInputs, options);
+    } catch (error) {
+      lastError = error;
+      if (!fellBackToInlineFile && activeVisionInputs.fileUrl && isModelFileUrlUnavailableError(error)) {
+        fellBackToInlineFile = true;
+        if (options.streamHandlers?.onFallback) {
+          options.streamHandlers.onFallback({
+            from: "file_url",
+            to: "file_data",
+            reason: String(error?.data?.upstreamMessage || error?.message || "file_url_unavailable").slice(0, 160)
+          });
+        }
+        activeVisionInputs = await inlineReferenceVideoVisionInput(context, probe, activeVisionInputs, "file_url_unavailable");
+        visionInputs.fileUrl = activeVisionInputs.fileUrl;
+        visionInputs.fileDataUrl = activeVisionInputs.fileDataUrl;
+        visionInputs.warnings = activeVisionInputs.warnings;
+        attempt -= 1;
+        continue;
+      }
+      if (attempt >= maxRetries || !isRetryableLlmError(error)) throw error;
+    }
+  }
+  throw lastError;
 }
 
 async function finalizeDraftDecomposition(context, probe, request, llmConfig, content) {
@@ -1031,7 +1426,10 @@ async function finalizeDraftDecomposition(context, probe, request, llmConfig, co
       missingFields: decomposition.missingFields
     });
   }
-  await recordTelemetryEvent(context, "script_decomposition_drafted", {
+  const recordEvent = typeof context.recordTelemetryEvent === "function"
+    ? context.recordTelemetryEvent
+    : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+  await recordEvent("script_decomposition_drafted", {
     referenceVideoId: probe.referenceVideoId,
     provider: llmConfig.provider,
     model: llmConfig.model,
@@ -1055,7 +1453,7 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
     throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
   }
   const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
-  const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+  const visionInputs = await collectReferenceVideoVisionInputs(context, probe, llmConfig);
   const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options);
   const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, content);
   return {
@@ -1073,14 +1471,22 @@ export async function draftReferenceVideoDecompositionStream(context, request = 
       throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
     }
     const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
-    const visionInputs = await collectReferenceVideoVisionInputs(context, probe);
+    const visionInputs = await collectReferenceVideoVisionInputs(context, probe, llmConfig);
     writeSseLog(res, `model=${llmConfig.model} provider=${llmConfig.provider}`);
     writeSseLog(res, "POST upstream stream=true …");
     const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, {
       requestId,
       streamHandlers: {
         onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
-        onDelta: (delta) => writeSseDelta(res, delta)
+        onDelta: (delta) => writeSseDelta(res, delta),
+        onRetry: ({ attempt, maxRetries }) => writeSseLog(
+          res,
+          `upstream retry ${attempt}/${maxRetries} after transient model error`
+        ),
+        onFallback: ({ from, to, reason }) => writeSseLog(
+          res,
+          `upstream fallback ${from}->${to}: ${reason || "file_url_unavailable"}`
+        )
       }
     });
     writeSseLog(res, "");

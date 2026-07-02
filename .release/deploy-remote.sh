@@ -99,7 +99,11 @@ COMPOSE="$(compose_cmd)"
 
 echo "[docker] build and start"
 cd "$APP_ROOT"
-$COMPOSE build --no-cache app
+BUILD_ARGS=(build app)
+if [ "${DEPLOY_NO_CACHE:-0}" = "1" ]; then
+  BUILD_ARGS=(build --no-cache app)
+fi
+$COMPOSE "${BUILD_ARGS[@]}"
 $COMPOSE up -d mysql
 
 echo "[docker] wait for mysql"

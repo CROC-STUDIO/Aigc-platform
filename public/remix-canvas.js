@@ -7,6 +7,10 @@
   const svg = document.getElementById("remixCanvasLinks");
   if (!canvas || !svg) return;
 
+  if (window.matchMedia("(min-width: 981px)").matches) {
+    canvas.classList.add("wz-step-view");
+  }
+
   canvas.setAttribute("tabindex", "0");
 
   const SVGNS = "http://www.w3.org/2000/svg";

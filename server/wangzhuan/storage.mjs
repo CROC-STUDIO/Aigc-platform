@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, rename, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
@@ -28,6 +29,7 @@ export function wangzhuanPaths(context) {
     userRoot,
     referenceVideosDir: join(userRoot, "reference-videos"),
     estimatesDir: join(userRoot, "estimates"),
+    jobsDir: join(userRoot, "jobs"),
     batchesDir: join(userRoot, "batches"),
     remixSourcesDir: join(userRoot, "remix-sources"),
     remixEstimatesDir: join(userRoot, "remix-estimates"),
@@ -50,6 +52,10 @@ function localPreviewUrl(relativePath) {
   return `/file?path=${encodeURIComponent(relativePath)}`;
 }
 
+function localObjectStorageMockEnabled() {
+  return ["1", "true", "yes", "on"].includes(String(process.env.WANGZHUAN_LOCAL_OBJECT_STORAGE || "").trim().toLowerCase());
+}
+
 function assertSyncedObjectStorage(storage, assetKind, { required = false } = {}) {
   if (!required) return storage;
   if (!storage?.storageKey || !storage?.storageUrl) {
@@ -68,25 +74,45 @@ function assertSyncedObjectStorage(storage, assetKind, { required = false } = {}
   return storage;
 }
 
+function objectStorageFailureMessage(assetKind, error) {
+  const reason = String(error?.message || "").trim();
+  const target = assetKind === "reference_video" ? "参考视频" : "素材";
+  if (/timeout|timed out|abort/i.test(reason) || error?.name === "TimeoutError" || error?.name === "AbortError") {
+    return `${target}上传到 S3 超时，请检查对象存储网络或稍后重试`;
+  }
+  return `${target}上传到 S3 失败，请检查对象存储配置或网络后重试`;
+}
+
 export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhuan_file", options = {}) {
   const required = Boolean(options.required);
-  if (typeof context.syncWangzhuanAsset === "function") {
-    return assertSyncedObjectStorage(
-      await context.syncWangzhuanAsset({ fullPath, assetKind, required }),
-      assetKind,
-      { required }
-    );
-  }
-  if (!objectStorageEnabled()) {
-    if (required) {
-      throw new WangzhuanError("object_storage_required", "对象存储未配置，无法上传产品素材到 S3", {
-        assetKind,
-        requiredEnv: ["S3_BUCKET", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
-      });
-    }
-    return null;
-  }
+  const preferRemote = Boolean(options.preferRemote);
   try {
+    if (typeof context.syncWangzhuanAsset === "function") {
+      return assertSyncedObjectStorage(
+        await context.syncWangzhuanAsset({ fullPath, assetKind, required, preferRemote }),
+        assetKind,
+        { required }
+      );
+    }
+    if (localObjectStorageMockEnabled() && !(preferRemote && objectStorageEnabled())) {
+      const relativePath = toProjectRelative(context.userProjectRoot, fullPath);
+      return {
+        assetKind,
+        storageKey: "",
+        storageUrl: localPreviewUrl(relativePath),
+        storedPath: relativePath,
+        localOnly: true
+      };
+    }
+    if (!objectStorageEnabled()) {
+      if (required) {
+        throw new WangzhuanError("object_storage_required", "对象存储未配置，无法上传产品素材到 S3", {
+          assetKind,
+          requiredEnv: ["S3_BUCKET", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+        });
+      }
+      return null;
+    }
     const storage = await uploadProjectAsset({
       fullPath,
       userRoot: context.userProjectRoot,
@@ -96,7 +122,13 @@ export async function syncWangzhuanAsset(context, fullPath, assetKind = "wangzhu
     });
     return assertSyncedObjectStorage(storage, assetKind, { required });
   } catch (error) {
-    if (required || error instanceof WangzhuanError) throw error;
+    if (required || error instanceof WangzhuanError) {
+      if (error instanceof WangzhuanError) throw error;
+      throw new WangzhuanError("object_storage_upload_failed", objectStorageFailureMessage(assetKind, error), {
+        assetKind,
+        cause: String(error?.message || error || "").slice(0, 300)
+      });
+    }
     console.warn(`[object-storage] failed to upload ${assetKind}: ${error.message}`);
     return null;
   }
@@ -164,7 +196,7 @@ export async function ensureParent(target) {
 
 export async function writeAtomicJson(target, value) {
   await ensureParent(target);
-  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}`;
   const body = `${JSON.stringify(value, null, 2)}\n`;
   let handle;
   try {

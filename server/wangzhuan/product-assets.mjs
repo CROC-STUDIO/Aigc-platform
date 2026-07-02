@@ -19,6 +19,7 @@ const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
 const MAX_PRODUCT_ASSET_BYTES = 100 * 1024 * 1024;
+const MAX_DISCLAIMER_ASSET_BYTES = 5 * 1024 * 1024;
 
 function sanitizeSegment(value, fallback = "asset") {
   return String(value || fallback)
@@ -107,6 +108,46 @@ export async function uploadProductAsset(context, request = {}) {
       storageKey: storage.storageKey,
       storageUrl: storage.storageUrl,
       review
+    }
+  };
+}
+
+export async function uploadDisclaimerOverlayAsset(context, request = {}) {
+  const fileName = sanitizeFileName(request.fileName || request.name, "disclaimer-overlay.png");
+  const ext = extname(fileName).toLowerCase();
+  const mimeType = String(request.mimeType || "").toLowerCase();
+  if (ext !== ".png" || (mimeType && mimeType !== "image/png")) {
+    throw new WangzhuanError("invalid_material", "免责声明贴片只支持透明背景 PNG", {
+      field: "fileName",
+      allowedExts: [".png"]
+    });
+  }
+  const buffer = parseUploadContent(request.content);
+  if (buffer.length > MAX_DISCLAIMER_ASSET_BYTES) {
+    throw new WangzhuanError("file_too_large", "免责声明贴片超过大小上限", {
+      sizeBytes: buffer.length,
+      maxUploadBytes: MAX_DISCLAIMER_ASSET_BYTES
+    });
+  }
+  if (!buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    throw new WangzhuanError("invalid_material", "免责声明贴片不是有效 PNG 文件", { field: "content" });
+  }
+
+  const targetDir = join(wangzhuanPaths(context).userRoot, "disclaimer-overlays");
+  await mkdir(targetDir, { recursive: true });
+  const target = join(targetDir, `${Date.now()}-${fileName}`);
+  await writeFile(target, buffer);
+  const storage = await syncWangzhuanAsset(context, target, "disclaimer_overlay", { required: true });
+  const storedPath = toProjectRelative(context.userProjectRoot, target);
+  return {
+    asset: {
+      fileName,
+      mimeType: "image/png",
+      sizeBytes: buffer.length,
+      storedPath,
+      previewUrl: storage.storageUrl,
+      storageKey: storage.storageKey,
+      storageUrl: storage.storageUrl
     }
   };
 }

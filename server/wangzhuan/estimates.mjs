@@ -3,8 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { effectiveLimits } from "./config.mjs";
 import { branchSummaries, normalizeBranchDrafts } from "./branches.mjs";
 import {
+  hasAnyStrongTruthRule,
   PROMISE_LEVELS,
-  REQUIRED_STRONG_TRUTH_FIELDS,
   TARGET_CHANNELS
 } from "./constants.mjs";
 import {
@@ -39,10 +39,6 @@ const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
-}
-
-function isNonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function normalizeInteger(value, field, min, max) {
@@ -115,9 +111,10 @@ async function loadReferenceDecomposition(context, referenceVideoId) {
 
 function validateTemplateForPromise(template, promiseLevel) {
   if (promiseLevel !== "strong_commitment") return;
-  const missingFields = REQUIRED_STRONG_TRUTH_FIELDS.filter((field) => !isNonEmptyString(template.draft?.truthRules?.[field]));
-  if (missingFields.length) {
-    throw new WangzhuanError("strong_rule_missing", "强承诺需要补齐真实收益规则", { missingFields });
+  if (!hasAnyStrongTruthRule(template.draft?.truthRules)) {
+    throw new WangzhuanError("strong_rule_missing", "强承诺至少需要填写一条真实收益规则", {
+      field: "truthRules"
+    });
   }
 }
 
@@ -290,18 +287,26 @@ export async function estimateBatch(context, request = {}) {
   const disclaimerOverlay = request.disclaimerOverlay && typeof request.disclaimerOverlay === "object"
     ? {
       enabled: request.disclaimerOverlay.enabled !== false,
+      templateId: String(request.disclaimerOverlay.templateId || disclaimerPresetId || "auto"),
+      imageFileName: String(request.disclaimerOverlay.imageFileName || ""),
+      imageStoredPath: String(request.disclaimerOverlay.imageStoredPath || ""),
+      imageStorageKey: String(request.disclaimerOverlay.imageStorageKey || ""),
+      imageStorageUrl: String(request.disclaimerOverlay.imageStorageUrl || ""),
       position: String(request.disclaimerOverlay.position || "bottom_center"),
-      fontSize: Number(request.disclaimerOverlay.fontSize || 22),
       boxHeight: Number(request.disclaimerOverlay.boxHeight || 88),
-      bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 64),
+      bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 3),
       horizontalMargin: Number(request.disclaimerOverlay.horizontalMargin || 50)
     }
     : {
       enabled: true,
+      templateId: disclaimerPresetId,
+      imageFileName: "",
+      imageStoredPath: "",
+      imageStorageKey: "",
+      imageStorageUrl: "",
       position: "bottom_center",
-      fontSize: 22,
       boxHeight: 88,
-      bottomMargin: 64,
+      bottomMargin: 3,
       horizontalMargin: 50
     };
   const normalizedRequest = {
@@ -424,6 +429,18 @@ export function canReuseActivePipelineDraft(active, request = {}, options = {}) 
   return editableStatuses.includes(String(activeStatus || ""));
 }
 
+function reusableDraftBatch(draftBatch, options = {}) {
+  if (!draftBatch?.batchId) return null;
+  if (!draftBatch.status) return draftBatch;
+  return canReuseActivePipelineDraft(
+    { batchId: draftBatch.batchId, status: draftBatch.status },
+    { batchId: draftBatch.batchId },
+    options
+  )
+    ? draftBatch
+    : null;
+}
+
 async function saveBatch(context, batch) {
   const synced = await syncBatchFacts(context, batch, "batch_created");
   if (synced?.skipped) {
@@ -465,10 +482,11 @@ export function enrichPlanGenerationError(error, batchId) {
 
 export function buildPlanPreviewBatch(context, record, draftBatch, branchDrafts) {
   const now = new Date().toISOString();
+  const reusableDraft = reusableDraftBatch(draftBatch, { allowPreviewRequired: true });
   return {
-    batchId: draftBatch?.batchId || makeBatchId(),
-    userBatchName: record.request.batchName || draftBatch?.userBatchName || "",
-    displayBatchName: record.request.batchName || draftBatch?.displayBatchName || "",
+    batchId: reusableDraft?.batchId || makeBatchId(),
+    userBatchName: record.request.batchName || reusableDraft?.userBatchName || "",
+    displayBatchName: record.request.batchName || reusableDraft?.displayBatchName || "",
     type: "pipeline",
     status: "preview_required",
     previewType: "seedance_plan",
@@ -486,14 +504,14 @@ export function buildPlanPreviewBatch(context, record, draftBatch, branchDrafts)
     scripts: [],
     tasks: [],
     plans: [],
-    outputs: draftBatch?.outputs || [],
-    qcSummary: draftBatch?.qcSummary || {
+    outputs: reusableDraft?.outputs || [],
+    qcSummary: reusableDraft?.qcSummary || {
       total: 0,
       passed: 0,
       failed: 0,
       warnings: []
     },
-    createdAt: draftBatch?.createdAt || now,
+    createdAt: reusableDraft?.createdAt || now,
     updatedAt: now
   };
 }
@@ -552,7 +570,7 @@ export async function startBatchFromEstimate(context, request = {}) {
       capability: "stitcher"
     });
   }
-  const draftBatch = await loadDraftBatch(context, request.batchId);
+  const draftBatch = reusableDraftBatch(await loadDraftBatch(context, request.batchId));
   const now = new Date().toISOString();
   const batch = {
     batchId: draftBatch?.batchId || makeBatchId(),
@@ -616,7 +634,7 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
   );
   await assertPlanGenerationAllowed(context, record);
 
-  const draftBatch = await loadDraftBatch(context, request.batchId);
+  const draftBatch = reusableDraftBatch(await loadDraftBatch(context, request.batchId), { allowPreviewRequired: true });
   const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
   let planBatchId = null;
   try {
@@ -674,7 +692,7 @@ export async function prepareBatchPlanFromEstimateStream(context, request = {}, 
     );
     await assertPlanGenerationAllowed(context, record);
 
-    const draftBatch = await loadDraftBatch(context, request.batchId);
+    const draftBatch = reusableDraftBatch(await loadDraftBatch(context, request.batchId), { allowPreviewRequired: true });
     const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
     assertSeedanceReferenceAssetLimits(branchDrafts);
     await saveBatch(context, batch);

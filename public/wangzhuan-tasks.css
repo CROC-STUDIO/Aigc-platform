@@ -1,0 +1,81 @@
+/* Task management page — layout compatibility (loads after styles.css) */
+
+.wz-body .wz-app.wz-tasks-app {
+  box-sizing: border-box;
+  margin-left: 226px;
+  min-width: 0;
+  padding: 82px 22px 22px;
+  width: calc(100% - 226px);
+}
+
+.wz-tasks-app .operation-pane {
+  max-height: calc(100dvh - 64px - 44px);
+  max-width: none;
+}
+
+.wz-tasks-layout:not(.is-list-only) {
+  grid-template-columns: minmax(380px, 420px) minmax(0, 1fr);
+}
+
+.wz-tasks-list-pane {
+  min-width: 0;
+}
+
+.wz-tasks-segment-btn {
+  height: auto;
+  min-width: 0;
+}
+
+@media (max-width: 1280px) {
+  .wz-tasks-layout:not(.is-list-only) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(280px, min(42dvh, 420px)) minmax(0, 1fr);
+  }
+}
+
+@container wz-tasks-list (max-width: 360px) {
+  .wz-tasks-segment-btn {
+    font-size: 11px;
+    min-height: 30px;
+    padding: 5px 4px;
+  }
+
+  .wz-tasks-item-row {
+    gap: 6px;
+    padding: 6px 8px 6px 0;
+  }
+
+  .wz-tasks-item-title {
+    font-size: 11px;
+  }
+
+  .wz-tasks-item-id {
+    flex-basis: 72px;
+    font-size: 9px;
+    max-width: 72px;
+  }
+
+  .wz-tasks-stripe-text {
+    font-size: 9px;
+  }
+
+  .wz-tasks-stripe-line {
+    width: 10px;
+  }
+
+  .wz-tasks-item-time {
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 980px) {
+  .wz-body .wz-app.wz-tasks-app {
+    margin-left: 0;
+    padding: 148px 14px 14px;
+    width: 100%;
+  }
+
+  .wz-tasks-layout:not(.is-list-only) {
+    grid-template-rows: minmax(240px, 38dvh) minmax(280px, 1fr);
+  }
+}
