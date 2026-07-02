@@ -8,7 +8,7 @@ import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
 import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
-import { uploadProductAsset } from "./product-assets.mjs";
+import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
 import { runBatchQc } from "./qc.mjs";
 import { detectRemixRegions } from "./remix-detection.mjs";
 import { buildRemixPlan } from "./remix-plan.mjs";
@@ -200,7 +200,11 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         });
         progress(95, "正在整理拆解字段");
         return result;
-      }, { context: scoped });
+      }, {
+        context: scoped,
+        subjectType: "reference_video",
+        subjectId: String(body.referenceVideoId || "")
+      });
       return sendOk(res, { ...job, decompositionJobId: job.id }, requestId);
     }
     const decompositionJob = decompositionJobRoute(url.pathname);
@@ -222,6 +226,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-assets/upload") {
       return sendOk(res, await uploadProductAsset(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/disclaimer-overlays/upload") {
+      return sendOk(res, await uploadDisclaimerOverlayAsset(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/draft") {
       return sendOk(res, await saveBatchDraft(scoped, await context.readJson(req)), requestId);
@@ -251,7 +258,12 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         const result = await runPlan(scoped, body);
         progress(95, "正在写入预案草稿");
         return result;
-      }, { draftSignature, context: scoped });
+      }, {
+        draftSignature,
+        context: scoped,
+        subjectType: "batch",
+        subjectId: String(body.batchId || "")
+      });
       return sendOk(res, { ...job, planJobId: job.id, draftSignature }, requestId);
     }
     const planJob = planJobRoute(url.pathname);

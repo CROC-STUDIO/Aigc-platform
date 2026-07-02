@@ -48,12 +48,12 @@ jms_ssh() {
 
 jms_exec_sh() {
   local remote_cmd="$1"
-  jms_ssh bash -lc "$remote_cmd"
+  jms_ssh "bash -lc $(printf '%q' "$remote_cmd")"
 }
 
 jms_sudo_exec_sh() {
   local remote_cmd="$1"
-  jms_ssh sudo -- bash -lc "$remote_cmd"
+  jms_ssh "sudo bash -lc $(printf '%q' "$remote_cmd")"
 }
 
 jms_sftp_batch() {
@@ -114,7 +114,7 @@ case "$cmd" in
     remote_path="${3:-}"
     [ -n "$local_path" ] && [ -n "$remote_path" ] || { print_usage; exit 1; }
     local_hash="$(shasum -a 256 "$local_path" | awk '{print $1}')"
-    remote_hash="$(jms_ssh "sha256sum $(printf '%q' "$remote_path") | awk '{print \\$1}'")"
+    remote_hash="$(jms_exec_sh "sha256sum $(printf '%q' "$remote_path") | cut -d' ' -f1")"
     echo "local : $local_hash"
     echo "remote: $remote_hash"
     [ "$local_hash" = "$remote_hash" ]

@@ -273,20 +273,18 @@
                   </select>
                 </label>
                 <label class="wz-inline-toggle"><input id="wzDisclaimerEnabled" type="checkbox" checked /><span>启用免责声明贴片</span></label>
+                <label>自定义贴片 PNG <input id="wzDisclaimerOverlayFile" type="file" accept="image/png" /></label>
                 <label>贴片位置
                   <select id="wzDisclaimerOverlayPosition">
                     <option value="bottom_center" selected>底部居中</option>
                     <option value="bottom_left">左下</option>
                   </select>
                 </label>
-                <label>字号 <input id="wzDisclaimerOverlayFontSize" type="number" min="18" max="42" step="1" value="22" /></label>
                 <label>贴片高度 <input id="wzDisclaimerOverlayBoxHeight" type="number" min="56" max="220" step="2" value="88" /></label>
-                <label>底部距离 <input id="wzDisclaimerOverlayBottomMargin" type="number" min="0" max="260" step="2" value="64" /></label>
+                <label>底部距离 <input id="wzDisclaimerOverlayBottomMargin" type="number" min="0" max="260" step="1" value="3" /></label>
                 <label>左右距离 <input id="wzDisclaimerOverlayHorizontalMargin" type="number" min="0" max="220" step="2" value="50" /></label>
               </div>
-              <label class="wz-field-label">免责声明文案
-                <textarea id="wzDisclaimer" class="wz-json-box compact" spellcheck="false">Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.</textarea>
-              </label>
+              <div id="wzDisclaimerOverlayPreview" class="wz-muted">未上传自定义 PNG 时，将使用所选模板的透明贴片。</div>
             </section>
 
             <section class="wz-v2-subband">

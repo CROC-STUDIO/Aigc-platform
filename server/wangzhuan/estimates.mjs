@@ -287,18 +287,26 @@ export async function estimateBatch(context, request = {}) {
   const disclaimerOverlay = request.disclaimerOverlay && typeof request.disclaimerOverlay === "object"
     ? {
       enabled: request.disclaimerOverlay.enabled !== false,
+      templateId: String(request.disclaimerOverlay.templateId || disclaimerPresetId || "auto"),
+      imageFileName: String(request.disclaimerOverlay.imageFileName || ""),
+      imageStoredPath: String(request.disclaimerOverlay.imageStoredPath || ""),
+      imageStorageKey: String(request.disclaimerOverlay.imageStorageKey || ""),
+      imageStorageUrl: String(request.disclaimerOverlay.imageStorageUrl || ""),
       position: String(request.disclaimerOverlay.position || "bottom_center"),
-      fontSize: Number(request.disclaimerOverlay.fontSize || 22),
       boxHeight: Number(request.disclaimerOverlay.boxHeight || 88),
-      bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 64),
+      bottomMargin: Number(request.disclaimerOverlay.bottomMargin || 3),
       horizontalMargin: Number(request.disclaimerOverlay.horizontalMargin || 50)
     }
     : {
       enabled: true,
+      templateId: disclaimerPresetId,
+      imageFileName: "",
+      imageStoredPath: "",
+      imageStorageKey: "",
+      imageStorageUrl: "",
       position: "bottom_center",
-      fontSize: 22,
       boxHeight: 88,
-      bottomMargin: 64,
+      bottomMargin: 3,
       horizontalMargin: 50
     };
   const normalizedRequest = {

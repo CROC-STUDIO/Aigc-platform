@@ -294,7 +294,7 @@ const branchFieldIds = {
 const DISCLAIMER_PRESETS = {
   en: "Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.",
   pt: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
-  zh: "奖励结果受 App 内活动规则、用户资格、任务完成情况、地区限制和活动时间影响，不保证每位用户都能获得相同奖励。"
+  zh: "奖励结果受 App 内活动规则、用户资格、任务完成情况、地区限制和活动时间影响，不保证每位用户都能获得相同奖励"
 };
 
 const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，请继续填写第三步产品改写。";

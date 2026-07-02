@@ -22,6 +22,10 @@ test("workbenchHref carries batch restore params and focus hash", () => {
     workbenchHref("batch", "running", "wzb_20260626010101_abcd"),
     "/wangzhuan-v2.html?restore=1&batchId=wzb_20260626010101_abcd#wzNodeLog"
   );
+  assert.equal(
+    workbenchHref("batch", "running", "wzb_20260626010101_abcd", { jobType: "plan", jobId: "planjob_1" }),
+    "/wangzhuan-v2.html?restore=1&batchId=wzb_20260626010101_abcd&jobType=plan&jobId=planjob_1#wzNodeLog"
+  );
 });
 
 test("workbenchHref carries remix restore params", () => {
@@ -46,4 +50,16 @@ test("tasks page polling only refreshes selected detail in place", async () => {
   assert.match(js, /function shouldPollPage\(\)\s*\{\s*return shouldPollDetail\(state\.detail\);\s*\}/);
   assert.match(js, /await loadSelectedDetail\(\{\s*silent:\s*true\s*\}\)/);
   assert.doesNotMatch(js, /hasActiveTasksOnPage\(\) \|\| shouldPollDetail/);
+});
+
+test("tasks page exposes recoverable background job notices", async () => {
+  const js = await readText("public/wangzhuan-tasks.js");
+  assert.match(js, /function renderBackgroundJobNotice/);
+  assert.match(js, /job\.error\?\.recoverable/);
+  assert.match(js, /重试查询拆解结果/);
+  assert.match(js, /重试查询预案结果/);
+  assert.match(js, /latestPlanJob/);
+  assert.match(js, /latestDecompositionJob/);
+  assert.match(js, /jobType: job\.type === "seedance_plan" \? "plan" : job\.type/);
+  assert.match(js, /jobId: job\.id/);
 });

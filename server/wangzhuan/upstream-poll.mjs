@@ -194,10 +194,14 @@ async function attachContinuityReferences(context, batch, tasks, now) {
   return { tasks: nextTasks, changed };
 }
 
-function statusAfterTaskWrite(batch, tasks) {
+export function statusAfterTaskWrite(batch, tasks) {
   if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return batch.status;
   if (tasks.some((task) => task.status === "pending" || task.status === "waiting_upstream")) return batch.status;
-  if (tasks.some((task) => task.status === "failed")) return "failed";
+  // `downloaded_output` is a task-level persistence trigger. Keep the run
+  // in its current non-terminal state and let later workflow triggers
+  // (`generation_completed` / `stitch_progress` / `qc_completed`) settle the
+  // final run status.
+  if (tasks.some((task) => task.status === "failed")) return batch.status;
   return batch.status;
 }
 

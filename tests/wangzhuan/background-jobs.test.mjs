@@ -164,10 +164,10 @@ test("plan draft signature includes strong fields and ignores disclaimer overlay
     customPrompt: "补充",
     negativePrompt: "不要水印",
     disclaimer: "post processing only",
-    disclaimerOverlay: { position: "bottom_center", fontSize: 22 },
+    disclaimerOverlay: { position: "bottom_center", boxHeight: 88, imageStoredPath: "a.png" },
     disclaimerOverlayEnabled: true,
     disclaimerOverlayPosition: "bottom_center",
-    disclaimerOverlayFontSize: 22
+    disclaimerOverlayBoxHeight: 88
   };
 
   const signature = planDraftSignature(base);
@@ -175,9 +175,9 @@ test("plan draft signature includes strong fields and ignores disclaimer overlay
   assert.equal(
     isPlanSignatureStale(signature, {
       ...base,
-      disclaimerOverlay: { position: "bottom_left", fontSize: 30 },
+      disclaimerOverlay: { position: "bottom_left", boxHeight: 120, imageStoredPath: "b.png" },
       disclaimerOverlayPosition: "bottom_left",
-      disclaimerOverlayFontSize: 30
+      disclaimerOverlayBoxHeight: 120
     }),
     false
   );

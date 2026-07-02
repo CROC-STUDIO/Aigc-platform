@@ -119,6 +119,8 @@ test("creates and polls decomposition job", async () => {
   assert.equal(created.payload.code, "ok");
   assert.equal(created.payload.data.status, "queued");
   assert.match(created.payload.data.decompositionJobId, /^decompjob_/);
+  assert.equal(created.payload.data.subjectType, "reference_video");
+  assert.equal(created.payload.data.subjectId, "ref_20260629_001");
 
   const polled = await waitForStatus(
     `/api/wangzhuan/reference-videos/decomposition-jobs/${created.payload.data.decompositionJobId}`,
@@ -247,6 +249,8 @@ test("creates and polls Seedance plan job with draft signature", async () => {
   assert.equal(created.payload.code, "ok");
   assert.match(created.payload.data.planJobId, /^planjob_/);
   assert.match(created.payload.data.draftSignature, /^plansig_/);
+  assert.equal(created.payload.data.subjectType, "batch");
+  assert.equal(created.payload.data.subjectId, "wzb_20260629000000_abcd");
 
   const polled = await waitForStatus(
     `/api/wangzhuan/batches/plan-jobs/${created.payload.data.planJobId}`,

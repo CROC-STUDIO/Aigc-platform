@@ -119,7 +119,9 @@ const state = {
   recentResults: [],
   recentPagination: null,
   recentPage: 1,
-  recentLoading: false
+  recentLoading: false,
+  disclaimerOverlayAsset: null,
+  confirmPlanSubmitting: false
 };
 
 let batchPollTimer = 0;
@@ -168,9 +170,8 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzNegativePrompt",
   "#wzDisclaimerPreset",
   "#wzDisclaimerEnabled",
-  "#wzDisclaimer",
+  "#wzDisclaimerOverlayFile",
   "#wzDisclaimerOverlayPosition",
-  "#wzDisclaimerOverlayFontSize",
   "#wzDisclaimerOverlayBoxHeight",
   "#wzDisclaimerOverlayBottomMargin",
   "#wzDisclaimerOverlayHorizontalMargin",
@@ -486,6 +487,33 @@ function referenceVideoPreviewUrl(referenceVideo = {}) {
     || "";
 }
 
+function disclaimerTemplateUrl(preset = "auto", language = "") {
+  let key = String(preset || "auto").trim();
+  if (key === "auto") {
+    const normalized = String(language || "").trim().toLowerCase();
+    key = normalized.startsWith("pt") ? "pt" : (normalized.startsWith("zh") || normalized.includes("chinese") ? "zh" : "en");
+  }
+  return ["en", "pt", "zh"].includes(key) ? `/assets/wangzhuan/disclaimers/${key}.png` : "";
+}
+
+function disclaimerOverlayAssetFromState() {
+  return state.disclaimerOverlayAsset && typeof state.disclaimerOverlayAsset === "object" ? state.disclaimerOverlayAsset : {};
+}
+
+function renderDisclaimerOverlayPreview() {
+  const box = $("#wzDisclaimerOverlayPreview");
+  if (!box) return;
+  const asset = disclaimerOverlayAssetFromState();
+  const preset = value($("#wzDisclaimerPreset")) || "auto";
+  const url = asset.previewUrl || asset.storageUrl || fileUrlFromStoredPath(asset.storedPath) || disclaimerTemplateUrl(preset, value(els.language));
+  const label = asset.fileName ? `已上传：${escapeHtml(asset.fileName)}` : "使用内置透明 PNG 模板";
+  if (!url) {
+    box.textContent = "请选择内置模板或上传透明 PNG。";
+    return;
+  }
+  box.innerHTML = `<span>${label}</span><img src="${escapeHtml(url)}" alt="免责声明贴片预览" style="display:block;width:min(100%,360px);height:auto;margin-top:6px;background:#222;" />`;
+}
+
 function describeReferenceVideo(referenceVideo = {}) {
   if (!referenceVideo?.referenceVideoId) return "未上传参考视频";
   const parts = [
@@ -536,20 +564,24 @@ function disclaimerRequestFields() {
   const language = value(els.language) || "en-US";
   const preset = value($("#wzDisclaimerPreset")) || "auto";
   const enabled = $("#wzDisclaimerEnabled")?.checked !== false;
-  const disclaimer = enabled ? value($("#wzDisclaimer")) : "";
+  const asset = disclaimerOverlayAssetFromState();
   return {
-    disclaimer,
+    disclaimer: "",
     disclaimerEnabled: enabled,
     disclaimerPresetId: preset,
     disclaimerPreset: preset,
     disclaimerLanguage: preset === "auto" ? language : preset,
-    disclaimerByLanguage: { [language]: disclaimer },
+    disclaimerByLanguage: {},
     disclaimerOverlay: {
       enabled,
+      templateId: preset,
+      imageFileName: asset.fileName || "",
+      imageStoredPath: asset.storedPath || "",
+      imageStorageKey: asset.storageKey || "",
+      imageStorageUrl: asset.storageUrl || asset.previewUrl || "",
       position: value($("#wzDisclaimerOverlayPosition")) || "bottom_center",
-      fontSize: Number(value($("#wzDisclaimerOverlayFontSize")) || 22),
       boxHeight: Number(value($("#wzDisclaimerOverlayBoxHeight")) || 88),
-      bottomMargin: Number(value($("#wzDisclaimerOverlayBottomMargin")) || 64),
+      bottomMargin: Number(value($("#wzDisclaimerOverlayBottomMargin")) || 3),
       horizontalMargin: Number(value($("#wzDisclaimerOverlayHorizontalMargin")) || 50)
     }
   };
@@ -638,12 +670,18 @@ function loadBranchToForm(branch = activeBranch()) {
   els.negativePrompt.value = branch.negativePrompt || "";
   if ($("#wzDisclaimerPreset")) $("#wzDisclaimerPreset").value = branch.disclaimerPreset || branch.disclaimerPresetId || "auto";
   if ($("#wzDisclaimerEnabled")) $("#wzDisclaimerEnabled").checked = branch.disclaimerEnabled !== false && branch.disclaimerOverlay?.enabled !== false;
-  if ($("#wzDisclaimer")) $("#wzDisclaimer").value = branch.disclaimer || "";
   if ($("#wzDisclaimerOverlayPosition")) $("#wzDisclaimerOverlayPosition").value = branch.disclaimerOverlay?.position || "bottom_center";
-  if ($("#wzDisclaimerOverlayFontSize")) $("#wzDisclaimerOverlayFontSize").value = String(branch.disclaimerOverlay?.fontSize ?? 22);
   if ($("#wzDisclaimerOverlayBoxHeight")) $("#wzDisclaimerOverlayBoxHeight").value = String(branch.disclaimerOverlay?.boxHeight ?? 88);
-  if ($("#wzDisclaimerOverlayBottomMargin")) $("#wzDisclaimerOverlayBottomMargin").value = String(branch.disclaimerOverlay?.bottomMargin ?? 64);
+  if ($("#wzDisclaimerOverlayBottomMargin")) $("#wzDisclaimerOverlayBottomMargin").value = String(branch.disclaimerOverlay?.bottomMargin ?? 3);
   if ($("#wzDisclaimerOverlayHorizontalMargin")) $("#wzDisclaimerOverlayHorizontalMargin").value = String(branch.disclaimerOverlay?.horizontalMargin ?? 50);
+  state.disclaimerOverlayAsset = branch.disclaimerOverlay?.imageStoredPath ? {
+    fileName: branch.disclaimerOverlay.imageFileName || "",
+    storedPath: branch.disclaimerOverlay.imageStoredPath || "",
+    storageKey: branch.disclaimerOverlay.imageStorageKey || "",
+    storageUrl: branch.disclaimerOverlay.imageStorageUrl || ""
+  } : null;
+  if ($("#wzDisclaimerOverlayFile")) $("#wzDisclaimerOverlayFile").value = "";
+  renderDisclaimerOverlayPreview();
   resetAssetInputDatasets();
   for (const [assetKey, selector] of assetInputs) {
     const input = $(selector);
@@ -1255,9 +1293,11 @@ function renderTasks() {
     },
     {
       title: "视频生成和质检",
-      status: batch?.status || "idle",
+      status: state.confirmPlanSubmitting ? "submitting" : (batch?.status || "idle"),
       progress: generationProgress,
-      message: tasksInBatch.length ? `${doneCount}/${tasksInBatch.length} 个子任务` : "沿用现有批次链路"
+      message: state.confirmPlanSubmitting
+        ? "正在确认预案并提交 Seedance"
+        : (tasksInBatch.length ? `${doneCount}/${tasksInBatch.length} 个子任务` : "沿用现有批次链路")
     }
   ];
   els.taskQueue.innerHTML = tasks.map((task) => `
@@ -1270,14 +1310,21 @@ function renderTasks() {
   els.planStaleNotice.hidden = !state.stalePlanPreview;
   const planUpstreamLocked = hasGeneratedSeedancePlan(batch);
   setPlanUpstreamLocked(planUpstreamLocked);
-  els.planBatchBtn.disabled = planUpstreamLocked || !state.estimate?.estimateId || state.stalePlanPreview;
-  els.confirmPlanBtn.disabled = !plans.length || state.stalePlanPreview;
+  const planRetryable = isRecoverableBackgroundJob(state.planJob);
+  els.planBatchBtn.disabled = planRetryable
+    ? false
+    : (planUpstreamLocked || !state.estimate?.estimateId || state.stalePlanPreview);
+  els.confirmPlanBtn.disabled = state.confirmPlanSubmitting || !plans.length || state.stalePlanPreview;
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
   els.runQcBtn.disabled = !batch?.batchId || !isBatchQcRunnable(batch, tasksInBatch, outputsInBatch);
+  if (isRecoverableBackgroundJob(state.decompositionJob)) {
+    els.draftDecompositionBtn.disabled = false;
+  }
   els.runStatusBox.textContent = batch?.batchId
     ? `${batch.batchId} · ${batch.status || "-"} · ${tasksInBatch.length ? `${doneCount}/${tasksInBatch.length} 子任务` : "暂无子任务"}`
     : "尚未开始生成";
   els.longTaskStatus.textContent = tasks.map((task) => `${task.title}:${task.status}`).join(" · ");
+  syncBackgroundJobActionButtons();
   renderReminders({ batch, plans });
 }
 
@@ -1389,6 +1436,52 @@ function failBackgroundJob(type, message, data = {}) {
   renderTasks();
 }
 
+function backgroundJobRetryLabel(type) {
+  return type === "decomposition" ? "重试查询拆解结果" : "重试查询预案结果";
+}
+
+function isRecoverableBackgroundJob(job = null) {
+  const code = String(job?.error?.code || "");
+  return Boolean(job?.id) && (code === "job_poll_failed" || code === "job_poll_timeout");
+}
+
+function retryableJobMessage(type, detail = "") {
+  const prefix = type === "decomposition" ? "AI 拆解结果查询失败" : "Seedance 预案结果查询失败";
+  const cleanDetail = String(detail || "").trim();
+  return cleanDetail
+    ? `${prefix}，后台任务可能仍在运行，可重试查询。原因：${cleanDetail}`
+    : `${prefix}，后台任务可能仍在运行，可重试查询。`;
+}
+
+function markBackgroundJobPollFailure(type, message, data = {}) {
+  const recoverableMessage = retryableJobMessage(type, message);
+  const job = {
+    id: data.jobId || "",
+    type,
+    status: "running",
+    progress: type === "decomposition" ? 30 : 90,
+    message: recoverableMessage,
+    error: {
+      code: data.code || "job_poll_failed",
+      message: message || "请求失败",
+      recoverable: true,
+      data
+    },
+    result: null,
+    events: []
+  };
+  if (type === "decomposition") {
+    state.decompositionJob = job;
+    els.draftDecompositionBtn.disabled = false;
+    els.decompositionStatus.textContent = recoverableMessage;
+  } else {
+    state.planJob = job;
+    els.planBatchBtn.disabled = false;
+  }
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}查询中断：${recoverableMessage}`);
+  renderTasks();
+}
+
 function markBackgroundJobTimeout(type, message, data = {}) {
   const job = {
     id: data.jobId || "",
@@ -1396,7 +1489,12 @@ function markBackgroundJobTimeout(type, message, data = {}) {
     status: "running",
     progress: type === "decomposition" ? 30 : 90,
     message: message || "后台任务仍在运行",
-    error: null,
+    error: {
+      code: data.code || "job_poll_timeout",
+      message: message || "后台任务仍在运行",
+      recoverable: true,
+      data
+    },
     result: null,
     events: []
   };
@@ -1410,6 +1508,87 @@ function markBackgroundJobTimeout(type, message, data = {}) {
   }
   log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}仍在后台运行：${message}`);
   renderTasks();
+}
+
+function syncBackgroundJobActionButtons() {
+  const planRetryable = isRecoverableBackgroundJob(state.planJob);
+  const decompositionRetryable = isRecoverableBackgroundJob(state.decompositionJob);
+  if (els.planBatchBtn) {
+    els.planBatchBtn.textContent = planRetryable ? backgroundJobRetryLabel("plan") : "生成 Seedance 预案";
+  }
+  if (els.draftDecompositionBtn) {
+    els.draftDecompositionBtn.textContent = decompositionRetryable ? backgroundJobRetryLabel("decomposition") : "开始解析";
+  }
+}
+
+function retryBackgroundJobPoll(type) {
+  const job = type === "decomposition" ? state.decompositionJob : state.planJob;
+  if (!isRecoverableBackgroundJob(job)) return false;
+  if (type === "decomposition") {
+    const model = job.model || selectedDecompositionModel();
+    job.message = "正在重新查询拆解结果";
+    job.error = null;
+    els.decompositionStatus.textContent = "正在重新查询拆解结果";
+    renderTasks();
+    pollJob("decomposition", job.id, {
+      timeoutMs: decompositionJobTimeoutWindowMs(model),
+      timeoutLabel: isGeminiDecompositionModel(model)
+        ? "Gemini 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。"
+        : `任务超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`
+    });
+    return true;
+  }
+  job.message = "正在重新查询预案结果";
+  job.error = null;
+  renderTasks();
+  pollJob("plan", job.id);
+  return true;
+}
+
+async function restoreBackgroundJobFromRequest(restoreRequest) {
+  const jobType = String(restoreRequest?.jobType || "").trim();
+  const jobId = String(restoreRequest?.jobId || "").trim();
+  if (!jobType || !jobId) return false;
+  if (jobType === "decomposition") {
+    state.decompositionJob = {
+      id: jobId,
+      type: "decomposition",
+      status: "running",
+      progress: 30,
+      message: "正在重新查询拆解结果",
+      error: {
+        code: "job_poll_failed",
+        message: "任务管理页发起重新查询",
+        recoverable: true,
+        data: {}
+      },
+      events: []
+    };
+    els.decompositionStatus.textContent = "正在重新查询拆解结果";
+    renderTasks();
+    retryBackgroundJobPoll("decomposition");
+    return true;
+  }
+  if (jobType === "plan") {
+    state.planJob = {
+      id: jobId,
+      type: "plan",
+      status: "running",
+      progress: 90,
+      message: "正在重新查询预案结果",
+      error: {
+        code: "job_poll_failed",
+        message: "任务管理页发起重新查询",
+        recoverable: true,
+        data: {}
+      },
+      events: []
+    };
+    renderTasks();
+    retryBackgroundJobPoll("plan");
+    return true;
+  }
+  return false;
 }
 
 function renderReminders({ batch, plans } = {}) {
@@ -1466,6 +1645,31 @@ async function uploadSeedanceAssetsForReview() {
   } finally {
     els.uploadSeedanceAssetsBtn.disabled = false;
   }
+}
+
+async function uploadDisclaimerOverlayAsset() {
+  const input = $("#wzDisclaimerOverlayFile");
+  const file = input?.files?.[0];
+  if (!file) return;
+  if (file.type && file.type !== "image/png") {
+    showError({ message: "免责声明贴片只支持 PNG" }, "贴片上传失败");
+    input.value = "";
+    return;
+  }
+  const content = await fileToDataUrl(file);
+  const data = await api("/api/wangzhuan/disclaimer-overlays/upload", {
+    method: "POST",
+    body: JSON.stringify({
+      fileName: file.name,
+      mimeType: file.type || "image/png",
+      content
+    })
+  });
+  state.disclaimerOverlayAsset = data.asset || null;
+  renderDisclaimerOverlayPreview();
+  renderTasks();
+  log("免责声明贴片 PNG 已上传");
+  await markPlanMaybeStale();
 }
 
 async function confirmRewriteInfo() {
@@ -1574,6 +1778,7 @@ async function confirmSeedanceAssetReviews() {
 }
 
 async function startDecompositionJob() {
+  if (retryBackgroundJobPoll("decomposition")) return;
   if (!state.referenceVideo?.referenceVideoId) return;
   const model = selectedDecompositionModel();
   const timeoutMs = decompositionTimeoutMs(model);
@@ -1613,6 +1818,7 @@ async function startDecompositionJob() {
 }
 
 async function startPlanJob() {
+  if (retryBackgroundJobPoll("plan")) return;
   if (!state.estimate?.estimateId) return;
   els.planBatchBtn.disabled = true;
   const payload = {
@@ -1685,7 +1891,7 @@ async function pollJob(type, jobId, options = {}) {
       renderTasks();
     } catch (error) {
       clearInterval(timer);
-      failBackgroundJob(type, error.message, {
+      markBackgroundJobPollFailure(type, error.message, {
         code: error.code || "job_poll_failed",
         jobId
       });
@@ -1747,6 +1953,7 @@ async function restoreWorkbenchFromUrl() {
   const batch = detail?.batch || detail || {};
   if (restored) {
     log(`已从任务管理恢复批次：${batch.batchId || restoreRequest.id}`);
+    await restoreBackgroundJobFromRequest(restoreRequest);
     if (batch.batchId && !TERMINAL_BATCH_STATUSES.has(batch.status)) startBatchPolling(batch.batchId);
     if (location.hash) {
       requestAnimationFrame(() => document.querySelector(location.hash)?.scrollIntoView({ block: "start" }));
@@ -1757,28 +1964,38 @@ async function restoreWorkbenchFromUrl() {
 
 async function confirmPlanAndGenerate() {
   const batch = state.batchDetail?.batch || state.batchDetail;
-  if (!batch?.batchId || state.stalePlanPreview) return;
+  if (!batch?.batchId || state.stalePlanPreview || state.confirmPlanSubmitting) return;
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) {
     showError({ message: "请先确认本批次数量、时长和可能消耗" }, "确认预案失败");
     return;
   }
-  const plans = collectEditablePlans();
-  const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/confirm-plan`, {
-    method: "POST",
-    body: JSON.stringify({
-      idempotencyKey: `wzv2-confirm-${Date.now()}`,
-      planIds: plans.map((plan) => plan.planId).filter(Boolean),
-      confirmedPlanIds: plans.map((plan) => plan.planId).filter(Boolean),
-      plans,
-      branchDrafts: estimateRequest().branches,
-      draftSignature: state.draftSignature,
-      draftSignatureInput: planSignatureInput()
-    })
-  });
-  state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
-  log("预案已确认，已提交 Seedance 生成");
+  clearError();
+  state.confirmPlanSubmitting = true;
+  log("正在确认预案并提交 Seedance...");
+  setBusy(els.confirmPlanBtn, true, "提交中");
   renderTasks();
-  startBatchPolling(batch.batchId);
+  const plans = collectEditablePlans();
+  try {
+    const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/confirm-plan`, {
+      method: "POST",
+      body: JSON.stringify({
+        idempotencyKey: `wzv2-confirm-${Date.now()}`,
+        planIds: plans.map((plan) => plan.planId).filter(Boolean),
+        confirmedPlanIds: plans.map((plan) => plan.planId).filter(Boolean),
+        plans,
+        branchDrafts: estimateRequest().branches,
+        draftSignature: state.draftSignature,
+        draftSignatureInput: planSignatureInput()
+      })
+    });
+    state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
+    log("预案已确认，已提交 Seedance 生成");
+    startBatchPolling(batch.batchId);
+  } finally {
+    state.confirmPlanSubmitting = false;
+    setBusy(els.confirmPlanBtn, false);
+    renderTasks();
+  }
 }
 
 async function stopBatch() {
@@ -1918,6 +2135,7 @@ els.promiseLevel?.addEventListener("change", syncTruthDetails);
 els.currencySymbol?.addEventListener("change", syncCurrencyCustom);
 els.truthFields?.addEventListener("input", markPlanMaybeStale);
 els.truthFields?.addEventListener("change", markPlanMaybeStale);
+$("#wzDisclaimerOverlayFile")?.addEventListener("change", () => uploadDisclaimerOverlayAsset().catch((error) => showError(error, "贴片上传失败")));
 els.estimateBtn?.addEventListener("click", () => estimateBatch().catch((error) => showError(error, "估算失败")));
 els.planBatchBtn?.addEventListener("click", () => startPlanJob().catch((error) => showError(error, "预案任务提交失败")));
 els.confirmPlanBtn?.addEventListener("click", () => confirmPlanAndGenerate().catch((error) => showError(error, "确认预案失败")));
@@ -1969,14 +2187,19 @@ for (const el of [
   $("#wzDisclaimerPreset"),
   $("#wzDisclaimerEnabled"),
   $("#wzDisclaimerOverlayPosition"),
-  $("#wzDisclaimerOverlayFontSize"),
   $("#wzDisclaimerOverlayBoxHeight"),
   $("#wzDisclaimerOverlayBottomMargin"),
-  $("#wzDisclaimerOverlayHorizontalMargin"),
-  $("#wzDisclaimer")
+  $("#wzDisclaimerOverlayHorizontalMargin")
 ]) {
-  el?.addEventListener("change", renderTasks);
-  el?.addEventListener("input", renderTasks);
+  el?.addEventListener("change", () => {
+    renderDisclaimerOverlayPreview();
+    renderTasks();
+    markPlanMaybeStale();
+  });
+  el?.addEventListener("input", () => {
+    renderTasks();
+    markPlanMaybeStale();
+  });
 }
 
 for (const [, selector] of assetInputs) {
@@ -1991,6 +2214,7 @@ syncGeminiDecompositionHint();
 renderBranchTabs();
 renderAssetReviewState();
 renderPlanEditors([]);
+renderDisclaimerOverlayPreview();
 renderTasks();
 renderLogs();
 renderRecentResults();

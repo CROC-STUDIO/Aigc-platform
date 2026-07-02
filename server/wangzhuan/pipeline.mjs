@@ -34,6 +34,7 @@ import {
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "./plan-preview.mjs";
+import { listBackgroundJobs } from "./background-jobs.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
@@ -768,6 +769,55 @@ async function enrichBatchWorkbenchContext(context, detail) {
   };
 }
 
+function backgroundJobSummary(job = null) {
+  if (!job) return null;
+  return {
+    id: job.id || "",
+    type: job.type || "",
+    subjectType: job.subjectType || "",
+    subjectId: job.subjectId || "",
+    status: job.status || "",
+    progress: Number(job.progress || 0),
+    message: job.message || "",
+    draftSignature: job.draftSignature || "",
+    createdAt: job.createdAt || null,
+    updatedAt: job.updatedAt || null,
+    error: job.error ? {
+      code: job.error.code || "",
+      message: job.error.message || "",
+      recoverable: Boolean(job.error.recoverable),
+      data: job.error.data && typeof job.error.data === "object" ? job.error.data : {}
+    } : null
+  };
+}
+
+async function attachBackgroundJobSummaries(context, detail) {
+  const batch = detail?.batch;
+  if (!batch?.batchId) return detail;
+  const referenceVideoId = batch.referenceVideo?.referenceVideoId || batch.request?.referenceVideoId || "";
+  const [planJobs, decompositionJobs] = await Promise.all([
+    listBackgroundJobs(context, {
+      type: "seedance_plan",
+      subjectType: "batch",
+      subjectId: batch.batchId
+    }).catch(() => []),
+    referenceVideoId
+      ? listBackgroundJobs(context, {
+        type: "decomposition",
+        subjectType: "reference_video",
+        subjectId: referenceVideoId
+      }).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  return {
+    ...detail,
+    backgroundJobs: {
+      latestPlanJob: backgroundJobSummary(planJobs[0] || null),
+      latestDecompositionJob: backgroundJobSummary(decompositionJobs[0] || null)
+    }
+  };
+}
+
 export async function getBatchDetail(context, batchId) {
   const initial = await readBatch(context, batchId);
   const { pollUpstreamBatch, shouldPollUpstreamBatch } = await import("./upstream-poll.mjs");
@@ -781,6 +831,7 @@ export async function getBatchDetail(context, batchId) {
   let detail = await loadBatchDetailFromMysql(context, batchId);
   if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   detail = await enrichBatchWorkbenchContext(context, detail);
+  detail = await attachBackgroundJobSummaries(context, detail);
   return detail;
 }
 
@@ -1168,6 +1219,10 @@ export async function getActiveBatch(context) {
   return {
     batch: null,
     events: [],
+    backgroundJobs: {
+      latestPlanJob: null,
+      latestDecompositionJob: null
+    },
     downloadSummary: {
       outputsTotal: 0,
       downloadEligibleCount: 0,

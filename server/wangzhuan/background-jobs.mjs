@@ -50,6 +50,8 @@ function publicJob(job) {
   return {
     id: job.id,
     type: job.type,
+    subjectType: job.subjectType || "",
+    subjectId: job.subjectId || "",
     status: job.status,
     progress: job.progress,
     message: job.message,
@@ -105,6 +107,7 @@ function safeError(error) {
   return {
     code: error?.code || "job_failed",
     message: String(error?.message || "任务失败").slice(0, 500),
+    recoverable: Boolean(error?.recoverable),
     data: error?.data && typeof error.data === "object" ? error.data : {}
   };
 }
@@ -121,6 +124,8 @@ export function createBackgroundJob(type, runner, options = {}) {
   const job = {
     id: `${idPrefix}_${Date.now()}_${randomBytes(4).toString("hex")}`,
     type,
+    subjectType: String(options.subjectType || ""),
+    subjectId: String(options.subjectId || ""),
     status: "queued",
     progress: 0,
     message: "已加入后台任务队列",
@@ -200,6 +205,29 @@ export async function getBackgroundJob(context, jobId) {
     return publicJob(job);
   }
   return loadPersistedJob(context, String(jobId || ""));
+}
+
+export async function listBackgroundJobs(context, filter = {}) {
+  const paths = wangzhuanPaths(context);
+  const { readdir } = await import("node:fs/promises");
+  let names = [];
+  try {
+    names = await readdir(paths.jobsDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  const entries = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const loaded = await loadPersistedJob(context, name.slice(0, -5));
+    if (!loaded) continue;
+    if (filter.type && loaded.type !== filter.type) continue;
+    if (filter.subjectType && loaded.subjectType !== filter.subjectType) continue;
+    if (filter.subjectId && loaded.subjectId !== filter.subjectId) continue;
+    entries.push(loaded);
+  }
+  return entries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
 export function resetBackgroundJobsForTest() {

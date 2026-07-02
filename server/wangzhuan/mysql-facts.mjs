@@ -261,6 +261,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "failed", "waiting_upstream", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "waiting_upstream", "batch_write", null, 0],
   ["workflow_task", "failed", "downloaded", "batch_write", null, 0],
+  ["workflow_task", "pending", "failed", "downloaded_output", null, 1],
   ["workflow_task", "failed", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "batch_write", null, 0],
@@ -296,6 +297,17 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ...RUN_STATUSES.flatMap((status) => SAME_STATUS_TRIGGERS.map((trigger) => ["workflow_run", status, status, trigger, null, TERMINAL_STATUSES.has(status) ? 1 : 0])),
   ...TASK_STATUSES.flatMap((status) => SAME_STATUS_TRIGGERS.map((trigger) => ["workflow_task", status, status, trigger, null, TERMINAL_STATUSES.has(status) ? 1 : 0]))
 ]);
+
+export function listStateTransitionRules() {
+  return STATE_TRANSITION_RULES.map(([entityType, fromStatus, toStatus, triggerName, requiresPermission, isTerminal]) => ({
+    entityType,
+    fromStatus,
+    toStatus,
+    triggerName,
+    requiresPermission,
+    isTerminal
+  }));
+}
 
 async function ensureStateTransitionRules(conn) {
   for (const rule of STATE_TRANSITION_RULES) {

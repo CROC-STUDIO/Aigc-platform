@@ -46,11 +46,15 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /id="wzTruthFields"/);
   assert.match(html, /id="wzInspectStoreBtn"[^>]*disabled/);
   assert.match(html, /免责声明贴片模板/);
+  assert.match(html, /id="wzDisclaimerOverlayFile"/);
+  assert.match(html, /id="wzDisclaimerOverlayPreview"/);
   assert.match(html, /id="wzDisclaimerOverlayPosition"/);
-  assert.match(html, /id="wzDisclaimerOverlayFontSize"/);
   assert.match(html, /id="wzDisclaimerOverlayBoxHeight"/);
   assert.match(html, /id="wzDisclaimerOverlayBottomMargin"/);
   assert.match(html, /id="wzDisclaimerOverlayHorizontalMargin"/);
+  assert.doesNotMatch(html, /id="wzDisclaimer"/);
+  assert.doesNotMatch(html, /免责声明文案/);
+  assert.doesNotMatch(html, /id="wzDisclaimerOverlayFontSize"/);
   assert.match(html, /脚本裂变规则补充/);
   assert.match(html, /变体数 \* 同时生成数量 \* 3min/);
   assert.match(html, /id="wzLlmModel"/);
@@ -85,8 +89,13 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /function hasGeneratedSeedancePlan/);
   assert.match(js, /function setPlanUpstreamLocked\(locked\)/);
   assert.match(js, /setPlanUpstreamLocked\(planUpstreamLocked\)/);
-  assert.match(js, /els\.planBatchBtn\.disabled = planUpstreamLocked/);
-  assert.match(js, /els\.confirmPlanBtn\.disabled = !plans\.length/);
+  assert.match(js, /const planRetryable = isRecoverableBackgroundJob\(state\.planJob\)/);
+  assert.match(js, /els\.planBatchBtn\.disabled = planRetryable/);
+  assert.match(js, /els\.confirmPlanBtn\.disabled = state\.confirmPlanSubmitting \|\| !plans\.length/);
+  assert.match(js, /state\.confirmPlanSubmitting = true/);
+  assert.match(js, /log\("正在确认预案并提交 Seedance\.\.\."\)/);
+  assert.match(js, /setBusy\(els\.confirmPlanBtn, true, "提交中"\)/);
+  assert.match(js, /finally \{\s*\n\s*state\.confirmPlanSubmitting = false/);
   assert.match(js, /setPlanUpstreamLocked\(true\)/);
   assert.match(js, /if \(type === "plan"\) setPlanUpstreamLocked\(false\)/);
   assert.match(js, /setPlanUpstreamLocked\(false\);\s*\n\s*state\.referenceVideo = null/);
@@ -131,7 +140,14 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /function decompositionJobTimeoutWindowMs\(model = selectedDecompositionModel\(\)\)/);
   assert.match(js, /const maxRetries = decompositionMaxRetries\(model\)/);
   assert.match(js, /markBackgroundJobTimeout/);
+  assert.match(js, /markBackgroundJobPollFailure/);
   assert.match(js, /job_poll_timeout/);
+  assert.match(js, /job_poll_failed/);
+  assert.match(js, /重试查询预案结果/);
+  assert.match(js, /重试查询拆解结果/);
+  assert.match(js, /后台任务可能仍在运行，可重试查询/);
+  assert.match(js, /retryBackgroundJobPoll\("plan"\)/);
+  assert.match(js, /retryBackgroundJobPoll\("decomposition"\)/);
   assert.match(js, /decompositionEditedFields:\s*new Set\(\)/);
   assert.match(js, /resetDecompositionDraft\(\{\s*clearForm:\s*true\s*\}\)/);
   assert.match(js, /state\.decompositionEditedFields\.clear\(\)/);
@@ -181,6 +197,7 @@ test("wangzhuan v2 restores task-manager backflow links in place", async () => {
   const js = await readText("public/wangzhuan-v2.js");
   assert.match(js, /readWorkbenchRestoreRequest/);
   assert.match(js, /async function restoreWorkbenchFromUrl\(\)/);
+  assert.match(js, /async function restoreBackgroundJobFromRequest\(restoreRequest\)/);
   assert.match(js, /const restoreRequest = readWorkbenchRestoreRequest\(\)/);
   assert.match(js, /\/api\/wangzhuan\/batches\/\$\{encodeURIComponent\(batchId\)\}/);
   assert.match(js, /function restoreV2FromBatchDetail\(detail = \{\}\)/);
@@ -189,6 +206,9 @@ test("wangzhuan v2 restores task-manager backflow links in place", async () => {
   assert.match(js, /branchDraftsFromBatch\(batch\)/);
   assert.match(js, /renderPlanEditors\(Array\.isArray\(batch\.plans\) \? batch\.plans : \[\]\)/);
   assert.match(js, /已从任务管理恢复批次/);
+  assert.match(js, /await restoreBackgroundJobFromRequest\(restoreRequest\)/);
+  assert.match(js, /retryBackgroundJobPoll\("plan"\)/);
+  assert.match(js, /retryBackgroundJobPoll\("decomposition"\)/);
   assert.match(js, /restoreWorkbenchFromUrl\(\)/);
 });
 
@@ -199,6 +219,41 @@ test("wangzhuan v2 page exposes bounded logs and lazy recent result controls", a
   assert.match(html, /只加载最近 5 条摘要/);
   assert.match(html, /id="wzRecentPager"/);
   assert.match(html, /id="wzRefreshRecentBtn"/);
+});
+
+test("task manager separates final outputs from intermediate outputs", async () => {
+  const js = await readText("public/wangzhuan-tasks.js");
+  assert.match(js, /function splitOutputGroups\(outputs = \[\]\)/);
+  assert.match(js, /function renderOutputStage/);
+  assert.match(js, /function renderOutputCards/);
+  assert.match(js, /output\.kind === "segment_video" \|\| output\.kind === "segment"/);
+  assert.match(js, /"stitched_video"/);
+  assert.match(js, /交付结果/);
+  assert.match(js, /最终结果尚未生成/);
+  assert.match(js, /中间结果/);
+  assert.match(js, /不作为最终交付成片/);
+});
+
+test("task manager download action starts zip download with visible feedback", async () => {
+  const js = await readText("public/wangzhuan-tasks.js");
+  assert.match(js, /async function downloadSelectedTask\(\)/);
+  assert.match(js, /result = await downloadZip\(\{/);
+  assert.match(js, /batchIds:\s*\[state\.selectedId\]/);
+  assert.match(js, /remixIds:\s*\[state\.selectedId\]/);
+  assert.match(js, /includeSegments:\s*Boolean\(\$\(("#wzTasksIncludeSegments"|\'#wzTasksIncludeSegments\')\)\?\.checked\)/);
+  assert.match(js, /showToast\(`已开始下载 \$\{result\?\.fileName \|\| "交付包"\}`/);
+});
+
+test("download packages require final media but allow missing auxiliary files", async () => {
+  const source = await readText("server/wangzhuan/package.mjs");
+  assert.match(source, /async function addStoredFile/);
+  assert.match(source, /return true/);
+  assert.match(source, /return false/);
+  assert.match(source, /const requiredMissingFiles = \[\]/);
+  assert.match(source, /if \(!outputAdded\) requiredMissingFiles\.push\(zipPath\)/);
+  assert.match(source, /if \(requiredMissingFiles\.length\)/);
+  assert.match(source, /交付包缺少最终视频文件/);
+  assert.doesNotMatch(source, /if \(missingFiles\.length\) \{\s*\n\s*throw new WangzhuanError\("missing_required_file"/);
 });
 
 test("confirming Seedance asset reviews is not blocked by preview stage", async () => {
