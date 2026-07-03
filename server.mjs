@@ -1633,7 +1633,7 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   const { stdout, stderr } = await execTai(args);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = parseSeedanceVideoUrl(raw) || await pollSeedanceVideoUrl(taskId, job.name);
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, job.name) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   await downloadBinary(videoUrl, job.videoOutput);
   const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
@@ -1703,7 +1703,7 @@ async function generateComicVideo(body = {}) {
   }
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = parseSeedanceVideoUrl(raw) || await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`);
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   const output = join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`);
   await downloadBinary(videoUrl, output);
@@ -1717,10 +1717,47 @@ async function generateComicVideo(body = {}) {
 
 function parseSeedanceVideoUrl(raw) {
   const lines = String(raw).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const direct = lines.map((line) => line.match(/(https?:\/\/\S+|\/v1\/public\/\S+\.(?:mp4|webm|mov)(?:\?\S+)?)/i)?.[1]).find(Boolean);
-  if (direct) return direct;
-  const outputLine = lines.find((line) => /Output|Preview|Video/i.test(line));
-  return outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1]?.trim() || "";
+  const cleanUrl = (value = "") => String(value).trim().replace(/[)"'，,。]+$/g, "");
+  const fromObject = (value, path = "") => {
+    if (!value || typeof value !== "object") return "";
+    const isOutputPath = /(output|result|generated|generation|video|download|play|preview)/i.test(path) &&
+      !/(input|source|reference|asset|upload|origin|prompt)/i.test(path);
+    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "preview_url", "previewUrl", "url"];
+    for (const key of keys) {
+      const nextPath = path ? `${path}.${key}` : key;
+      const keyLooksLikeOutput = /(output|result|generated|generation|video|download|play|preview)/i.test(nextPath) &&
+        !/(input|source|reference|asset|upload|origin|prompt)/i.test(nextPath);
+      if (typeof value[key] === "string" && (isOutputPath || keyLooksLikeOutput) && isLikelyVideoUrl(value[key])) return cleanUrl(value[key]);
+    }
+    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "preview", "download"]) {
+      const found = fromObject(value[key], path ? `${path}.${key}` : key);
+      if (found) return found;
+    }
+    for (const item of Object.values(value)) {
+      if (Array.isArray(item)) {
+        const arrayPath = Object.entries(value).find(([, candidate]) => candidate === item)?.[0] || "items";
+        for (const child of item) {
+          const found = fromObject(child, path ? `${path}.${arrayPath}` : arrayPath);
+          if (found) return found;
+        }
+      }
+    }
+    return "";
+  };
+  for (const line of lines) {
+    if (!line.startsWith("{") && !line.startsWith("[")) continue;
+    try {
+      const found = fromObject(JSON.parse(line));
+      if (found) return found;
+    } catch {
+      // CLI output often contains non-JSON progress lines.
+    }
+  }
+  const outputLine = lines.find((line) =>
+    /(Output|Result|Generated|Preview|Video\s*(URL|Output|Result)|视频结果|生成结果|输出)/i.test(line) &&
+    !/(Upload|Uploaded|Input|Source|Reference|Asset|--video|source-video|参考|输入|上传)/i.test(line)
+  );
+  return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
 }
 
 async function pollSeedanceVideoUrl(taskId, jobName) {
