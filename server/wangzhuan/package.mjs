@@ -65,6 +65,18 @@ function normalizeBoolean(value) {
   return value === true || value === "true" || value === "1";
 }
 
+function normalizeIdSet(values) {
+  if (!Array.isArray(values)) return new Set();
+  return new Set(values.map((value) => String(value || "").trim()).filter(Boolean));
+}
+
+function hasSelectedOutputFilter(request) {
+  return Boolean(
+    normalizeIdSet(request.outputIds).size ||
+    normalizeIdSet(request.remixOutputIds).size
+  );
+}
+
 function zipSafeName(name) {
   return String(name || "file").replace(/^[\\/]+/, "").replace(/[\\:*?"<>|]/g, "_");
 }
@@ -74,6 +86,10 @@ function addStringFile(files, zipPath, value) {
     zipPath: zipSafeName(zipPath),
     data: Buffer.from(`${typeof value === "string" ? value : JSON.stringify(value, null, 2)}\n`, "utf8")
   });
+}
+
+function outputFileExtension(output = {}) {
+  return extname(output.filePath || output.displayFileName || output.storageKey || "") || ".mp4";
 }
 
 async function addDiskFile(context, files, missingFiles, zipPath, relativePath) {
@@ -119,7 +135,7 @@ async function addStoredFile(context, files, missingFiles, zipPath, asset = {}) 
 }
 
 function outputPackagePath(batchRoot, output) {
-  const ext = extname(output.filePath) || ".mp4";
+  const ext = outputFileExtension(output);
   const fileName = output.displayFileName || `${output.outputId}${output.kind === "stitched_video" ? "_30s" : ""}${ext}`;
   if (output.kind === "stitched_video") return `${batchRoot}/stitched/${fileName}`;
   if (output.kind === "segment_video") return `${batchRoot}/segments/${fileName}`;
@@ -127,6 +143,10 @@ function outputPackagePath(batchRoot, output) {
 }
 
 function packageOutputSelection(batch, request) {
+  const selectedOutputIds = normalizeIdSet(request.outputIds);
+  if (selectedOutputIds.size) {
+    return (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => selectedOutputIds.has(output.outputId));
+  }
   const includeFailed = normalizeBoolean(request.includeFailed);
   const includeSegments = normalizeBoolean(request.includeSegments);
   return (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => {
@@ -138,6 +158,12 @@ function packageOutputSelection(batch, request) {
 }
 
 function packageRemixOutputSelection(remix, request) {
+  const selectedOutputIds = normalizeIdSet(request.remixOutputIds).size
+    ? normalizeIdSet(request.remixOutputIds)
+    : normalizeIdSet(request.outputIds);
+  if (selectedOutputIds.size) {
+    return (Array.isArray(remix.outputs) ? remix.outputs : []).filter((output) => selectedOutputIds.has(output.outputId));
+  }
   const includeFailed = normalizeBoolean(request.includeFailed);
   return (Array.isArray(remix.outputs) ? remix.outputs : []).filter((output) => {
     if (output.downloadEligible) return true;
@@ -245,6 +271,26 @@ async function collectBatchFiles(context, batch, request, packageItems, missingF
   const batchRoot = `batches/${batch.batchId}`;
   const selectedOutputs = packageOutputSelection(batch, request);
   if (!selectedOutputs.length) return { files, selectedOutputs };
+  const selectedOnly = hasSelectedOutputFilter(request);
+
+  if (selectedOnly) {
+    for (const output of selectedOutputs) {
+      const zipPath = outputPackagePath(batchRoot, output);
+      const outputAdded = await addStoredFile(context, files, missingFiles, zipPath, output);
+      if (!outputAdded) requiredMissingFiles.push(zipPath);
+      packageItems.push({
+        sourceType: "pipeline",
+        batchId: batch.batchId,
+        outputId: output.outputId,
+        kind: output.kind,
+        status: batch.status,
+        qcStatus: output.qcStatus,
+        packagePath: zipPath,
+        diagnostic: !output.downloadEligible
+      });
+    }
+    return { files, selectedOutputs };
+  }
 
   addStringFile(files, `${batchRoot}/batch.json`, sanitizedBatch(batch));
   const referenceExt = extname(batch.referenceVideo?.storedPath || "") || ".mp4";
@@ -312,6 +358,26 @@ async function collectRemixFiles(context, remix, request, packageItems, missingF
   const remixRoot = `remix/${remix.remixId}`;
   const selectedOutputs = packageRemixOutputSelection(remix, request);
   if (!selectedOutputs.length) return { files, selectedOutputs };
+  const selectedOnly = hasSelectedOutputFilter(request);
+
+  if (selectedOnly) {
+    for (const output of selectedOutputs) {
+      const zipPath = `${remixRoot}/outputs/${output.outputId}${outputFileExtension(output)}`;
+      const outputAdded = await addStoredFile(context, files, missingFiles, zipPath, output);
+      if (!outputAdded) requiredMissingFiles.push(zipPath);
+      packageItems.push({
+        sourceType: "remix",
+        remixId: remix.remixId,
+        outputId: output.outputId,
+        kind: output.kind,
+        status: remix.status,
+        qcStatus: output.qcStatus,
+        packagePath: zipPath,
+        diagnostic: !output.downloadEligible
+      });
+    }
+    return { files, selectedOutputs };
+  }
 
   const sourceExt = extname(remix.source?.storedPath || "") || ".mp4";
   await addStoredFile(context, files, missingFiles, `${remixRoot}/source/original${sourceExt}`, remix.source || {});
@@ -319,7 +385,7 @@ async function collectRemixFiles(context, remix, request, packageItems, missingF
 
   const outputPathById = new Map();
   for (const output of selectedOutputs) {
-    const zipPath = `${remixRoot}/outputs/${output.outputId}${extname(output.filePath) || ".mp4"}`;
+    const zipPath = `${remixRoot}/outputs/${output.outputId}${outputFileExtension(output)}`;
     outputPathById.set(output.outputId, zipPath);
     const outputAdded = await addStoredFile(context, files, missingFiles, zipPath, output);
     if (!outputAdded) requiredMissingFiles.push(zipPath);
@@ -448,6 +514,7 @@ export function buildZip(files) {
 export async function buildDownloadPackage(context, request = {}) {
   const batchIds = Array.isArray(request.batchIds) ? request.batchIds.map(String) : [];
   const remixIds = Array.isArray(request.remixIds) ? request.remixIds.map(String) : [];
+  const selectedOnly = hasSelectedOutputFilter(request);
   if (!batchIds.length && !remixIds.length) {
     throw new WangzhuanError("empty_download_set", "当前筛选没有可下载素材", { field: "batchIds/remixIds" });
   }
@@ -484,6 +551,9 @@ export async function buildDownloadPackage(context, request = {}) {
     filters: {
       batchIds,
       remixIds,
+      outputIds: Array.from(normalizeIdSet(request.outputIds)),
+      remixOutputIds: Array.from(normalizeIdSet(request.remixOutputIds)),
+      selectedOnly,
       includeFailed: normalizeBoolean(request.includeFailed),
       includeSegments: normalizeBoolean(request.includeSegments),
       includeRemoteUrls: false
@@ -496,7 +566,7 @@ export async function buildDownloadPackage(context, request = {}) {
     throw new WangzhuanError("missing_required_file", "交付包缺少最终视频文件，请重建或联系管理员", { missingFiles: requiredMissingFiles, manifest });
   }
 
-  addStringFile(files, "package-manifest.json", manifest);
+  if (!selectedOnly) addStringFile(files, "package-manifest.json", manifest);
   const synced = await syncDownloadPackageFact(context, manifest);
   if (synced?.skipped) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存下载包记录");
@@ -506,6 +576,7 @@ export async function buildDownloadPackage(context, request = {}) {
     batchIds,
     remixIds,
     itemCount: packageItems.length,
+    selectedOnly,
     includeFailed: manifest.filters.includeFailed,
     includeSegments: manifest.filters.includeSegments
   }, { audit: true });

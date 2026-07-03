@@ -14,6 +14,7 @@ const PRODUCT_ASSET_KEYS = new Set([
   "personAsset",
   "rewardElement"
 ]);
+const MULTI_PRODUCT_ASSET_PREFIXES = new Set(["productIcon", "productScreenshot", "productRecording"]);
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -57,7 +58,8 @@ function allowedMimeForExt(ext) {
 
 export async function uploadProductAsset(context, request = {}) {
   const assetKey = sanitizeSegment(request.assetKey);
-  if (!PRODUCT_ASSET_KEYS.has(assetKey)) {
+  const baseAssetKey = assetKey.replace(/_\d+$/, "");
+  if (!PRODUCT_ASSET_KEYS.has(assetKey) && !MULTI_PRODUCT_ASSET_PREFIXES.has(baseAssetKey)) {
     throw new WangzhuanError("validation_error", "产品素材字段不支持", { field: "assetKey", assetKey });
   }
   const fileName = sanitizeFileName(request.fileName || request.name, assetKey);

@@ -414,7 +414,15 @@ function templateVersionStatus(template) {
   return ["active", "archived", "deleted"].includes(template?.status) ? template.status : "active";
 }
 
-async function upsertTemplateFact(conn, facts, template) {
+function templateAggregateStatus(templates = [], templateId = "") {
+  const versions = templates.filter((template) => template.templateId === templateId);
+  if (!versions.length) return "active";
+  if (versions.some((template) => templateVersionStatus(template) === "active")) return "active";
+  if (versions.some((template) => templateVersionStatus(template) === "archived")) return "archived";
+  return "deleted";
+}
+
+async function upsertTemplateFact(conn, facts, template, status = templateVersionStatus(template)) {
   await conn.execute(
     `INSERT INTO product_templates
       (template_uid, project_id, display_name, status, created_by, created_at, updated_at, deleted_at)
@@ -428,11 +436,11 @@ async function upsertTemplateFact(conn, facts, template) {
       template.templateId,
       facts.projectId,
       templateDisplayName(template),
-      templateVersionStatus(template),
+      status,
       facts.userId,
       mysqlDate(template.createdAt) || mysqlDate(new Date()),
       mysqlDate(template.updatedAt) || mysqlDate(new Date()),
-      template.status === "deleted" ? (mysqlDate(template.updatedAt) || mysqlDate(new Date())) : null
+      status === "deleted" ? (mysqlDate(template.updatedAt) || mysqlDate(new Date())) : null
     ]
   );
   return findTemplateId(conn, facts.projectId, template.templateId);
@@ -526,7 +534,7 @@ export async function syncTemplateStoreFacts(context, store) {
     let defaultTemplateDbId = null;
     for (const template of store.templates) {
       if (!template?.templateId || !template?.versionId) continue;
-      const templateDbId = await upsertTemplateFact(conn, facts, template);
+      const templateDbId = await upsertTemplateFact(conn, facts, template, templateAggregateStatus(store.templates, template.templateId));
       const versionDbId = await upsertTemplateVersionFact(conn, facts, templateDbId, template);
       if ((store.defaultTemplateId && template.templateId === store.defaultTemplateId) || template.isDefault) {
         defaultTemplateDbId = templateDbId;

@@ -39,6 +39,7 @@ const els = {
   templateSelect: $("#wzTemplateSelect"),
   displayName: $("#wzDisplayName"),
   createTemplateBtn: $("#wzCreateTemplateBtn"),
+  deleteTemplateBtn: $("#wzDeleteTemplateBtn"),
   confirmRewriteBtn: $("#wzConfirmRewriteBtn"),
   addBranchBtn: $("#wzAddBranchBtn"),
   removeBranchBtn: $("#wzRemoveBranchBtn"),
@@ -59,11 +60,9 @@ const els = {
   cta: $("#wzCta"),
   ending: $("#wzEnding"),
   uploadSeedanceAssetsBtn: $("#wzUploadSeedanceAssetsBtn"),
-  confirmAssetsBtn: $("#wzConfirmAssetsBtn"),
   variantPrompt: $("#wzVariantPrompt"),
   customPrompt: $("#wzCustomPrompt"),
   negativePrompt: $("#wzNegativePrompt"),
-  estimateBtn: $("#wzEstimateBtn"),
   estimateBox: $("#wzEstimateBox"),
   confirmLimits: $("#wzConfirmLimits"),
   planLlmProvider: $("#wzPlanLlmProvider"),
@@ -132,6 +131,14 @@ const POLL_INTERVAL_MS = 1500;
 const VISIBLE_LOG_LIMIT = 50;
 const OLDER_LOG_PAGE_SIZE = 50;
 const RECENT_PAGE_SIZE = 5;
+const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-fast-260128";
+const DEFAULT_VARIANT_COUNT = 3;
+const MAX_VARIANT_COUNT = 10;
+const MULTI_ASSET_LIMITS = Object.freeze({
+  productIcon: 9,
+  productScreenshot: 9,
+  productRecording: 2
+});
 const TERMINAL_BATCH_STATUSES = new Set(["succeeded", "failed", "partial_failed", "stopped", "skipped"]);
 const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzBatchName",
@@ -163,8 +170,6 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzCurrencyCustom",
   "#wzCta",
   "#wzEnding",
-  "#wzUploadSeedanceAssetsBtn",
-  "#wzConfirmAssetsBtn",
   "#wzVariantPrompt",
   "#wzCustomPrompt",
   "#wzNegativePrompt",
@@ -184,7 +189,6 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzPlanLlmModel",
   "#wzPlanLlmEndpoint",
   "#wzPlanLlmTemperature",
-  "#wzEstimateBtn",
   "#wzConfirmLimits",
   "#wzPlanBatchBtn",
   "#wzProductIconFile",
@@ -246,6 +250,29 @@ function syncCurrencyCustom() {
 
 function selectedDecompositionModel() {
   return value($("#wzLlmModel"));
+}
+
+function selectedSeedanceModel() {
+  const selected = value($("#wzModelSelect")) || value(els.seedanceModel);
+  return normalizeSeedanceModel(selected);
+}
+
+function syncSeedanceModel() {
+  const model = selectedSeedanceModel();
+  const modelSelect = $("#wzModelSelect");
+  if (modelSelect) modelSelect.value = model;
+  if (els.seedanceModel) els.seedanceModel.value = model;
+}
+
+function normalizeSeedanceModel(model = "") {
+  const valueText = String(model || "").trim();
+  if (!valueText) return DEFAULT_SEEDANCE_MODEL;
+  return valueText;
+}
+
+function variantCountValue() {
+  const raw = Number(value(els.variantCount) || DEFAULT_VARIANT_COUNT);
+  return Math.max(1, Math.min(MAX_VARIANT_COUNT, raw || DEFAULT_VARIANT_COUNT));
 }
 
 function isGeminiDecompositionModel(model = selectedDecompositionModel()) {
@@ -315,6 +342,16 @@ function currentBatchId() {
 
 function emptyAssetMaps() {
   return { assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetReviews: {} };
+}
+
+function assetEntryKey(assetKey, index = 0) {
+  return index > 0 ? `${assetKey}_${index + 1}` : assetKey;
+}
+
+function assetInputFiles(input, assetKey) {
+  const files = Array.from(input?.files || []);
+  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+  return files.slice(0, limit);
 }
 
 function defaultBranchDraft(index = 0, seed = {}) {
@@ -536,19 +573,31 @@ const assetInputs = [
 ];
 
 function assetReferences() {
-  return assetInputs.map(([assetKey, selector]) => {
+  return assetInputs.flatMap(([assetKey, selector]) => {
     const input = $(selector);
     const branch = activeBranch();
-    return {
-      assetKey,
+    const storedKeys = Object.keys(branch.assetFileNames || {}).filter((key) => key === assetKey || key.startsWith(`${assetKey}_`));
+    const keys = storedKeys.length ? storedKeys : [assetKey];
+    return keys.map((entryKey) => ({
+      assetKey: entryKey,
       branchId: branch.branchId,
-      fileName: branch.assetFileNames?.[assetKey] || input?.dataset.uploadedFileName || input?.files?.[0]?.name || "",
-      storageKey: branch.assetStorageKeys?.[assetKey] || input?.dataset.storageKey || "",
-      storedPath: branch.assetStoredPaths?.[assetKey] || input?.dataset.storedPath || "",
-      assetId: branch.assetReviews?.[assetKey]?.assetId || input?.dataset.assetId || "",
-      reviewStatus: branch.assetReviews?.[assetKey]?.status || input?.dataset.reviewStatus || ""
-    };
+      fileName: branch.assetFileNames?.[entryKey] || input?.dataset.uploadedFileName || input?.files?.[0]?.name || "",
+      storageKey: branch.assetStorageKeys?.[entryKey] || input?.dataset.storageKey || "",
+      storedPath: branch.assetStoredPaths?.[entryKey] || input?.dataset.storedPath || "",
+      assetId: branch.assetReviews?.[entryKey]?.assetId || input?.dataset.assetId || "",
+      reviewStatus: branch.assetReviews?.[entryKey]?.status || input?.dataset.reviewStatus || ""
+    }));
   }).filter((asset) => asset.fileName || asset.storageKey || asset.storedPath || asset.assetId || asset.reviewStatus);
+}
+
+function branchAssetEntryKeys(branch = activeBranch(), assetKey = "") {
+  return Object.keys(branch.assetFileNames || {})
+    .filter((key) => key === assetKey || key.startsWith(`${assetKey}_`))
+    .sort((left, right) => {
+      const leftIndex = Number(left.replace(`${assetKey}_`, ""));
+      const rightIndex = Number(right.replace(`${assetKey}_`, ""));
+      return (Number.isFinite(leftIndex) ? leftIndex : -1) - (Number.isFinite(rightIndex) ? rightIndex : -1);
+    });
 }
 
 function updateBranchAsset(assetKey, asset = {}) {
@@ -558,6 +607,19 @@ function updateBranchAsset(assetKey, asset = {}) {
   branch.assetStorageKeys[assetKey] = asset.storageKey || "";
   branch.assetStoredPaths[assetKey] = asset.storedPath || "";
   branch.assetReviews[assetKey] = asset.review || {};
+}
+
+function pruneBranchAssetsForInput(assetKey, keepKeys = []) {
+  const branch = activeBranch();
+  const keep = new Set(keepKeys);
+  for (const key of branchAssetEntryKeys(branch, assetKey)) {
+    if (keep.has(key)) continue;
+    delete branch.assetFileNames[key];
+    delete branch.assetUrls[key];
+    delete branch.assetStorageKeys[key];
+    delete branch.assetStoredPaths[key];
+    delete branch.assetReviews[key];
+  }
 }
 
 function disclaimerRequestFields() {
@@ -780,10 +842,12 @@ function restoreV2FromBatchDetail(detail = {}) {
   state.activeBranchIndex = 0;
   activeBranch();
   loadBranchToForm(state.branchDraft);
-  if (draft.seedanceModel && els.seedanceModel) els.seedanceModel.value = draft.seedanceModel;
+  if (draft.seedanceModel && $("#wzModelSelect")) $("#wzModelSelect").value = draft.seedanceModel;
+  syncSeedanceModel();
   if (request.durationSec && els.duration) els.duration.value = String(request.durationSec);
   if (request.outputRatio && els.outputRatio) els.outputRatio.value = request.outputRatio;
-  if (request.seedanceModel && els.seedanceModel) els.seedanceModel.value = request.seedanceModel;
+  if (request.seedanceModel && $("#wzModelSelect")) $("#wzModelSelect").value = request.seedanceModel;
+  syncSeedanceModel();
   if (request.variantCount && els.variantCount) els.variantCount.value = String(request.variantCount);
   if (request.requestedConcurrency && els.requestedConcurrency) els.requestedConcurrency.value = String(request.requestedConcurrency);
   if (batch.draftSignature) state.draftSignature = batch.draftSignature;
@@ -795,7 +859,7 @@ function restoreV2FromBatchDetail(detail = {}) {
   if (state.estimate) {
     const scriptCount = state.estimate.scriptCount || request.variantCount || 0;
     const seedanceCount = state.estimate.seedanceSegmentCount || 0;
-    els.estimateBox.textContent = `估算结果：${scriptCount} 条脚本 · ${seedanceCount} 段 Seedance · ${state.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟（变体数 * 同时生成数量 * 3min）。`;
+    els.estimateBox.textContent = `估算结果：${scriptCount} 条脚本 · ${seedanceCount} 段 Seedance · ${state.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟。`;
   }
   renderTasks();
   return true;
@@ -847,6 +911,9 @@ function addBranch() {
     promiseLevel: source.promiseLevel,
     truthRules: source.truthRules,
     voiceoverStyle: source.voiceoverStyle,
+    variantPrompt: source.variantPrompt,
+    customPrompt: source.customPrompt,
+    negativePrompt: source.negativePrompt,
     defaultDurationSec: source.defaultDurationSec,
     defaultOutputRatio: source.defaultOutputRatio,
     disclaimer: source.disclaimer,
@@ -907,7 +974,7 @@ function currentDraft() {
     negativePrompt: value(els.negativePrompt),
     defaultDurationSec: Number(value(els.duration) || 15),
     defaultOutputRatio: value(els.outputRatio) || "9:16",
-    seedanceModel: value(els.seedanceModel),
+    seedanceModel: selectedSeedanceModel(),
     llmConfig: {
       provider: value($("#wzLlmProvider")),
       model: value($("#wzLlmModel")),
@@ -933,24 +1000,33 @@ function renderAssetReviewState() {
       status.className = "wz-v2-asset-status";
       slot.append(status);
     }
-    const review = branch.assetReviews?.[assetKey] || {};
-    const fileName = branch.assetFileNames?.[assetKey] || input?.files?.[0]?.name || "";
-    status.textContent = fileName
-      ? `${fileName} · ${review.status || input.dataset.reviewStatus || "待上传"}${review.assetId ? ` · ${review.assetId}` : ""}`
+    const keys = branchAssetEntryKeys(branch, assetKey);
+    const selectedFiles = assetInputFiles(input, assetKey).map((file) => file.name);
+    const names = keys.length ? keys.map((key) => branch.assetFileNames[key]).filter(Boolean) : selectedFiles;
+    const failed = keys
+      .map((key) => branch.assetReviews?.[key])
+      .filter((review) => review?.status && !isAssetReviewApproved(review.status));
+    status.textContent = names.length
+      ? `${names.join("、")} · ${failed.length ? "有审核风险" : (keys.length ? "已记录" : "待上传")}`
       : "未选择";
+    slot.dataset.hasAsset = names.length ? "1" : "0";
   }
+}
+
+function isAssetReviewApproved(status = "") {
+  return ["approved", "active", "success", "succeeded", "pass", "passed"].includes(String(status || "").trim().toLowerCase());
 }
 
 function renderPlanEditors(plans = []) {
   if (!plans.length) {
     els.planBox.className = "wz-list empty-line";
-    els.planBox.textContent = "尚未生成 Seedance 预案";
+    els.planBox.textContent = "尚未生成 Seedance prompt";
     return;
   }
   els.planBox.className = "wz-list";
   els.planBox.innerHTML = plans.map((plan, index) => `
     <section class="wz-v2-plan-editor" data-plan-id="${plan.planId || ""}">
-      <h3>预案 ${index + 1}${plan.branchLabel ? ` · ${plan.branchLabel}` : ""}</h3>
+      <h3>Prompt ${index + 1}${plan.branchLabel ? ` · ${plan.branchLabel}` : ""}</h3>
       <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${plan.hook || ""}</textarea></label>
       <label>口播 <textarea data-plan-field="voiceover" class="wz-json-box compact">${plan.voiceover || ""}</textarea></label>
       <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${plan.seedancePrompt || ""}</textarea></label>
@@ -1036,6 +1112,49 @@ async function uploadReferenceVideo() {
   }
 }
 
+function bindReferenceDropUpload() {
+  const dropZone = $("#wzReferenceDropZone") || $("#wzReferenceUploadPanel");
+  if (!dropZone || !els.referenceFile) return;
+  for (const eventName of ["dragenter", "dragover"]) {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("is-dragover");
+    });
+  }
+  for (const eventName of ["dragleave", "drop"]) {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.remove("is-dragover");
+    });
+  }
+  dropZone.addEventListener("drop", (event) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    els.referenceFile.files = transfer.files;
+    uploadReferenceVideo();
+  });
+  dropZone.addEventListener("click", (event) => {
+    if (event.target?.closest?.("button, video, input, select, textarea, a")) return;
+    els.referenceFile.click();
+  });
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    els.referenceFile.click();
+  });
+}
+
+function validateAssetInputLimit(input, assetKey) {
+  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+  if ((input?.files?.length || 0) <= limit) return true;
+  showError({ message: `${input.closest(".wz-asset-slot")?.textContent?.trim() || assetKey} 最多上传 ${limit} 个文件` }, "素材数量超限");
+  input.value = "";
+  renderAssetReviewState();
+  return false;
+}
+
 function renderDecompositionForm(decomposition = {}, { preserveUserInput = false } = {}) {
   const fields = ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"];
   els.decompositionForm.hidden = false;
@@ -1079,7 +1198,14 @@ function collectDecompositionForm() {
 function currentDecomposition() {
   const collected = collectDecompositionForm();
   const hasFormValue = Object.values(collected).some((item) => String(item || "").trim());
-  return hasFormValue ? collected : state.decompositionDraft;
+  const source = hasFormValue ? collected : state.decompositionDraft;
+  if (!source) return null;
+  return {
+    ...(state.decompositionDraft || {}),
+    ...source,
+    referenceVideoId: source.referenceVideoId || state.decompositionDraft?.referenceVideoId || state.referenceVideo?.referenceVideoId,
+    schemaVersion: source.schemaVersion || state.decompositionDraft?.schemaVersion || "video_decomposition.v1"
+  };
 }
 
 function planSignatureInput() {
@@ -1089,7 +1215,7 @@ function planSignatureInput() {
   return {
     productName: value(els.productName),
     productLink: value(els.productLink),
-    assets: branches.flatMap((branch) => assetInputs.map(([assetKey]) => ({
+    assets: branches.flatMap((branch) => Object.keys(branch.assetFileNames || {}).map((assetKey) => ({
       branchId: branch.branchId,
       assetKey,
       fileName: branch.assetFileNames?.[assetKey] || "",
@@ -1136,10 +1262,10 @@ function estimateRequest() {
     truthRules: collectTruthRules(),
     currencySymbol: currencyValue(),
     durationSec: Number(value(els.duration) || 15),
-    variantCount: Number(value(els.variantCount) || 1),
+    variantCount: variantCountValue(),
     requestedConcurrency: Number(value(els.requestedConcurrency) || 1),
     outputRatio: value(els.outputRatio),
-    seedanceModel: value(els.seedanceModel),
+    seedanceModel: selectedSeedanceModel(),
     decomposition: currentDecomposition(),
     ...disclaimerFields,
     templateSnapshot: {
@@ -1165,7 +1291,7 @@ function estimateRequest() {
         negativePrompt: value(els.negativePrompt),
         defaultDurationSec: Number(value(els.duration) || 15),
         defaultOutputRatio: value(els.outputRatio) || "9:16",
-        seedanceModel: value(els.seedanceModel),
+        seedanceModel: selectedSeedanceModel(),
         ...disclaimerFields,
         branches
       }
@@ -1175,7 +1301,7 @@ function estimateRequest() {
 }
 
 function expectedMinutes() {
-  return Number(value(els.variantCount) || 0) * Number(value(els.requestedConcurrency) || 0) * 3;
+  return variantCountValue() * Number(value(els.requestedConcurrency) || 0) * 3;
 }
 
 function planLlmConfig() {
@@ -1204,6 +1330,11 @@ function renderTemplates() {
     `)
   ];
   els.templateSelect.innerHTML = options.join("");
+  syncTemplateActions();
+}
+
+function syncTemplateActions() {
+  if (els.deleteTemplateBtn) els.deleteTemplateBtn.disabled = !state.selectedTemplate?.templateId;
 }
 
 function applyTemplate(template) {
@@ -1230,6 +1361,9 @@ function applyTemplate(template) {
     materialDirection: branch.materialDirection || draft.materialDirection || "other",
     materialDirectionCustom: branch.materialDirectionCustom || draft.materialDirectionCustom || "跟随竞品",
     voiceoverStyle: branch.voiceoverStyle || draft.voiceoverStyle || "遵循竞品",
+    variantPrompt: branch.variantPrompt || draft.variantPrompt || "",
+    customPrompt: branch.customPrompt || draft.customPrompt || "",
+    negativePrompt: branch.negativePrompt || draft.negativePrompt || "",
     disclaimer: branch.disclaimer ?? draft.disclaimer,
     disclaimerEnabled: branch.disclaimerEnabled ?? draft.disclaimerEnabled,
     disclaimerPreset: branch.disclaimerPreset || draft.disclaimerPreset || draft.disclaimerPresetId,
@@ -1243,8 +1377,10 @@ function applyTemplate(template) {
   loadBranchToForm(state.branchDraft);
   els.duration.value = String(draft.defaultDurationSec || 15);
   els.outputRatio.value = draft.defaultOutputRatio || "9:16";
-  els.seedanceModel.value = draft.seedanceModel || els.seedanceModel.value;
+  if ($("#wzModelSelect")) $("#wzModelSelect").value = draft.seedanceModel || selectedSeedanceModel();
+  syncSeedanceModel();
   renderBranchTabs();
+  syncTemplateActions();
   markPlanMaybeStale();
 }
 
@@ -1286,17 +1422,17 @@ function renderTasks() {
       message: state.decompositionJob?.message || "等待参考视频"
     },
     {
-      title: "Seedance 预案",
+      title: "Seedance prompt",
       status: state.stalePlanPreview ? "stale" : (state.planJob?.status || (plans.length ? "succeeded" : "idle")),
       progress: state.planJob?.progress || (plans.length ? 100 : 0),
-      message: state.stalePlanPreview ? "预案已失效，请重新生成" : (state.planJob?.message || "等待估算")
+      message: state.stalePlanPreview ? "Seedance prompt 已失效，请重新生成" : (state.planJob?.message || "等待生成")
     },
     {
       title: "视频生成和质检",
       status: state.confirmPlanSubmitting ? "submitting" : (batch?.status || "idle"),
       progress: generationProgress,
       message: state.confirmPlanSubmitting
-        ? "正在确认预案并提交 Seedance"
+        ? "正在确认 prompt 并提交 Seedance"
         : (tasksInBatch.length ? `${doneCount}/${tasksInBatch.length} 个子任务` : "沿用现有批次链路")
     }
   ];
@@ -1313,7 +1449,7 @@ function renderTasks() {
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
   els.planBatchBtn.disabled = planRetryable
     ? false
-    : (planUpstreamLocked || !state.estimate?.estimateId || state.stalePlanPreview);
+    : (planUpstreamLocked || state.stalePlanPreview);
   els.confirmPlanBtn.disabled = state.confirmPlanSubmitting || !plans.length || state.stalePlanPreview;
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
   els.runQcBtn.disabled = !batch?.batchId || !isBatchQcRunnable(batch, tasksInBatch, outputsInBatch);
@@ -1432,12 +1568,12 @@ function failBackgroundJob(type, message, data = {}) {
     state.planJob = job;
     els.planBatchBtn.disabled = false;
   }
-  log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}失败：${job.error.message}`);
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}失败：${job.error.message}`);
   renderTasks();
 }
 
 function backgroundJobRetryLabel(type) {
-  return type === "decomposition" ? "重试查询拆解结果" : "重试查询预案结果";
+  return type === "decomposition" ? "重试查询拆解结果" : "重试查询 prompt 结果";
 }
 
 function isRecoverableBackgroundJob(job = null) {
@@ -1446,7 +1582,7 @@ function isRecoverableBackgroundJob(job = null) {
 }
 
 function retryableJobMessage(type, detail = "") {
-  const prefix = type === "decomposition" ? "AI 拆解结果查询失败" : "Seedance 预案结果查询失败";
+  const prefix = type === "decomposition" ? "AI 拆解结果查询失败" : "Seedance prompt 结果查询失败";
   const cleanDetail = String(detail || "").trim();
   return cleanDetail
     ? `${prefix}，后台任务可能仍在运行，可重试查询。原因：${cleanDetail}`
@@ -1478,7 +1614,7 @@ function markBackgroundJobPollFailure(type, message, data = {}) {
     state.planJob = job;
     els.planBatchBtn.disabled = false;
   }
-  log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}查询中断：${recoverableMessage}`);
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}查询中断：${recoverableMessage}`);
   renderTasks();
 }
 
@@ -1506,7 +1642,7 @@ function markBackgroundJobTimeout(type, message, data = {}) {
     state.planJob = job;
     els.planBatchBtn.disabled = false;
   }
-  log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}仍在后台运行：${message}`);
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}仍在后台运行：${message}`);
   renderTasks();
 }
 
@@ -1514,7 +1650,7 @@ function syncBackgroundJobActionButtons() {
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
   const decompositionRetryable = isRecoverableBackgroundJob(state.decompositionJob);
   if (els.planBatchBtn) {
-    els.planBatchBtn.textContent = planRetryable ? backgroundJobRetryLabel("plan") : "生成 Seedance 预案";
+    els.planBatchBtn.textContent = planRetryable ? backgroundJobRetryLabel("plan") : "生成 Seedance prompt";
   }
   if (els.draftDecompositionBtn) {
     els.draftDecompositionBtn.textContent = decompositionRetryable ? backgroundJobRetryLabel("decomposition") : "开始解析";
@@ -1538,7 +1674,7 @@ function retryBackgroundJobPoll(type) {
     });
     return true;
   }
-  job.message = "正在重新查询预案结果";
+  job.message = "正在重新查询 prompt 结果";
   job.error = null;
   renderTasks();
   pollJob("plan", job.id);
@@ -1575,7 +1711,7 @@ async function restoreBackgroundJobFromRequest(restoreRequest) {
       type: "plan",
       status: "running",
       progress: 90,
-      message: "正在重新查询预案结果",
+      message: "正在重新查询 prompt 结果",
       error: {
         code: "job_poll_failed",
         message: "任务管理页发起重新查询",
@@ -1596,54 +1732,63 @@ function renderReminders({ batch, plans } = {}) {
   if (!state.referenceVideo) items.push("先上传参考视频");
   if (state.referenceVideo && !state.decompositionDraft) items.push("参考视频已上传，待 AI 拆解或手动填写脚本");
   if (!state.rewriteConfirmed) items.push("第 3 步产品/投放信息尚未确认");
-  if (!state.estimate) items.push("尚未估算本批任务");
+  if (!state.estimate) items.push("尚未生成 Seedance prompt");
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) items.push("本批任务较多，需要确认数量和消耗");
-  if (state.stalePlanPreview) items.push("Seedance 预案已失效，需要重新生成");
+  if (state.stalePlanPreview) items.push("Seedance prompt 已失效，需要重新生成");
   const failedAssets = state.branches.flatMap((branch) => Object.entries(branch.assetReviews || {})
-    .filter(([, review]) => review?.status && review.status !== "passed")
+    .filter(([, review]) => review?.status && !isAssetReviewApproved(review.status))
     .map(([key, review]) => `${branch.branchLabel || branch.branchId}/${key}:${review.status}${review.reviewReason ? ` ${review.reviewReason}` : ""}`));
   if (failedAssets.length) items.push(`素材审核未通过：${failedAssets.join("；")}`);
-  if (plans?.length && !batch?.tasks?.length) items.push("预案已生成，待确认并提交 Seedance");
+  if (plans?.length && !batch?.tasks?.length) items.push("Seedance prompt 已生成，待确认并提交 Seedance");
   els.reminders.textContent = items.length ? items.join(" / ") : "当前无阻塞项";
 }
 
 async function uploadSeedanceAssetsForReview() {
-  els.uploadSeedanceAssetsBtn.disabled = true;
+  if (els.uploadSeedanceAssetsBtn) els.uploadSeedanceAssetsBtn.disabled = true;
   try {
     const branch = activeBranch();
     for (const [assetKey, selector] of assetInputs) {
       const input = $(selector);
-      const file = input?.files?.[0];
-      if (!file) continue;
-      if (input.dataset.uploadedFileName === file.name && input.dataset.storageKey) continue;
-      const content = await fileToDataUrl(file);
-      const data = await api("/api/wangzhuan/product-assets/upload", {
-        method: "POST",
-        body: JSON.stringify({
-          branchId: branch.branchId,
-          assetKey,
-          fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
-          content
-        })
-      });
-      const asset = data.asset || {};
-      const review = asset.review || {};
-      input.dataset.uploadedFileName = asset.fileName || file.name;
-      input.dataset.storageUrl = asset.storageUrl || asset.previewUrl || "";
-      input.dataset.storageKey = asset.storageKey || "";
-      input.dataset.storedPath = asset.storedPath || "";
-      input.dataset.assetId = review.assetId || "";
-      input.dataset.reviewStatus = review.status || "pending";
-      input.dataset.reviewReason = review.reviewReason || "";
-      updateBranchAsset(assetKey, asset);
+      const files = assetInputFiles(input, assetKey);
+      if (!files.length) continue;
+      const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+      if ((input?.files?.length || 0) > limit) {
+        showError({ message: `${input.closest(".wz-asset-slot")?.textContent?.trim() || assetKey} 最多上传 ${limit} 个文件` }, "素材上传失败");
+        continue;
+      }
+      for (const [index, file] of files.entries()) {
+        const entryKey = assetEntryKey(assetKey, index);
+        if (branch.assetFileNames?.[entryKey] === file.name && branch.assetStorageKeys?.[entryKey]) continue;
+        const content = await fileToDataUrl(file);
+        const data = await api("/api/wangzhuan/product-assets/upload", {
+          method: "POST",
+          body: JSON.stringify({
+            branchId: branch.branchId,
+            assetKey: entryKey,
+            fileName: file.name,
+            mimeType: file.type || "application/octet-stream",
+            content
+          })
+        });
+        const asset = data.asset || {};
+        updateBranchAsset(entryKey, asset);
+        log(`${entryKey} 已上传并完成审核状态记录`);
+      }
+      pruneBranchAssetsForInput(assetKey, files.map((_, index) => assetEntryKey(assetKey, index)));
+      const firstKey = assetEntryKey(assetKey, 0);
+      input.dataset.uploadedFileName = branch.assetFileNames?.[firstKey] || "";
+      input.dataset.storageUrl = branch.assetUrls?.[firstKey] || "";
+      input.dataset.storageKey = branch.assetStorageKeys?.[firstKey] || "";
+      input.dataset.storedPath = branch.assetStoredPaths?.[firstKey] || "";
+      input.dataset.assetId = branch.assetReviews?.[firstKey]?.assetId || "";
+      input.dataset.reviewStatus = branch.assetReviews?.[firstKey]?.status || "";
+      input.dataset.reviewReason = branch.assetReviews?.[firstKey]?.reviewReason || "";
       renderAssetReviewState();
-      log(`${assetKey} 已上传并完成审核状态记录`);
     }
     state.stalePlanPreview = Boolean(state.draftSignature && state.batchDetail);
     renderTasks();
   } finally {
-    els.uploadSeedanceAssetsBtn.disabled = false;
+    if (els.uploadSeedanceAssetsBtn) els.uploadSeedanceAssetsBtn.disabled = false;
   }
 }
 
@@ -1723,6 +1868,31 @@ async function saveTemplate() {
   }
 }
 
+async function deleteSelectedTemplate() {
+  clearError();
+  if (!state.selectedTemplate?.templateId || !state.selectedTemplate?.versionId) return;
+  setBusy(els.deleteTemplateBtn, true, "删除中");
+  try {
+    await api("/api/wangzhuan/templates/admin", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "delete",
+        templateId: state.selectedTemplate.templateId,
+        versionId: state.selectedTemplate.versionId
+      })
+    });
+    state.selectedTemplate = null;
+    await loadTemplates();
+    if (els.templateSelect) els.templateSelect.value = "";
+    syncTemplateActions();
+    log("模板已删除");
+  } catch (error) {
+    showError(error, "模板删除失败");
+  } finally {
+    setBusy(els.deleteTemplateBtn, false);
+  }
+}
+
 async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
   if (!state.referenceVideo?.referenceVideoId) {
     throw new WangzhuanApiError({
@@ -1743,7 +1913,7 @@ async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
       templateSnapshot: { draft: estimateRequest().templateSnapshot.draft },
       branches: estimateRequest().branches,
       branchDrafts: estimateRequest().branches,
-      decomposition: state.decompositionDraft || collectDecompositionForm()
+      decomposition: currentDecomposition()
     })
   });
   if (data.batch) state.batchDetail = data;
@@ -1819,13 +1989,17 @@ async function startDecompositionJob() {
 
 async function startPlanJob() {
   if (retryBackgroundJobPoll("plan")) return;
-  if (!state.estimate?.estimateId) return;
   els.planBatchBtn.disabled = true;
+  const estimateResult = state.estimate?.estimateId ? state.estimate : await estimateBatch();
+  if (!estimateResult?.estimateId) {
+    renderTasks();
+    return;
+  }
   const payload = {
-    estimateId: state.estimate.estimateId,
+    estimateId: estimateResult.estimateId,
     batchId: state.batchDetail?.batch?.batchId || state.batchDetail?.batchId,
     idempotencyKey: `wzv2-plan-${Date.now()}`,
-    confirmationToken: state.estimate.confirmationToken,
+    confirmationToken: estimateResult.confirmationToken,
     llmConfig: planLlmConfig(),
     knowledgeNotes: value($("#wzKnowledgeNotes")),
     draftSignatureInput: planSignatureInput()
@@ -1837,7 +2011,7 @@ async function startPlanJob() {
   state.planJob = job;
   state.draftSignature = job.draftSignature;
   state.stalePlanPreview = false;
-  log("Seedance 预案任务已提交");
+  log("Seedance prompt 任务已提交");
   setPlanUpstreamLocked(true);
   renderTasks();
   pollJob("plan", job.planJobId);
@@ -1876,7 +2050,7 @@ async function pollJob(type, jobId, options = {}) {
           state.draftSignature = job.draftSignature;
           renderPlanEditors(job.plans || []);
         }
-        log(`${type === "decomposition" ? "AI 拆解" : "Seedance 预案"}完成`);
+        log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}完成`);
       }
       if (job.status === "failed") {
         clearInterval(timer);
@@ -1966,12 +2140,12 @@ async function confirmPlanAndGenerate() {
   const batch = state.batchDetail?.batch || state.batchDetail;
   if (!batch?.batchId || state.stalePlanPreview || state.confirmPlanSubmitting) return;
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) {
-    showError({ message: "请先确认本批次数量、时长和可能消耗" }, "确认预案失败");
+    showError({ message: "请先确认本批次数量、时长和可能消耗" }, "确认 prompt 失败");
     return;
   }
   clearError();
   state.confirmPlanSubmitting = true;
-  log("正在确认预案并提交 Seedance...");
+  log("正在确认 prompt 并提交 Seedance...");
   setBusy(els.confirmPlanBtn, true, "提交中");
   renderTasks();
   const plans = collectEditablePlans();
@@ -1989,7 +2163,7 @@ async function confirmPlanAndGenerate() {
       })
     });
     state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
-    log("预案已确认，已提交 Seedance 生成");
+    log("Seedance prompt 已确认，已提交 Seedance 生成");
     startBatchPolling(batch.batchId);
   } finally {
     state.confirmPlanSubmitting = false;
@@ -2043,7 +2217,7 @@ function startNewTask() {
   els.referenceUploadStatus.textContent = "选中文件后自动上传、检查和预览。";
   els.draftDecompositionBtn.disabled = true;
   els.decompositionStatus.textContent = "上传参考视频后可启动后台拆解。";
-  els.estimateBox.textContent = "估算结果：待估算。预计时间规则：变体数 * 同时生成数量 * 3min。";
+  els.estimateBox.textContent = "估算结果：待估算。";
   renderPlanEditors([]);
   resetAssetInputDatasets();
   loadBranchToForm(state.branchDraft);
@@ -2081,24 +2255,27 @@ async function logout() {
 
 async function estimateBatch() {
   clearError();
-  if (!currentDecomposition()) {
-    showError({ message: "请先完成 AI 拆解或手动填写脚本拆解" }, "估算失败");
-    return;
+  const decomposition = currentDecomposition();
+  if (!decomposition) {
+    showError({ message: "请先完成 AI 拆解或手动填写脚本拆解" }, "生成 Seedance prompt 失败");
+    return null;
   }
   if (!state.rewriteConfirmed) {
-    showError({ message: "请先点击第 3 步「确认信息」" }, "估算失败");
-    return;
+    showError({ message: "请先点击第 3 步「确认信息」" }, "生成 Seedance prompt 失败");
+    return null;
   }
+  await saveDraft("estimate");
   const request = estimateRequest();
   const data = await api("/api/wangzhuan/batches/estimate", {
     method: "POST",
     body: JSON.stringify(request)
   });
   state.estimate = data.estimate;
-  els.estimateBox.textContent = `估算结果：${state.estimate.scriptCount || request.variantCount || 0} 条脚本 · ${state.estimate.seedanceSegmentCount || 0} 段 Seedance · ${request.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟（变体数 * 同时生成数量 * 3min）。`;
+  els.estimateBox.textContent = `估算结果：${state.estimate.scriptCount || request.variantCount || 0} 条脚本 · ${state.estimate.seedanceSegmentCount || 0} 段 Seedance · ${request.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟。`;
   els.planBatchBtn.disabled = false;
   renderTasks();
   log("估算完成");
+  return state.estimate;
 }
 
 async function markPlanMaybeStale() {
@@ -2109,6 +2286,7 @@ async function markPlanMaybeStale() {
 
 els.checkReferenceBtn?.addEventListener("click", () => els.referenceFile?.click());
 els.referenceFile?.addEventListener("change", uploadReferenceVideo);
+bindReferenceDropUpload();
 els.decompositionForm?.addEventListener("input", (event) => {
   const field = event.target?.dataset?.decompositionField;
   if (field) state.decompositionEditedFields.add(field);
@@ -2128,24 +2306,39 @@ els.confirmRewriteBtn?.addEventListener("click", confirmRewriteInfo);
 els.templateSelect?.addEventListener("change", () => {
   const selected = state.templates.find((template) => template.versionId === els.templateSelect.value);
   if (selected) applyTemplate(selected);
+  else {
+    state.selectedTemplate = null;
+    syncTemplateActions();
+  }
 });
 els.createTemplateBtn?.addEventListener("click", saveTemplate);
+els.deleteTemplateBtn?.addEventListener("click", deleteSelectedTemplate);
+$("#wzModelSelect")?.addEventListener("change", () => {
+  syncSeedanceModel();
+  markPlanMaybeStale();
+});
 els.materialDirection?.addEventListener("change", syncMaterialDirectionCustom);
 els.promiseLevel?.addEventListener("change", syncTruthDetails);
 els.currencySymbol?.addEventListener("change", syncCurrencyCustom);
 els.truthFields?.addEventListener("input", markPlanMaybeStale);
 els.truthFields?.addEventListener("change", markPlanMaybeStale);
 $("#wzDisclaimerOverlayFile")?.addEventListener("change", () => uploadDisclaimerOverlayAsset().catch((error) => showError(error, "贴片上传失败")));
-els.estimateBtn?.addEventListener("click", () => estimateBatch().catch((error) => showError(error, "估算失败")));
-els.planBatchBtn?.addEventListener("click", () => startPlanJob().catch((error) => showError(error, "预案任务提交失败")));
-els.confirmPlanBtn?.addEventListener("click", () => confirmPlanAndGenerate().catch((error) => showError(error, "确认预案失败")));
+els.planBatchBtn?.addEventListener("click", () => startPlanJob().catch((error) => showError(error, "prompt 任务提交失败")));
+els.confirmPlanBtn?.addEventListener("click", () => confirmPlanAndGenerate().catch((error) => showError(error, "确认 prompt 失败")));
 els.stopBatchBtn?.addEventListener("click", () => stopBatch().catch((error) => showError(error, "停止失败")));
 els.runQcBtn?.addEventListener("click", () => runVideoQc().catch((error) => showError(error, "视频质检失败")));
 els.saveDraftBtn?.addEventListener("click", () => saveDraftBatch().catch((error) => showError(error, "草稿保存失败")));
 els.uploadSeedanceAssetsBtn?.addEventListener("click", () => uploadSeedanceAssetsForReview().catch((error) => showError(error, "Seedance 素材上传失败")));
-els.confirmAssetsBtn?.addEventListener("click", () => confirmSeedanceAssetReviews().catch((error) => showError(error, "确认审核结果失败")));
 els.loadOlderLogsBtn?.addEventListener("click", loadOlderLogs);
 els.refreshRecentBtn?.addEventListener("click", () => loadRecentResults(1).catch((error) => showError(error, "最近结果加载失败")));
+for (const [assetKey, selector] of assetInputs) {
+  $(selector)?.addEventListener("change", (event) => {
+    if (!validateAssetInputLimit(event.target, assetKey)) return;
+    const files = assetInputFiles(event.target, assetKey);
+    pruneBranchAssetsForInput(assetKey, files.map((_, index) => assetEntryKey(assetKey, index)));
+    renderAssetReviewState();
+  });
+}
 els.recentResults?.addEventListener("click", (event) => {
   const button = event.target?.closest?.("[data-recent-id]");
   if (!button) return;

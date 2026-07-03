@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 
 import { qcPathHelpers } from "../../server/wangzhuan/qc.mjs";
 
-const { tryResolveUserPath, videoSpecCheck, templateSnapshotCheck } = qcPathHelpers;
+const { tryResolveUserPath, videoSpecCheck, templateSnapshotCheck, deterministicVideoChecks } = qcPathHelpers;
 
 async function withTempRoot(run) {
   const root = await mkdtemp(join(tmpdir(), "wz-qc-"));
@@ -49,6 +49,39 @@ await withTempRoot(async (root) => {
     filePath: rel
   });
   assert.equal(localSpec.status, "pass");
+
+  const remoteOnlyChecks = await deterministicVideoChecks(
+    context,
+    { estimate: { durationSec: 15, request: { outputRatio: "9:16" } } },
+    {
+      outputId: "out_remote_001",
+      durationSec: 15,
+      kind: "segment_video",
+      filePath: "wangzhuan/batches/wzb_20260626090000_abcd/outputs/missing.mp4",
+      storageKey: "seedance/generated/out_remote_001.mp4",
+      storageUrl: "https://static.example.com/seedance/generated/out_remote_001.mp4"
+    }
+  );
+  const remoteOnlyById = new Map(remoteOnlyChecks.map((item) => [item.checkId, item]));
+  assert.equal(remoteOnlyById.get("ffprobe_readable").status, "pass");
+  assert.equal(remoteOnlyById.get("resolution_spec").status, "pass");
+  assert.equal(remoteOnlyById.get("duration_tolerance").status, "pass");
+  assert.equal(remoteOnlyById.get("download_status").status, "pass");
+  assert.match(remoteOnlyById.get("download_status").message, /对象存储/);
+
+  const missingLocalChecks = await deterministicVideoChecks(
+    context,
+    { estimate: { durationSec: 15, request: { outputRatio: "9:16" } } },
+    {
+      outputId: "out_missing_001",
+      durationSec: 15,
+      kind: "segment_video",
+      filePath: "wangzhuan/batches/wzb_20260626090000_abcd/outputs/missing-without-remote.mp4"
+    }
+  );
+  assert.equal(missingLocalChecks.at(-1).checkId, "download_status");
+  assert.equal(missingLocalChecks.at(-1).status, "fail");
+  assert.match(missingLocalChecks.at(-1).message, /未落盘/);
 
   const branchTemplate = templateSnapshotCheck({
     templateSnapshot: {

@@ -26,9 +26,12 @@ test("wangzhuan v2 page keeps old page separate and exposes dense workbench regi
 test("wangzhuan v2 page uses required native controls and field labels", async () => {
   const html = await readText("public/wangzhuan-v2.html");
   assert.match(html, /id="wzReferencePreview"/);
-  assert.match(html, /id="wzUploadSeedanceAssetsBtn"/);
-  assert.match(html, /上传 Seedance 素材并审核/);
-  assert.match(html, /id="wzConfirmAssetsBtn"/);
+  assert.match(html, /参考视频与 AI 拆解/);
+  assert.match(html, /拖拽或选择参考视频/);
+  assert.match(html, /<input id="wzProjectName" type="hidden"/);
+  assert.doesNotMatch(html, /当前项目/);
+  assert.doesNotMatch(html, /上传 Seedance 素材并审核/);
+  assert.doesNotMatch(html, /id="wzConfirmAssetsBtn"/);
   assert.match(html, /id="wzAddBranchBtn"/);
   assert.match(html, /id="wzBranchTabs"/);
   assert.match(html, /\+ 裂变子节点/);
@@ -44,7 +47,8 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /id="wzTruthDetails"/);
   assert.match(html, /强承诺真实规则/);
   assert.match(html, /id="wzTruthFields"/);
-  assert.match(html, /id="wzInspectStoreBtn"[^>]*disabled/);
+  assert.doesNotMatch(html, /id="wzInspectStoreBtn"/);
+  assert.doesNotMatch(html, /读取商店页/);
   assert.match(html, /免责声明贴片模板/);
   assert.match(html, /id="wzDisclaimerOverlayFile"/);
   assert.match(html, /id="wzDisclaimerOverlayPreview"/);
@@ -55,11 +59,26 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.doesNotMatch(html, /id="wzDisclaimer"/);
   assert.doesNotMatch(html, /免责声明文案/);
   assert.doesNotMatch(html, /id="wzDisclaimerOverlayFontSize"/);
+  assert.doesNotMatch(html, /bottom_left/);
+  assert.match(html, /id="wzDeleteTemplateBtn"/);
   assert.match(html, /脚本裂变规则补充/);
-  assert.match(html, /变体数 \* 同时生成数量 \* 3min/);
+  assert.match(html, /<summary>Seedance prompt 提示补充<\/summary>/);
+  assert.doesNotMatch(html, /<summary>提示词规则<\/summary>/);
+  assert.doesNotMatch(html, /变体数 \* 同时生成数量 \* 3min/);
   assert.match(html, /id="wzLlmModel"/);
   assert.match(html, /id="wzPlanLlmModel"/);
   assert.match(html, /id="wzConfirmLimits"/);
+  assert.match(html, /裂变数量[\s\S]*id="wzVariantCount" type="number" min="1" max="10"/);
+  assert.match(html, /id="wzSeedanceModel" type="hidden" value="dreamina-seedance-2-0-fast-260128"/);
+  assert.match(html, /<select id="wzModelSelect">[\s\S]*dreamina-seedance-2-0-260128[\s\S]*dreamina-seedance-2-0-fast-260128[\s\S]*dreamina-seedance-2-0-mini-260615/);
+  assert.match(html, /产品 Logo（最多 9 个）[\s\S]*id="wzProductIconFile"[^>]*multiple/);
+  assert.match(html, /产品截图（最多 9 个）[\s\S]*id="wzProductScreenshotFile"[^>]*multiple/);
+  assert.match(html, /产品录屏（最多 2 个）[\s\S]*id="wzProductRecordingFile"[^>]*multiple/);
+  assert.match(html, /Seedance prompt/);
+  assert.doesNotMatch(html, /Seedance 预案/);
+  assert.doesNotMatch(html, /id="wzEstimateBtn"/);
+  assert.doesNotMatch(html, /估算本批任务/);
+  assert.match(html, /<div class="wz-v2-section-head">[\s\S]*id="wzConfirmPlanBtn"[\s\S]*确认 prompt 并生成视频[\s\S]*<\/div>/);
   assert.match(html, /<option value="gemini-3\.1-pro-preview">Gemini 3\.1 Pro Preview<\/option>/);
   assert.match(html, /id="wzGeminiDecompositionHint"[\s\S]*视频拆解通常需要 1-3 分钟/);
   assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.5" selected>GPT-5\.5<\/option>/);
@@ -91,9 +110,11 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /setPlanUpstreamLocked\(planUpstreamLocked\)/);
   assert.match(js, /const planRetryable = isRecoverableBackgroundJob\(state\.planJob\)/);
   assert.match(js, /els\.planBatchBtn\.disabled = planRetryable/);
+  assert.doesNotMatch(js, /estimateBtn:/);
+  assert.doesNotMatch(js, /wzEstimateBtn/);
   assert.match(js, /els\.confirmPlanBtn\.disabled = state\.confirmPlanSubmitting \|\| !plans\.length/);
   assert.match(js, /state\.confirmPlanSubmitting = true/);
-  assert.match(js, /log\("正在确认预案并提交 Seedance\.\.\."\)/);
+  assert.match(js, /log\("正在确认 prompt 并提交 Seedance\.\.\."\)/);
   assert.match(js, /setBusy\(els\.confirmPlanBtn, true, "提交中"\)/);
   assert.match(js, /finally \{\s*\n\s*state\.confirmPlanSubmitting = false/);
   assert.match(js, /setPlanUpstreamLocked\(true\)/);
@@ -107,6 +128,27 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /branchDrafts:\s*estimateRequest\(\)\.branches/);
   assert.match(js, /const branches = collectBranchDrafts\(\)/);
   assert.match(js, /\/api\/wangzhuan\/product-assets\/upload/);
+  assert.match(js, /referenceVideoId:\s*source\.referenceVideoId \|\| state\.decompositionDraft\?\.referenceVideoId \|\| state\.referenceVideo\?\.referenceVideoId/);
+  assert.match(js, /schemaVersion:\s*source\.schemaVersion \|\| state\.decompositionDraft\?\.schemaVersion \|\| "video_decomposition\.v1"/);
+  assert.match(js, /await saveDraft\("estimate"\)/);
+  assert.match(js, /const estimateResult = state\.estimate\?\.estimateId \? state\.estimate : await estimateBatch\(\)/);
+  assert.match(js, /estimateId:\s*estimateResult\.estimateId/);
+  assert.match(js, /decomposition:\s*currentDecomposition\(\)/);
+  assert.match(js, /const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-fast-260128"/);
+  assert.match(js, /function normalizeSeedanceModel\(model = ""\)/);
+  assert.match(js, /if \(!valueText\) return DEFAULT_SEEDANCE_MODEL/);
+  assert.doesNotMatch(js, /valueText === "dreamina-seedance-2-0-260128"/);
+  assert.match(js, /function isAssetReviewApproved\(status = ""\)/);
+  assert.match(js, /\["approved", "active", "success", "succeeded", "pass", "passed"\]/);
+  assert.match(js, /!isAssetReviewApproved\(review\.status\)/);
+  assert.match(js, /MULTI_ASSET_LIMITS/);
+  assert.match(js, /productIcon:\s*9/);
+  assert.match(js, /productScreenshot:\s*9/);
+  assert.match(js, /productRecording:\s*2/);
+  assert.match(js, /function validateAssetInputLimit/);
+  assert.match(js, /function deleteSelectedTemplate/);
+  assert.match(js, /\/api\/wangzhuan\/templates\/admin/);
+  assert.match(js, /action:\s*"delete"/);
   assert.match(js, /\/confirm-assets/);
   assert.match(js, /\/api\/wangzhuan\/batches\/draft/);
   assert.match(js, /function currentBatchId\(\)/);
@@ -117,6 +159,12 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /\/api\/login/);
   assert.match(js, /loadTemplates/);
   assert.match(js, /applyTemplate/);
+  assert.match(js, /variantPrompt:\s*value\(els\.variantPrompt\)/);
+  assert.match(js, /customPrompt:\s*value\(els\.customPrompt\)/);
+  assert.match(js, /negativePrompt:\s*value\(els\.negativePrompt\)/);
+  assert.match(js, /variantPrompt:\s*branch\.variantPrompt \|\| draft\.variantPrompt \|\| ""/);
+  assert.match(js, /customPrompt:\s*branch\.customPrompt \|\| draft\.customPrompt \|\| ""/);
+  assert.match(js, /negativePrompt:\s*branch\.negativePrompt \|\| draft\.negativePrompt \|\| ""/);
   assert.match(js, /confirmRewriteInfo/);
   assert.match(js, /renderPlanEditors/);
   assert.match(js, /renderReminders/);
@@ -143,7 +191,7 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /markBackgroundJobPollFailure/);
   assert.match(js, /job_poll_timeout/);
   assert.match(js, /job_poll_failed/);
-  assert.match(js, /重试查询预案结果/);
+  assert.match(js, /重试查询 prompt 结果/);
   assert.match(js, /重试查询拆解结果/);
   assert.match(js, /后台任务可能仍在运行，可重试查询/);
   assert.match(js, /retryBackgroundJobPoll\("plan"\)/);
@@ -223,15 +271,41 @@ test("wangzhuan v2 page exposes bounded logs and lazy recent result controls", a
 
 test("task manager separates final outputs from intermediate outputs", async () => {
   const js = await readText("public/wangzhuan-tasks.js");
-  assert.match(js, /function splitOutputGroups\(outputs = \[\]\)/);
+  assert.match(js, /function batchWorkflowStep\(batch = \{\}\)/);
+  assert.match(js, /1 上传视频并拆解/);
+  assert.match(js, /2 产品改写信息填写/);
+  assert.match(js, /3 生成 Seedance 提示词/);
+  assert.match(js, /4 生成视频和质检/);
+  assert.match(js, /5 结果确认和下载/);
+  assert.match(js, /function taskWorkflowStripe\(item = \{\}\)/);
+  assert.match(js, /function batchWorkflowBadge\(batch = \{\}\)/);
+  assert.match(js, /taskWorkflowStripe\(item\)/);
+  assert.match(js, /batchWorkflowBadge\(batch\)/);
+  assert.match(js, /function splitOutputGroups\(outputs = \[\], options = \{\}\)/);
+  assert.match(js, /expectedDurationSec/);
   assert.match(js, /function renderOutputStage/);
   assert.match(js, /function renderOutputCards/);
-  assert.match(js, /output\.kind === "segment_video" \|\| output\.kind === "segment"/);
+  assert.match(js, /function renderSourceMediaStage/);
+  assert.match(js, /renderSourceMediaStage\(\{/);
+  const batchDetailBody = js.slice(js.indexOf("function renderBatchDetail"), js.indexOf("function renderRemixDetail"));
+  const remixDetailBody = js.slice(js.indexOf("function renderRemixDetail"), js.indexOf("function shouldPollDetail"));
+  assert.doesNotMatch(batchDetailBody, /renderTaskMediaCompare/);
+  assert.doesNotMatch(remixDetailBody, /renderTaskMediaCompare/);
+  assert.match(js, /class="wzTasksOutputCheckbox"/);
+  assert.match(js, /function selectedOutputIds\(\)/);
+  assert.match(js, /function qcBadge\(output = \{\}\)/);
+  assert.match(js, /QC 通过/);
+  assert.match(js, /QC 未通过/);
+  assert.match(js, /function isDeliveryOutput\(output = \{\}\)/);
+  assert.match(js, /function hasStitchedDeliveryOutput\(outputs = \[\]\)/);
+  assert.match(js, /context\.hasStitchedOutput/);
+  assert.match(js, /\["stitched_video", "remix_video"\]/);
   assert.match(js, /"stitched_video"/);
   assert.match(js, /交付结果/);
+  assert.match(js, /包含 QC 通过、警告、未通过和未质检状态/);
   assert.match(js, /最终结果尚未生成/);
   assert.match(js, /中间结果/);
-  assert.match(js, /不作为最终交付成片/);
+  assert.match(js, /Seedance 生成的分段或处理过程视频/);
 });
 
 test("task manager download action starts zip download with visible feedback", async () => {
@@ -240,8 +314,13 @@ test("task manager download action starts zip download with visible feedback", a
   assert.match(js, /result = await downloadZip\(\{/);
   assert.match(js, /batchIds:\s*\[state\.selectedId\]/);
   assert.match(js, /remixIds:\s*\[state\.selectedId\]/);
-  assert.match(js, /includeSegments:\s*Boolean\(\$\(("#wzTasksIncludeSegments"|\'#wzTasksIncludeSegments\')\)\?\.checked\)/);
-  assert.match(js, /showToast\(`已开始下载 \$\{result\?\.fileName \|\| "交付包"\}`/);
+  assert.match(js, /const outputIds = selectedOutputIds\(\)/);
+  assert.match(js, /outputIds,/);
+  assert.match(js, /remixOutputIds:\s*outputIds/);
+  assert.match(js, /请先勾选要下载的视频/);
+  assert.match(js, /下载选中视频/);
+  assert.doesNotMatch(js, /wzTasksIncludeSegments/);
+  assert.match(js, /showToast\(`已开始下载 \$\{result\?\.fileName \|\| "选中视频"\}`/);
 });
 
 test("download packages require final media but allow missing auxiliary files", async () => {
@@ -254,6 +333,17 @@ test("download packages require final media but allow missing auxiliary files", 
   assert.match(source, /if \(requiredMissingFiles\.length\)/);
   assert.match(source, /交付包缺少最终视频文件/);
   assert.doesNotMatch(source, /if \(missingFiles\.length\) \{\s*\n\s*throw new WangzhuanError\("missing_required_file"/);
+});
+
+test("download packages support selected-output-only video zips", async () => {
+  const source = await readText("server/wangzhuan/package.mjs");
+  assert.match(source, /function normalizeIdSet\(values\)/);
+  assert.match(source, /function hasSelectedOutputFilter\(request\)/);
+  assert.match(source, /const selectedOutputIds = normalizeIdSet\(request\.outputIds\)/);
+  assert.match(source, /normalizeIdSet\(request\.remixOutputIds\)/);
+  assert.match(source, /const selectedOnly = hasSelectedOutputFilter\(request\)/);
+  assert.match(source, /if \(selectedOnly\) \{/);
+  assert.match(source, /if \(!selectedOnly\) addStringFile\(files, "package-manifest\.json", manifest\)/);
 });
 
 test("confirming Seedance asset reviews is not blocked by preview stage", async () => {

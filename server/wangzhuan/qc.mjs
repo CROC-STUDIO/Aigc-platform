@@ -616,6 +616,21 @@ function minResolutionForRatio(ratio) {
   return { width: 720, height: 1280 };
 }
 
+function recordedVideoProbe(output = {}) {
+  const probe = output.probe || output.mediaProbe || {};
+  const width = numberOrZero(probe.width ?? output.width);
+  const height = numberOrZero(probe.height ?? output.height);
+  const durationSec = numberOrZero(probe.durationSec ?? output.actualDurationSec ?? output.durationSec);
+  if (!width && !height && !durationSec) return null;
+  return {
+    ...probe,
+    width,
+    height,
+    durationSec,
+    formatName: probe.formatName || ""
+  };
+}
+
 async function outputMediaProbe(context, output) {
   const filePath = resolveUserPath(context, output.filePath);
   const timeoutMs = numberOrZero(context.config?.wangzhuan?.ffprobe?.timeoutMs) || 15000;
@@ -631,18 +646,36 @@ async function deterministicVideoChecks(context, batch, output) {
   const expectedRatio = expectedOutputRatio(batch, output);
   const minResolution = minResolutionForRatio(expectedRatio);
   const filePath = tryResolveUserPath(context, output.filePath);
-  if (!filePath) {
+  const hasRemoteAsset = outputHasRemoteAsset(output);
+  const localFileExists = Boolean(filePath && existsSync(filePath));
+  if (!filePath && !hasRemoteAsset) {
     checks.push(checkWithData(
       "download_status",
-      outputHasRemoteAsset(output) ? "warn" : "fail",
-      outputHasRemoteAsset(output) ? "输出仅在对象存储，本地文件未落盘" : "输出文件路径缺失",
+      "fail",
+      "输出文件路径缺失",
       "filePath",
       { filePath: output.filePath || "", storageKey: output.storageKey || "" }
     ));
     return checks;
   }
-  let probe = output.probe || output.mediaProbe || null;
-  if (!probe) {
+
+  let probe = localFileExists ? (output.probe || output.mediaProbe || null) : recordedVideoProbe(output);
+  if (!localFileExists && hasRemoteAsset) {
+    checks.push(checkWithData("ffprobe_readable", "pass", "输出已在对象存储，本地缓存未落盘，跳过本地 ffprobe", "storageKey", {
+      filePath: output.filePath || "",
+      storageKey: output.storageKey || "",
+      storageUrl: output.storageUrl || ""
+    }));
+  } else if (!localFileExists) {
+    checks.push(checkWithData(
+      "download_status",
+      "fail",
+      "输出文件未落盘，不能下载",
+      "filePath",
+      { filePath: output.filePath || "", storageKey: output.storageKey || "" }
+    ));
+    return checks;
+  } else if (!probe) {
     try {
       probe = await outputMediaProbe(context, output);
     } catch (error) {
@@ -672,6 +705,13 @@ async function deterministicVideoChecks(context, batch, output) {
       "resolution",
       { expectedRatio, minWidth: minResolution.width, minHeight: minResolution.height, width, height }
     ));
+  } else if (!localFileExists && hasRemoteAsset) {
+    checks.push(checkWithData("resolution_spec", "pass", "输出已在对象存储，本地分辨率校验跳过；以生成任务规格记录为准", "storageKey", {
+      expectedRatio,
+      minResolution,
+      storageKey: output.storageKey || "",
+      storageUrl: output.storageUrl || ""
+    }));
   } else {
     checks.push(checkWithData("resolution_spec", "warn", "缺少可验证的分辨率信息", "resolution", { expectedRatio, minResolution }));
   }
@@ -691,13 +731,12 @@ async function deterministicVideoChecks(context, batch, output) {
     checks.push(checkWithData("duration_tolerance", "warn", "缺少可验证的时长信息", "durationSec", { expectedDuration, actualDuration }));
   }
 
-  const fileExists = existsSync(filePath);
   checks.push(checkWithData(
     "download_status",
-    fileExists ? "pass" : "fail",
-    fileExists ? "输出文件已落盘，可进入下载判断" : "输出文件未落盘，不能下载",
-    "filePath",
-    { filePath: output.filePath, storageKey: output.storageKey || "" }
+    localFileExists || hasRemoteAsset ? "pass" : "fail",
+    localFileExists ? "输出文件已落盘，可进入下载判断" : "输出已在对象存储，可进入下载判断",
+    localFileExists ? "filePath" : "storageKey",
+    { filePath: output.filePath || "", storageKey: output.storageKey || "", storageUrl: output.storageUrl || "" }
   ));
   return checks;
 }
@@ -1415,5 +1454,6 @@ export async function runBatchQc(context, batchId) {
 export const qcPathHelpers = {
   tryResolveUserPath,
   videoSpecCheck,
-  templateSnapshotCheck
+  templateSnapshotCheck,
+  deterministicVideoChecks
 };

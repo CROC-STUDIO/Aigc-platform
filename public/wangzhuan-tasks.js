@@ -226,6 +226,48 @@ function statusStripe(status, labelMap) {
   return taskListStripe(label, `tone-${statusStripeTone(status)}`);
 }
 
+function batchWorkflowStep(batch = {}) {
+  const status = String(batch.status || "");
+  const plans = Array.isArray(batch.plans) ? batch.plans : [];
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
+  const hasOutputs = outputs.length > 0;
+  const qcStarted = outputs.some((output) => output.qcStatus && output.qcStatus !== "not_started");
+  if (status === "draft" || status === "checking" || status === "inline_draft") {
+    return { step: 1, label: "1 上传视频并拆解", tone: "neutral" };
+  }
+  if (!plans.length && !tasks.length && !hasOutputs && ["queued", "running"].includes(status)) {
+    return { step: 3, label: "3 生成 Seedance 提示词", tone: "neutral" };
+  }
+  if (status === "preview_required" || plans.length && !tasks.length) {
+    return { step: 3, label: "3 生成 Seedance 提示词", tone: "warn" };
+  }
+  if (["queued", "running", "stitching"].includes(status) || tasks.some((task) => ["pending", "waiting_upstream", "downloaded"].includes(task.status))) {
+    return { step: 4, label: "4 生成视频和质检", tone: status === "partial_failed" || status === "failed" ? "warn" : "neutral" };
+  }
+  if (status === "qc" && !qcStarted) {
+    return { step: 4, label: "4 生成视频和质检", tone: "neutral" };
+  }
+  if (["succeeded", "partial_failed", "failed", "skipped", "stopped"].includes(status) || qcStarted || hasOutputs) {
+    return { step: 5, label: "5 结果确认和下载", tone: status === "succeeded" ? "good" : "warn" };
+  }
+  return { step: 2, label: "2 产品改写信息填写", tone: "neutral" };
+}
+
+function taskWorkflowStripe(item = {}) {
+  if (item.type === "remix") {
+    const labels = taskLabels(item.type);
+    return statusStripe(item.status, labels);
+  }
+  const step = batchWorkflowStep(item);
+  return taskListStripe(step.label, `tone-${step.tone}`);
+}
+
+function batchWorkflowBadge(batch = {}) {
+  const step = batchWorkflowStep(batch);
+  return `<span class="wz-badge ${escapeHtml(step.tone)}">${escapeHtml(step.label)}</span>`;
+}
+
 function taskPrimaryId(item) {
   return item.type === "remix" ? item.remixId : item.batchId;
 }
@@ -336,15 +378,31 @@ function sortedOutputs(outputs = []) {
     });
 }
 
-function isIntermediateOutput(output = {}) {
-  return output.kind === "segment_video" || output.kind === "segment";
+function isDeliveryOutput(output = {}) {
+  return ["stitched_video", "remix_video"].includes(output.kind);
 }
 
-function splitOutputGroups(outputs = []) {
+function hasStitchedDeliveryOutput(outputs = []) {
+  return (Array.isArray(outputs) ? outputs : []).some((output) => output?.kind === "stitched_video");
+}
+
+function isIntermediateOutput(output = {}, context = {}) {
+  if (output.kind === "segment_video" || output.kind === "segment") {
+    return Number(context.expectedDurationSec) === 30 || Boolean(context.hasStitchedOutput || context.hasFinalOutput);
+  }
+  return !isDeliveryOutput(output);
+}
+
+function splitOutputGroups(outputs = [], options = {}) {
   const items = sortedOutputs(outputs);
+  const context = {
+    hasStitchedOutput: hasStitchedDeliveryOutput(items),
+    hasFinalOutput: items.some((output) => isDeliveryOutput(output)),
+    expectedDurationSec: Number(options.expectedDurationSec || 0)
+  };
   return {
-    finalOutputs: items.filter((output) => !isIntermediateOutput(output)),
-    intermediateOutputs: items.filter(isIntermediateOutput)
+    finalOutputs: items.filter((output) => !isIntermediateOutput(output, context)),
+    intermediateOutputs: items.filter((output) => isIntermediateOutput(output, context))
   };
 }
 
@@ -373,14 +431,45 @@ function renderOutputQcIssues(output = {}) {
   `;
 }
 
-function renderOutputCards(items = []) {
+function qcBadge(output = {}) {
+  const status = output.qcStatus || "not_started";
+  const label = {
+    pass: "QC 通过",
+    warn: "QC 警告",
+    fail: "QC 未通过",
+    manual_required: "需人工确认",
+    not_started: "未质检",
+    qc_running: "质检中"
+  }[status] || `QC ${status}`;
+  const tone = status === "pass" ? "succeeded" : ["fail", "warn", "manual_required"].includes(status) ? "failed" : "pending";
+  return badge(tone, { succeeded: label, failed: label, pending: label });
+}
+
+function outputSelectable(output = {}) {
+  return Boolean(output?.outputId && assetPreviewUrl(output));
+}
+
+function renderOutputCards(items = [], options = {}) {
+  const defaultChecked = options.defaultChecked !== false;
   return `
     <div class="wz-tasks-output-grid">
       ${items.map((output) => `
         <article class="wz-tasks-output-card">
           <div class="wz-tasks-output-card-head">
-            <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
-            ${output.downloadEligible ? badge("succeeded", { succeeded: "可下载" }) : badge("pending", { pending: "归档中" })}
+            <label class="wz-check wz-tasks-output-select">
+              <input
+                class="wzTasksOutputCheckbox"
+                type="checkbox"
+                data-output-id="${escapeHtml(output.outputId || "")}"
+                ${outputSelectable(output) ? "" : "disabled"}
+                ${outputSelectable(output) && defaultChecked ? "checked" : ""}
+              />
+              <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
+            </label>
+            <span class="wz-tasks-output-badges">
+              ${qcBadge(output)}
+              ${output.downloadEligible ? badge("succeeded", { succeeded: "可下载" }) : badge("pending", { pending: "归档中" })}
+            </span>
           </div>
           ${renderMediaPlayer(output, "该输出暂不可预览")}
           <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
@@ -392,34 +481,35 @@ function renderOutputCards(items = []) {
   `;
 }
 
-function renderOutputStage({ title, description, items = [], emptyText, className = "" }) {
+function renderOutputStage({ title, description, items = [], emptyText, className = "", defaultChecked = true }) {
   return `
     <section class="wz-tasks-output-stage ${escapeHtml(className)}" aria-label="${escapeHtml(title)}">
       <header class="wz-tasks-media-stage-head">
         <h2>${escapeHtml(title)}</h2>
         <p>${escapeHtml(description)}</p>
       </header>
-      ${items.length ? renderOutputCards(items) : `<div class="wz-list empty-line">${escapeHtml(emptyText)}</div>`}
+      ${items.length ? renderOutputCards(items, { defaultChecked }) : `<div class="wz-list empty-line">${escapeHtml(emptyText)}</div>`}
     </section>
   `;
 }
 
-function renderOutputCollection(outputs = []) {
-  const { finalOutputs, intermediateOutputs } = splitOutputGroups(outputs);
+function renderOutputCollection(outputs = [], options = {}) {
+  const { finalOutputs, intermediateOutputs } = splitOutputGroups(outputs, options);
   const hasAnyOutput = finalOutputs.length || intermediateOutputs.length;
   const finalStage = renderOutputStage({
     title: "交付结果",
-    description: "最终成片、改造视频等面向交付的结果",
+    description: "所有面向交付的视频都会展示在这里，包含 QC 通过、警告、未通过和未质检状态",
     items: finalOutputs,
     emptyText: hasAnyOutput ? "最终结果尚未生成" : "暂无输出"
   });
   const intermediateStage = intermediateOutputs.length
     ? renderOutputStage({
         title: "中间结果",
-        description: "分段视频、诊断过程文件等中间产物，不作为最终交付成片",
+        description: "Seedance 生成的分段或处理过程视频，不作为最终交付成片",
         items: intermediateOutputs,
         emptyText: "暂无中间结果",
-        className: "is-intermediate"
+        className: "is-intermediate",
+        defaultChecked: false
       })
     : "";
   return `${finalStage}${intermediateStage}`;
@@ -497,6 +587,26 @@ function renderTaskMediaCompare({ inputAsset, outputAsset, inputLabel = "输入�
   `;
 }
 
+function renderSourceMediaStage({ asset, label = "输入素材", description = "任务参考输入" }) {
+  return `
+    <section class="wz-tasks-media-stage wz-tasks-source-stage" aria-label="${escapeHtml(label)}">
+      <header class="wz-tasks-media-stage-head">
+        <h2>${escapeHtml(label)}</h2>
+        <p>${escapeHtml(description)}</p>
+      </header>
+      <article class="wz-tasks-media-card is-input">
+        <div class="wz-tasks-media-card-head">
+          <span class="wz-tasks-media-tag">输入</span>
+          <strong>${escapeHtml(label)}</strong>
+        </div>
+        ${renderMediaPlayer(asset, "输入视频尚未关联或暂不可预览")}
+        <footer class="wz-tasks-media-meta">${escapeHtml(formatMediaMeta(asset || {}))}</footer>
+        ${assetPreviewUrl(asset) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(asset))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
+      </article>
+    </section>
+  `;
+}
+
 function renderScopeFilters() {
   for (const button of [els.scopeActive, els.scopeAll, els.scopeDone]) {
     if (!button) continue;
@@ -546,7 +656,6 @@ function renderTaskList() {
   els.list.innerHTML = state.items.map((item) => {
     const id = taskPrimaryId(item);
     const selected = item.type === state.selectedType && id === state.selectedId;
-    const labels = taskLabels(item.type);
     const typeClass = item.type === "remix" ? "remix" : "pipeline";
     const label = taskTypeLabelShort(item.type);
     const liveClass = item.isActive ? " is-live" : "";
@@ -556,7 +665,7 @@ function renderTaskList() {
         <span class="wz-tasks-item-rail" aria-hidden="true"></span>
         <span class="wz-tasks-item-row">
           ${typeStripe(typeClass, label)}
-          ${statusStripe(item.status, labels)}
+          ${taskWorkflowStripe(item)}
           <strong class="wz-tasks-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
           <code class="wz-tasks-item-id" title="${escapeHtml(id)}">${escapeHtml(shortId(id))}</code>
           <small class="wz-tasks-item-time">${escapeHtml(formatTimestamp(item.updatedAt || item.createdAt))}</small>
@@ -615,14 +724,12 @@ function renderBatchDetail(detail) {
   const notice = detailNotice("batch", batch.status);
   const planJobNotice = renderBackgroundJobNotice(detail?.backgroundJobs?.latestPlanJob, "Seedance 预案后台任务");
   const decompositionJobNotice = renderBackgroundJobNotice(detail?.backgroundJobs?.latestDecompositionJob, "AI 拆解后台任务");
-  const outputAsset = pickPrimaryOutput(batch.outputs);
-  const outputLabel = outputAsset?.kind === "stitched_video" ? "拼接成片" : "输出视频";
   return `
     <article class="wz-tasks-detail-head">
       <div class="wz-tasks-detail-head-copy">
         <div class="wz-tasks-detail-head-badges">
           <span class="wz-tasks-type-badge pipeline">网赚素材管线</span>
-          ${badge(batch.status, batchStatusLabels)}
+          ${batchWorkflowBadge(batch)}
         </div>
         <strong class="wz-tasks-detail-id" title="${escapeHtml(batch.batchId)}">${escapeHtml(batch.batchId)}</strong>
         <small>创建 ${escapeHtml(formatTimestamp(batch.createdAt))} · 更新 ${escapeHtml(formatTimestamp(batch.updatedAt))}</small>
@@ -631,13 +738,12 @@ function renderBatchDetail(detail) {
     ${notice ? `<div class="wz-warning wz-tasks-notice">${escapeHtml(notice)}</div>` : ""}
     ${decompositionJobNotice}
     ${planJobNotice}
-    ${renderTaskMediaCompare({
-      inputAsset: batch.referenceVideo,
-      outputAsset,
-      inputLabel: "参考输入视频",
-      outputLabel
+    ${renderSourceMediaStage({
+      asset: batch.referenceVideo,
+      label: "参考输入视频",
+      description: "原始参考视频独立展示；多条裂变输出在下方交付结果中查看"
     })}
-    ${renderOutputCollection(batch.outputs)}
+    ${renderOutputCollection(batch.outputs, { expectedDurationSec: batch.estimate?.durationSec })}
     <div class="wz-kv-grid">
       ${renderKeyValues([
         ["任务数", tasks.length],
@@ -662,8 +768,7 @@ function renderBatchDetail(detail) {
       ${qcRunnable ? `<button id="wzTasksRunQcBtn" type="button">${batch.status === "qc" ? "运行视频质检" : "重新质检"}</button>` : ""}
       <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status, batch.batchId))}">前往管线工作台</a>
       ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
-      ${batch.status === "partial_failed" ? `<label class="wz-check"><input id="wzTasksIncludeSegments" type="checkbox" checked /> 下载可用分段/可用项</label>` : ""}
-      ${detail.downloadSummary?.packageReady || batch.status === "partial_failed" ? `<button id="wzTasksDownloadBtn" type="button">${batch.status === "partial_failed" ? "下载可用项" : "下载交付包"}</button>` : ""}
+      ${detail.downloadSummary?.packageReady || batch.status === "partial_failed" ? `<button id="wzTasksDownloadBtn" type="button">下载选中视频</button>` : ""}
     </div>
   `;
 }
@@ -685,11 +790,10 @@ function renderRemixDetail(detail) {
       </div>
     </article>
     ${notice ? `<div class="wz-warning wz-tasks-notice">${escapeHtml(notice)}</div>` : ""}
-    ${renderTaskMediaCompare({
-      inputAsset: remix.source,
-      outputAsset: output,
-      inputLabel: "竞品源视频",
-      outputLabel: "改造输出"
+    ${renderSourceMediaStage({
+      asset: remix.source,
+      label: "竞品源视频",
+      description: "源视频独立展示；所有改造输出在下方交付结果中查看"
     })}
     ${renderOutputCollection(remix.outputs)}
     ${renderDiagnosticArchive(remix.providerJob)}
@@ -706,7 +810,7 @@ function renderRemixDetail(detail) {
       <a class="mini ghost" href="${escapeHtml(workbenchHref("remix", remix.status, remix.remixId))}">前往改造工作台</a>
       ${remix.status === "preview_required" && output ? `<button id="wzTasksConfirmPreviewBtn" type="button">确认预览</button>` : ""}
       ${!["succeeded", "failed", "stopped"].includes(remix.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">停止任务</button>` : ""}
-      ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载交付包</button>` : ""}
+      ${detail.downloadSummary?.packageReady ? `<button id="wzTasksDownloadBtn" type="button">下载选中视频</button>` : ""}
     </div>
   `;
 }
@@ -718,6 +822,12 @@ function shouldPollDetail(detail) {
   }
   const status = detail?.remix?.status;
   return Boolean(status && !["succeeded", "failed", "stopped"].includes(status));
+}
+
+function selectedOutputIds() {
+  return Array.from(document.querySelectorAll(".wzTasksOutputCheckbox:checked"))
+    .map((input) => String(input.dataset.outputId || "").trim())
+    .filter(Boolean);
 }
 
 function renderDetailPanel(options = {}) {
@@ -949,24 +1059,30 @@ async function stopSelectedTask() {
 
 async function downloadSelectedTask() {
   const button = $("#wzTasksDownloadBtn");
+  const outputIds = selectedOutputIds();
+  if (!outputIds.length) {
+    renderError(els.globalError, new Error("请先勾选要下载的视频"), "下载失败");
+    return;
+  }
   setBusy(button, true, "打包中");
   try {
     let result;
     if (state.selectedType === "remix") {
       result = await downloadZip({
         remixIds: [state.selectedId],
+        remixOutputIds: outputIds,
         includeFailed: false,
         includeRemoteUrls: false
       });
     } else {
       result = await downloadZip({
         batchIds: [state.selectedId],
-        includeSegments: Boolean($("#wzTasksIncludeSegments")?.checked),
+        outputIds,
         includeFailed: false,
         includeRemoteUrls: false
       });
     }
-    showToast(`已开始下载 ${result?.fileName || "交付包"}`, { type: "success" });
+    showToast(`已开始下载 ${result?.fileName || "选中视频"}`, { type: "success" });
   } catch (error) {
     renderError(els.globalError, error, "下载失败");
   } finally {

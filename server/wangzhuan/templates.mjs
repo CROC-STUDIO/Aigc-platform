@@ -30,7 +30,24 @@ function clone(value) {
   return structuredClone(value);
 }
 
+function telemetryRecorder(context) {
+  return typeof context.recordTelemetryEvent === "function"
+    ? context.recordTelemetryEvent
+    : (eventName, payload, options) => recordTelemetryEvent(context, eventName, payload, options);
+}
+
 async function loadTemplateStore(context) {
+  if (typeof context.loadTemplateStore === "function") {
+    const injectedStore = await context.loadTemplateStore();
+    return {
+      schemaVersion: "templates.v1",
+      defaultTemplateId: "",
+      nextTemplateSeq: 1,
+      templates: [],
+      ...(injectedStore || {}),
+      templates: Array.isArray(injectedStore?.templates) ? injectedStore.templates : []
+    };
+  }
   if (!await hasWangzhuanFactsStore()) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取模板状态");
   }
@@ -47,6 +64,10 @@ async function loadTemplateStore(context) {
 }
 
 async function saveTemplateStore(context, store) {
+  if (typeof context.saveTemplateStore === "function") {
+    await context.saveTemplateStore(store);
+    return;
+  }
   const synced = await syncTemplateStoreFacts(context, store);
   if (synced?.skipped) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存模板状态");
@@ -184,7 +205,7 @@ export async function saveTemplate(context, request = {}) {
   await saveTemplateStore(context, store);
 
   const auditEventId = makeAuditEventId();
-  await recordTelemetryEvent(context, "product_template_saved", {
+  await telemetryRecorder(context)("product_template_saved", {
     templateId,
     versionId: template.versionId,
     mode: request.mode,
@@ -201,13 +222,19 @@ export async function adminTemplateAction(context, request = {}) {
     throw new WangzhuanError("validation_error", "模板管理动作不支持", { field: "action" });
   }
   const store = await loadTemplateStore(context);
-  const matched = store.templates.filter((template) => template.templateId === request.templateId);
+  const matched = store.templates.filter((template) => {
+    if (request.versionId) return template.versionId === request.versionId && template.templateId === request.templateId;
+    return template.templateId === request.templateId;
+  });
   if (!matched.length) {
-    throw new WangzhuanError("template_not_found", "模板不存在或已被删除", { templateId: request.templateId });
+    throw new WangzhuanError("template_not_found", "模板不存在或已被删除", {
+      templateId: request.templateId,
+      versionId: request.versionId
+    });
   }
 
   let status = matched[0].status;
-  let versionId = request.versionId;
+  let versionId = request.versionId || "";
   const now = new Date().toISOString();
 
   if (request.action === "archive" || request.action === "delete") {
@@ -215,8 +242,14 @@ export async function adminTemplateAction(context, request = {}) {
     for (const template of matched) {
       template.status = status;
       template.updatedAt = now;
+      versionId ||= template.versionId;
     }
-    if (status === "deleted" && store.defaultTemplateId === request.templateId) store.defaultTemplateId = "";
+    if (status === "deleted" && store.defaultTemplateId === request.templateId) {
+      const hasActiveVersion = store.templates.some((template) => {
+        return template.templateId === request.templateId && template.status !== "deleted";
+      });
+      if (!hasActiveVersion) store.defaultTemplateId = "";
+    }
   } else if (request.action === "rename") {
     if (!isNonEmptyString(request.displayName)) {
       throw new WangzhuanError("validation_error", "displayName 不能为空", { field: "displayName" });
@@ -240,7 +273,7 @@ export async function adminTemplateAction(context, request = {}) {
 
   await saveTemplateStore(context, store);
   const auditEventId = makeAuditEventId();
-  await recordTelemetryEvent(context, "product_template_admin_changed", {
+  await telemetryRecorder(context)("product_template_admin_changed", {
     templateId: request.templateId,
     versionId,
     action: request.action,
