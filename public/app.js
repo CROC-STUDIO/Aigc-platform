@@ -17,6 +17,9 @@ const state = {
 };
 
 const GUANGDADA_DISABLED = false;
+const GUANGDADA_SEARCH_COOLDOWN_MS = 60 * 1000;
+let guangdadaSearchCooldownUntil = 0;
+let guangdadaSearchCooldownTimer = null;
 const DEFAULT_OUTPUT_SIZE = "1024x1024";
 function splitSizeParts(value, fallback = DEFAULT_OUTPUT_SIZE) {
   const normalized = normalizeOutputSizeInput(value) || normalizeOutputSizeInput(fallback) || DEFAULT_OUTPUT_SIZE;
@@ -1235,6 +1238,7 @@ els.batchTag.value = defaultBatchTag();
 updateStartButtonState(false);
 els.guangdadaMinPopularity.value = "100000";
 els.guangdadaTopN.value = "3";
+els.guangdadaTopN.max = "10";
 els.guangdadaRecentRange.value = "3";
 els.guangdadaMaterialType.value = "image";
 applyRecentRange("3");
@@ -1413,7 +1417,40 @@ els.saveGlobalRequirementBtn.addEventListener("click", async () => {
   }
 });
 
+function clampGuangdadaTopN() {
+  const value = Math.max(1, Math.min(10, Number(els.guangdadaTopN.value || 3)));
+  els.guangdadaTopN.value = String(value);
+  return value;
+}
+
+function remainingGuangdadaCooldownSeconds() {
+  return Math.max(0, Math.ceil((guangdadaSearchCooldownUntil - Date.now()) / 1000));
+}
+
+function updateGuangdadaSearchCooldown() {
+  const remaining = remainingGuangdadaCooldownSeconds();
+  if (remaining > 0) {
+    els.guangdadaSearchBtn.disabled = true;
+    els.guangdadaSearchBtn.textContent = `${remaining}s`;
+    if (!guangdadaSearchCooldownTimer) {
+      guangdadaSearchCooldownTimer = setInterval(updateGuangdadaSearchCooldown, 1000);
+    }
+    return;
+  }
+  if (guangdadaSearchCooldownTimer) {
+    clearInterval(guangdadaSearchCooldownTimer);
+    guangdadaSearchCooldownTimer = null;
+  }
+  els.guangdadaSearchBtn.disabled = false;
+  els.guangdadaSearchBtn.textContent = "抓取";
+}
+
 els.guangdadaSearchBtn.addEventListener("click", async () => {
+  const cooldownSeconds = remainingGuangdadaCooldownSeconds();
+  if (cooldownSeconds > 0) {
+    els.guangdadaStatus.textContent = `请等待 ${cooldownSeconds}s`;
+    return;
+  }
   if (GUANGDADA_DISABLED) {
     els.guangdadaStatus.textContent = "已禁用";
     return alert("广大大抓取暂时禁用，请自行上传竞品素材。");
@@ -1428,12 +1465,13 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
   try {
     const minPopularity = Number(els.guangdadaMinPopularity.value || 100000);
     els.guangdadaMinPopularity.value = String(minPopularity);
+    const topN = clampGuangdadaTopN();
     const result = await api("/api/guangdada/search", {
       method: "POST",
       body: JSON.stringify({
         keyWord: els.guangdadaKeyword.value.trim(),
         minPopularity,
-        topN: Number(els.guangdadaTopN.value || 30),
+        topN,
         materialType: els.guangdadaMaterialType.value,
         startDate: els.guangdadaStartDate.value,
         endDate: els.guangdadaEndDate.value
@@ -1446,8 +1484,8 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
     alert(error.message);
     els.guangdadaStatus.textContent = "抓取失败";
   } finally {
-    els.guangdadaSearchBtn.disabled = false;
-    els.guangdadaSearchBtn.textContent = "抓取";
+    guangdadaSearchCooldownUntil = Date.now() + GUANGDADA_SEARCH_COOLDOWN_MS;
+    updateGuangdadaSearchCooldown();
   }
 });
 
@@ -1496,6 +1534,8 @@ els.guangdadaStartDate.addEventListener("input", () => {
 els.guangdadaEndDate.addEventListener("input", () => {
   els.guangdadaRecentRange.value = "";
 });
+
+els.guangdadaTopN.addEventListener("input", clampGuangdadaTopN);
 
 els.imageModelSelect.addEventListener("change", () => {
   updateStartButtonState();

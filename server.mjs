@@ -250,6 +250,7 @@ function dirs() {
     logoDir: join(sharedRoot, "\u4ea7\u54c1logo"),
     outputDir: join(root, "\u6548\u679c\u56fe"),
     recordDir,
+    guangdadaCacheDir: join(recordDir, "guangdada_cache"),
     globalRequirementPath: join(recordDir, "\u901a\u7528\u63d0\u793a\u8bcd.txt"),
     competitorNameLibraryPath: join(recordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
     upscaledDir: join(sharedRecordDir, "upscaled_refs_20260608_b")
@@ -2430,10 +2431,13 @@ async function searchGuangdada(body) {
   if (!keyWord) throw new Error("请输入广大大搜索关键词");
   assertZingApiConfig();
   const minPopularity = Math.max(0, Number(body.minPopularity ?? 0));
-  const topN = Math.max(1, Math.min(100, Number(body.topN ?? 50)));
+  const topN = Math.max(1, Math.min(10, Number(body.topN ?? 10)));
   const materialType = ["all", "image", "video"].includes(String(body.materialType ?? "")) ? String(body.materialType) : "image";
   const startDate = parseDateFilter(body.startDate);
   const endDate = parseDateFilter(body.endDate, true);
+  const cacheKey = guangdadaCacheKey({ keyWord, minPopularity, topN, materialType, startDate: body.startDate || "", endDate: body.endDate || "" });
+  const cached = await readGuangdadaCache(cacheKey);
+  if (cached) return { ...cached, cached: true };
   const dateChunks = guangdadaDateChunks(startDate, endDate);
   const maxPagesPerChunk = guangdadaMaxPagesForThreshold(minPopularity);
   const itemMap = new Map();
@@ -2460,7 +2464,36 @@ async function searchGuangdada(body) {
   const items = Array.from(itemMap.values())
     .sort((a, b) => b.popularity - a.popularity || normalizeUnixMs(b.timestamp) - normalizeUnixMs(a.timestamp))
     .slice(0, topN);
-  return { ok: true, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
+  const result = { ok: true, cached: false, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
+  await writeGuangdadaCache(cacheKey, result);
+  return result;
+}
+
+function guangdadaCacheKey(value) {
+  return sha256Hex(JSON.stringify(value)).slice(0, 32);
+}
+
+async function readGuangdadaCache(cacheKey) {
+  const cachePath = join(dirs().guangdadaCacheDir, `${cacheKey}.json`);
+  if (!existsSync(cachePath)) return null;
+  try {
+    const data = JSON.parse(await readFile(cachePath, "utf8"));
+    const createdAt = Date.parse(data.createdAt || "");
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > 30 * 24 * 60 * 60 * 1000) {
+      await rm(cachePath, { force: true }).catch(() => {});
+      return null;
+    }
+    return data.result || null;
+  } catch {
+    await rm(cachePath, { force: true }).catch(() => {});
+    return null;
+  }
+}
+
+async function writeGuangdadaCache(cacheKey, result) {
+  await mkdir(dirs().guangdadaCacheDir, { recursive: true });
+  const cachePath = join(dirs().guangdadaCacheDir, `${cacheKey}.json`);
+  await writeFile(cachePath, JSON.stringify({ createdAt: new Date().toISOString(), result }, null, 2), "utf8");
 }
 
 function assertZingApiConfig() {
@@ -2488,27 +2521,27 @@ function zingAuthorization({ method, path, query = "", headers, bodyText }) {
   const signedHeaders = signedHeaderNames.join(";");
   const canonicalRequest = [
     method.toUpperCase(),
-    path.split("/").map((part) => encodeRfc3986(part)).join("/"),
+    path,
     query,
     canonicalHeaders,
     signedHeaders,
     sha256Hex(bodyText)
   ].join("\n");
-  const stringToSign = `ACS3-HMAC-SHA256\n${sha256Hex(canonicalRequest)}`;
+  const stringToSign = `zf3-HMAC-SHA256\n${sha256Hex(canonicalRequest)}`;
   const signature = createHmac("sha256", ZINGAPI_ACCESS_KEY_SECRET).update(stringToSign, "utf8").digest("hex");
-  return `ACS3-HMAC-SHA256 Credential=${ZINGAPI_ACCESS_KEY_ID},SignedHeaders=${signedHeaders},Signature=${signature}`;
+  return `zf3-HMAC-SHA256 Credential=${ZINGAPI_ACCESS_KEY_ID},SignedHeaders=${signedHeaders},Signature=${signature}`;
 }
 
 async function zingApiRequest(action, path, payload) {
   assertZingApiConfig();
-  const bodyText = stableJsonStringify(payload);
+  const bodyText = JSON.stringify(payload);
   const contentHash = sha256Hex(bodyText);
   const headersToSign = {
-    "content-type": "application/json",
+    "content-type": "application/json; charset=utf-8",
     "x-zf-action": action,
     "x-zf-content-sha256": contentHash,
     "x-zf-date": new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-    "x-zf-signature-nonce": randomUUID().replace(/-/g, ""),
+    "x-zf-nonce": randomUUID(),
     "x-zf-version": ZINGAPI_VERSION
   };
   const authorization = zingAuthorization({ method: "POST", path, headers: headersToSign, bodyText });
@@ -2517,6 +2550,7 @@ async function zingApiRequest(action, path, payload) {
     headers: {
       host: ZINGAPI_HOST,
       ...headersToSign,
+      "x-timezone": "+0800",
       Authorization: authorization
     },
     body: bodyText
@@ -2622,8 +2656,9 @@ function normalizeGuangdadaItem(item) {
   const viewValue = Number(item.view_count || item.impression || 0);
   const heatValue = Number(item.heat ?? item.hot ?? 0);
   const explicitPopularity = Number(item.popularity ?? 0);
-  const popularity = heatValue || explicitPopularity || exposureValue || viewValue;
+  const popularity = Math.max(heatValue, explicitPopularity, exposureValue, viewValue);
   const hasVideoSignal = Boolean(
+    adsType === 2 ||
     resourceType === 2 ||
     videoDuration > 0 ||
     item.video_url ||
@@ -2636,7 +2671,7 @@ function normalizeGuangdadaItem(item) {
   );
   const hasStillImageSignal = Boolean(item.preview_img_url || item.preview_image_url || item.image_url || item.logo_url || isLikelyImageUrl(imageUrl));
   const isVideoMaterial = hasVideoSignal;
-  const isImageMaterial = Boolean(imageUrl && hasStillImageSignal && !hasVideoSignal);
+  const isImageMaterial = Boolean(imageUrl && (adsType === 1 || hasStillImageSignal) && !hasVideoSignal);
   return {
     id: String(item.ad_key || item.creative_id || item.id || item.image_ahash_md5 || imageUrl),
     title: String(item.title || item.body || item.advertiser_name || "未命名素材").slice(0, 120),
@@ -2851,8 +2886,9 @@ async function tryDownloadImage(imageUrl) {
   const res = await fetch(imageUrl, {
     signal: controller.signal,
     headers: {
-      Referer: "http://120.27.200.123:3000/guangdada",
-      "User-Agent": "Mozilla/5.0"
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
     }
   }).finally(() => clearTimeout(timeout));
   const contentType = res.headers.get("content-type") || "";
@@ -2867,6 +2903,7 @@ async function tryDownloadImage(imageUrl) {
 async function proxyGuangdadaImage(req, res, url) {
   const imageUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(imageUrl)) throw new Error("缺少有效的图片链接");
+  assertAllowedGuangdadaMediaUrl(imageUrl);
   const cacheKey = imageUrl;
   const cached = remoteImageCache.get(cacheKey);
   if (cached && Date.now() - cached.time < 20 * 60 * 1000) {
@@ -2896,6 +2933,7 @@ async function proxyGuangdadaImage(req, res, url) {
 async function proxyGuangdadaVideo(req, res, url) {
   const videoUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(videoUrl)) throw new Error("缺少有效的视频链接");
+  assertAllowedGuangdadaMediaUrl(videoUrl);
   const candidates = [
     videoUrl,
     `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(videoUrl)}`
@@ -2933,6 +2971,13 @@ async function proxyGuangdadaVideo(req, res, url) {
     }
   }
   throw lastError || new Error("视频预览加载失败");
+}
+
+function assertAllowedGuangdadaMediaUrl(value) {
+  const { hostname } = new URL(String(value));
+  const host = hostname.toLowerCase();
+  if (host === "120.27.200.123" || host === "zingfront.com" || host.endsWith(".zingfront.com")) return;
+  throw new Error("Unsupported Guangdada media host");
 }
 
 function detectImageContentType(buffer) {
@@ -3255,8 +3300,9 @@ const server = http.createServer((req, res) => {
   const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
   const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
   const isPublicAsset = url.pathname.startsWith("/api/public/assets/");
+  const isPublicGuangdadaPreview = req.method === "GET" && (url.pathname === "/api/guangdada/image" || url.pathname === "/api/guangdada/video");
   const isStatic = !url.pathname.startsWith("/api/") && url.pathname !== "/file";
-  if (isPublicAuth || isPublicAsset || isStatic) {
+  if (isPublicAuth || isPublicAsset || isPublicGuangdadaPreview || isStatic) {
     handleRequest(req, res).catch((error) => sendError(res, error));
     return;
   }
