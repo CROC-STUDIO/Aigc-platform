@@ -60,7 +60,7 @@
             </div>
           </div>
           <div class="status">
-            <span id="modelBadge">gpt-image-2</span>
+            <span id="modelBadge">codex-gpt-image2</span>
             <span id="runBadge">空闲</span>
           </div>
         </section>
@@ -86,8 +86,16 @@
             <label for="imageModelSelect">生图模型</label>
             <select id="imageModelSelect" required>
               <option value="">请选择</option>
-              <option value="gpt-image-2">image 2.0（常规）</option>
+              <option value="codex-gpt-image2">codex-gpt-image2（常规）</option>
               <option value="ByteDance-Seedream-5-0-lite">ByteDance-Seedream-5-0-lite（擦边）</option>
+            </select>
+          </div>
+          <div class="batch-box model-box video-model-box">
+            <label for="videoModelSelect">视频模型</label>
+            <select id="videoModelSelect">
+              <option value="dreamina-seedance-2-0-fast-260128">Seedance 2.0 Fast</option>
+              <option value="dreamina-seedance-2-0-260128">dreamina-seedance-2-0-260128</option>
+              <option value="dreamina-seedance-2-0-mini" selected>Dreamina Seedance 2.0 Mini</option>
             </select>
           </div>
           <button id="stopBtn" class="icon-action ghost" type="button" title="停止" aria-label="停止" disabled>×</button>
@@ -141,25 +149,25 @@
           <div class="workspace-main">
             <section class="panel guangdada-panel">
               <div class="panel-head">
-                <h2>广大大素材库 <span class="disabled-tag">暂时禁用，请自行上传素材</span></h2>
-                <span id="guangdadaStatus">已禁用</span>
+                <h2>广大大素材库 <span class="disabled-tag">ZingAPI 接入</span></h2>
+                <span id="guangdadaStatus">待抓取</span>
               </div>
               <div class="guangdada-box">
               <div class="guangdada-controls">
                 <label>竞品 <select id="guangdadaKeyword"></select></label>
-                <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" disabled /></label>
-                <label>数量 <input id="guangdadaTopN" type="number" min="1" max="100" value="3" disabled /></label>
+                <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" /></label>
+                <label>数量 <input id="guangdadaTopN" type="number" min="1" max="100" value="3" /></label>
                 <label>类型
-                  <select id="guangdadaMaterialType" disabled>
+                  <select id="guangdadaMaterialType">
                     <option value="all">全部</option>
                     <option value="image" selected>图片</option>
                     <option value="video">视频</option>
                   </select>
                 </label>
-                <label>开始日期 <input id="guangdadaStartDate" type="date" disabled /></label>
-                <label>结束日期 <input id="guangdadaEndDate" type="date" disabled /></label>
+                <label>开始日期 <input id="guangdadaStartDate" type="date" /></label>
+                <label>结束日期 <input id="guangdadaEndDate" type="date" /></label>
                 <label>最近时间
-                  <select id="guangdadaRecentRange" disabled>
+                  <select id="guangdadaRecentRange">
                     <option value="">自定义</option>
                     <option value="1">最近1天</option>
                     <option value="3" selected>最近3天</option>
@@ -168,10 +176,10 @@
                     <option value="365">最近1年</option>
                   </select>
                 </label>
-                <button id="guangdadaSearchBtn" class="ghost compact-action" type="button" disabled>抓取</button>
+                <button id="guangdadaSearchBtn" class="ghost compact-action" type="button">抓取</button>
                 <button id="guangdadaDeleteFolderBtn" class="ghost danger compact-action" type="button">删除</button>
               </div>
-              <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">广大大抓取暂时禁用，请在下方竞品素材卡片中手动上传图片或视频素材。</div></div>
+              <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div></div>
               </div>
             </section>
 
