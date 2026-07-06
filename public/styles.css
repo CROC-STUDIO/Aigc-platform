@@ -9848,6 +9848,26 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   overflow-wrap: anywhere;
 }
 
+.wz-v2-body .wz-asset-slot .wz-v2-asset-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wz-v2-body .wz-asset-slot .wz-v2-asset-file {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid rgba(141, 240, 180, 0.28);
+  border-radius: 6px;
+  color: #dfffea;
+  background: rgba(141, 240, 180, 0.08);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .wz-v2-body .wz-asset-slot[data-has-asset="1"] {
   border-style: solid;
   border-color: rgba(72, 245, 138, 0.38);

@@ -1000,15 +1000,24 @@ function renderAssetReviewState() {
       status.className = "wz-v2-asset-status";
       slot.append(status);
     }
+    let fileList = slot.querySelector(".wz-v2-asset-files");
+    if (!fileList) {
+      fileList = document.createElement("div");
+      fileList.className = "wz-v2-asset-files";
+      slot.append(fileList);
+    }
     const keys = branchAssetEntryKeys(branch, assetKey);
     const selectedFiles = assetInputFiles(input, assetKey).map((file) => file.name);
     const names = keys.length ? keys.map((key) => branch.assetFileNames[key]).filter(Boolean) : selectedFiles;
     const failed = keys
       .map((key) => branch.assetReviews?.[key])
       .filter((review) => review?.status && !isAssetReviewApproved(review.status));
-    status.textContent = names.length
-      ? `${names.join("、")} · ${failed.length ? "有审核风险" : (keys.length ? "已记录" : "待上传")}`
-      : "未选择";
+    const countLabel = names.length ? `${names.length} 个文件` : "未选择";
+    const stateLabel = failed.length ? "有审核风险" : (keys.length ? "已记录" : (names.length ? "待上传" : ""));
+    status.textContent = stateLabel ? `${countLabel} · ${stateLabel}` : countLabel;
+    fileList.innerHTML = names.length
+      ? names.map((name) => `<span class="wz-v2-asset-file">${escapeHtml(name)}</span>`).join("")
+      : "";
     slot.dataset.hasAsset = names.length ? "1" : "0";
   }
 }
@@ -1891,6 +1900,10 @@ async function deleteSelectedTemplate() {
   } finally {
     setBusy(els.deleteTemplateBtn, false);
   }
+}
+
+async function saveDraft(sourceStep = "wzv2_manual_draft") {
+  return saveDraftBatch(sourceStep);
 }
 
 async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
