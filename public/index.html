@@ -18,6 +18,9 @@
       <div class="topbar-account">
         <a class="topbar-account-link" href="/wangzhuan-tasks.html">任务管理</a>
         <span id="currentUserBadge">未登录</span>
+        <button id="profileAvatarBtn" class="profile-avatar-btn" type="button" title="个人信息" aria-label="个人信息" hidden>
+          <span id="profileAvatarText">U</span>
+        </button>
         <button id="adminUsersBtn" class="mini ghost" type="button" hidden>账号管理</button>
         <button id="logoutBtn" class="mini ghost" type="button" hidden>退出</button>
       </div>
@@ -60,7 +63,7 @@
             </div>
           </div>
           <div class="status">
-            <span id="modelBadge">gpt-image-2</span>
+            <span id="modelBadge">codex-gpt-image-2</span>
             <span id="runBadge">空闲</span>
           </div>
         </section>
@@ -86,8 +89,16 @@
             <label for="imageModelSelect">生图模型</label>
             <select id="imageModelSelect" required>
               <option value="">请选择</option>
-              <option value="gpt-image-2">image 2.0（常规）</option>
+              <option value="codex-gpt-image-2">codex-gpt-image-2（常规）</option>
               <option value="ByteDance-Seedream-5-0-lite">ByteDance-Seedream-5-0-lite（擦边）</option>
+            </select>
+          </div>
+          <div class="batch-box model-box video-model-box">
+            <label for="videoModelSelect">视频模型</label>
+            <select id="videoModelSelect">
+              <option value="dreamina-seedance-2-0-fast-260128">Seedance 2.0 Fast</option>
+              <option value="dreamina-seedance-2-0-260128">dreamina-seedance-2-0-260128</option>
+              <option value="dreamina-seedance-2-0-mini" selected>Dreamina Seedance 2.0 Mini</option>
             </select>
           </div>
           <button id="stopBtn" class="icon-action ghost" type="button" title="停止" aria-label="停止" disabled>×</button>
@@ -141,25 +152,25 @@
           <div class="workspace-main">
             <section class="panel guangdada-panel">
               <div class="panel-head">
-                <h2>广大大素材库 <span class="disabled-tag">暂时禁用，请自行上传素材</span></h2>
-                <span id="guangdadaStatus">已禁用</span>
+                <h2>广大大素材库 <span class="disabled-tag">ZingAPI 接入</span></h2>
+                <span id="guangdadaStatus">待抓取</span>
               </div>
               <div class="guangdada-box">
               <div class="guangdada-controls">
                 <label>竞品 <select id="guangdadaKeyword"></select></label>
-                <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" disabled /></label>
-                <label>数量 <input id="guangdadaTopN" type="number" min="1" max="100" value="3" disabled /></label>
+                <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" /></label>
+                <label>数量 <input id="guangdadaTopN" type="number" min="1" max="10" value="3" /></label>
                 <label>类型
-                  <select id="guangdadaMaterialType" disabled>
+                  <select id="guangdadaMaterialType">
                     <option value="all">全部</option>
                     <option value="image" selected>图片</option>
                     <option value="video">视频</option>
                   </select>
                 </label>
-                <label>开始日期 <input id="guangdadaStartDate" type="date" disabled /></label>
-                <label>结束日期 <input id="guangdadaEndDate" type="date" disabled /></label>
+                <label>开始日期 <input id="guangdadaStartDate" type="date" /></label>
+                <label>结束日期 <input id="guangdadaEndDate" type="date" /></label>
                 <label>最近时间
-                  <select id="guangdadaRecentRange" disabled>
+                  <select id="guangdadaRecentRange">
                     <option value="">自定义</option>
                     <option value="1">最近1天</option>
                     <option value="3" selected>最近3天</option>
@@ -168,10 +179,10 @@
                     <option value="365">最近1年</option>
                   </select>
                 </label>
-                <button id="guangdadaSearchBtn" class="ghost compact-action" type="button" disabled>抓取</button>
+                <button id="guangdadaSearchBtn" class="ghost compact-action" type="button">抓取</button>
                 <button id="guangdadaDeleteFolderBtn" class="ghost danger compact-action" type="button">删除</button>
               </div>
-              <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">广大大抓取暂时禁用，请在下方竞品素材卡片中手动上传图片或视频素材。</div></div>
+              <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div></div>
               </div>
             </section>
 
@@ -260,6 +271,31 @@
               <li>生成流程支持图片模式和图片+视频模式，并支持生成次数参数。</li>
             </ul>
           </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileModal" class="modal-backdrop" hidden>
+      <div class="modal-panel profile-panel">
+        <div class="modal-title-row">
+          <div>
+            <h2>个人信息</h2>
+            <p>配置头像、昵称和当前账号用于生图/生视频的 API Key。</p>
+          </div>
+          <button id="profileCloseBtn" class="mini ghost" type="button">关闭</button>
+        </div>
+        <div class="profile-editor">
+          <button class="profile-avatar-preview" id="profileAvatarPreview" type="button" title="点击上传头像">U</button>
+          <input id="profileAvatarFileInput" type="file" accept="image/*" hidden />
+          <input id="profileAvatarInput" type="hidden" />
+          <label>昵称 <input id="profileDisplayNameInput" type="text" placeholder="请输入昵称" /></label>
+          <small>点击头像上传本地图片。</small>
+          <label>API Key <input id="profileApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原 Key" /></label>
+          <small id="profileApiKeyHint">未配置 API Key 时不能开始生图或生视频。</small>
+          <p id="profileStatus" class="login-status"></p>
+        </div>
+        <div class="modal-actions">
+          <button id="profileSaveBtn" type="button">保存</button>
         </div>
       </div>
     </div>

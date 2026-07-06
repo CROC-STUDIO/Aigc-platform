@@ -3,11 +3,13 @@ dist/
 build/
 .env
 .env.*
+!.env.example
 env.export.txt
 *.log
 server-error.log
 server-start.log
 users.json
+user-profiles.json
 .learnings/
 .understand-anything/
 .tmp/

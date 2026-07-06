@@ -219,6 +219,30 @@ body::before {
   border-radius: 999px;
 }
 
+.profile-avatar-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(169, 112, 255, 0.42);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+  background:
+    linear-gradient(135deg, rgba(123, 97, 255, 0.95), rgba(65, 220, 255, 0.75)),
+    rgba(255, 255, 255, 0.08);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  box-shadow: 0 0 22px rgba(123, 97, 255, 0.28);
+}
+
+.profile-avatar-btn.has-image span,
+.profile-avatar-preview.has-image {
+  color: transparent;
+}
+
 .topbar-account-link {
   border-radius: 999px;
   color: var(--ink);
@@ -399,7 +423,7 @@ textarea {
   z-index: 35;
   width: fit-content;
   max-width: calc(100vw - 32px);
-  grid-template-columns: 128px 92px 116px 230px 34px 34px;
+  grid-template-columns: 128px 92px 116px 230px 220px 34px 34px;
   align-items: center;
   gap: 8px;
   margin: 0;
@@ -473,6 +497,10 @@ textarea {
 
 .model-box {
   min-width: 230px;
+}
+
+.video-model-box {
+  min-width: 220px;
 }
 
 input,
@@ -1456,12 +1484,13 @@ button.mini {
 
 .competitor-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(74px, max-content)) minmax(88px, max-content) minmax(126px, max-content) minmax(86px, max-content);
+  grid-template-columns: repeat(2, minmax(74px, max-content)) minmax(88px, max-content) repeat(2, minmax(188px, max-content)) minmax(86px, max-content);
   align-items: center;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
+  flex-wrap: wrap;
 }
 
 .competitor-check {
@@ -1519,6 +1548,21 @@ button.mini {
 .count-field.size-field input {
   width: 86px;
   text-align: center;
+}
+
+.count-field.split-size-field {
+  min-width: 188px;
+  white-space: nowrap;
+}
+
+.count-field.split-size-field input {
+  width: 58px;
+  text-align: center;
+}
+
+.count-field.split-size-field span {
+  color: var(--muted);
+  line-height: 1;
 }
 
 .empty-thumb {
@@ -1661,12 +1705,17 @@ button.mini {
   }
 
   .replace-competitor,
-  .size-field {
+  .size-field,
+  .split-size-field {
     grid-column: 1 / -1;
   }
 
   .count-field.size-field input {
     width: min(150px, 55%);
+  }
+
+  .count-field.split-size-field input {
+    width: min(120px, 36%);
   }
 }
 
@@ -1979,6 +2028,50 @@ button.mini {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.profile-panel {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.profile-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-avatar-preview {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(169, 112, 255, 0.42);
+  border-radius: 18px;
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 950;
+  background:
+    linear-gradient(135deg, rgba(123, 97, 255, 0.95), rgba(65, 220, 255, 0.75)),
+    rgba(255, 255, 255, 0.08);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 32px rgba(123, 97, 255, 0.28);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.profile-avatar-preview:hover {
+  transform: translateY(-1px);
+  border-color: rgba(65, 220, 255, 0.7);
+}
+
+.profile-editor textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.profile-editor small {
+  color: var(--muted);
 }
 
 ::-webkit-scrollbar {

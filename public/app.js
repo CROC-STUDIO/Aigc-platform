@@ -16,8 +16,16 @@ const state = {
   pollTimer: null
 };
 
-const GUANGDADA_DISABLED = true;
+const GUANGDADA_DISABLED = false;
+const GUANGDADA_SEARCH_COOLDOWN_MS = 60 * 1000;
+let guangdadaSearchCooldownUntil = 0;
+let guangdadaSearchCooldownTimer = null;
 const DEFAULT_OUTPUT_SIZE = "1024x1024";
+function splitSizeParts(value, fallback = DEFAULT_OUTPUT_SIZE) {
+  const normalized = normalizeOutputSizeInput(value) || normalizeOutputSizeInput(fallback) || DEFAULT_OUTPUT_SIZE;
+  const [width, height] = normalized.split("x").map(Number);
+  return { width, height, size: `${width}x${height}` };
+}
 const COMPETITOR_UPLOAD_TEXT = "更换素材中";
 
 const els = {
@@ -34,6 +42,7 @@ const els = {
   repeatCountInput: document.querySelector("#repeatCountInput"),
   outputModeSelect: document.querySelector("#outputModeSelect"),
   imageModelSelect: document.querySelector("#imageModelSelect"),
+  videoModelSelect: document.querySelector("#videoModelSelect"),
   refreshBtn: document.querySelector("#refreshBtn"),
   stopBtn: document.querySelector("#stopBtn"),
   startBtn: document.querySelector("#startBtn"),
@@ -82,6 +91,18 @@ const els = {
   changelogModal: document.querySelector("#changelogModal"),
   changelogCloseBtn: document.querySelector("#changelogCloseBtn"),
   currentUserBadge: document.querySelector("#currentUserBadge"),
+  profileAvatarBtn: document.querySelector("#profileAvatarBtn"),
+  profileAvatarText: document.querySelector("#profileAvatarText"),
+  profileModal: document.querySelector("#profileModal"),
+  profileCloseBtn: document.querySelector("#profileCloseBtn"),
+  profileSaveBtn: document.querySelector("#profileSaveBtn"),
+  profileDisplayNameInput: document.querySelector("#profileDisplayNameInput"),
+  profileAvatarInput: document.querySelector("#profileAvatarInput"),
+  profileAvatarFileInput: document.querySelector("#profileAvatarFileInput"),
+  profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
+  profileApiKeyInput: document.querySelector("#profileApiKeyInput"),
+  profileApiKeyHint: document.querySelector("#profileApiKeyHint"),
+  profileStatus: document.querySelector("#profileStatus"),
   adminUsersBtn: document.querySelector("#adminUsersBtn"),
   adminUsersModal: document.querySelector("#adminUsersModal"),
   adminUsersCloseBtn: document.querySelector("#adminUsersCloseBtn"),
@@ -137,6 +158,7 @@ function showLogin(message = "") {
   if (els.loginModal) els.loginModal.hidden = false;
   if (els.loginStatus) els.loginStatus.textContent = message;
   if (els.currentUserBadge) els.currentUserBadge.textContent = "未登录";
+  renderProfileAvatar(null);
   if (els.adminUsersBtn) els.adminUsersBtn.hidden = true;
   updateProjectAdminActions();
   if (els.logoutBtn) els.logoutBtn.hidden = true;
@@ -149,9 +171,91 @@ function hideLogin(user) {
   if (els.loginStatus) els.loginStatus.textContent = "";
   if (els.loginPassword) els.loginPassword.value = "";
   if (els.currentUserBadge) els.currentUserBadge.textContent = user?.displayName || user?.username || "已登录";
+  renderProfileAvatar(user);
+  loadProfile().catch(() => {});
   if (els.adminUsersBtn) els.adminUsersBtn.hidden = !user?.isAdmin;
   updateProjectAdminActions();
   if (els.logoutBtn) els.logoutBtn.hidden = false;
+}
+
+function renderProfileAvatar(user = state.user) {
+  if (!els.profileAvatarBtn) return;
+  const avatar = user?.avatar || user?.profile?.avatar || "";
+  const name = user?.displayName || user?.username || "U";
+  els.profileAvatarBtn.hidden = !user;
+  if (avatar) {
+    els.profileAvatarBtn.style.backgroundImage = `url("${avatar.replace(/"/g, "%22")}")`;
+    els.profileAvatarBtn.classList.add("has-image");
+  } else {
+    els.profileAvatarBtn.style.backgroundImage = "";
+    els.profileAvatarBtn.classList.remove("has-image");
+  }
+  if (els.profileAvatarText) els.profileAvatarText.textContent = String(name).trim().slice(0, 1).toUpperCase() || "U";
+}
+
+function setProfilePreviewAvatar(avatar, name = "") {
+  if (!els.profileAvatarPreview) return;
+  els.profileAvatarPreview.textContent = String(name || "U").trim().slice(0, 1).toUpperCase() || "U";
+  els.profileAvatarPreview.style.backgroundImage = avatar ? `url("${avatar.replace(/"/g, "%22")}")` : "";
+  els.profileAvatarPreview.classList.toggle("has-image", Boolean(avatar));
+}
+
+function renderProfileForm(profile = {}) {
+  if (els.profileDisplayNameInput) els.profileDisplayNameInput.value = profile.displayName || state.user?.displayName || state.user?.username || "";
+  if (els.profileAvatarInput) els.profileAvatarInput.value = profile.avatar || "";
+  if (els.profileApiKeyInput) els.profileApiKeyInput.value = "";
+  if (els.profileApiKeyHint) els.profileApiKeyHint.textContent = profile.hasApiKey ? `已配置 API Key：${profile.apiKeyPreview}` : "未配置 API Key 时不能开始生图或生视频。";
+  setProfilePreviewAvatar(profile.avatar || "", profile.displayName || state.user?.displayName || state.user?.username || "U");
+}
+
+async function loadProfile() {
+  if (!state.user) return null;
+  const data = await api("/api/profile");
+  const profile = data.profile || {};
+  state.user = { ...state.user, displayName: profile.displayName || state.user.displayName, avatar: profile.avatar, profile };
+  if (els.currentUserBadge) els.currentUserBadge.textContent = state.user.displayName || state.user.username || "已登录";
+  renderProfileAvatar(state.user);
+  renderProfileForm(profile);
+  return profile;
+}
+
+async function openProfile() {
+  if (!els.profileModal) return;
+  els.profileStatus.textContent = "";
+  els.profileModal.hidden = false;
+  await loadProfile().catch((error) => {
+    els.profileStatus.textContent = error.message;
+  });
+}
+
+function closeProfile() {
+  if (els.profileModal) els.profileModal.hidden = true;
+}
+
+async function saveProfile() {
+  if (!els.profileSaveBtn) return;
+  els.profileSaveBtn.disabled = true;
+  els.profileStatus.textContent = "保存中...";
+  try {
+    const data = await api("/api/profile", {
+      method: "POST",
+      body: JSON.stringify({
+        displayName: els.profileDisplayNameInput.value,
+        avatar: els.profileAvatarInput.value,
+        apiKey: els.profileApiKeyInput.value
+      })
+    });
+    const profile = data.profile || {};
+    state.user = { ...state.user, displayName: profile.displayName || state.user?.displayName, avatar: profile.avatar, profile };
+    renderProfileAvatar(state.user);
+    renderProfileForm(profile);
+    if (els.currentUserBadge) els.currentUserBadge.textContent = state.user.displayName || state.user.username || "已登录";
+    els.profileStatus.textContent = "已保存";
+  } catch (error) {
+    els.profileStatus.textContent = error.message;
+  } finally {
+    els.profileSaveBtn.disabled = false;
+  }
 }
 
 function updateProjectAdminActions() {
@@ -360,12 +464,16 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
         roleCount: item.roleCount ?? 1,
         monsterCount: item.monsterCount ?? 0,
         useLogo: Boolean(item.useLogo),
-        outputSize: item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
+        imageSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
+        videoSize: item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
+        outputSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
         specialRequirement: item.specialRequirement || ""
       };
     } else if (item.specialRequirement && !state.competitorSettings[item.name].specialRequirement) {
       state.competitorSettings[item.name].specialRequirement = item.specialRequirement;
-      if (!state.competitorSettings[item.name].outputSize) state.competitorSettings[item.name].outputSize = item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
+      if (!state.competitorSettings[item.name].imageSize) state.competitorSettings[item.name].imageSize = item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
+      if (!state.competitorSettings[item.name].videoSize) state.competitorSettings[item.name].videoSize = item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
+      if (!state.competitorSettings[item.name].outputSize) state.competitorSettings[item.name].outputSize = state.competitorSettings[item.name].imageSize;
     }
   }
 
@@ -531,7 +639,9 @@ function renderCompetitors() {
       : firstImage
         ? `<img src="${firstImage.url}" alt="${escapeHtml(item.name)}" />`
         : '<div class="empty-thumb">暂无素材</div>';
-    const setting = state.competitorSettings[item.name] || { roleCount: item.roleCount ?? 1, monsterCount: item.monsterCount ?? 0, useLogo: Boolean(item.useLogo), outputSize: item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, specialRequirement: item.specialRequirement || "" };
+    const setting = state.competitorSettings[item.name] || { roleCount: item.roleCount ?? 1, monsterCount: item.monsterCount ?? 0, useLogo: Boolean(item.useLogo), imageSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, videoSize: item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, outputSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, specialRequirement: item.specialRequirement || "" };
+    const imageSizeParts = splitSizeParts(setting.imageSize || setting.outputSize, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE);
+    const videoSizeParts = splitSizeParts(setting.videoSize || setting.imageSize || setting.outputSize, imageSizeParts.size);
     const block = document.createElement("article");
     block.className = "competitor";
     block.dataset.folder = item.name;
@@ -551,7 +661,8 @@ function renderCompetitors() {
             <label class="count-field">角色 <input class="role-count" type="number" min="0" max="8" value="${setting.roleCount}" /></label>
             <label class="count-field">怪物 <input class="monster-count" type="number" min="0" max="8" value="${setting.monsterCount}" /></label>
             <label class="count-field logo-field">Logo <input class="logo-enabled" type="checkbox" ${setting.useLogo ? "checked" : ""} /></label>
-            <label class="count-field size-field">尺寸 <input class="output-size" type="text" value="${escapeHtml(setting.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE)}" placeholder="${escapeHtml(item.defaultOutputSize || DEFAULT_OUTPUT_SIZE)}" /></label>
+            <label class="count-field split-size-field">图片尺寸 <input class="image-width" type="number" min="256" max="4096" step="1" value="${imageSizeParts.width}" /><span>×</span><input class="image-height" type="number" min="256" max="4096" step="1" value="${imageSizeParts.height}" /></label>
+            <label class="count-field split-size-field">视频尺寸 <input class="video-width" type="number" min="256" max="4096" step="1" value="${videoSizeParts.width}" /><span>×</span><input class="video-height" type="number" min="256" max="4096" step="1" value="${videoSizeParts.height}" /></label>
             <button class="replace-competitor mini ghost" type="button">更换素材</button>
           </div>
         <label class="field-label">特殊提示词</label>
@@ -568,7 +679,10 @@ function renderCompetitors() {
     const roleCountInput = block.querySelector(".role-count");
     const monsterCountInput = block.querySelector(".monster-count");
     const logoEnabledInput = block.querySelector(".logo-enabled");
-    const outputSizeInput = block.querySelector(".output-size");
+    const imageWidthInput = block.querySelector(".image-width");
+    const imageHeightInput = block.querySelector(".image-height");
+    const videoWidthInput = block.querySelector(".video-width");
+    const videoHeightInput = block.querySelector(".video-height");
     const replaceBtn = block.querySelector(".replace-competitor");
     const autosaveStatus = block.querySelector(".autosave-status");
     block.addEventListener("click", (event) => {
@@ -598,7 +712,9 @@ function renderCompetitors() {
         roleCount: clampNumber(roleCountInput.value, 0, 8),
         monsterCount: clampNumber(monsterCountInput.value, 0, 8),
         useLogo: logoEnabledInput.checked,
-        outputSize: normalizeOutputSizeInput(outputSizeInput.value) || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
+        imageSize: sizeFromInputs(imageWidthInput, imageHeightInput, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
+        videoSize: sizeFromInputs(videoWidthInput, videoHeightInput, item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
+        outputSize: sizeFromInputs(imageWidthInput, imageHeightInput, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
         specialRequirement: specialRequirement.value
       };
       updateTaskPreview();
@@ -621,13 +737,14 @@ function renderCompetitors() {
     roleCountInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     monsterCountInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     logoEnabledInput.addEventListener("change", () => { updateSetting(); autoSaveSetting(); });
-    outputSizeInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
-    outputSizeInput.addEventListener("blur", () => {
-      const normalized = normalizeOutputSizeInput(outputSizeInput.value);
-      outputSizeInput.value = normalized || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
-      updateSetting();
-      autoSaveSetting();
-    });
+    for (const sizeInput of [imageWidthInput, imageHeightInput, videoWidthInput, videoHeightInput]) {
+      sizeInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
+      sizeInput.addEventListener("blur", () => {
+        sizeInput.value = clampNumber(sizeInput.value, 256, 4096);
+        updateSetting();
+        autoSaveSetting();
+      });
+    }
     specialRequirement.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     replaceBtn.addEventListener("click", async () => {
       if (state.materials?.runState?.running) return alert("当前正在生成中，不能更换竞品素材。请先停止任务，或等待生成完成后再操作。");
@@ -820,8 +937,11 @@ function renderRunState(runState) {
 
 function updateStartButtonState(isRunning = Boolean(state.materials?.runState?.running)) {
   const missingImageModel = !els.imageModelSelect?.value;
-  els.startBtn.disabled = Boolean(isRunning) || missingImageModel;
-  els.startBtn.title = missingImageModel ? "请先选择生图模型" : "开始生成";
+  const needsVideoModel = els.outputModeSelect?.value === "video";
+  const missingVideoModel = needsVideoModel && !els.videoModelSelect?.value;
+  if (els.videoModelSelect) els.videoModelSelect.disabled = !needsVideoModel || Boolean(isRunning);
+  els.startBtn.disabled = Boolean(isRunning) || missingImageModel || missingVideoModel;
+  els.startBtn.title = missingImageModel ? "请先选择生图模型" : missingVideoModel ? "请先选择视频模型" : "开始生成";
 }
 
 function syncMaterialActionState(isRunning) {
@@ -869,7 +989,7 @@ function formatLogLine(line) {
   if (line.type === "start") {
     const repeat = line.message?.match(/repeat=(\d+)/)?.[1] || "1";
     const suffix = repeat !== "1" ? `，每组生成 ${repeat} 次` : "";
-    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 gpt-image-2${suffix}`;
+    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 codex-gpt-image-2${suffix}`;
   }
   if (line.type === "job-start") return `${worker}开始 ${job}`;
   if (line.type === "video-start") return `${worker}开始视频 ${job}`;
@@ -981,6 +1101,13 @@ function normalizeOutputSizeInput(value) {
   if (!match) return "";
   const width = Math.max(256, Math.min(4096, Number(match[1])));
   const height = Math.max(256, Math.min(4096, Number(match[2])));
+  return `${width}x${height}`;
+}
+
+function sizeFromInputs(widthInput, heightInput, fallback = DEFAULT_OUTPUT_SIZE) {
+  const fallbackParts = splitSizeParts(fallback);
+  const width = clampNumber(widthInput?.value || fallbackParts.width, 256, 4096);
+  const height = clampNumber(heightInput?.value || fallbackParts.height, 256, 4096);
   return `${width}x${height}`;
 }
 
@@ -1206,6 +1333,7 @@ els.batchTag.value = defaultBatchTag();
 updateStartButtonState(false);
 els.guangdadaMinPopularity.value = "100000";
 els.guangdadaTopN.value = "3";
+els.guangdadaTopN.max = "10";
 els.guangdadaRecentRange.value = "3";
 els.guangdadaMaterialType.value = "image";
 applyRecentRange("3");
@@ -1384,7 +1512,40 @@ els.saveGlobalRequirementBtn.addEventListener("click", async () => {
   }
 });
 
+function clampGuangdadaTopN() {
+  const value = Math.max(1, Math.min(10, Number(els.guangdadaTopN.value || 3)));
+  els.guangdadaTopN.value = String(value);
+  return value;
+}
+
+function remainingGuangdadaCooldownSeconds() {
+  return Math.max(0, Math.ceil((guangdadaSearchCooldownUntil - Date.now()) / 1000));
+}
+
+function updateGuangdadaSearchCooldown() {
+  const remaining = remainingGuangdadaCooldownSeconds();
+  if (remaining > 0) {
+    els.guangdadaSearchBtn.disabled = true;
+    els.guangdadaSearchBtn.textContent = `${remaining}s`;
+    if (!guangdadaSearchCooldownTimer) {
+      guangdadaSearchCooldownTimer = setInterval(updateGuangdadaSearchCooldown, 1000);
+    }
+    return;
+  }
+  if (guangdadaSearchCooldownTimer) {
+    clearInterval(guangdadaSearchCooldownTimer);
+    guangdadaSearchCooldownTimer = null;
+  }
+  els.guangdadaSearchBtn.disabled = false;
+  els.guangdadaSearchBtn.textContent = "抓取";
+}
+
 els.guangdadaSearchBtn.addEventListener("click", async () => {
+  const cooldownSeconds = remainingGuangdadaCooldownSeconds();
+  if (cooldownSeconds > 0) {
+    els.guangdadaStatus.textContent = `请等待 ${cooldownSeconds}s`;
+    return;
+  }
   if (GUANGDADA_DISABLED) {
     els.guangdadaStatus.textContent = "已禁用";
     return alert("广大大抓取暂时禁用，请自行上传竞品素材。");
@@ -1399,12 +1560,13 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
   try {
     const minPopularity = Number(els.guangdadaMinPopularity.value || 100000);
     els.guangdadaMinPopularity.value = String(minPopularity);
+    const topN = clampGuangdadaTopN();
     const result = await api("/api/guangdada/search", {
       method: "POST",
       body: JSON.stringify({
         keyWord: els.guangdadaKeyword.value.trim(),
         minPopularity,
-        topN: Number(els.guangdadaTopN.value || 30),
+        topN,
         materialType: els.guangdadaMaterialType.value,
         startDate: els.guangdadaStartDate.value,
         endDate: els.guangdadaEndDate.value
@@ -1417,8 +1579,8 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
     alert(error.message);
     els.guangdadaStatus.textContent = "抓取失败";
   } finally {
-    els.guangdadaSearchBtn.disabled = false;
-    els.guangdadaSearchBtn.textContent = "抓取";
+    guangdadaSearchCooldownUntil = Date.now() + GUANGDADA_SEARCH_COOLDOWN_MS;
+    updateGuangdadaSearchCooldown();
   }
 });
 
@@ -1468,7 +1630,17 @@ els.guangdadaEndDate.addEventListener("input", () => {
   els.guangdadaRecentRange.value = "";
 });
 
+els.guangdadaTopN.addEventListener("input", clampGuangdadaTopN);
+
 els.imageModelSelect.addEventListener("change", () => {
+  updateStartButtonState();
+});
+
+els.videoModelSelect?.addEventListener("change", () => {
+  updateStartButtonState();
+});
+
+els.outputModeSelect?.addEventListener("change", () => {
   updateStartButtonState();
 });
 
@@ -1510,6 +1682,8 @@ els.guangdadaDeleteFolderBtn.addEventListener("click", async () => {
 
 els.startBtn.addEventListener("click", async () => {
   const imageModel = els.imageModelSelect.value;
+  const videoModel = els.videoModelSelect?.value || "";
+  if (els.outputModeSelect.value === "video" && !videoModel) return alert("请先选择视频模型");
   if (!imageModel) return alert("请先选择生图模型");
   if (!state.selectedCompetitors.size) return alert("请至少选择一个竞品素材类型");
   const estimatedCount = estimateTaskCount();
@@ -1519,6 +1693,10 @@ els.startBtn.addEventListener("click", async () => {
   els.batchTag.value = freshBatchTag;
   els.startBtn.disabled = true;
   try {
+    await api("/api/model-access", {
+      method: "POST",
+      body: JSON.stringify({ imageModel, videoModel, outputMode: els.outputModeSelect.value })
+    });
     const runState = await api("/api/start", {
       method: "POST",
       body: JSON.stringify({
@@ -1527,6 +1705,7 @@ els.startBtn.addEventListener("click", async () => {
         repeatCount: clampNumber(els.repeatCountInput.value || 1, 1, 50),
         outputMode: els.outputModeSelect.value,
         imageModel,
+        videoModel,
         roles: [...state.selectedRoles],
         monsters: [...state.selectedMonsters],
         logos: [...state.selectedLogos],
@@ -1575,10 +1754,33 @@ els.logoutBtn?.addEventListener("click", async () => {
   showLogin("已退出登录");
 });
 els.adminUsersBtn?.addEventListener("click", openAdminUsers);
+els.profileAvatarBtn?.addEventListener("click", openProfile);
+els.profileCloseBtn?.addEventListener("click", closeProfile);
+els.profileSaveBtn?.addEventListener("click", saveProfile);
+els.profileAvatarPreview?.addEventListener("click", () => {
+  els.profileAvatarFileInput?.click();
+});
+els.profileAvatarFileInput?.addEventListener("change", async () => {
+  const file = els.profileAvatarFileInput.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) return alert("请选择图片文件");
+  if (file.size > 2 * 1024 * 1024) return alert("头像图片不能超过 2MB");
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  els.profileAvatarInput.value = dataUrl;
+  setProfilePreviewAvatar(dataUrl, els.profileDisplayNameInput?.value || state.user?.displayName || state.user?.username || "U");
+});
 els.changelogBtn?.addEventListener("click", openChangelog);
 els.changelogCloseBtn?.addEventListener("click", closeChangelog);
 els.changelogModal?.addEventListener("click", (event) => {
   if (event.target === els.changelogModal) closeChangelog();
+});
+els.profileModal?.addEventListener("click", (event) => {
+  if (event.target === els.profileModal) closeProfile();
 });
 els.adminUsersCloseBtn?.addEventListener("click", closeAdminUsers);
 els.adminUsersModal?.addEventListener("click", (event) => {

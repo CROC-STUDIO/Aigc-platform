@@ -1,5 +1,5 @@
-﻿import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from "node:fs";
 import { access, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
@@ -37,6 +37,7 @@ function resolveAppPath(value, baseDir = __dirname) {
 const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
 const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
+const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(process.env.AIGC_USER_PROFILES_PATH) : join(__dirname, "user-profiles.json");
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
@@ -46,15 +47,32 @@ let authStore;
 let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
-const MODEL = "gpt-image-2";
-const IMAGE_MODELS = new Set(["gpt-image-2", "ByteDance-Seedream-5-0-lite"]);
+const MODEL = "codex-gpt-image-2";
+const IMAGE_MODEL_OPTIONS = {
+  "codex-gpt-image-2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "codex-gpt-image2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "ByteDance-Seedream-5-0-lite": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" },
+  "doubao-seedream-5-0-260128": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" }
+};
+const IMAGE_MODELS = new Set(Object.keys(IMAGE_MODEL_OPTIONS));
 const SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
+const SEEDANCE_MODEL_LABEL = "Dreamina Seedance 2.0 Mini";
+const VIDEO_MODEL_OPTIONS = {
+  "dreamina-seedance-2-0-fast-260128": { model: "dreamina-seedance-2-0-fast-260128", label: "Seedance 2.0 Fast" },
+  "dreamina-seedance-2-0-260128": { model: "dreamina-seedance-2-0-260128", label: "dreamina-seedance-2-0-260128" },
+  "dreamina-seedance-2-0-mini": { model: "dreamina-seedance-2-0-260128", label: "Dreamina Seedance 2.0 Mini" }
+};
 const REVERSE_PROMPT_MODEL = process.env.REVERSE_PROMPT_MODEL || "gemini-3-flash-preview";
 const REVERSE_PROMPT_ENDPOINT = process.env.REVERSE_PROMPT_ENDPOINT || process.env.OPENAI_BASE_URL || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || process.env.REVERSE_PROMPT_API_KEY || "";
 const DEFAULT_OUTPUT_SIZE = "1024x1024";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
+const ZINGAPI_HOST = process.env.ZINGAPI_HOST || "openapi.dataideaglobal.com";
+const ZINGAPI_VERSION = process.env.ZINGAPI_VERSION || "v1";
+const ZINGAPI_CUSTOMER_NAME = process.env.ZINGAPI_CUSTOMER_NAME || process.env.GUANGDADA_CUSTOMER_NAME || "";
+const ZINGAPI_ACCESS_KEY_ID = process.env.ZINGAPI_ACCESS_KEY_ID || process.env.GUANGDADA_ACCESS_KEY_ID || "";
+const ZINGAPI_ACCESS_KEY_SECRET = process.env.ZINGAPI_ACCESS_KEY_SECRET || process.env.GUANGDADA_ACCESS_KEY_SECRET || "";
 
 function defaultRunState() {
   return {
@@ -127,7 +145,9 @@ async function login(req, res) {
     return sendJson(res, { error: "账号或密码错误" }, 401);
   }
   appendCookie(res, `${SESSION_COOKIE_NAME}=${encodeURIComponent(result.token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
-  return sendJson(res, { authenticated: true, user: result.user });
+  const profiles = await readUserProfiles();
+  const profile = publicProfile(result.user.username, profiles[result.user.username]);
+  return sendJson(res, { authenticated: true, user: { ...result.user, displayName: profile.displayName || result.user.displayName, avatar: profile.avatar, profile } });
 }
 
 async function logout(req, res) {
@@ -168,6 +188,114 @@ async function updateAdminUser(body = {}) {
 async function deleteAdminUser(body = {}) {
   const admin = requireAdmin();
   return authStore.deleteUser(body.username, admin);
+}
+
+async function readUserProfiles() {
+  if (!existsSync(USER_PROFILES_PATH)) return {};
+  try {
+    const data = JSON.parse(await readFile(USER_PROFILES_PATH, "utf8"));
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeUserProfiles(profiles) {
+  await writeFile(USER_PROFILES_PATH, `${JSON.stringify(profiles, null, 2)}\n`, "utf8");
+}
+
+function maskApiKey(value) {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  if (key.length <= 10) return "已配置";
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+function publicProfile(username, profile = {}) {
+  return {
+    username,
+    displayName: String(profile.displayName || "").trim(),
+    avatar: String(profile.avatar || "").trim(),
+    hasApiKey: Boolean(String(profile.apiKey || "").trim()),
+    apiKeyPreview: maskApiKey(profile.apiKey)
+  };
+}
+
+async function getMyProfile() {
+  const user = currentUser();
+  if (!user?.username) throw new Error("请先登录");
+  const profiles = await readUserProfiles();
+  return { profile: publicProfile(user.username, profiles[user.username]) };
+}
+
+async function updateMyProfile(body = {}) {
+  const user = currentUser();
+  if (!user?.username) throw new Error("请先登录");
+  const profiles = await readUserProfiles();
+  const current = profiles[user.username] || {};
+  const displayName = String(body.displayName ?? current.displayName ?? user.displayName ?? user.username).trim().slice(0, 60);
+  const avatar = String(body.avatar ?? current.avatar ?? "").trim().slice(0, 3_000_000);
+  const apiKeyInput = String(body.apiKey ?? "").trim();
+  profiles[user.username] = {
+    ...current,
+    displayName: displayName || user.username,
+    avatar,
+    apiKey: apiKeyInput ? apiKeyInput : String(current.apiKey || ""),
+    updatedAt: new Date().toISOString()
+  };
+  await writeUserProfiles(profiles);
+  return { ok: true, profile: publicProfile(user.username, profiles[user.username]) };
+}
+
+function resolveImageModel(value = MODEL) {
+  const key = String(value || MODEL).trim();
+  const info = IMAGE_MODEL_OPTIONS[key];
+  if (!info) throw new Error("请先选择生图模型。");
+  return info;
+}
+
+async function currentUserProfile() {
+  const username = currentUserId();
+  const profiles = await readUserProfiles();
+  return profiles[username] || {};
+}
+
+async function requireUserApiKeyForModel(model, label = "模型") {
+  const profile = await currentUserProfile();
+  const apiKey = String(profile.apiKey || "").trim();
+  if (!apiKey) {
+    const error = new Error(`请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}`);
+    error.status = 400;
+    throw error;
+  }
+  return apiKey;
+}
+
+function taiEnvForApiKey(apiKey) {
+  const clean = String(apiKey || "").trim();
+  if (!clean) return {};
+  return {
+    OPENAI_API_KEY: clean,
+    OPENAI_KEY: clean,
+    REVERSE_PROMPT_API_KEY: clean,
+    TAI_API_KEY: clean,
+    TAI_TOKEN: clean
+  };
+}
+
+async function checkModelAccess(body = {}) {
+  const imageModel = String(body.imageModel || "").trim();
+  const videoModel = String(body.videoModel || "").trim();
+  const outputMode = body.outputMode === "video" ? "video" : "image";
+  if (imageModel) {
+    const info = resolveImageModel(imageModel);
+    await requireUserApiKeyForModel(info.model, info.label);
+  }
+  if (outputMode === "video") {
+    const info = resolveVideoModel(videoModel || "dreamina-seedance-2-0-mini");
+    await requireUserApiKeyForModel(info.model, info.label);
+  }
+  return { ok: true };
 }
 
 function currentUserId() {
@@ -239,6 +367,7 @@ function dirs() {
     logoDir: join(sharedRoot, "\u4ea7\u54c1logo"),
     outputDir: join(root, "\u6548\u679c\u56fe"),
     recordDir,
+    guangdadaCacheDir: join(recordDir, "guangdada_cache"),
     globalRequirementPath: join(recordDir, "\u901a\u7528\u63d0\u793a\u8bcd.txt"),
     competitorNameLibraryPath: join(recordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
     upscaledDir: join(sharedRecordDir, "upscaled_refs_20260608_b")
@@ -451,7 +580,7 @@ function chineseVideoSpecialRequirement(fileName, analysis = null) {
     : [
         `来源：本段默认要求根据本次上传视频 ${fileName} 生成，不是按竞品素材文件夹编号套模板。`,
         "视频反推：请观察当前视频的广告类型、镜头远近、主体入场方向、UI/文字层级、动作节奏、道具互动、情绪变化和转场时机，并把这些抽象关系写入我方生成要求。只有当前视频明确是战斗/塔防玩法时，才反推攻击因果、升级链路或敌我方向。",
-        "首帧要求：先用视频中最能代表广告布局的一帧作为 gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
+        "首帧要求：先用视频中最能代表广告布局的一帧作为 codex-gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
         "替换规则：竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都必须改成我方原创风格；我方角色或素材要替换原参考中的对应主体位置，不能在原主体旁边额外新增。非战斗素材不要强行加入怪物、攻击、技能、升级卡或塔防元素。"
       ].join("\n");
   return `${frameText}\n视频节奏：生成视频时继续参考本视频的前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮记忆点和结尾停留，但只保留抽象节奏、镜头语言和广告关系，不复制竞品具体元素。只有当前视频明确是战斗玩法时，才加入攻击反馈或升级节奏；否则保持非战斗广告类型。`;
@@ -467,7 +596,7 @@ function specialRequirementJson({ type, fileName, analysis = null, videoPrompt =
   const seedancePrompt = ai?.seedance2_video_prompt || (isVideo
     ? [
         `参考当前竞品视频 ${fileName} 的反推结构制作 Seedance 2.0 视频，但只保留抽象镜头语言、节奏和广告关系。`,
-        "先根据 gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
+        "先根据 codex-gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
         "如果当前视频明确是战斗/塔防玩法，才保留敌我方向、单位位置、升级链路和攻击因果；如果不是战斗视频，必须保持原参考的非战斗类型，不要加入怪物进攻、武器、技能、血条、伤害数字、升级卡或战斗UI。",
         "所有竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都要替换成我方原创风格；我方角色/怪物/Logo必须替换原参考里的对应主体位置，不能与原主体同时存在。"
       ].join("\n")
@@ -612,7 +741,7 @@ async function reversePromptWithVisionModel(imagePath, { type = "image", fileNam
     "台词语种必须保留：除非用户明确要求翻译或改语种，新视频不能改变原视频台词语种。例如原版是英文，新视频也必须是英文；原版是中文，新视频也必须是中文。",
     "如果不是战斗素材，要明确 non_combat_guard，禁止强行加入敌人、怪物进攻、攻击、武器、技能、血条、伤害数字、升级卡、战斗UI。",
     "如果是视频封面，请根据封面和上传视频语境写 seedance2_video_prompt：用于 Seedance 2.0 生成15秒竖屏视频，描述前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮和结尾停留，只保留抽象节奏，不复制竞品IP。",
-    "image2_prompt_guidance 必须用于 gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
+    "image2_prompt_guidance 必须用于 codex-gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
     "JSON字段：material_type, visual_summary, composition, subjects, expressions, scene, props, text_logo_ui, dialogue, camera, color_lighting, ad_mechanic, is_combat_reference, non_combat_guard, infringement_avoidance, image2_prompt_guidance, seedance2_video_prompt, user_edit_tip。dialogue格式为 { has_dialogue, language, original_lines, preserve_language, instruction }。"
   ].join("\n");
   const inputText = `${instruction}\n当前素材类型：${type}\n文件名：${fileName}\n尺寸：${width || "unknown"}x${height || "unknown"}，${orientationLabel || "未知比例"}`;
@@ -988,16 +1117,21 @@ function competitorSettingsPath(folder) {
 }
 
 async function readCompetitorSettings(folder) {
-  const fallback = { roleCount: 1, monsterCount: 0, useLogo: false, outputSize: DEFAULT_OUTPUT_SIZE };
+  const fallback = { roleCount: 1, monsterCount: 0, useLogo: false, imageSize: DEFAULT_OUTPUT_SIZE, videoSize: DEFAULT_OUTPUT_SIZE, outputSize: DEFAULT_OUTPUT_SIZE };
   const target = competitorSettingsPath(folder);
   if (!existsSync(target)) return fallback;
   try {
     const data = JSON.parse(await readFile(target, "utf8"));
+    const legacySize = normalizeStoredOutputSize(data.outputSize ?? fallback.outputSize);
+    const imageSize = normalizeStoredOutputSize(data.imageSize ?? legacySize);
+    const videoSize = normalizeStoredOutputSize(data.videoSize ?? legacySize);
     return {
       roleCount: Math.max(0, Math.min(8, Number(data.roleCount ?? fallback.roleCount))),
       monsterCount: Math.max(0, Math.min(8, Number(data.monsterCount ?? fallback.monsterCount))),
       useLogo: Boolean(data.useLogo ?? fallback.useLogo),
-      outputSize: normalizeStoredOutputSize(data.outputSize ?? fallback.outputSize)
+      imageSize,
+      videoSize,
+      outputSize: imageSize
     };
   } catch {
     return fallback;
@@ -1012,7 +1146,9 @@ async function saveCompetitorSettings(body = {}) {
   const roleCount = Math.max(0, Math.min(8, Number(body.roleCount ?? existing.roleCount)));
   const monsterCount = Math.max(0, Math.min(8, Number(body.monsterCount ?? existing.monsterCount)));
   const useLogo = Boolean(body.useLogo ?? existing.useLogo);
-  const outputSize = normalizeOutputSize(body.outputSize ?? existing.outputSize);
+  const imageSize = normalizeOutputSize(body.imageSize ?? body.outputSize ?? existing.imageSize ?? existing.outputSize);
+  const videoSize = normalizeOutputSize(body.videoSize ?? existing.videoSize ?? imageSize);
+  const outputSize = imageSize;
   const specialRequirement = String(body.specialRequirement ?? body.text ?? "");
   const specialRequirementPath = safeInsideProject(join(dir, "\u7528\u6237\u7279\u6b8a\u8981\u6c42.txt"));
   await writeFile(specialRequirementPath, specialRequirement, "utf8");
@@ -1022,8 +1158,8 @@ async function saveCompetitorSettings(body = {}) {
     await writeFile(videoPromptPath, jsonVideoPrompt, "utf8");
   }
   const settingsPath = competitorSettingsPath(folder);
-  await writeFile(settingsPath, JSON.stringify({ roleCount, monsterCount, useLogo, outputSize }, null, 2), "utf8");
-  return { ok: true, folder, roleCount, monsterCount, useLogo, outputSize, specialRequirementPath, settingsPath };
+  await writeFile(settingsPath, JSON.stringify({ roleCount, monsterCount, useLogo, imageSize, videoSize, outputSize }, null, 2), "utf8");
+  return { ok: true, folder, roleCount, monsterCount, useLogo, imageSize, videoSize, outputSize, specialRequirementPath, settingsPath };
 }
 
 async function selectedOutputsForBatches(body = {}) {
@@ -1186,11 +1322,13 @@ async function loadMaterials() {
     const specialRequirement = await readTextIfExists(specialRequirementPath, "");
     const settings = await readCompetitorSettings(folder);
     const defaultOutputSize = DEFAULT_OUTPUT_SIZE;
-    const outputSize = settings.outputSize || defaultOutputSize || layout.size;
+    const imageSize = settings.imageSize || settings.outputSize || defaultOutputSize || layout.size;
+    const videoSize = settings.videoSize || imageSize;
+    const outputSize = imageSize;
     const videoPromptPath = join(dir, "视频反推提示词.txt");
     const videoPrompt = await readTextIfExists(videoPromptPath, "");
     const displayName = await readCompetitorDisplayName(folder);
-    competitors.push({ name: folder, displayName, path: dir, images, videos, layout, defaultOutputSize, outputSize, roleCount: settings.roleCount, monsterCount: settings.monsterCount, useLogo: settings.useLogo, specialRequirement, specialRequirementPath, videoPrompt, videoPromptPath });
+    competitors.push({ name: folder, displayName, path: dir, images, videos, layout, defaultOutputSize, imageSize, videoSize, outputSize, roleCount: settings.roleCount, monsterCount: settings.monsterCount, useLogo: settings.useLogo, specialRequirement, specialRequirementPath, videoPrompt, videoPromptPath });
   }
 
   const outputs = await listOutputFiles(dirs().outputDir);
@@ -1254,6 +1392,32 @@ function layoutWithOutputSize(layout, outputSize = "") {
   };
 }
 
+function ratioFromOutputSize(outputSize = "") {
+  const normalized = normalizeOutputSize(outputSize);
+  const [width, height] = normalized.split("x").map(Number);
+  if (!width || !height) return "9:16";
+  const ratio = width / height;
+  const choices = [
+    ["21:9", 21 / 9],
+    ["16:9", 16 / 9],
+    ["4:3", 4 / 3],
+    ["1:1", 1],
+    ["3:4", 3 / 4],
+    ["9:16", 9 / 16]
+  ];
+  return choices.reduce((best, item) => Math.abs(item[1] - ratio) < Math.abs(best[1] - ratio) ? item : best, choices[0])[0];
+}
+
+function videoSizeInstruction(outputSize = "") {
+  const normalized = normalizeOutputSize(outputSize);
+  const ratio = ratioFromOutputSize(normalized);
+  return `目标视频尺寸：${normalized}，画幅比例按 ${ratio} 构图。`;
+}
+
+function resolveVideoModel(value = "") {
+  return VIDEO_MODEL_OPTIONS[String(value || "").trim()] || VIDEO_MODEL_OPTIONS["dreamina-seedance-2-0-mini"];
+}
+
 function layoutLockBlock(competitor) {
   const layout = competitor.layout ?? layoutFromDimensions();
   return `\nReference layout lock: the output must keep the current competitor reference's ${layout.label} aspect ratio, camera zoom, full viewport, and major layout map. Preserve the relative positions and approximate size hierarchy of visible logo/title area, main subject group, secondary characters or creatures, foreground props, background depth, and bottom text/banner area when those elements are present. Do not crop in, zoom in, enlarge the board, enlarge tiles, enlarge units, or simplify the screen into a close-up. If the reference is square, do not expand into a wide banner; keep a square poster composition. If multiple user assets are selected, arrange them inside the same layout zones and original footprints instead of inventing a new team-lineup scene.\n`;
@@ -1266,7 +1430,7 @@ function videoReferenceBlock(competitor) {
     : "When the current reference is not clearly gameplay/battle, preserve its non-combat creative structure: scene type, camera rhythm, emotional beats, character interaction, props, product/logo placement, editing cadence, and ad pacing. Do not introduce battles, enemies, monsters, weapons, towers, attack effects, upgrade cards, HP bars, or combat UI unless they are visibly present in the current reference.";
   const jsonVideoPrompt = specialRequirementForVideoPrompt(competitor.specialRequirement);
   const mergedVideoPrompt = [jsonVideoPrompt, competitor.videoPrompt].filter(Boolean).join("\n");
-  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
+  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the codex-gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
 }
 
 function isCombatReference(competitor = {}) {
@@ -1408,12 +1572,14 @@ function repeatSuffix(index, repeatCount) {
   return repeatCount > 1 ? `_第${index}次` : "";
 }
 
-function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL }) {
+function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
   const chosenRoles = roles.filter((role) => selectedRoleNames.includes(role.name));
   const chosenMonsters = monsters.filter((monster) => selectedMonsterNames.includes(monster.name));
   const chosenLogos = logos.filter((logo) => selectedLogoNames.includes(logo.name));
   const chosenCompetitors = competitors.filter((item) => selectedCompetitorNames.includes(item.name));
   const repeats = Math.max(1, Math.min(50, Number(repeatCount || 1)));
+  const resolvedImageModel = resolveImageModel(imageModel);
+  const resolvedVideoModel = resolveVideoModel(videoModel);
   const jobs = [];
 
   for (const competitor of chosenCompetitors) {
@@ -1421,13 +1587,14 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
     const roleCount = Math.max(0, Math.min(8, Number(setting.roleCount ?? 1)));
     const monsterCount = Math.max(0, Math.min(8, Number(setting.monsterCount ?? 0)));
     const useLogo = Boolean(setting.useLogo);
-    const outputSize = normalizeOutputSize(setting.outputSize ?? competitor.outputSize ?? "");
+    const imageSize = normalizeOutputSize(setting.imageSize ?? setting.outputSize ?? competitor.imageSize ?? competitor.outputSize ?? "");
+    const videoSize = normalizeOutputSize(setting.videoSize ?? competitor.videoSize ?? imageSize);
     const jobLogos = useLogo ? chosenLogos : [];
     if (useLogo && !jobLogos.length) {
       addLog("warn", `${competitor.name} requires logo but no logo selected`, { competitor: competitor.name });
       continue;
     }
-    const promptCompetitor = { ...competitor, layout: layoutWithOutputSize(competitor.layout, outputSize), outputSize, requirement: globalRequirement ?? "", specialRequirement: setting.specialRequirement ?? "", videoPrompt: competitor.videoPrompt ?? "", videos: competitor.videos ?? [] };
+    const promptCompetitor = { ...competitor, layout: layoutWithOutputSize(competitor.layout, imageSize), imageSize, videoSize, outputSize: imageSize, requirement: globalRequirement ?? "", specialRequirement: setting.specialRequirement ?? "", videoPrompt: competitor.videoPrompt ?? "", videos: competitor.videos ?? [] };
     const requiresCombo = roleCount !== 1 || monsterCount > 0;
 
     if (requiresCombo) {
@@ -1453,8 +1620,12 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             id: `${competitor.name}_${groupName}`,
             name: `${competitor.name}_${groupName}`,
             outputMode,
-            imageModel,
+            imageModel: resolvedImageModel.model,
+            imageModelLabel: resolvedImageModel.label,
+            videoModel: resolvedVideoModel.model,
+            videoModelLabel: resolvedVideoModel.label,
             size: (promptCompetitor.layout ?? layoutFromDimensions()).size,
+            videoSize,
             prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
             images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
@@ -1476,8 +1647,12 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           id: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           name: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           outputMode,
-          imageModel,
+          imageModel: resolvedImageModel.model,
+          imageModelLabel: resolvedImageModel.label,
+          videoModel: resolvedVideoModel.model,
+          videoModelLabel: resolvedVideoModel.label,
           size: layout.size,
+          videoSize,
           prompt: singleRolePrompt(role, promptCompetitor, jobLogos),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
           images: [role.sourcePath, ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
@@ -1511,6 +1686,8 @@ async function runTaiJob(job, promptDir, logPath) {
 
 async function runImageStage(job, promptDir, logPath) {
   const imageModel = job.imageModel || MODEL;
+  const imageModelLabel = job.imageModelLabel || imageModel;
+  const apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 
@@ -1520,7 +1697,7 @@ async function runImageStage(job, promptDir, logPath) {
     const runState = getRunState();
     if (runState.stopRequested) throw new Error("Batch stopped by user");
     try {
-      const result = await execTai(args);
+      const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
       stdout = result.stdout;
       stderr = result.stderr;
       break;
@@ -1553,7 +1730,7 @@ async function runImageStage(job, promptDir, logPath) {
 
   await downloadImage(imageUrl, job.output);
   const storage = await syncProjectAssetToObjectStorage(job.output, "generated_image");
-  const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
+  const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, model_label: imageModelLabel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -1565,25 +1742,27 @@ async function runImageStage(job, promptDir, logPath) {
 async function runSeedanceVideoStage(job, promptDir, logPath) {
   const runState = getRunState();
   if (runState.stopRequested) throw new Error("Batch stopped by user");
+  const videoModel = job.videoModel || SEEDANCE_MODEL;
+  const apiKey = await requireUserApiKeyForModel(videoModel, job.videoModelLabel || videoModel);
   const args = [
     "aigc", "seedance",
     "--mode", "image_to_video",
-    "--model", SEEDANCE_MODEL,
+    "--model", videoModel,
     "--image", job.output,
     "--duration", "15",
-    "--ratio", "9:16",
+    "--ratio", ratioFromOutputSize(job.videoSize),
     "--resolution", "720p",
     job.videoPrompt
   ];
-  addLog("video-start", `VIDEO_START ${job.name}`, { job: job.name });
-  const { stdout, stderr } = await execTai(args);
+  addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}]`, { job: job.name, model: videoModel });
+  const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = parseSeedanceVideoUrl(raw) || await pollSeedanceVideoUrl(taskId, job.name);
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, job.name) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   await downloadBinary(videoUrl, job.videoOutput);
   const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
-  const record = { time: new Date().toISOString(), name: job.name, model: SEEDANCE_MODEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
+  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -1596,6 +1775,7 @@ async function generateComicVideo(body = {}) {
   const prompt = String(body.prompt ?? "").trim();
   if (!prompt) throw new Error("请先生成或填写 Seedance 提示词");
   const ratio = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"].includes(String(body.ratio)) ? String(body.ratio) : "9:16";
+  const videoModelInfo = resolveVideoModel(body.videoModel || "dreamina-seedance-2-0-mini");
   const duration = Math.max(4, Math.min(15, Number.parseInt(String(body.duration ?? "15"), 10) || 15));
   const batchTag = sanitizeSegment(body.batchTag || new Date().toISOString().slice(0, 19).replace(/\D/g, ""));
   const workDir = join(dirs().recordDir, `comic_${batchTag}`);
@@ -1630,7 +1810,7 @@ async function generateComicVideo(body = {}) {
     else if (mime.startsWith("audio/")) audioArgs.push(target);
   }
   const mode = imageArgs.length || videoArgs.length || audioArgs.length ? "omni_reference" : "text_to_video";
-  const args = ["aigc", "seedance", "--mode", mode, "--model", SEEDANCE_MODEL, "--duration", String(duration), "--ratio", ratio, "--resolution", "720p"];
+  const args = ["aigc", "seedance", "--mode", mode, "--model", videoModelInfo.model, "--duration", String(duration), "--ratio", ratio, "--resolution", "720p"];
   for (const item of imageArgs) args.push("--image", item);
   for (const item of videoArgs) args.push("--video", item);
   for (const item of audioArgs) args.push("--audio", item);
@@ -1648,24 +1828,61 @@ async function generateComicVideo(body = {}) {
   }
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = parseSeedanceVideoUrl(raw) || await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`);
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   const output = join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`);
   await downloadBinary(videoUrl, output);
   const storage = await syncProjectAssetToObjectStorage(output, "comic_video_output");
   const promptPath = join(workDir, "seedance_prompt.txt");
   await writeFile(promptPath, prompt, "utf8");
-  await writeFile(join(workDir, "seedance_result.json"), JSON.stringify({ time: new Date().toISOString(), model: SEEDANCE_MODEL, mode, taskId, promptPath, output, remoteUrl: videoUrl, refs: { images: imageArgs.length, videos: videoArgs.length, audios: audioArgs.length } }, null, 2), "utf8");
+  await writeFile(join(workDir, "seedance_result.json"), JSON.stringify({ time: new Date().toISOString(), model: videoModelInfo.model, model_label: videoModelInfo.label, mode, taskId, promptPath, output, remoteUrl: videoUrl, refs: { images: imageArgs.length, videos: videoArgs.length, audios: audioArgs.length } }, null, 2), "utf8");
   const info = await stat(output);
-  return { ok: true, model: SEEDANCE_MODEL, mode, taskId, output, url: storage?.storageUrl || localFileUrl(output, Math.round(info.mtimeMs)), remoteUrl: videoUrl, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}) };
+  return { ok: true, model: videoModelInfo.model, modelLabel: videoModelInfo.label, mode, taskId, output, url: storage?.storageUrl || localFileUrl(output, Math.round(info.mtimeMs)), remoteUrl: videoUrl, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl } : {}) };
 }
 
 function parseSeedanceVideoUrl(raw) {
   const lines = String(raw).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const direct = lines.map((line) => line.match(/(https?:\/\/\S+|\/v1\/public\/\S+\.(?:mp4|webm|mov)(?:\?\S+)?)/i)?.[1]).find(Boolean);
-  if (direct) return direct;
-  const outputLine = lines.find((line) => /Output|Preview|Video/i.test(line));
-  return outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1]?.trim() || "";
+  const cleanUrl = (value = "") => String(value).trim().replace(/[)"'，,。]+$/g, "");
+  const fromObject = (value, path = "") => {
+    if (!value || typeof value !== "object") return "";
+    const isOutputPath = /(output|result|generated|generation|video|download|play|preview)/i.test(path) &&
+      !/(input|source|reference|asset|upload|origin|prompt)/i.test(path);
+    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "preview_url", "previewUrl", "url"];
+    for (const key of keys) {
+      const nextPath = path ? `${path}.${key}` : key;
+      const keyLooksLikeOutput = /(output|result|generated|generation|video|download|play|preview)/i.test(nextPath) &&
+        !/(input|source|reference|asset|upload|origin|prompt)/i.test(nextPath);
+      if (typeof value[key] === "string" && (isOutputPath || keyLooksLikeOutput) && isLikelyVideoUrl(value[key])) return cleanUrl(value[key]);
+    }
+    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "preview", "download"]) {
+      const found = fromObject(value[key], path ? `${path}.${key}` : key);
+      if (found) return found;
+    }
+    for (const item of Object.values(value)) {
+      if (Array.isArray(item)) {
+        const arrayPath = Object.entries(value).find(([, candidate]) => candidate === item)?.[0] || "items";
+        for (const child of item) {
+          const found = fromObject(child, path ? `${path}.${arrayPath}` : arrayPath);
+          if (found) return found;
+        }
+      }
+    }
+    return "";
+  };
+  for (const line of lines) {
+    if (!line.startsWith("{") && !line.startsWith("[")) continue;
+    try {
+      const found = fromObject(JSON.parse(line));
+      if (found) return found;
+    } catch {
+      // CLI output often contains non-JSON progress lines.
+    }
+  }
+  const outputLine = lines.find((line) =>
+    /(Output|Result|Generated|Preview|Video\s*(URL|Output|Result)|视频结果|生成结果|输出)/i.test(line) &&
+    !/(Upload|Uploaded|Input|Source|Reference|Asset|--video|source-video|参考|输入|上传)/i.test(line)
+  );
+  return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
 }
 
 async function pollSeedanceVideoUrl(taskId, jobName) {
@@ -1721,6 +1938,10 @@ async function startBatch(options = {}) {
   const outputMode = options.outputMode === "video" ? "video" : "image";
   const imageModel = String(options.imageModel || "").trim();
   if (!IMAGE_MODELS.has(imageModel)) throw new Error("请先选择生图模型。");
+  const imageModelInfo = resolveImageModel(imageModel);
+  const requestedVideoModel = String(options.videoModel || "dreamina-seedance-2-0-mini").trim();
+  if (outputMode === "video" && !VIDEO_MODEL_OPTIONS[requestedVideoModel]) throw new Error("请先选择视频模型。");
+  const videoModelInfo = resolveVideoModel(requestedVideoModel);
   const jobs = buildJobs({
     roles: materials.roles,
     monsters: materials.monsters,
@@ -1735,7 +1956,8 @@ async function startBatch(options = {}) {
     batchTag,
     outputMode,
     repeatCount,
-    imageModel
+    imageModel: imageModelInfo.model,
+    videoModel: requestedVideoModel
   });
   if (!jobs.length) {
     const needsMonster = materials.competitors
@@ -1749,7 +1971,7 @@ async function startBatch(options = {}) {
     if (needsLogo && !selectedLogoNames.length) throw new Error("没有可生成任务：已选竞品勾选了 Logo，但没有勾选产品 Logo 图。请勾选产品 Logo，或取消该竞品的 Logo。");
     throw new Error("没有可生成任务：请检查竞品素材、角色数量、怪物数量和素材勾选状态。");
   }
-  const safeImageModel = imageModel.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeImageModel = imageModelInfo.model.replace(/[^a-zA-Z0-9_-]/g, "_");
   const promptDir = join(dirs().recordDir, `prompts_${batchTag}_${safeImageModel}`);
   const logPath = join(dirs().recordDir, `batch_${batchTag}_${safeImageModel}_${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   await mkdir(promptDir, { recursive: true });
@@ -1769,13 +1991,17 @@ async function startBatch(options = {}) {
     current: "",
     concurrency,
     repeatCount,
-    imageModel,
+    imageModel: imageModelInfo.model,
+    videoModel: outputMode === "video" ? videoModelInfo.model : "",
+    videoModelLabel: outputMode === "video" ? videoModelInfo.label : "",
     jobs: jobs.map((job, index) => ({
       index: index + 1,
       name: job.name,
       size: job.size,
       outputMode: job.outputMode,
       imageModel: job.imageModel,
+      videoModel: job.videoModel || "",
+      videoModelLabel: job.videoModelLabel || "",
       status: "pending",
       statusText: "pending",
       output: job.output,
@@ -1785,7 +2011,7 @@ async function startBatch(options = {}) {
     })),
     log: []
   });
-  addLog("start", `START total=${jobs.length} concurrency=${concurrency} repeat=${repeatCount} mode=${outputMode} model=${imageModel}`);
+  addLog("start", `START total=${jobs.length} concurrency=${concurrency} repeat=${repeatCount} mode=${outputMode} model=${imageModelInfo.label}${outputMode === "video" ? ` videoModel=${videoModelInfo.label}` : ""}`);
 
   void (async () => {
     let cursor = 0;
@@ -1808,7 +2034,7 @@ async function startBatch(options = {}) {
             runState = getRunState();
             runState.completed += 1;
             updateJobState(job.name, { status: "done", statusText: "done", finishedAt: new Date().toISOString(), output: job.outputMode === "video" ? job.videoOutput : job.output });
-            addLog("done", `DONE ${job.name} [${job.outputMode === "video" ? "Seedance 2.0" : MODEL}]`, { job: job.name, output: job.outputMode === "video" ? job.videoOutput : job.output, worker: workerId });
+            addLog("done", `DONE ${job.name} [${job.outputMode === "video" ? (job.videoModelLabel || SEEDANCE_MODEL_LABEL) : MODEL}]`, { job: job.name, output: job.outputMode === "video" ? job.videoOutput : job.output, worker: workerId });
           }
         } catch (error) {
           runState = getRunState();
@@ -1892,13 +2118,14 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const extraAssets = monsters.length ? `如使用附加生物/宠物素材，只把它作为当前参考中对应宠物、伙伴、装饰角色或互动对象的替换参考，不要改成怪物敌人：${monsters.map((monster, index) => `素材${index + 1}${monster.traits}`).join("；")}。` : "";
   const layout = competitor.layout ?? layoutFromDimensions();
+  const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，视频如需改编为竖屏9:16，也必须保留核心主体相对位置、镜头距离、文字/Logo层级和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏、镜头距离和主体比例。" : "参考图接近方图，视频可以改编为竖屏9:16，但必须保留核心版式关系和主体比例。";
   const mergedVideoPrompt = seedanceReferencePromptText(competitor, false);
   const dialoguePrompt = dialogueInstructionBlock(parseSpecialRequirementJson(competitor.specialRequirement)?.reverse_analysis?.dialogue);
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推当前竞品视频的非战斗广告结构：前3秒钩子、镜头推进方式、角色互动、表情变化、道具使用、场景转场、产品/Logo露出和结尾停留方式。只保留抽象节奏和布局关系，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤或专有道具。`
     : "";
-  return `参考上一阶段由 gpt-image-2 生成的效果图，制作15秒竖屏9:16 Seedance 2.0 手游广告视频。${aspectText}${videoReference}
+  return `参考上一阶段由 codex-gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
 
 当前参考素材未明确表现战斗/塔防/怪物进攻玩法，因此本视频必须按当前参考的实际类型生成：可以是生活化、休闲、搞笑、经营、换装、合成、剧情、解谜、宠物互动、社交展示或产品广告演绎。不要强行加入战斗、敌人、怪物进攻、攻击、武器、技能释放、塔防道路、升级卡、A/S/SS卡牌、HP血条、伤害数字、Boss或战斗UI。必须保留效果图中的我方角色身份、构图、镜头角度、UI/文字层级、道具功能、场景情绪和主体比例。${roleText}。${extraAssets}
 
@@ -1918,13 +2145,14 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const monsterText = monsters.length ? `怪物素材保持：${monsters.map((monster, index) => `怪物${index + 1}${monster.traits}`).join("；")}。` : "";
   const layout = competitor.layout ?? layoutFromDimensions();
+  const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，但视频请改编为竖屏9:16，并保留核心主体相对位置和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏。" : "参考图接近方图，视频请改编为竖屏9:16，保留核心版式关系。";
   const mergedVideoPrompt = seedanceReferencePromptText(competitor, true);
   const dialoguePrompt = dialogueInstructionBlock(parseSpecialRequirementJson(competitor.specialRequirement)?.reverse_analysis?.dialogue);
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推竞品视频的玩法结构、单位位置、镜头节奏、波次推进、升级链路和攻击因果，再套用到我方效果图。只能保留抽象玩法布局和广告节奏，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤、建筑造型、冰雪门楼、火把、地图装饰或专有道具。`
     : "";
-  return `参考上一阶段由 gpt-image-2 生成的局内效果图，制作15秒竖屏9:16 Seedance 2.0 手游广告视频。${aspectText}${videoReference}
+  return `参考上一阶段由 codex-gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
 
 必须保留效果图中的我方角色身份、地图布局、镜头角度、UI层级、敌我方向和主体比例。若参考视频是纵向塔防局内画面，英雄/防线必须保持在下方或底部格子，怪物必须保持在上方路径或从上方入口推进，攻击从下方英雄/防线朝上方怪物发出。保持原始镜头缩放、完整游戏屏幕、格子密度、道路宽度和UI边距，不能把场地、格子、敌人、英雄整体放大，不能裁切成近景。英雄必须保持小型局内单位比例，约等于参考视频里原英雄的屏幕占比，不能变成中心大插画、角色特写或前景展示；怪物也按参考视频怪物的相对尺寸和路径关系出现。必须用我方角色替换原卡皮/原英雄，原竞品单位必须消失，不能出现“原卡皮+我方角色”同时存在。我方角色必须站在原卡皮/原玩家单位所在同一个格子中心、同一条路线、同一层级。所有单位都必须在原版对应格子、路径或站位范围内运动，不能站出格子外或遮挡底部UI。不能改成左右对峙、横向决斗、海报展示或角色怪物并排站位。${roleText}。${monsterText}
 
@@ -2261,7 +2489,7 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
 }
 
 function defaultVideoReversePrompt(fileName) {
-  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
+  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 codex-gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
 }
 
 async function transcribeVideoDialogue(videoPath) {
@@ -2326,11 +2554,15 @@ function transcriptToDialogue(transcript = {}) {
 async function searchGuangdada(body) {
   const keyWord = String(body.keyWord ?? "").trim();
   if (!keyWord) throw new Error("请输入广大大搜索关键词");
+  assertZingApiConfig();
   const minPopularity = Math.max(0, Number(body.minPopularity ?? 0));
-  const topN = Math.max(1, Math.min(100, Number(body.topN ?? 50)));
+  const topN = Math.max(1, Math.min(10, Number(body.topN ?? 10)));
   const materialType = ["all", "image", "video"].includes(String(body.materialType ?? "")) ? String(body.materialType) : "image";
   const startDate = parseDateFilter(body.startDate);
   const endDate = parseDateFilter(body.endDate, true);
+  const cacheKey = guangdadaCacheKey({ keyWord, minPopularity, topN, materialType, startDate: body.startDate || "", endDate: body.endDate || "" });
+  const cached = await readGuangdadaCache(cacheKey);
+  if (cached) return { ...cached, cached: true };
   const dateChunks = guangdadaDateChunks(startDate, endDate);
   const maxPagesPerChunk = guangdadaMaxPagesForThreshold(minPopularity);
   const itemMap = new Map();
@@ -2341,27 +2573,133 @@ async function searchGuangdada(body) {
     for (let page = 1; page <= maxPagesPerChunk; page += 1) {
       const payload = { ...basePayload, page };
       lastPayload = payload;
-      const res = await fetch("http://120.27.200.123:3000/api/guangdada/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) throw new Error(data?.message || `广大大接口失败 HTTP ${res.status}`);
-      const list = data?.data?.data?.creative_list ?? data?.data?.data?.list ?? [];
-      total += list.length;
+      const data = await zingApiRequest("creative-list", `/zingapi/v1/creative/list/${encodeURIComponent(ZINGAPI_CUSTOMER_NAME)}`, payload);
+      const list = data?.data?.creative_list ?? data?.creative_list ?? [];
+      const remoteTotal = Number(data?.data?.total_count ?? data?.total_count ?? 0) || 0;
+      total = Math.max(total, remoteTotal);
+      if (!remoteTotal) total += list.length;
       for (const item of list.map(normalizeGuangdadaItem)) {
         if (!matchGuangdadaDateRange(item, startDate, endDate)) continue;
         if (!item.imageUrl || !matchGuangdadaMaterialType(item, materialType) || item.popularity < minPopularity) continue;
         keepBestGuangdadaItem(itemMap, item);
       }
-      if (list.length < basePayload.page_size) break;
+      if (list.length < basePayload.page_size || itemMap.size >= topN) break;
     }
   }
   const items = Array.from(itemMap.values())
     .sort((a, b) => b.popularity - a.popularity || normalizeUnixMs(b.timestamp) - normalizeUnixMs(a.timestamp))
     .slice(0, topN);
-  return { ok: true, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
+  const result = { ok: true, cached: false, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
+  await writeGuangdadaCache(cacheKey, result);
+  return result;
+}
+
+function guangdadaCacheKey(value) {
+  return sha256Hex(JSON.stringify(value)).slice(0, 32);
+}
+
+async function readGuangdadaCache(cacheKey) {
+  const cachePath = join(dirs().guangdadaCacheDir, `${cacheKey}.json`);
+  if (!existsSync(cachePath)) return null;
+  try {
+    const data = JSON.parse(await readFile(cachePath, "utf8"));
+    const createdAt = Date.parse(data.createdAt || "");
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > 30 * 24 * 60 * 60 * 1000) {
+      await rm(cachePath, { force: true }).catch(() => {});
+      return null;
+    }
+    return data.result || null;
+  } catch {
+    await rm(cachePath, { force: true }).catch(() => {});
+    return null;
+  }
+}
+
+async function writeGuangdadaCache(cacheKey, result) {
+  await mkdir(dirs().guangdadaCacheDir, { recursive: true });
+  const cachePath = join(dirs().guangdadaCacheDir, `${cacheKey}.json`);
+  await writeFile(cachePath, JSON.stringify({ createdAt: new Date().toISOString(), result }, null, 2), "utf8");
+}
+
+function assertZingApiConfig() {
+  const missing = [];
+  if (!ZINGAPI_CUSTOMER_NAME) missing.push("ZINGAPI_CUSTOMER_NAME");
+  if (!ZINGAPI_ACCESS_KEY_ID) missing.push("ZINGAPI_ACCESS_KEY_ID");
+  if (!ZINGAPI_ACCESS_KEY_SECRET) missing.push("ZINGAPI_ACCESS_KEY_SECRET");
+  if (missing.length) throw new Error(`ZingAPI 未配置：请在 D:\\Aigc-platform\\.env 中配置 ${missing.join(", ")}`);
+}
+
+function stableJsonStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJsonStringify(value[key])}`).join(",")}}`;
+}
+
+function encodeRfc3986(value) {
+  return encodeURIComponent(String(value)).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function zingAuthorization({ method, path, query = "", headers, bodyText }) {
+  const signedHeaderNames = Object.keys(headers).map((key) => key.toLowerCase()).sort();
+  const lowerHeaders = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value).trim()]));
+  const canonicalHeaders = signedHeaderNames.map((key) => `${key}:${lowerHeaders[key]}\n`).join("");
+  const signedHeaders = signedHeaderNames.join(";");
+  const canonicalRequest = [
+    method.toUpperCase(),
+    path,
+    query,
+    canonicalHeaders,
+    signedHeaders,
+    sha256Hex(bodyText)
+  ].join("\n");
+  const stringToSign = `zf3-HMAC-SHA256\n${sha256Hex(canonicalRequest)}`;
+  const signature = createHmac("sha256", ZINGAPI_ACCESS_KEY_SECRET).update(stringToSign, "utf8").digest("hex");
+  return `zf3-HMAC-SHA256 Credential=${ZINGAPI_ACCESS_KEY_ID},SignedHeaders=${signedHeaders},Signature=${signature}`;
+}
+
+async function zingApiRequest(action, path, payload) {
+  assertZingApiConfig();
+  const bodyText = JSON.stringify(payload);
+  const contentHash = sha256Hex(bodyText);
+  const headersToSign = {
+    "content-type": "application/json; charset=utf-8",
+    "x-zf-action": action,
+    "x-zf-content-sha256": contentHash,
+    "x-zf-date": new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    "x-zf-nonce": randomUUID(),
+    "x-zf-version": ZINGAPI_VERSION
+  };
+  const authorization = zingAuthorization({ method: "POST", path, headers: headersToSign, bodyText });
+  const res = await fetch(`https://${ZINGAPI_HOST}${path}`, {
+    method: "POST",
+    headers: {
+      host: ZINGAPI_HOST,
+      ...headersToSign,
+      "x-timezone": "+0800",
+      Authorization: authorization
+    },
+    body: bodyText
+  });
+  const text = await res.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`ZingAPI 返回非 JSON：HTTP ${res.status} ${text.slice(0, 300)}`);
+  }
+  if (!res.ok || (data.message && data.message !== "success") || data.code || data.error) {
+    const rawMessage = String(data.message || data.error || data.code || text.slice(0, 300));
+    const authHint = rawMessage === "invalid auth argument"
+      ? "（AccessKeyId 已被服务端识别，但签名校验未通过；请核对 ZINGAPI_ACCESS_KEY_SECRET、customer_name 是否绑定该 key，并让 ZingAPI 供应商按 trace_id 核查签名串）"
+      : "";
+    const detail = [
+      `${rawMessage}${authHint}`,
+      data.trace_id ? `trace_id=${data.trace_id}` : "",
+      data.request_id ? `request_id=${data.request_id}` : ""
+    ].filter(Boolean).join(" ");
+    throw new Error(`ZingAPI 请求失败：HTTP ${res.status} ${detail}`);
+  }
+  return data;
 }
 
 function keepBestGuangdadaItem(map, item) {
@@ -2402,16 +2740,16 @@ function buildGuangdadaSearchPayload({ keyWord, startDate, endDate, materialType
   const now = Date.now();
   const seenBegin = startDate ? Math.floor(startDate / 1000) : Math.floor((now - 365 * 24 * 60 * 60 * 1000) / 1000);
   const seenEnd = endDate ? Math.floor(endDate / 1000) : Math.floor(now / 1000);
+  const adsType = materialType === "image" ? [1] : materialType === "video" ? [2] : [1, 2];
   const payload = {
     page: 1,
-    page_size: 60,
+    page_size: 20,
     seen_begin: seenBegin,
     seen_end: seenEnd,
-    sort_field: "-impression",
-    duplicate_removal: 0,
+    sort_field: "-heat_degree",
+    duplicate_removal: 1,
     search_type: "1",
-    keyword: [keyWord],
-    new_advertiser_flag: false,
+    keyword: keyWord,
     complete_country_match: false,
     fb_merge: false,
     new_ads_flag: 0,
@@ -2419,13 +2757,8 @@ function buildGuangdadaSearchPayload({ keyWord, startDate, endDate, materialType
     is_dynamic: 0,
     landing_page: 0,
     app_type: 1,
-    min_popularity: minPopularity,
-    min_impression: minPopularity,
-    min_exposure: minPopularity,
-    all_exposure_value_min: minPopularity
+    ads_type: adsType
   };
-  if (materialType === "image") payload.resource_type = 1;
-  if (materialType === "video") payload.resource_type = 2;
   return payload;
 }
 
@@ -2448,8 +2781,9 @@ function normalizeGuangdadaItem(item) {
   const viewValue = Number(item.view_count || item.impression || 0);
   const heatValue = Number(item.heat ?? item.hot ?? 0);
   const explicitPopularity = Number(item.popularity ?? 0);
-  const popularity = exposureValue || explicitPopularity || heatValue || viewValue;
+  const popularity = Math.max(heatValue, explicitPopularity, exposureValue, viewValue);
   const hasVideoSignal = Boolean(
+    adsType === 2 ||
     resourceType === 2 ||
     videoDuration > 0 ||
     item.video_url ||
@@ -2462,7 +2796,7 @@ function normalizeGuangdadaItem(item) {
   );
   const hasStillImageSignal = Boolean(item.preview_img_url || item.preview_image_url || item.image_url || item.logo_url || isLikelyImageUrl(imageUrl));
   const isVideoMaterial = hasVideoSignal;
-  const isImageMaterial = Boolean(imageUrl && hasStillImageSignal && !hasVideoSignal);
+  const isImageMaterial = Boolean(imageUrl && (adsType === 1 || hasStillImageSignal) && !hasVideoSignal);
   return {
     id: String(item.ad_key || item.creative_id || item.id || item.image_ahash_md5 || imageUrl),
     title: String(item.title || item.body || item.advertiser_name || "未命名素材").slice(0, 120),
@@ -2472,7 +2806,7 @@ function normalizeGuangdadaItem(item) {
     exposure: exposureValue,
     views: viewValue,
     likes: Number(item.like_count ?? 0),
-    platform: String(item.platform || ""),
+    platform: Array.isArray(item.platform) ? item.platform.join(", ") : String(item.platform || ""),
     adsType,
     resourceType,
     videoDuration,
@@ -2677,8 +3011,9 @@ async function tryDownloadImage(imageUrl) {
   const res = await fetch(imageUrl, {
     signal: controller.signal,
     headers: {
-      Referer: "http://120.27.200.123:3000/guangdada",
-      "User-Agent": "Mozilla/5.0"
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
     }
   }).finally(() => clearTimeout(timeout));
   const contentType = res.headers.get("content-type") || "";
@@ -2693,6 +3028,7 @@ async function tryDownloadImage(imageUrl) {
 async function proxyGuangdadaImage(req, res, url) {
   const imageUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(imageUrl)) throw new Error("缺少有效的图片链接");
+  assertAllowedGuangdadaMediaUrl(imageUrl);
   const cacheKey = imageUrl;
   const cached = remoteImageCache.get(cacheKey);
   if (cached && Date.now() - cached.time < 20 * 60 * 1000) {
@@ -2722,6 +3058,7 @@ async function proxyGuangdadaImage(req, res, url) {
 async function proxyGuangdadaVideo(req, res, url) {
   const videoUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(videoUrl)) throw new Error("缺少有效的视频链接");
+  assertAllowedGuangdadaMediaUrl(videoUrl);
   const candidates = [
     videoUrl,
     `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(videoUrl)}`
@@ -2759,6 +3096,13 @@ async function proxyGuangdadaVideo(req, res, url) {
     }
   }
   throw lastError || new Error("视频预览加载失败");
+}
+
+function assertAllowedGuangdadaMediaUrl(value) {
+  const { hostname } = new URL(String(value));
+  const host = hostname.toLowerCase();
+  if (host === "120.27.200.123" || host === "zingfront.com" || host.endsWith(".zingfront.com")) return;
+  throw new Error("Unsupported Guangdada media host");
 }
 
 function detectImageContentType(buffer) {
@@ -3008,6 +3352,9 @@ async function handleRequest(req, res) {
       return sendJson(res, result);
     }
     if (req.method === "GET" && url.pathname === "/api/projects") return sendJson(res, { projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), userId: currentUserId(), projects: projectList() });
+    if (req.method === "GET" && url.pathname === "/api/profile") return sendJson(res, await getMyProfile());
+    if (req.method === "POST" && url.pathname === "/api/profile") return sendJson(res, await updateMyProfile(await readJson(req)));
+    if (req.method === "POST" && url.pathname === "/api/model-access") return sendJson(res, await checkModelAccess(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/projects/switch") {
       const result = await switchProject(await readJson(req));
       appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
@@ -3081,8 +3428,9 @@ const server = http.createServer((req, res) => {
   const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
   const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
   const isPublicAsset = url.pathname.startsWith("/api/public/assets/");
+  const isPublicGuangdadaPreview = req.method === "GET" && (url.pathname === "/api/guangdada/image" || url.pathname === "/api/guangdada/video");
   const isStatic = !url.pathname.startsWith("/api/") && url.pathname !== "/file";
-  if (isPublicAuth || isPublicAsset || isStatic) {
+  if (isPublicAuth || isPublicAsset || isPublicGuangdadaPreview || isStatic) {
     handleRequest(req, res).catch((error) => sendError(res, error));
     return;
   }
