@@ -37,6 +37,7 @@ function resolveAppPath(value, baseDir = __dirname) {
 const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AIGC_CONFIG_PATH) : join(__dirname, "config.json");
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
 const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
+const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(process.env.AIGC_USER_PROFILES_PATH) : join(__dirname, "user-profiles.json");
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
@@ -46,8 +47,14 @@ let authStore;
 let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
-const MODEL = "codex-gpt-image2";
-const IMAGE_MODELS = new Set(["codex-gpt-image2", "ByteDance-Seedream-5-0-lite"]);
+const MODEL = "codex-gpt-image-2";
+const IMAGE_MODEL_OPTIONS = {
+  "codex-gpt-image-2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "codex-gpt-image2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "ByteDance-Seedream-5-0-lite": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" },
+  "doubao-seedream-5-0-260128": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" }
+};
+const IMAGE_MODELS = new Set(Object.keys(IMAGE_MODEL_OPTIONS));
 const SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
 const SEEDANCE_MODEL_LABEL = "Dreamina Seedance 2.0 Mini";
 const VIDEO_MODEL_OPTIONS = {
@@ -138,7 +145,9 @@ async function login(req, res) {
     return sendJson(res, { error: "账号或密码错误" }, 401);
   }
   appendCookie(res, `${SESSION_COOKIE_NAME}=${encodeURIComponent(result.token)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`);
-  return sendJson(res, { authenticated: true, user: result.user });
+  const profiles = await readUserProfiles();
+  const profile = publicProfile(result.user.username, profiles[result.user.username]);
+  return sendJson(res, { authenticated: true, user: { ...result.user, displayName: profile.displayName || result.user.displayName, avatar: profile.avatar, profile } });
 }
 
 async function logout(req, res) {
@@ -179,6 +188,114 @@ async function updateAdminUser(body = {}) {
 async function deleteAdminUser(body = {}) {
   const admin = requireAdmin();
   return authStore.deleteUser(body.username, admin);
+}
+
+async function readUserProfiles() {
+  if (!existsSync(USER_PROFILES_PATH)) return {};
+  try {
+    const data = JSON.parse(await readFile(USER_PROFILES_PATH, "utf8"));
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeUserProfiles(profiles) {
+  await writeFile(USER_PROFILES_PATH, `${JSON.stringify(profiles, null, 2)}\n`, "utf8");
+}
+
+function maskApiKey(value) {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  if (key.length <= 10) return "已配置";
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+function publicProfile(username, profile = {}) {
+  return {
+    username,
+    displayName: String(profile.displayName || "").trim(),
+    avatar: String(profile.avatar || "").trim(),
+    hasApiKey: Boolean(String(profile.apiKey || "").trim()),
+    apiKeyPreview: maskApiKey(profile.apiKey)
+  };
+}
+
+async function getMyProfile() {
+  const user = currentUser();
+  if (!user?.username) throw new Error("请先登录");
+  const profiles = await readUserProfiles();
+  return { profile: publicProfile(user.username, profiles[user.username]) };
+}
+
+async function updateMyProfile(body = {}) {
+  const user = currentUser();
+  if (!user?.username) throw new Error("请先登录");
+  const profiles = await readUserProfiles();
+  const current = profiles[user.username] || {};
+  const displayName = String(body.displayName ?? current.displayName ?? user.displayName ?? user.username).trim().slice(0, 60);
+  const avatar = String(body.avatar ?? current.avatar ?? "").trim().slice(0, 3_000_000);
+  const apiKeyInput = String(body.apiKey ?? "").trim();
+  profiles[user.username] = {
+    ...current,
+    displayName: displayName || user.username,
+    avatar,
+    apiKey: apiKeyInput ? apiKeyInput : String(current.apiKey || ""),
+    updatedAt: new Date().toISOString()
+  };
+  await writeUserProfiles(profiles);
+  return { ok: true, profile: publicProfile(user.username, profiles[user.username]) };
+}
+
+function resolveImageModel(value = MODEL) {
+  const key = String(value || MODEL).trim();
+  const info = IMAGE_MODEL_OPTIONS[key];
+  if (!info) throw new Error("请先选择生图模型。");
+  return info;
+}
+
+async function currentUserProfile() {
+  const username = currentUserId();
+  const profiles = await readUserProfiles();
+  return profiles[username] || {};
+}
+
+async function requireUserApiKeyForModel(model, label = "模型") {
+  const profile = await currentUserProfile();
+  const apiKey = String(profile.apiKey || "").trim();
+  if (!apiKey) {
+    const error = new Error(`请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}`);
+    error.status = 400;
+    throw error;
+  }
+  return apiKey;
+}
+
+function taiEnvForApiKey(apiKey) {
+  const clean = String(apiKey || "").trim();
+  if (!clean) return {};
+  return {
+    OPENAI_API_KEY: clean,
+    OPENAI_KEY: clean,
+    REVERSE_PROMPT_API_KEY: clean,
+    TAI_API_KEY: clean,
+    TAI_TOKEN: clean
+  };
+}
+
+async function checkModelAccess(body = {}) {
+  const imageModel = String(body.imageModel || "").trim();
+  const videoModel = String(body.videoModel || "").trim();
+  const outputMode = body.outputMode === "video" ? "video" : "image";
+  if (imageModel) {
+    const info = resolveImageModel(imageModel);
+    await requireUserApiKeyForModel(info.model, info.label);
+  }
+  if (outputMode === "video") {
+    const info = resolveVideoModel(videoModel || "dreamina-seedance-2-0-mini");
+    await requireUserApiKeyForModel(info.model, info.label);
+  }
+  return { ok: true };
 }
 
 function currentUserId() {
@@ -463,7 +580,7 @@ function chineseVideoSpecialRequirement(fileName, analysis = null) {
     : [
         `来源：本段默认要求根据本次上传视频 ${fileName} 生成，不是按竞品素材文件夹编号套模板。`,
         "视频反推：请观察当前视频的广告类型、镜头远近、主体入场方向、UI/文字层级、动作节奏、道具互动、情绪变化和转场时机，并把这些抽象关系写入我方生成要求。只有当前视频明确是战斗/塔防玩法时，才反推攻击因果、升级链路或敌我方向。",
-        "首帧要求：先用视频中最能代表广告布局的一帧作为 codex-gpt-image2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
+        "首帧要求：先用视频中最能代表广告布局的一帧作为 codex-gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
         "替换规则：竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都必须改成我方原创风格；我方角色或素材要替换原参考中的对应主体位置，不能在原主体旁边额外新增。非战斗素材不要强行加入怪物、攻击、技能、升级卡或塔防元素。"
       ].join("\n");
   return `${frameText}\n视频节奏：生成视频时继续参考本视频的前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮记忆点和结尾停留，但只保留抽象节奏、镜头语言和广告关系，不复制竞品具体元素。只有当前视频明确是战斗玩法时，才加入攻击反馈或升级节奏；否则保持非战斗广告类型。`;
@@ -479,7 +596,7 @@ function specialRequirementJson({ type, fileName, analysis = null, videoPrompt =
   const seedancePrompt = ai?.seedance2_video_prompt || (isVideo
     ? [
         `参考当前竞品视频 ${fileName} 的反推结构制作 Seedance 2.0 视频，但只保留抽象镜头语言、节奏和广告关系。`,
-        "先根据 codex-gpt-image2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
+        "先根据 codex-gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
         "如果当前视频明确是战斗/塔防玩法，才保留敌我方向、单位位置、升级链路和攻击因果；如果不是战斗视频，必须保持原参考的非战斗类型，不要加入怪物进攻、武器、技能、血条、伤害数字、升级卡或战斗UI。",
         "所有竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都要替换成我方原创风格；我方角色/怪物/Logo必须替换原参考里的对应主体位置，不能与原主体同时存在。"
       ].join("\n")
@@ -624,7 +741,7 @@ async function reversePromptWithVisionModel(imagePath, { type = "image", fileNam
     "台词语种必须保留：除非用户明确要求翻译或改语种，新视频不能改变原视频台词语种。例如原版是英文，新视频也必须是英文；原版是中文，新视频也必须是中文。",
     "如果不是战斗素材，要明确 non_combat_guard，禁止强行加入敌人、怪物进攻、攻击、武器、技能、血条、伤害数字、升级卡、战斗UI。",
     "如果是视频封面，请根据封面和上传视频语境写 seedance2_video_prompt：用于 Seedance 2.0 生成15秒竖屏视频，描述前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮和结尾停留，只保留抽象节奏，不复制竞品IP。",
-    "image2_prompt_guidance 必须用于 codex-gpt-image2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
+    "image2_prompt_guidance 必须用于 codex-gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
     "JSON字段：material_type, visual_summary, composition, subjects, expressions, scene, props, text_logo_ui, dialogue, camera, color_lighting, ad_mechanic, is_combat_reference, non_combat_guard, infringement_avoidance, image2_prompt_guidance, seedance2_video_prompt, user_edit_tip。dialogue格式为 { has_dialogue, language, original_lines, preserve_language, instruction }。"
   ].join("\n");
   const inputText = `${instruction}\n当前素材类型：${type}\n文件名：${fileName}\n尺寸：${width || "unknown"}x${height || "unknown"}，${orientationLabel || "未知比例"}`;
@@ -1313,7 +1430,7 @@ function videoReferenceBlock(competitor) {
     : "When the current reference is not clearly gameplay/battle, preserve its non-combat creative structure: scene type, camera rhythm, emotional beats, character interaction, props, product/logo placement, editing cadence, and ad pacing. Do not introduce battles, enemies, monsters, weapons, towers, attack effects, upgrade cards, HP bars, or combat UI unless they are visibly present in the current reference.";
   const jsonVideoPrompt = specialRequirementForVideoPrompt(competitor.specialRequirement);
   const mergedVideoPrompt = [jsonVideoPrompt, competitor.videoPrompt].filter(Boolean).join("\n");
-  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the codex-gpt-image2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
+  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the codex-gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
 }
 
 function isCombatReference(competitor = {}) {
@@ -1461,6 +1578,7 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
   const chosenLogos = logos.filter((logo) => selectedLogoNames.includes(logo.name));
   const chosenCompetitors = competitors.filter((item) => selectedCompetitorNames.includes(item.name));
   const repeats = Math.max(1, Math.min(50, Number(repeatCount || 1)));
+  const resolvedImageModel = resolveImageModel(imageModel);
   const resolvedVideoModel = resolveVideoModel(videoModel);
   const jobs = [];
 
@@ -1502,7 +1620,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             id: `${competitor.name}_${groupName}`,
             name: `${competitor.name}_${groupName}`,
             outputMode,
-            imageModel,
+            imageModel: resolvedImageModel.model,
+            imageModelLabel: resolvedImageModel.label,
             videoModel: resolvedVideoModel.model,
             videoModelLabel: resolvedVideoModel.label,
             size: (promptCompetitor.layout ?? layoutFromDimensions()).size,
@@ -1528,7 +1647,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           id: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           name: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           outputMode,
-          imageModel,
+          imageModel: resolvedImageModel.model,
+          imageModelLabel: resolvedImageModel.label,
           videoModel: resolvedVideoModel.model,
           videoModelLabel: resolvedVideoModel.label,
           size: layout.size,
@@ -1566,6 +1686,8 @@ async function runTaiJob(job, promptDir, logPath) {
 
 async function runImageStage(job, promptDir, logPath) {
   const imageModel = job.imageModel || MODEL;
+  const imageModelLabel = job.imageModelLabel || imageModel;
+  const apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 
@@ -1575,7 +1697,7 @@ async function runImageStage(job, promptDir, logPath) {
     const runState = getRunState();
     if (runState.stopRequested) throw new Error("Batch stopped by user");
     try {
-      const result = await execTai(args);
+      const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
       stdout = result.stdout;
       stderr = result.stderr;
       break;
@@ -1608,7 +1730,7 @@ async function runImageStage(job, promptDir, logPath) {
 
   await downloadImage(imageUrl, job.output);
   const storage = await syncProjectAssetToObjectStorage(job.output, "generated_image");
-  const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
+  const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, model_label: imageModelLabel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -1620,25 +1742,27 @@ async function runImageStage(job, promptDir, logPath) {
 async function runSeedanceVideoStage(job, promptDir, logPath) {
   const runState = getRunState();
   if (runState.stopRequested) throw new Error("Batch stopped by user");
+  const videoModel = job.videoModel || SEEDANCE_MODEL;
+  const apiKey = await requireUserApiKeyForModel(videoModel, job.videoModelLabel || videoModel);
   const args = [
     "aigc", "seedance",
     "--mode", "image_to_video",
-    "--model", job.videoModel || SEEDANCE_MODEL,
+    "--model", videoModel,
     "--image", job.output,
     "--duration", "15",
     "--ratio", ratioFromOutputSize(job.videoSize),
     "--resolution", "720p",
     job.videoPrompt
   ];
-  addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}]`, { job: job.name, model: job.videoModel || SEEDANCE_MODEL });
-  const { stdout, stderr } = await execTai(args);
+  addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}]`, { job: job.name, model: videoModel });
+  const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
   const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, job.name) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   await downloadBinary(videoUrl, job.videoOutput);
   const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
-  const record = { time: new Date().toISOString(), name: job.name, model: job.videoModel || SEEDANCE_MODEL, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
+  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -1814,6 +1938,7 @@ async function startBatch(options = {}) {
   const outputMode = options.outputMode === "video" ? "video" : "image";
   const imageModel = String(options.imageModel || "").trim();
   if (!IMAGE_MODELS.has(imageModel)) throw new Error("请先选择生图模型。");
+  const imageModelInfo = resolveImageModel(imageModel);
   const requestedVideoModel = String(options.videoModel || "dreamina-seedance-2-0-mini").trim();
   if (outputMode === "video" && !VIDEO_MODEL_OPTIONS[requestedVideoModel]) throw new Error("请先选择视频模型。");
   const videoModelInfo = resolveVideoModel(requestedVideoModel);
@@ -1831,7 +1956,7 @@ async function startBatch(options = {}) {
     batchTag,
     outputMode,
     repeatCount,
-    imageModel,
+    imageModel: imageModelInfo.model,
     videoModel: requestedVideoModel
   });
   if (!jobs.length) {
@@ -1846,7 +1971,7 @@ async function startBatch(options = {}) {
     if (needsLogo && !selectedLogoNames.length) throw new Error("没有可生成任务：已选竞品勾选了 Logo，但没有勾选产品 Logo 图。请勾选产品 Logo，或取消该竞品的 Logo。");
     throw new Error("没有可生成任务：请检查竞品素材、角色数量、怪物数量和素材勾选状态。");
   }
-  const safeImageModel = imageModel.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeImageModel = imageModelInfo.model.replace(/[^a-zA-Z0-9_-]/g, "_");
   const promptDir = join(dirs().recordDir, `prompts_${batchTag}_${safeImageModel}`);
   const logPath = join(dirs().recordDir, `batch_${batchTag}_${safeImageModel}_${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   await mkdir(promptDir, { recursive: true });
@@ -1866,7 +1991,7 @@ async function startBatch(options = {}) {
     current: "",
     concurrency,
     repeatCount,
-    imageModel,
+    imageModel: imageModelInfo.model,
     videoModel: outputMode === "video" ? videoModelInfo.model : "",
     videoModelLabel: outputMode === "video" ? videoModelInfo.label : "",
     jobs: jobs.map((job, index) => ({
@@ -1886,7 +2011,7 @@ async function startBatch(options = {}) {
     })),
     log: []
   });
-  addLog("start", `START total=${jobs.length} concurrency=${concurrency} repeat=${repeatCount} mode=${outputMode} model=${imageModel}${outputMode === "video" ? ` videoModel=${videoModelInfo.label}` : ""}`);
+  addLog("start", `START total=${jobs.length} concurrency=${concurrency} repeat=${repeatCount} mode=${outputMode} model=${imageModelInfo.label}${outputMode === "video" ? ` videoModel=${videoModelInfo.label}` : ""}`);
 
   void (async () => {
     let cursor = 0;
@@ -2000,7 +2125,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推当前竞品视频的非战斗广告结构：前3秒钩子、镜头推进方式、角色互动、表情变化、道具使用、场景转场、产品/Logo露出和结尾停留方式。只保留抽象节奏和布局关系，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 codex-gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
 
 当前参考素材未明确表现战斗/塔防/怪物进攻玩法，因此本视频必须按当前参考的实际类型生成：可以是生活化、休闲、搞笑、经营、换装、合成、剧情、解谜、宠物互动、社交展示或产品广告演绎。不要强行加入战斗、敌人、怪物进攻、攻击、武器、技能释放、塔防道路、升级卡、A/S/SS卡牌、HP血条、伤害数字、Boss或战斗UI。必须保留效果图中的我方角色身份、构图、镜头角度、UI/文字层级、道具功能、场景情绪和主体比例。${roleText}。${extraAssets}
 
@@ -2027,7 +2152,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推竞品视频的玩法结构、单位位置、镜头节奏、波次推进、升级链路和攻击因果，再套用到我方效果图。只能保留抽象玩法布局和广告节奏，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤、建筑造型、冰雪门楼、火把、地图装饰或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 codex-gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
 
 必须保留效果图中的我方角色身份、地图布局、镜头角度、UI层级、敌我方向和主体比例。若参考视频是纵向塔防局内画面，英雄/防线必须保持在下方或底部格子，怪物必须保持在上方路径或从上方入口推进，攻击从下方英雄/防线朝上方怪物发出。保持原始镜头缩放、完整游戏屏幕、格子密度、道路宽度和UI边距，不能把场地、格子、敌人、英雄整体放大，不能裁切成近景。英雄必须保持小型局内单位比例，约等于参考视频里原英雄的屏幕占比，不能变成中心大插画、角色特写或前景展示；怪物也按参考视频怪物的相对尺寸和路径关系出现。必须用我方角色替换原卡皮/原英雄，原竞品单位必须消失，不能出现“原卡皮+我方角色”同时存在。我方角色必须站在原卡皮/原玩家单位所在同一个格子中心、同一条路线、同一层级。所有单位都必须在原版对应格子、路径或站位范围内运动，不能站出格子外或遮挡底部UI。不能改成左右对峙、横向决斗、海报展示或角色怪物并排站位。${roleText}。${monsterText}
 
@@ -2364,7 +2489,7 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
 }
 
 function defaultVideoReversePrompt(fileName) {
-  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 codex-gpt-image2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
+  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 codex-gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
 }
 
 async function transcribeVideoDialogue(videoPath) {
@@ -3227,6 +3352,9 @@ async function handleRequest(req, res) {
       return sendJson(res, result);
     }
     if (req.method === "GET" && url.pathname === "/api/projects") return sendJson(res, { projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), userId: currentUserId(), projects: projectList() });
+    if (req.method === "GET" && url.pathname === "/api/profile") return sendJson(res, await getMyProfile());
+    if (req.method === "POST" && url.pathname === "/api/profile") return sendJson(res, await updateMyProfile(await readJson(req)));
+    if (req.method === "POST" && url.pathname === "/api/model-access") return sendJson(res, await checkModelAccess(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/projects/switch") {
       const result = await switchProject(await readJson(req));
       appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);

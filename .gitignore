@@ -9,6 +9,7 @@ env.export.txt
 server-error.log
 server-start.log
 users.json
+user-profiles.json
 .learnings/
 .understand-anything/
 .tmp/

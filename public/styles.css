@@ -219,6 +219,30 @@ body::before {
   border-radius: 999px;
 }
 
+.profile-avatar-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(169, 112, 255, 0.42);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+  background:
+    linear-gradient(135deg, rgba(123, 97, 255, 0.95), rgba(65, 220, 255, 0.75)),
+    rgba(255, 255, 255, 0.08);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  box-shadow: 0 0 22px rgba(123, 97, 255, 0.28);
+}
+
+.profile-avatar-btn.has-image span,
+.profile-avatar-preview.has-image {
+  color: transparent;
+}
+
 .topbar-account-link {
   border-radius: 999px;
   color: var(--ink);
@@ -2004,6 +2028,50 @@ button.mini {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.profile-panel {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.profile-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-avatar-preview {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(169, 112, 255, 0.42);
+  border-radius: 18px;
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 950;
+  background:
+    linear-gradient(135deg, rgba(123, 97, 255, 0.95), rgba(65, 220, 255, 0.75)),
+    rgba(255, 255, 255, 0.08);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 32px rgba(123, 97, 255, 0.28);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.profile-avatar-preview:hover {
+  transform: translateY(-1px);
+  border-color: rgba(65, 220, 255, 0.7);
+}
+
+.profile-editor textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.profile-editor small {
+  color: var(--muted);
 }
 
 ::-webkit-scrollbar {

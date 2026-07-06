@@ -91,6 +91,18 @@ const els = {
   changelogModal: document.querySelector("#changelogModal"),
   changelogCloseBtn: document.querySelector("#changelogCloseBtn"),
   currentUserBadge: document.querySelector("#currentUserBadge"),
+  profileAvatarBtn: document.querySelector("#profileAvatarBtn"),
+  profileAvatarText: document.querySelector("#profileAvatarText"),
+  profileModal: document.querySelector("#profileModal"),
+  profileCloseBtn: document.querySelector("#profileCloseBtn"),
+  profileSaveBtn: document.querySelector("#profileSaveBtn"),
+  profileDisplayNameInput: document.querySelector("#profileDisplayNameInput"),
+  profileAvatarInput: document.querySelector("#profileAvatarInput"),
+  profileAvatarFileInput: document.querySelector("#profileAvatarFileInput"),
+  profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
+  profileApiKeyInput: document.querySelector("#profileApiKeyInput"),
+  profileApiKeyHint: document.querySelector("#profileApiKeyHint"),
+  profileStatus: document.querySelector("#profileStatus"),
   adminUsersBtn: document.querySelector("#adminUsersBtn"),
   adminUsersModal: document.querySelector("#adminUsersModal"),
   adminUsersCloseBtn: document.querySelector("#adminUsersCloseBtn"),
@@ -146,6 +158,7 @@ function showLogin(message = "") {
   if (els.loginModal) els.loginModal.hidden = false;
   if (els.loginStatus) els.loginStatus.textContent = message;
   if (els.currentUserBadge) els.currentUserBadge.textContent = "未登录";
+  renderProfileAvatar(null);
   if (els.adminUsersBtn) els.adminUsersBtn.hidden = true;
   updateProjectAdminActions();
   if (els.logoutBtn) els.logoutBtn.hidden = true;
@@ -158,9 +171,91 @@ function hideLogin(user) {
   if (els.loginStatus) els.loginStatus.textContent = "";
   if (els.loginPassword) els.loginPassword.value = "";
   if (els.currentUserBadge) els.currentUserBadge.textContent = user?.displayName || user?.username || "已登录";
+  renderProfileAvatar(user);
+  loadProfile().catch(() => {});
   if (els.adminUsersBtn) els.adminUsersBtn.hidden = !user?.isAdmin;
   updateProjectAdminActions();
   if (els.logoutBtn) els.logoutBtn.hidden = false;
+}
+
+function renderProfileAvatar(user = state.user) {
+  if (!els.profileAvatarBtn) return;
+  const avatar = user?.avatar || user?.profile?.avatar || "";
+  const name = user?.displayName || user?.username || "U";
+  els.profileAvatarBtn.hidden = !user;
+  if (avatar) {
+    els.profileAvatarBtn.style.backgroundImage = `url("${avatar.replace(/"/g, "%22")}")`;
+    els.profileAvatarBtn.classList.add("has-image");
+  } else {
+    els.profileAvatarBtn.style.backgroundImage = "";
+    els.profileAvatarBtn.classList.remove("has-image");
+  }
+  if (els.profileAvatarText) els.profileAvatarText.textContent = String(name).trim().slice(0, 1).toUpperCase() || "U";
+}
+
+function setProfilePreviewAvatar(avatar, name = "") {
+  if (!els.profileAvatarPreview) return;
+  els.profileAvatarPreview.textContent = String(name || "U").trim().slice(0, 1).toUpperCase() || "U";
+  els.profileAvatarPreview.style.backgroundImage = avatar ? `url("${avatar.replace(/"/g, "%22")}")` : "";
+  els.profileAvatarPreview.classList.toggle("has-image", Boolean(avatar));
+}
+
+function renderProfileForm(profile = {}) {
+  if (els.profileDisplayNameInput) els.profileDisplayNameInput.value = profile.displayName || state.user?.displayName || state.user?.username || "";
+  if (els.profileAvatarInput) els.profileAvatarInput.value = profile.avatar || "";
+  if (els.profileApiKeyInput) els.profileApiKeyInput.value = "";
+  if (els.profileApiKeyHint) els.profileApiKeyHint.textContent = profile.hasApiKey ? `已配置 API Key：${profile.apiKeyPreview}` : "未配置 API Key 时不能开始生图或生视频。";
+  setProfilePreviewAvatar(profile.avatar || "", profile.displayName || state.user?.displayName || state.user?.username || "U");
+}
+
+async function loadProfile() {
+  if (!state.user) return null;
+  const data = await api("/api/profile");
+  const profile = data.profile || {};
+  state.user = { ...state.user, displayName: profile.displayName || state.user.displayName, avatar: profile.avatar, profile };
+  if (els.currentUserBadge) els.currentUserBadge.textContent = state.user.displayName || state.user.username || "已登录";
+  renderProfileAvatar(state.user);
+  renderProfileForm(profile);
+  return profile;
+}
+
+async function openProfile() {
+  if (!els.profileModal) return;
+  els.profileStatus.textContent = "";
+  els.profileModal.hidden = false;
+  await loadProfile().catch((error) => {
+    els.profileStatus.textContent = error.message;
+  });
+}
+
+function closeProfile() {
+  if (els.profileModal) els.profileModal.hidden = true;
+}
+
+async function saveProfile() {
+  if (!els.profileSaveBtn) return;
+  els.profileSaveBtn.disabled = true;
+  els.profileStatus.textContent = "保存中...";
+  try {
+    const data = await api("/api/profile", {
+      method: "POST",
+      body: JSON.stringify({
+        displayName: els.profileDisplayNameInput.value,
+        avatar: els.profileAvatarInput.value,
+        apiKey: els.profileApiKeyInput.value
+      })
+    });
+    const profile = data.profile || {};
+    state.user = { ...state.user, displayName: profile.displayName || state.user?.displayName, avatar: profile.avatar, profile };
+    renderProfileAvatar(state.user);
+    renderProfileForm(profile);
+    if (els.currentUserBadge) els.currentUserBadge.textContent = state.user.displayName || state.user.username || "已登录";
+    els.profileStatus.textContent = "已保存";
+  } catch (error) {
+    els.profileStatus.textContent = error.message;
+  } finally {
+    els.profileSaveBtn.disabled = false;
+  }
 }
 
 function updateProjectAdminActions() {
@@ -894,7 +989,7 @@ function formatLogLine(line) {
   if (line.type === "start") {
     const repeat = line.message?.match(/repeat=(\d+)/)?.[1] || "1";
     const suffix = repeat !== "1" ? `，每组生成 ${repeat} 次` : "";
-    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 codex-gpt-image2${suffix}`;
+    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 codex-gpt-image-2${suffix}`;
   }
   if (line.type === "job-start") return `${worker}开始 ${job}`;
   if (line.type === "video-start") return `${worker}开始视频 ${job}`;
@@ -1598,6 +1693,10 @@ els.startBtn.addEventListener("click", async () => {
   els.batchTag.value = freshBatchTag;
   els.startBtn.disabled = true;
   try {
+    await api("/api/model-access", {
+      method: "POST",
+      body: JSON.stringify({ imageModel, videoModel, outputMode: els.outputModeSelect.value })
+    });
     const runState = await api("/api/start", {
       method: "POST",
       body: JSON.stringify({
@@ -1655,10 +1754,33 @@ els.logoutBtn?.addEventListener("click", async () => {
   showLogin("已退出登录");
 });
 els.adminUsersBtn?.addEventListener("click", openAdminUsers);
+els.profileAvatarBtn?.addEventListener("click", openProfile);
+els.profileCloseBtn?.addEventListener("click", closeProfile);
+els.profileSaveBtn?.addEventListener("click", saveProfile);
+els.profileAvatarPreview?.addEventListener("click", () => {
+  els.profileAvatarFileInput?.click();
+});
+els.profileAvatarFileInput?.addEventListener("change", async () => {
+  const file = els.profileAvatarFileInput.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) return alert("请选择图片文件");
+  if (file.size > 2 * 1024 * 1024) return alert("头像图片不能超过 2MB");
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  els.profileAvatarInput.value = dataUrl;
+  setProfilePreviewAvatar(dataUrl, els.profileDisplayNameInput?.value || state.user?.displayName || state.user?.username || "U");
+});
 els.changelogBtn?.addEventListener("click", openChangelog);
 els.changelogCloseBtn?.addEventListener("click", closeChangelog);
 els.changelogModal?.addEventListener("click", (event) => {
   if (event.target === els.changelogModal) closeChangelog();
+});
+els.profileModal?.addEventListener("click", (event) => {
+  if (event.target === els.profileModal) closeProfile();
 });
 els.adminUsersCloseBtn?.addEventListener("click", closeAdminUsers);
 els.adminUsersModal?.addEventListener("click", (event) => {

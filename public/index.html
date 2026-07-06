@@ -18,6 +18,9 @@
       <div class="topbar-account">
         <a class="topbar-account-link" href="/wangzhuan-tasks.html">任务管理</a>
         <span id="currentUserBadge">未登录</span>
+        <button id="profileAvatarBtn" class="profile-avatar-btn" type="button" title="个人信息" aria-label="个人信息" hidden>
+          <span id="profileAvatarText">U</span>
+        </button>
         <button id="adminUsersBtn" class="mini ghost" type="button" hidden>账号管理</button>
         <button id="logoutBtn" class="mini ghost" type="button" hidden>退出</button>
       </div>
@@ -60,7 +63,7 @@
             </div>
           </div>
           <div class="status">
-            <span id="modelBadge">codex-gpt-image2</span>
+            <span id="modelBadge">codex-gpt-image-2</span>
             <span id="runBadge">空闲</span>
           </div>
         </section>
@@ -86,7 +89,7 @@
             <label for="imageModelSelect">生图模型</label>
             <select id="imageModelSelect" required>
               <option value="">请选择</option>
-              <option value="codex-gpt-image2">codex-gpt-image2（常规）</option>
+              <option value="codex-gpt-image-2">codex-gpt-image-2（常规）</option>
               <option value="ByteDance-Seedream-5-0-lite">ByteDance-Seedream-5-0-lite（擦边）</option>
             </select>
           </div>
@@ -268,6 +271,31 @@
               <li>生成流程支持图片模式和图片+视频模式，并支持生成次数参数。</li>
             </ul>
           </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileModal" class="modal-backdrop" hidden>
+      <div class="modal-panel profile-panel">
+        <div class="modal-title-row">
+          <div>
+            <h2>个人信息</h2>
+            <p>配置头像、昵称和当前账号用于生图/生视频的 API Key。</p>
+          </div>
+          <button id="profileCloseBtn" class="mini ghost" type="button">关闭</button>
+        </div>
+        <div class="profile-editor">
+          <button class="profile-avatar-preview" id="profileAvatarPreview" type="button" title="点击上传头像">U</button>
+          <input id="profileAvatarFileInput" type="file" accept="image/*" hidden />
+          <input id="profileAvatarInput" type="hidden" />
+          <label>昵称 <input id="profileDisplayNameInput" type="text" placeholder="请输入昵称" /></label>
+          <small>点击头像上传本地图片。</small>
+          <label>API Key <input id="profileApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原 Key" /></label>
+          <small id="profileApiKeyHint">未配置 API Key 时不能开始生图或生视频。</small>
+          <p id="profileStatus" class="login-status"></p>
+        </div>
+        <div class="modal-actions">
+          <button id="profileSaveBtn" type="button">保存</button>
         </div>
       </div>
     </div>
