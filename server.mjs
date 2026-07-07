@@ -981,6 +981,10 @@ function summarizeErrorText(text) {
     .slice(0, 700);
 }
 
+function isBytePlusAssetUploadRejected(text = "") {
+  return /Asset upload rejected|CreateAsset HTTP 400|BytePlus Asset API/i.test(String(text || ""));
+}
+
 function sleepWithStop(ms) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -1059,7 +1063,7 @@ async function listOutputFiles(dir) {
     if (!type) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
+    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -1508,6 +1512,67 @@ async function readVideoDurationSeconds(videoPath = "") {
   }
 }
 
+async function readVideoMetadata(videoPath = "") {
+  if (!videoPath || !existsSync(videoPath)) return null;
+  try {
+    const ffprobe = toolPath("ffprobe");
+    const { stdout } = await execTool(ffprobe, [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,duration",
+      "-of", "json",
+      videoPath
+    ]);
+    const stream = JSON.parse(stdout || "{}")?.streams?.[0] || {};
+    const width = Number(stream.width) || 0;
+    const height = Number(stream.height) || 0;
+    const duration = Number.parseFloat(stream.duration || "0") || 0;
+    return width && height ? { width, height, duration, pixelCount: width * height } : null;
+  } catch (error) {
+    addLog("warn", `VIDEO_METADATA_READ_FAILED ${basename(videoPath)} ${summarizeErrorText(`${error.stderr ?? ""}\n${error.message ?? ""}`)}`);
+    return null;
+  }
+}
+
+function isSeedanceCompatibleVideo(metadata) {
+  return Boolean(metadata?.width && metadata?.height && metadata.pixelCount >= 409600 && (!metadata.duration || (metadata.duration >= 1.8 && metadata.duration <= 15.2)));
+}
+
+function isVideoCodecCompatible(metadata) {
+  return Boolean(metadata?.width && metadata?.height);
+}
+
+async function seedanceSafeVideoReference(videoPath = "", workDir = dirs().recordDir) {
+  if (!videoPath || !existsSync(videoPath)) return "";
+  const metadata = await readVideoMetadata(videoPath);
+  if (isSeedanceCompatibleVideo(metadata) && existsSync(videoPath)) return videoPath;
+  await mkdir(workDir, { recursive: true });
+  const target = join(workDir, `${parse(videoPath).name}_seedance_ref_1024.mp4`);
+  const ffmpeg = toolPath("ffmpeg");
+  const sourceWidth = metadata?.width || 576;
+  const sourceHeight = metadata?.height || 1024;
+  const scale = sourceWidth >= sourceHeight ? Math.max(1, 1024 / sourceWidth) : Math.max(1, 1024 / sourceHeight);
+  const width = Math.max(2, Math.round((sourceWidth * scale) / 2) * 2);
+  const height = Math.max(2, Math.round((sourceHeight * scale) / 2) * 2);
+  await execTool(ffmpeg, [
+    "-y",
+    "-i", videoPath,
+    ...(metadata?.duration && metadata.duration > 15.2 ? ["-t", "15"] : []),
+    "-vf", `scale=${width}:${height}`,
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-preset", "veryfast",
+    "-crf", "20",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    target
+  ]);
+  const nextMetadata = await readVideoMetadata(target);
+  addLog("video-ref-normalized", `REFERENCE_VIDEO_NORMALIZED ${basename(videoPath)} ${metadata?.width || "?"}x${metadata?.height || "?"} ${metadata?.duration ? `${metadata.duration.toFixed(1)}s` : "?s"} -> ${nextMetadata?.width || "?"}x${nextMetadata?.height || "?"} ${nextMetadata?.duration ? `${nextMetadata.duration.toFixed(1)}s` : "?s"}`, { source: videoPath, output: target });
+  return target;
+}
+
 function normalizeSeedanceDuration(seconds = 15) {
   const rounded = Math.round(Number(seconds) || 15);
   return Math.max(4, Math.min(15, rounded));
@@ -1938,6 +2003,7 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   const segmentPaths = [];
   const taskIds = [];
   const remoteUrls = [];
+  const normalizedVideoRefs = [];
   addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}] duration=${targetDuration}s segments=${segmentDurations.join("+")}`, { job: job.name, model: videoModel });
   for (let index = 0; index < segmentDurations.length; index += 1) {
     if (getRunState().stopRequested) throw new Error("Batch stopped by user");
@@ -1946,24 +2012,30 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
     const segmentPath = segmentDurations.length > 1
       ? join(dirname(job.videoOutput), `${parse(job.videoOutput).name}_part${index + 1}.mp4`)
       : job.videoOutput;
-    const hasReferenceVideo = index === 0 && job.referenceVideoPath && existsSync(job.referenceVideoPath);
+    const referenceVideoForSeedance = index === 0 && job.referenceVideoPath && existsSync(job.referenceVideoPath)
+      ? await seedanceSafeVideoReference(job.referenceVideoPath, promptDir)
+      : "";
+    if (referenceVideoForSeedance) normalizedVideoRefs.push(referenceVideoForSeedance);
+    const hasReferenceVideo = Boolean(referenceVideoForSeedance);
+    const firstSegmentPrompt = `${job.videoPrompt}\nMatch the uploaded reference ad video duration and shot rhythm as closely as possible. This is segment ${index + 1}/${segmentDurations.length}; keep the first segment as the opening hook and do not end abruptly unless more segments follow.`;
+    const sourceVideoForExtend = index > 0 ? await seedanceSafeVideoReference(segmentPaths[index - 1], promptDir) : "";
     const args = index === 0
       ? [
           "aigc", "seedance",
           "--mode", hasReferenceVideo ? "omni_reference" : "image_to_video",
           "--model", videoModel,
           "--image", job.output,
-          ...(hasReferenceVideo ? ["--video", job.referenceVideoPath] : []),
+          ...(hasReferenceVideo ? ["--video", referenceVideoForSeedance] : []),
           "--duration", String(segmentDuration),
           "--ratio", ratio,
           "--resolution", "720p",
-          `${job.videoPrompt}\nMatch the uploaded reference ad video duration and shot rhythm as closely as possible. This is segment ${index + 1}/${segmentDurations.length}; keep the first segment as the opening hook and do not end abruptly unless more segments follow.`
+          firstSegmentPrompt
         ]
       : [
           "aigc", "seedance",
           "--mode", "video_extend",
           "--model", videoModel,
-          "--source-video", segmentPaths[index - 1],
+          "--source-video", sourceVideoForExtend,
           "--duration", String(segmentDuration),
           "--ratio", ratio,
           "--resolution", "720p",
@@ -1973,9 +2045,9 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
     const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
     const raw = `${stdout}\n${stderr}`.trim();
     const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-    const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, segmentName) : parseSeedanceVideoUrl(raw);
+    const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, segmentName, segmentPath) : parseSeedanceVideoUrl(raw);
     if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
-    await downloadBinary(videoUrl, segmentPath);
+    if (!taskId) await downloadVerifiedVideo(videoUrl, segmentPath, segmentName);
     segmentPaths.push(segmentPath);
     taskIds.push(taskId);
     remoteUrls.push(videoUrl);
@@ -1983,8 +2055,8 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   if (segmentPaths.length > 1) {
     await concatVideos(segmentPaths, job.videoOutput);
   }
-  const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
-  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskIds.filter(Boolean).join(","), prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: remoteUrls[remoteUrls.length - 1] || "", reference_video: job.referenceVideoPath || "", reference_video_duration: job.referenceVideoDuration || 0, target_duration: targetDuration, segment_durations: segmentDurations };
+  const storage = null;
+  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskIds.filter(Boolean).join(","), prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: remoteUrls[remoteUrls.length - 1] || "", reference_video: job.referenceVideoPath || "", seedance_reference_video: normalizedVideoRefs[0] || "", reference_video_duration: job.referenceVideoDuration || 0, target_duration: targetDuration, segment_durations: segmentDurations };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -2069,14 +2141,14 @@ function parseSeedanceVideoUrl(raw) {
     if (!value || typeof value !== "object") return "";
     const isOutputPath = /(output|result|generated|generation|video|download|play|preview)/i.test(path) &&
       !/(input|source|reference|asset|upload|origin|prompt)/i.test(path);
-    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "preview_url", "previewUrl", "url"];
+    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "url"];
     for (const key of keys) {
       const nextPath = path ? `${path}.${key}` : key;
       const keyLooksLikeOutput = /(output|result|generated|generation|video|download|play|preview)/i.test(nextPath) &&
         !/(input|source|reference|asset|upload|origin|prompt)/i.test(nextPath);
       if (typeof value[key] === "string" && (isOutputPath || keyLooksLikeOutput) && isLikelyVideoUrl(value[key])) return cleanUrl(value[key]);
     }
-    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "preview", "download"]) {
+    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "download"]) {
       const found = fromObject(value[key], path ? `${path}.${key}` : key);
       if (found) return found;
     }
@@ -2107,7 +2179,7 @@ function parseSeedanceVideoUrl(raw) {
   return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
 }
 
-async function pollSeedanceVideoUrl(taskId, jobName) {
+async function pollSeedanceVideoUrl(taskId, jobName, targetPath = "") {
   if (!taskId) return "";
   for (let attempt = 1; attempt <= 60; attempt += 1) {
     const runState = getRunState();
@@ -2119,7 +2191,15 @@ async function pollSeedanceVideoUrl(taskId, jobName) {
     }));
     const raw = `${stdout}\n${stderr}`.trim();
     const videoUrl = parseSeedanceVideoUrl(raw);
-    if (videoUrl) return videoUrl;
+    if (videoUrl) {
+      if (!targetPath) return videoUrl;
+      try {
+        await downloadVerifiedVideo(videoUrl, targetPath, jobName);
+        return videoUrl;
+      } catch (error) {
+        addLog("warn", `VIDEO_URL_NOT_READY ${jobName} ${summarizeErrorText(error.message)}`, { job: jobName, url: videoUrl });
+      }
+    }
     if (/failed|rejected|error/i.test(raw)) throw new Error(`Seedance failed for ${jobName}: ${summarizeErrorText(raw)}`);
     if (attempt === 1 || attempt % 2 === 0) addLog("video-wait", `VIDEO_WAIT ${jobName} task=${taskId} attempt=${attempt}`, { job: jobName });
   }
@@ -2328,6 +2408,16 @@ Group label: ${groupName}. Add short readable English UI text only when the refe
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
 ${visualStyleFinalRule(competitor.visualStyleMode)}`;
+}
+
+async function downloadVerifiedVideo(videoUrl, targetPath, jobName) {
+  await downloadBinary(videoUrl, targetPath);
+  const metadata = await readVideoMetadata(targetPath);
+  if (!isVideoCodecCompatible(metadata)) {
+    await rm(targetPath, { force: true }).catch(() => {});
+    throw new Error(`Seedance returned a non-video asset for ${jobName}: ${videoUrl}`);
+  }
+  return metadata;
 }
 
 function seedanceAdVideoPrompt({ roles, monsters, competitor, groupName }) {
