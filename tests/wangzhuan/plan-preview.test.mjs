@@ -324,6 +324,60 @@ test("Seedance plan prompt preserves object-shaped subtitleWorkflow in prompt co
   assert.match(text, /"Linha 1"/);
 });
 
+test("Seedance plan prompt preserves draft subtitleWorkflow object when branch uses legacy string", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707124500_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          subtitleWorkflow: {
+            burnedInSubtitles: false,
+            postSubtitleRequired: false,
+            provider: "custom_provider",
+            subtitleScript: ["sub"]
+          }
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_legacy_subtitle_workflow",
+      branchLabel: "Legacy subtitle workflow",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      subtitleWorkflow: "post_process",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "living room",
+      subject: "viewer",
+      action: "watches drama and checks rewards",
+      camera: "phone close-up",
+      lighting: "soft daylight",
+      style: "short-drama hook",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"subtitleWorkflow": \{/);
+  assert.match(text, /"burnedInSubtitles": false/);
+  assert.match(text, /"postSubtitleRequired": false/);
+  assert.match(text, /"provider": "custom_provider"/);
+  assert.match(text, /"subtitleScript": \[/);
+  assert.match(text, /"sub"/);
+});
+
 test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {
   const messages = buildThirtySecondSeedancePlanMessages({
     batch: {

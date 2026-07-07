@@ -428,7 +428,11 @@ export function buildSeedancePlanMessages({
   const draftSubtitleWorkflowObject = normalizeObject(draft.subtitleWorkflow);
   const subtitleWorkflow = (() => {
     if (branchSubtitleWorkflowText) {
-      return normalizeSubtitleWorkflow();
+      return normalizeSubtitleWorkflow(
+        undefined,
+        [],
+        Object.keys(draftSubtitleWorkflowObject).length ? draftSubtitleWorkflowObject : undefined
+      );
     }
     if (Object.keys(branchSubtitleWorkflowObject).length) {
       return normalizeSubtitleWorkflow(branchSubtitleWorkflowObject, [], draftSubtitleWorkflowObject);
