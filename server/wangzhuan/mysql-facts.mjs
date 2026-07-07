@@ -185,6 +185,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "draft", "checking", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "checking", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "draft", "batch_draft_saved", null, 0],
+  ["workflow_run", "preview_required", "preview_required", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "queued", "batch_created", null, 0],
   ["workflow_run", "checking", "preview_required", "batch_created", null, 0],
   ["workflow_run", "checking", "queued", "estimate_accepted", null, 0],
@@ -1933,10 +1934,11 @@ async function loadBatchRunRow(conn, facts, batchId) {
     LEFT JOIN asset_files ref_asset ON ref_asset.id = rv.asset_file_id
     LEFT JOIN video_decompositions vd ON vd.reference_video_id = rv.id
     WHERE wr.run_type = 'pipeline'
+      AND wr.project_id = ?
       AND wr.run_uid = ?
       AND (wr.user_id = ? OR ? = 'admin')
     LIMIT 1`,
-    [batchId, facts.userId, facts.role || "user"]
+    [facts.projectId, batchId, facts.userId, facts.role || "user"]
   );
   return runs[0] ?? null;
 }
@@ -2419,6 +2421,60 @@ export async function loadBatchDetailFromMysql(context, batchId) {
     return run ? await loadBatchByRunRow(conn, facts, run) : null;
   } catch (error) {
     console.warn(`[mysql-facts] failed to load batch detail ${batchId}: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function loadOutputDetailFromMysql(context, outputId) {
+  const pool = await getPool();
+  const safeOutputId = String(outputId || "").trim();
+  if (!pool || !safeOutputId) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT
+        wo.output_uid,
+        wr.run_uid,
+        wr.run_type,
+        wo.source_type,
+        wo.output_kind,
+        wo.duration_sec,
+        wo.qc_status,
+        wo.download_eligible,
+        wo.visual_preview_required,
+        wo.preview_confirmed,
+        wo.preview_confirmed_at,
+        af.file_name,
+        af.mime_type,
+        af.storage_relative_path,
+        af.storage_key,
+        af.storage_url,
+        af.probe_json AS output_probe_json
+      FROM workflow_outputs wo
+      JOIN workflow_runs wr ON wr.id = wo.run_id
+      JOIN asset_files af ON af.id = wo.asset_file_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wo.output_uid = ?
+      ORDER BY wo.id DESC
+      LIMIT 1`,
+      [facts.projectId, facts.userId, safeOutputId]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    const output = outputRowToOutput({ ...row, run_uid: row.run_uid }, []);
+    output.fileName = row.file_name || output.fileName || `${output.outputId}.mp4`;
+    output.mimeType = row.mime_type || "";
+    output.storedPath = output.filePath || relativePath(row.storage_relative_path);
+    output.previewUrl = output.previewUrl || row.storage_url || (output.storedPath ? `/file?path=${encodeURIComponent(output.storedPath)}` : "");
+    if (row.run_type === "remix") output.remixId = row.run_uid;
+    else output.batchId = row.run_uid;
+    return output;
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load output detail ${safeOutputId}: ${error.message}`);
     return null;
   } finally {
     conn.release();
@@ -2932,8 +2988,9 @@ export async function loadWorkflowTasksFromMysql(context, query = {}) {
   try {
     const facts = await ensureContextFacts(conn, context);
     const pagination = normalizePagination(query);
-    const params = [facts.userId];
+    const params = [facts.projectId, facts.userId];
     const filters = [
+      "wr.project_id = ?",
       "wr.user_id = ?",
       "wr.run_type IN ('pipeline', 'remix')"
     ];

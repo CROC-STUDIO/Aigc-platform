@@ -47,7 +47,14 @@ import {
   archiveVideoOpsSubmission,
   syncVideoOpsJobArchive
 } from "./video-ops-archive.mjs";
-import { createBackgroundJob, getBackgroundJob, isPlanSignatureStale, planDraftSignature } from "./background-jobs.mjs";
+import { createBackgroundJob, getBackgroundJob, isPlanSignatureStale, listBackgroundJobs, planDraftSignature } from "./background-jobs.mjs";
+import {
+  ensureExpandableOutput,
+  expansionJobMeta,
+  normalizeExpansionRequest,
+  runOutputExpansion
+} from "./output-expansion.mjs";
+import { loadOutputDetailFromMysql } from "./mysql-facts.mjs";
 
 function buildContext(context) {
   return {
@@ -115,6 +122,18 @@ function planJobRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/batches\/plan-jobs\/([^/]+)$/);
   if (!match) return null;
   return { jobId: decodeURIComponent(match[1]) };
+}
+
+function outputExpansionSubmitRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/outputs\/([^/]+)\/expand$/);
+  if (!match) return null;
+  return { outputId: decodeURIComponent(match[1]) };
+}
+
+function outputExpansionJobsRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/outputs\/([^/]+)\/expand-jobs$/);
+  if (!match) return null;
+  return { outputId: decodeURIComponent(match[1]) };
 }
 
 function sendZip(res, zip, requestId) {
@@ -281,6 +300,71 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/start") {
       const started = await startBatchFromEstimate(scoped, await context.readJson(req));
       return sendOk(res, started, requestId);
+    }
+    const expandRoute = outputExpansionSubmitRoute(url.pathname);
+    if (expandRoute && req.method === "POST") {
+      const body = await context.readJson(req);
+      const request = normalizeExpansionRequest(body);
+      const loadOutputDetail = scoped.loadOutputDetailFromMysql || context.loadOutputDetailFromMysql || loadOutputDetailFromMysql;
+      const output = ensureExpandableOutput(await loadOutputDetail(scoped, expandRoute.outputId));
+      const meta = expansionJobMeta(output, request);
+      const job = createBackgroundJob("output_expansion", async ({ log, progress }) => {
+        log("视频尺寸扩展已开始");
+        progress(20, "正在准备输出尺寸");
+        const expandOutput = scoped.runOutputExpansion || context.runOutputExpansion || runOutputExpansion;
+        const result = await expandOutput(scoped, output, request, {
+          jobId: "",
+          requestId
+        });
+        progress(95, "正在归档扩展结果");
+        return { ...result, ...meta };
+      }, {
+        context: scoped,
+        subjectType: "workflow_output",
+        subjectId: String(output.outputId || "")
+      });
+      return sendOk(res, {
+        ...job,
+        jobId: job.id,
+        outputId: output.outputId,
+        targetWidth: request.targetWidth,
+        targetHeight: request.targetHeight,
+        sizeKey: meta.sizeKey,
+        mode: request.mode
+      }, requestId);
+    }
+    const expandJobsRoute = outputExpansionJobsRoute(url.pathname);
+    if (expandJobsRoute && req.method === "GET") {
+      const jobs = await listBackgroundJobs(scoped, {
+        type: "output_expansion",
+        subjectType: "workflow_output",
+        subjectId: expandJobsRoute.outputId
+      });
+      const latestBySize = new Map();
+      for (const job of jobs) {
+        const targetWidth = Number(job.result?.targetWidth || job.error?.data?.targetWidth || 0);
+        const targetHeight = Number(job.result?.targetHeight || job.error?.data?.targetHeight || 0);
+        const sizeKey = String(job.result?.sizeKey || job.error?.data?.sizeKey || (targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : "")).trim();
+        const dedupeKey = sizeKey || job.id;
+        if (!latestBySize.has(dedupeKey)) latestBySize.set(dedupeKey, job);
+      }
+      return sendOk(res, {
+        items: Array.from(latestBySize.values()).map((job) => ({
+          jobId: job.id,
+          outputId: expandJobsRoute.outputId,
+          status: job.status,
+          targetWidth: Number(job.result?.targetWidth || job.error?.data?.targetWidth || 0),
+          targetHeight: Number(job.result?.targetHeight || job.error?.data?.targetHeight || 0),
+          sizeKey: String(job.result?.sizeKey || job.error?.data?.sizeKey || "").trim(),
+          fileName: job.result?.fileName || "",
+          storedPath: job.result?.storedPath || "",
+          videoUrl: job.result?.previewUrl || "",
+          downloadUrl: job.result?.downloadUrl || "",
+          errorMessage: job.error?.message || "",
+          requestId: job.result?.requestId || "",
+          updatedAt: job.result?.updatedAt || job.updatedAt || ""
+        }))
+      }, requestId);
     }
     if (req.method === "GET" && url.pathname === "/api/wangzhuan/batches/active") {
       return sendOk(res, await getActiveBatch(scoped), requestId);
