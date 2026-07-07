@@ -259,6 +259,30 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.doesNotMatch(js, /const content = await fileToDataUrl\(file\);\s*const data = await api\("\/api\/wangzhuan\/reference-videos\/check"/);
 });
 
+test("v2 captures wangzhuan output template fields for Seedance planning", async () => {
+  const html = await readFile(new URL("../../public/wangzhuan-v2.html", import.meta.url), "utf8");
+  const js = await readFile(new URL("../../public/wangzhuan-v2.js", import.meta.url), "utf8");
+  const jobs = await readFile(new URL("../../server/wangzhuan/background-jobs.mjs", import.meta.url), "utf8");
+
+  assert.match(html, /id="wzOutputTemplateMode"/);
+  assert.match(html, /三段式拼接/);
+  assert.match(html, /短剧高光 \+ 赚钱安利/);
+  assert.match(html, /id="wzSliceStrategy"/);
+  assert.match(html, /id="wzMoneyVisuals"/);
+  assert.match(html, /id="wzSubtitleWorkflow"/);
+
+  assert.match(js, /outputTemplateMode:\s*value\(els\.outputTemplateMode\)/);
+  assert.match(js, /sliceStrategy:\s*value\(els\.sliceStrategy\)/);
+  assert.match(js, /moneyVisuals:\s*selectedValues\(els\.moneyVisuals\)/);
+  assert.match(js, /subtitleWorkflow:\s*value\(els\.subtitleWorkflow\)/);
+  assert.match(js, /outputTemplateMode:\s*primary\.outputTemplateMode/);
+
+  assert.match(jobs, /"outputTemplateMode"/);
+  assert.match(jobs, /"sliceStrategy"/);
+  assert.match(jobs, /"moneyVisuals"/);
+  assert.match(jobs, /"subtitleWorkflow"/);
+});
+
 test("wangzhuan v2 restores task-manager backflow links in place", async () => {
   const js = await readText("public/wangzhuan-v2.js");
   assert.match(js, /readWorkbenchRestoreRequest/);

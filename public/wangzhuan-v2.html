@@ -238,6 +238,38 @@
                     </select>
                   </label>
                   <label id="wzMaterialDirectionCustomWrap">其他素材方向 <input id="wzMaterialDirectionCustom" type="text" value="跟随竞品" /></label>
+                  <label>出量模板
+                    <select id="wzOutputTemplateMode">
+                      <option value="reference_fission">参考视频裂变</option>
+                      <option value="three_slice_net_earning" selected>三段式拼接</option>
+                      <option value="short_drama_earning_highlight">短剧高光 + 赚钱安利</option>
+                    </select>
+                  </label>
+                  <label>切片策略
+                    <select id="wzSliceStrategy">
+                      <option value="fixed_15s">固定 15s 单段</option>
+                      <option value="two_15s">2 段拼接</option>
+                      <option value="auto_10_15s_multi_slice" selected>自动 10-15s 多段</option>
+                      <option value="three_slice">3 段拼接</option>
+                    </select>
+                  </label>
+                  <label>网赚视觉元素
+                    <select id="wzMoneyVisuals" multiple size="6">
+                      <option value="cash">真钞</option>
+                      <option value="coin_burst" selected>金币爆发</option>
+                      <option value="cash_rain" selected>现金雨</option>
+                      <option value="reward_number_growth" selected>收益数字增长</option>
+                      <option value="withdrawal_success" selected>提现成功</option>
+                      <option value="arrival_animation">到账动画</option>
+                      <option value="withdrawal_record">提现记录截图</option>
+                    </select>
+                  </label>
+                  <label>字幕方案
+                    <select id="wzSubtitleWorkflow">
+                      <option value="post_process" selected>原视频无字幕，后处理贴字幕</option>
+                      <option value="none">不生成字幕脚本</option>
+                    </select>
+                  </label>
                   <label>口播风格 <input id="wzVoiceoverStyle" type="text" value="遵循竞品" /></label>
                   <label>承诺等级
                     <select id="wzPromiseLevel">

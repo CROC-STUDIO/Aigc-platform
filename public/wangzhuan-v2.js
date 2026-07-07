@@ -53,6 +53,10 @@ const els = {
   productLink: $("#wzProductLink"),
   materialDirection: $("#wzMaterialDirection"),
   materialDirectionCustom: $("#wzMaterialDirectionCustom"),
+  outputTemplateMode: $("#wzOutputTemplateMode"),
+  sliceStrategy: $("#wzSliceStrategy"),
+  moneyVisuals: $("#wzMoneyVisuals"),
+  subtitleWorkflow: $("#wzSubtitleWorkflow"),
   voiceoverStyle: $("#wzVoiceoverStyle"),
   promiseLevel: $("#wzPromiseLevel"),
   truthDetails: $("#wzTruthDetails"),
@@ -165,6 +169,10 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzLanguage",
   "#wzMaterialDirection",
   "#wzMaterialDirectionCustom",
+  "#wzOutputTemplateMode",
+  "#wzSliceStrategy",
+  "#wzMoneyVisuals",
+  "#wzSubtitleWorkflow",
   "#wzVoiceoverStyle",
   "#wzPromiseLevel",
   "#wzCurrencySymbol",
@@ -209,6 +217,18 @@ document.getElementById("wzConfirmReferenceBtn")?.remove();
 
 function value(el) {
   return String(el?.value || "").trim();
+}
+
+function selectedValues(select) {
+  return Array.from(select?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+}
+
+function setSelectedValues(select, values = []) {
+  if (!select) return;
+  const set = new Set(Array.isArray(values) ? values : []);
+  for (const option of Array.from(select.options || [])) {
+    option.selected = set.has(option.value);
+  }
 }
 
 function escapeHtml(value) {
@@ -680,6 +700,10 @@ function collectCurrentBranchDraft() {
     languages: [language],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
+    outputTemplateMode: value(els.outputTemplateMode),
+    sliceStrategy: value(els.sliceStrategy),
+    moneyVisuals: selectedValues(els.moneyVisuals),
+    subtitleWorkflow: value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
     currencySymbol: currencyValue(),
@@ -737,6 +761,10 @@ function loadBranchToForm(branch = activeBranch()) {
   applyTruthRules(branch.truthRules || {});
   els.materialDirection.value = branch.materialDirection || "other";
   els.materialDirectionCustom.value = branch.materialDirectionCustom || "跟随竞品";
+  if (els.outputTemplateMode) els.outputTemplateMode.value = branch.outputTemplateMode || "three_slice_net_earning";
+  if (els.sliceStrategy) els.sliceStrategy.value = branch.sliceStrategy || "auto_10_15s_multi_slice";
+  setSelectedValues(els.moneyVisuals, branch.moneyVisuals || ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"]);
+  if (els.subtitleWorkflow) els.subtitleWorkflow.value = branch.subtitleWorkflow || "post_process";
   els.voiceoverStyle.value = branch.voiceoverStyle || "遵循竞品";
   els.variantPrompt.value = branch.variantPrompt || "";
   els.customPrompt.value = branch.customPrompt || "";
@@ -975,6 +1003,10 @@ function currentDraft() {
     languages: [value(els.language) || "en-US"],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
+    outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
+    sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
+    moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
+    subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
@@ -1310,6 +1342,7 @@ function estimateRequest() {
   const language = value(els.language);
   const disclaimerFields = disclaimerRequestFields();
   const branches = collectBranchDrafts();
+  const primary = branches[0] || {};
   return {
     batchName: value($("#wzBatchName")),
     projectName: value($("#wzProjectName")),
@@ -1341,6 +1374,10 @@ function estimateRequest() {
         languages: [language],
         materialDirection: effectiveMaterialDirection(),
         materialDirectionCustom: value(els.materialDirectionCustom),
+        outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
+        sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
+        moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
+        subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
         voiceoverStyle: value(els.voiceoverStyle),
         promiseLevel: value(els.promiseLevel),
         truthRules: collectTruthRules(),
@@ -1421,6 +1458,10 @@ function applyTemplate(template) {
     truthRules: branch.truthRules || draft.truthRules || {},
     materialDirection: branch.materialDirection || draft.materialDirection || "other",
     materialDirectionCustom: branch.materialDirectionCustom || draft.materialDirectionCustom || "跟随竞品",
+    outputTemplateMode: branch.outputTemplateMode || draft.outputTemplateMode || "three_slice_net_earning",
+    sliceStrategy: branch.sliceStrategy || draft.sliceStrategy || "auto_10_15s_multi_slice",
+    moneyVisuals: branch.moneyVisuals || draft.moneyVisuals || ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"],
+    subtitleWorkflow: branch.subtitleWorkflow || draft.subtitleWorkflow || "post_process",
     voiceoverStyle: branch.voiceoverStyle || draft.voiceoverStyle || "遵循竞品",
     variantPrompt: branch.variantPrompt || draft.variantPrompt || "",
     customPrompt: branch.customPrompt || draft.customPrompt || "",
