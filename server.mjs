@@ -1559,6 +1559,12 @@ function layoutLockBlock(competitor) {
 
 function videoReferenceBlock(competitor) {
   if (!competitor.videos?.length && !competitor.videoPrompt) return "";
+  if (competitor.referenceVideoPath || competitor.videos?.length) {
+    const actionLine = isCombatReference(competitor)
+      ? "If and only if the current uploaded reference video visibly contains gameplay or battle, preserve its abstract gameplay layout and camera rhythm."
+      : "The current uploaded reference video should be treated as a direct storyboard and pacing reference, not as text keywords. Preserve only its shot rhythm, subject placement, emotional beats, camera distance, prop interaction, product/logo placement, editing cadence, and ending hold.";
+    return `\nVideo reference guidance: ${actionLine} Do not infer or add battle, enemy, monster wave, attack, weapon, skill release, upgrade card, HP bar, damage number, tower-defense lane, or victory battle settlement unless these elements are clearly visible in the current uploaded reference video. Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n`;
+  }
   const actionLine = isCombatReference(competitor)
     ? "When the current reference is clearly gameplay/battle, preserve its gameplay layout, camera angle, unit direction, UI rhythm, upgrade timing, attack causality, and ad pacing."
     : "When the current reference is not clearly gameplay/battle, preserve its non-combat creative structure: scene type, camera rhythm, emotional beats, character interaction, props, product/logo placement, editing cadence, and ad pacing. Do not introduce battles, enemies, monsters, weapons, towers, attack effects, upgrade cards, HP bars, or combat UI unless they are visibly present in the current reference.";
@@ -1648,6 +1654,18 @@ function visualStyleModeBlock(mode = "2D") {
     : "\nVisual style mode: 2D. Render the ad as crisp 2D mobile game illustration / cartoon ad art, with clean shapes, expressive linework, flat-to-soft shaded color, readable UI, and no photorealistic 3D render look. Keep the competitor reference's layout and ad rhythm, but convert all user-owned characters, props, UI, and scene elements into a consistent original 2D game art style.\n";
 }
 
+function visualStyleFinalRule(mode = "2D") {
+  return String(mode || "2D").toUpperCase() === "3D"
+    ? "Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. Use polished stylized 3D game CG: modeled dimensional forms, readable silhouettes, material response, soft shadows, depth, cinematic lighting, and clean advertising composition. Do not render as flat 2D line art, thick-outline cartoon illustration, sticker art, or hand-drawn poster style."
+    : "Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. Use crisp 2D mobile game cartoon advertising art: clean shapes, expressive linework, smooth gradients, readable bold text when needed, no grain, no photorealism.";
+}
+
+function videoVisualStyleRule(mode = "2D") {
+  return String(mode || "2D").toUpperCase() === "3D"
+    ? "视觉风格规则：必须保持风格化3D游戏CG/国漫动画质感，角色和场景有清晰立体体积、材质反光、空间阴影、景深和电影光影；不要做成平面2D线稿、厚描边卡通插画、贴纸感或手绘海报。不要写实真人，但必须是3D动画/游戏CG。"
+    : "视觉风格规则：必须保持2D移动游戏广告插画/卡通动画质感，线条干净、色块清晰、表情夸张；不要做成写实3D渲染。";
+}
+
 function sanitizeRequirementText(text) {
   return String(text)
     .replaceAll("战斗", "能力展示")
@@ -1687,7 +1705,7 @@ Expression and acting lock: match the current reference character's emotional pe
 Place the user-owned character naturally into the same kind of scene shown by the reference. Preserve the character identity exactly: ${role.traits}. Use readable short text only when the reference has text or the user special request asks for text replacement.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. High-saturation mobile game cartoon style, crisp shapes, smooth gradients, readable bold text when needed, no grain, no photorealism.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
 }
 
 function trioPrompt(roles, competitor, groupName) {
@@ -1702,11 +1720,12 @@ ${unitScaleLockBlock(competitor)}
 ${referenceTypeGuardBlock(competitor)}
 ${originalityBlock()}
 ${noCrossReferenceBlock()}
+${visualStyleModeBlock(competitor.visualStyleMode)}
 
 Expression and acting lock: match the current reference character's emotional performance as closely as possible, including scared, crying, shocked, calm, happy, or smug expressions. Preserve only visible emotional signals from the current reference, such as eye shape, eyebrow angle, tears, sweat drops, mouth shape, head tilt, and body pose. Do not invent extra character states or danger elements that are not visible in the current reference.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor characters, copied logo, copied text unless specifically requested as replacement text, watermark, proprietary mascot, gore, injury, or horror. High-saturation mobile game cartoon style, thick outlines, crisp silhouettes, smooth gradients, no grain.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
 }
 
 function repeatSuffix(index, repeatCount) {
@@ -1927,16 +1946,18 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
     const segmentPath = segmentDurations.length > 1
       ? join(dirname(job.videoOutput), `${parse(job.videoOutput).name}_part${index + 1}.mp4`)
       : job.videoOutput;
+    const hasReferenceVideo = index === 0 && job.referenceVideoPath && existsSync(job.referenceVideoPath);
     const args = index === 0
       ? [
           "aigc", "seedance",
-          "--mode", "image_to_video",
+          "--mode", hasReferenceVideo ? "omni_reference" : "image_to_video",
           "--model", videoModel,
           "--image", job.output,
+          ...(hasReferenceVideo ? ["--video", job.referenceVideoPath] : []),
           "--duration", String(segmentDuration),
           "--ratio", ratio,
           "--resolution", "720p",
-          `${job.videoPrompt}\nMatch the reference ad video duration as closely as possible. This is segment ${index + 1}/${segmentDurations.length}; keep the first segment as the opening hook and do not end abruptly unless more segments follow.`
+          `${job.videoPrompt}\nMatch the uploaded reference ad video duration and shot rhythm as closely as possible. This is segment ${index + 1}/${segmentDurations.length}; keep the first segment as the opening hook and do not end abruptly unless more segments follow.`
         ]
       : [
           "aigc", "seedance",
@@ -1948,7 +1969,7 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
           "--resolution", "720p",
           `${job.videoPrompt}\nContinue from the previous generated segment. This is segment ${index + 1}/${segmentDurations.length}; preserve motion continuity, character identity, camera direction, dialogue language, and ad rhythm. End naturally only on the final segment.`
         ];
-    addLog("video-segment", `VIDEO_SEGMENT ${segmentName} duration=${segmentDuration}s`, { job: job.name, segment: index + 1 });
+    addLog("video-segment", `VIDEO_SEGMENT ${segmentName} duration=${segmentDuration}s${hasReferenceVideo ? " reference_video=on" : ""}`, { job: job.name, segment: index + 1, referenceVideo: hasReferenceVideo });
     const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
     const raw = `${stdout}\n${stderr}`.trim();
     const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
@@ -1963,7 +1984,7 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
     await concatVideos(segmentPaths, job.videoOutput);
   }
   const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
-  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskIds.filter(Boolean).join(","), prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: remoteUrls[remoteUrls.length - 1] || "", reference_video_duration: job.referenceVideoDuration || 0, target_duration: targetDuration, segment_durations: segmentDurations };
+  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskIds.filter(Boolean).join(","), prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: remoteUrls[remoteUrls.length - 1] || "", reference_video: job.referenceVideoPath || "", reference_video_duration: job.referenceVideoDuration || 0, target_duration: targetDuration, segment_durations: segmentDurations };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -2306,20 +2327,42 @@ ${monsterLines}
 Group label: ${groupName}. Add short readable English UI text only when the reference has text or the user special request asks for text replacement. Keep the image all-ages, polished, and promotional while preserving the reference mood.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Do not include competitor characters, copied logo, copied text unless specifically requested as replacement text, watermark, proprietary mascot, gore, injury, or horror. High-saturation mobile game cartoon style, thick outlines, crisp silhouettes, smooth gradients, no grain.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
 }
 
 function seedanceAdVideoPrompt({ roles, monsters, competitor, groupName }) {
+  if (competitor.referenceVideoPath || competitor.videos?.length) {
+    return seedanceDirectReferenceVideoPrompt({ roles, monsters, competitor, groupName });
+  }
   const combat = isCombatReference(competitor);
   return combat
     ? seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName })
     : seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName });
 }
 
+function seedanceDirectReferenceVideoPrompt({ roles, monsters, competitor, groupName }) {
+  const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
+  const monsterText = monsters.length ? `附加生物/宠物素材保持：${monsters.map((monster, index) => `素材${index + 1}${monster.traits}`).join("；")}。` : "";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
+  const layout = competitor.layout ?? layoutFromDimensions();
+  const aspectText = layout.orientation === "wide" ? "如果参考视频是横版，只参考其镜头节奏和主体关系；输出比例按当前任务自动适配，但不要改变主体相对位置。" : layout.orientation === "tall" ? "保持参考视频的竖屏广告节奏、镜头距离和主体比例。" : "保持参考视频的核心版式关系、镜头距离和主体比例。";
+  const dialoguePrompt = dialogueInstructionBlock(parseSpecialRequirementJson(competitor.specialRequirement)?.reverse_analysis?.dialogue);
+  return `请直接参考已上传的竞品视频素材来生成视频：参考它的分镜节奏、镜头运动、主体位置、动作时机、表情变化、道具互动、转场和结尾停留方式；参考上一阶段生成的效果图作为我方画面、角色身份和美术风格来源。${styleText}${aspectText}
+
+必须把参考视频里的竞品角色/主体替换为我方生成图中的角色和资产，不能让竞品原角色与我方角色同时存在。${roleText}。${monsterText}
+
+只保留参考视频的抽象节奏和镜头结构，不复制竞品logo、品牌名、字幕、UI文字、角色形象、具体场景皮肤、专有道具或水印。不要根据历史模板自行添加参考视频里没有的内容；如果参考视频没有打怪、战斗、攻击、怪物波次、升级卡、HP血条、伤害数字、技能释放或胜利结算，就绝对不要生成这些元素。
+
+音频规则：如果参考视频有人声或台词，保持原语种和台词节奏；如果没有明显台词，只生成自然环境音、动作/道具音效或轻量口播，不要强行添加背景音乐。
+${dialoguePrompt}
+
+当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
+}
+
 function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) {
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const extraAssets = monsters.length ? `如使用附加生物/宠物素材，只把它作为当前参考中对应宠物、伙伴、装饰角色或互动对象的替换参考，不要改成怪物敌人：${monsters.map((monster, index) => `素材${index + 1}${monster.traits}`).join("；")}。` : "";
-  const styleText = competitor.visualStyleMode === "3D" ? "视觉风格必须是3D游戏CG/国漫动画质感，角色有立体体积、材质、景深、电影光影和空间阴影。" : "视觉风格必须是2D移动游戏广告插画/卡通动画质感，线条干净、色块清晰、表情夸张，不要做成写实3D渲染。";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
   const layout = competitor.layout ?? layoutFromDimensions();
   const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，视频如需改编为竖屏9:16，也必须保留核心主体相对位置、镜头距离、文字/Logo层级和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏、镜头距离和主体比例。" : "参考图接近方图，视频可以改编为竖屏9:16，但必须保留核心版式关系和主体比例。";
@@ -2337,7 +2380,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
 7-11秒：加强广告节奏，展示角色表情、道具变化、场景反馈、Logo或产品信息层级。若参考中有文字区域，只保留位置和层级，文字按用户特殊提示词替换或使用简短原创英文；不要生成乱码。
 11-15秒：形成结尾记忆点，保持参考的结尾停留逻辑，例如角色满意/震惊/开心/无奈定格，产品Logo露出，场景成果展示，或轻微镜头拉远展示完整构图。不能突然切入怪物、攻击、爆炸、升级或胜利战斗结算。
 
-视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
+视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
 音频总规则：必须生成音频轨道，包含自然环境音、动作/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
 ${dialoguePrompt}
 
@@ -2347,7 +2390,7 @@ ${dialoguePrompt}
 function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const monsterText = monsters.length ? `怪物素材保持：${monsters.map((monster, index) => `怪物${index + 1}${monster.traits}`).join("；")}。` : "";
-  const styleText = competitor.visualStyleMode === "3D" ? "视觉风格必须是3D游戏CG/国漫动画质感，角色有立体体积、材质、景深、电影光影和空间阴影。" : "视觉风格必须是2D移动游戏广告插画/卡通动画质感，线条干净、色块清晰、表情夸张，不要做成写实3D渲染。";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
   const layout = competitor.layout ?? layoutFromDimensions();
   const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，但视频请改编为竖屏9:16，并保留核心主体相对位置和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏。" : "参考图接近方图，视频请改编为竖屏9:16，保留核心版式关系。";
@@ -2365,7 +2408,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
 7-11秒：出现S阶升级和更高生命值目标，怪物数量逐步增加但保持从同一入口/同一路径进入，战场连续不跳切。角色外观或武器出现轻微强化，仍保持原身份。
 11-15秒：出现SS阶终极升级，释放大范围但因果清晰的终结技能：蓄力、发射、覆盖目标、敌人反应、奖励回流，最后胜利定格。
 
-视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。保持高饱和Q版移动游戏广告质感，清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
+视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
 音频总规则：必须生成音频轨道，包含自然环境音、攻击/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
 ${dialoguePrompt}
 
