@@ -1096,6 +1096,8 @@ async function listVideoFiles(dir) {
 
 function inferBatchFromOutputName(name) {
   const stem = parse(name).name;
+  const timeBatch = stem.match(/^(\d{8}_\d{4,6}|\d{12,14})(?:_|$)/);
+  if (timeBatch) return timeBatch[1];
   const markers = ["_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
   const indexes = markers.map((marker) => stem.indexOf(marker)).filter((index) => index > 0);
   if (!indexes.length) return "ungrouped";
