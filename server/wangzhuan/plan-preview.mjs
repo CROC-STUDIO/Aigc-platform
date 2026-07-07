@@ -370,9 +370,9 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     complianceNotes: normalizeStringList(plan.complianceNotes),
     segmentRole: cleanString(plan.segmentRole) || cleanString(context.segmentRole),
     sliceDurationSec: clampSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
-    outputTemplateMode: cleanString(plan.outputTemplateMode || context.outputTemplateMode),
+    outputTemplateMode: cleanString(plan.outputTemplateMode) || cleanString(context.outputTemplateMode),
     moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
-    withdrawalVisual: cleanString(plan.withdrawalVisual || context.withdrawalVisual),
+    withdrawalVisual: cleanString(plan.withdrawalVisual) || cleanString(context.withdrawalVisual),
     subtitleWorkflow: normalizeSubtitleWorkflow(
       plan.subtitleWorkflow,
       plan.subtitles,

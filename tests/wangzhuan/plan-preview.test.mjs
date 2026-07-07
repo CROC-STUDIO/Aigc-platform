@@ -424,6 +424,34 @@ test("Seedance plan validation falls back to context for output-template fields 
   });
 });
 
+test("Seedance plan validation falls back when template fields are blank and forces burned subtitles off", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    outputTemplateMode: "   ",
+    withdrawalVisual: "   ",
+    subtitleWorkflow: {
+      burnedInSubtitles: true
+    }
+  }, {
+    outputTemplateMode: "three_slice_net_earning",
+    withdrawalVisual: "Pix option shown without exact amount"
+  });
+
+  assert.equal(plan.outputTemplateMode, "three_slice_net_earning");
+  assert.equal(plan.withdrawalVisual, "Pix option shown without exact amount");
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+});
+
 test("strong commitment plan validation accepts any non-empty truth rule", () => {
   assert.doesNotThrow(() => validateBranchTruthRulesForPlan([{
     branchId: "branch_1",
