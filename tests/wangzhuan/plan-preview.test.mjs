@@ -299,6 +299,49 @@ test("Seedance plan validation allows optional CTA and ending", () => {
   assert.equal(plan.ending, "");
 });
 
+test("Seedance plan validation preserves wangzhuan output-template fields", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A different worker checks drama tasks and sees reward feedback.",
+    voiceover: "I used my break to watch a short drama and check the app rewards.",
+    subtitles: ["Break time", "Reward feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Brazilian bus commuter holding a phone, local street background, Drama Gold screen visible.",
+    seedancePrompt: "0-5s: commuter reacts to a bus delay; 5-10s: phone close-up shows drama task; 10-15s: reward feedback appears with coin burst, no exact amount.",
+    negativePrompt: "No competitor logo, no burned subtitles, no exact cash amount.",
+    mediaRefs: {},
+    complianceNotes: ["No guaranteed payout claim."],
+    segmentRole: "hook_slice",
+    sliceDurationSec: 12,
+    outputTemplateMode: "three_slice_net_earning",
+    moneyVisuals: ["coin_burst", "reward_number_growth", "withdrawal_success"],
+    withdrawalVisual: "Pix/Nubank option shown without exact amount",
+    subtitleWorkflow: {
+      burnedInSubtitles: false,
+      postSubtitleRequired: true,
+      provider: "pixel_tech",
+      subtitleScript: ["Break time", "Reward feedback"]
+    },
+    sliceDiversity: {
+      personChangedFromPrevious: true,
+      sceneChangedFromPrevious: true,
+      clothingChangedFromPrevious: true,
+      voiceChangedFromPrevious: true
+    }
+  });
+
+  assert.equal(plan.segmentRole, "hook_slice");
+  assert.equal(plan.sliceDurationSec, 12);
+  assert.equal(plan.outputTemplateMode, "three_slice_net_earning");
+  assert.deepEqual(plan.moneyVisuals, ["coin_burst", "reward_number_growth", "withdrawal_success"]);
+  assert.equal(plan.withdrawalVisual, "Pix/Nubank option shown without exact amount");
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, true);
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "Reward feedback"]);
+  assert.equal(plan.sliceDiversity.personChangedFromPrevious, true);
+});
+
 test("strong commitment plan validation accepts any non-empty truth rule", () => {
   assert.doesNotThrow(() => validateBranchTruthRulesForPlan([{
     branchId: "branch_1",

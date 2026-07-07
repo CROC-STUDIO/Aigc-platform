@@ -89,6 +89,33 @@ function normalizeStringList(value) {
   return text ? [text] : [];
 }
 
+function clampSliceDuration(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 15;
+  return Math.max(10, Math.min(15, Math.round(number)));
+}
+
+function normalizeSubtitleWorkflow(value = {}, subtitles = []) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const subtitleScript = normalizeStringList(source.subtitleScript);
+  return {
+    burnedInSubtitles: false,
+    postSubtitleRequired: source.postSubtitleRequired !== false,
+    provider: cleanString(source.provider) || "pixel_tech",
+    subtitleScript: subtitleScript.length ? subtitleScript : normalizeStringList(subtitles)
+  };
+}
+
+function normalizeSliceDiversity(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    personChangedFromPrevious: Boolean(source.personChangedFromPrevious),
+    sceneChangedFromPrevious: Boolean(source.sceneChangedFromPrevious),
+    clothingChangedFromPrevious: Boolean(source.clothingChangedFromPrevious),
+    voiceChangedFromPrevious: Boolean(source.voiceChangedFromPrevious)
+  };
+}
+
 function resolveStringList(...values) {
   for (const value of values) {
     const list = normalizeStringList(value);
@@ -287,7 +314,14 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       personAsset: cleanString(plan.mediaRefs?.personAsset),
       rewardElement: cleanString(plan.mediaRefs?.rewardElement)
     }),
-    complianceNotes: normalizeStringList(plan.complianceNotes)
+    complianceNotes: normalizeStringList(plan.complianceNotes),
+    segmentRole: cleanString(plan.segmentRole),
+    sliceDurationSec: clampSliceDuration(plan.sliceDurationSec || context.sliceDurationSec || 15),
+    outputTemplateMode: cleanString(plan.outputTemplateMode || context.outputTemplateMode),
+    moneyVisuals: normalizeStringList(plan.moneyVisuals),
+    withdrawalVisual: cleanString(plan.withdrawalVisual),
+    subtitleWorkflow: normalizeSubtitleWorkflow(plan.subtitleWorkflow, plan.subtitles),
+    sliceDiversity: normalizeSliceDiversity(plan.sliceDiversity)
   }, context.branch || {});
 }
 
