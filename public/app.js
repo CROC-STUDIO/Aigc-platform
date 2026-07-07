@@ -876,22 +876,19 @@ function renderGuangdadaItems(items) {
     const video = card.querySelector("video");
     const folderSelect = card.querySelector(".guangdada-card-target");
     if (playButton && video) {
-      playButton.addEventListener("click", async (event) => {
+      playButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        try {
-          video.muted = false;
-          video.controls = true;
-          await video.play();
-          playButton.textContent = "播放中";
-          setTimeout(() => (playButton.textContent = "播放"), 1200);
-        } catch {
-          window.open(videoPreviewUrl, "_blank", "noopener,noreferrer");
-        }
+        openGuangdadaVideoPreview(videoPreviewUrl, item.title || "video");
+      });
+      video.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openGuangdadaVideoPreview(videoPreviewUrl, item.title || "video");
       });
       video.addEventListener("error", () => {
         playButton.textContent = "打开预览";
-        playButton.title = "视频源限制了内嵌播放，点击在新窗口打开预览";
+        playButton.title = "点击在当前页面预览视频";
       });
     }
     const isRunning = Boolean(state.materials?.runState?.running);
@@ -945,6 +942,47 @@ function renderRunState(runState) {
     div.textContent = `${formatTime(line.time)}  ${formatLogLine(line)}`;
     els.logList.append(div);
   }
+}
+
+function openGuangdadaVideoPreview(src, title = "video") {
+  if (!src) return alert("暂无可预览的视频链接");
+  let modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "guangdadaVideoPreviewModal";
+    modal.className = "media-preview-modal";
+    modal.innerHTML = `
+      <div class="media-preview-dialog">
+        <div class="media-preview-head">
+          <strong></strong>
+          <button type="button" class="media-preview-close" aria-label="关闭">×</button>
+        </div>
+        <video controls autoplay playsinline></video>
+      </div>
+    `;
+    document.body.append(modal);
+    modal.querySelector(".media-preview-close").addEventListener("click", closeGuangdadaVideoPreview);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closeGuangdadaVideoPreview();
+    });
+  }
+  modal.querySelector("strong").textContent = title;
+  const video = modal.querySelector("video");
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.src = src;
+  video.muted = false;
+  modal.classList.add("show");
+  video.play().catch(() => {});
+}
+
+function closeGuangdadaVideoPreview() {
+  const modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) return;
+  const video = modal.querySelector("video");
+  video?.pause();
+  modal.classList.remove("show");
 }
 
 function updateStartButtonState(isRunning = Boolean(state.materials?.runState?.running)) {
