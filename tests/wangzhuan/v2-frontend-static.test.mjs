@@ -276,6 +276,15 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(js, /moneyVisuals:\s*selectedValues\(els\.moneyVisuals\)/);
   assert.match(js, /subtitleWorkflow:\s*value\(els\.subtitleWorkflow\)/);
   assert.match(js, /outputTemplateMode:\s*primary\.outputTemplateMode/);
+  assert.match(js, /const signatureFields = \[[\s\S]*"outputTemplateMode"[\s\S]*"sliceStrategy"[\s\S]*"moneyVisuals"[\s\S]*"subtitleWorkflow"[\s\S]*\]/);
+  assert.match(js, /function planSignatureInput\(\)[\s\S]*outputTemplateMode:\s*primary\.outputTemplateMode \|\| value\(els\.outputTemplateMode\)/);
+  assert.match(js, /function planSignatureInput\(\)[\s\S]*sliceStrategy:\s*primary\.sliceStrategy \|\| value\(els\.sliceStrategy\)/);
+  assert.match(js, /function planSignatureInput\(\)[\s\S]*moneyVisuals:\s*primary\.moneyVisuals \|\| selectedValues\(els\.moneyVisuals\)/);
+  assert.match(js, /function planSignatureInput\(\)[\s\S]*subtitleWorkflow:\s*primary\.subtitleWorkflow \|\| value\(els\.subtitleWorkflow\)/);
+  assert.match(js, /function addBranch\(\)[\s\S]*outputTemplateMode:\s*source\.outputTemplateMode/);
+  assert.match(js, /function addBranch\(\)[\s\S]*sliceStrategy:\s*source\.sliceStrategy/);
+  assert.match(js, /function addBranch\(\)[\s\S]*moneyVisuals:\s*source\.moneyVisuals/);
+  assert.match(js, /function addBranch\(\)[\s\S]*subtitleWorkflow:\s*source\.subtitleWorkflow/);
 
   assert.match(jobs, /"outputTemplateMode"/);
   assert.match(jobs, /"sliceStrategy"/);

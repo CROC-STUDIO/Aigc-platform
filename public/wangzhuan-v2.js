@@ -12,6 +12,10 @@ const signatureFields = [
   "languages",
   "materialDirection",
   "materialDirectionCustom",
+  "outputTemplateMode",
+  "sliceStrategy",
+  "moneyVisuals",
+  "subtitleWorkflow",
   "voiceoverStyle",
   "promiseLevel",
   "currencySymbol",
@@ -949,6 +953,10 @@ function addBranch() {
     currencySymbol: source.currencySymbol,
     promiseLevel: source.promiseLevel,
     truthRules: source.truthRules,
+    outputTemplateMode: source.outputTemplateMode,
+    sliceStrategy: source.sliceStrategy,
+    moneyVisuals: source.moneyVisuals,
+    subtitleWorkflow: source.subtitleWorkflow,
     voiceoverStyle: source.voiceoverStyle,
     variantPrompt: source.variantPrompt,
     customPrompt: source.customPrompt,
@@ -1305,6 +1313,7 @@ function planSignatureInput() {
   const region = value(els.targetRegion);
   const language = value(els.language);
   const branches = collectBranchDrafts();
+  const primary = branches[0] || {};
   return {
     productName: value(els.productName),
     productLink: value(els.productLink),
@@ -1324,6 +1333,10 @@ function planSignatureInput() {
     languages: [language],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
+    outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
+    sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
+    moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
+    subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
