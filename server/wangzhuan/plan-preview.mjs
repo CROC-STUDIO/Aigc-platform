@@ -183,8 +183,8 @@ function normalizeOutputTemplateMode(value, fallback = "") {
   if (OUTPUT_TEMPLATE_MODES.includes(text)) return text;
   const fallbackText = cleanString(fallback);
   if (OUTPUT_TEMPLATE_MODES.includes(fallbackText)) return fallbackText;
-  if (!text) return fallbackText || "";
-  return fallbackText || "reference_fission";
+  if (!text && !fallbackText) return "";
+  return "reference_fission";
 }
 
 function resolveNormalizedSubtitleWorkflow(value, fallback = undefined) {
