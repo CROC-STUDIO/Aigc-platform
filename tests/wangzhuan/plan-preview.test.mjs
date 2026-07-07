@@ -324,7 +324,7 @@ test("Seedance plan prompt preserves object-shaped subtitleWorkflow in prompt co
   assert.match(text, /"Linha 1"/);
 });
 
-test("Seedance plan prompt preserves draft subtitleWorkflow object when branch uses legacy string", () => {
+test("Seedance plan prompt uses branch post_process mode over contradictory draft subtitleWorkflow object", () => {
   const messages = buildSeedancePlanMessages({
     batch: {
       batchId: "wzb_20260707124500_abcd",
@@ -372,10 +372,64 @@ test("Seedance plan prompt preserves draft subtitleWorkflow object when branch u
   const text = messagesText(messages);
   assert.match(text, /"subtitleWorkflow": \{/);
   assert.match(text, /"burnedInSubtitles": false/);
-  assert.match(text, /"postSubtitleRequired": false/);
-  assert.match(text, /"provider": "custom_provider"/);
+  assert.match(text, /"postSubtitleRequired": true/);
+  assert.match(text, /"provider": "pixel_tech"/);
   assert.match(text, /"subtitleScript": \[/);
-  assert.match(text, /"sub"/);
+  assert.doesNotMatch(text, /"sub"/);
+  assert.doesNotMatch(text, /"custom_provider"/);
+});
+
+test("Seedance plan prompt preserves branch none subtitleWorkflow mode in prompt context", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707124600_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          subtitleWorkflow: {
+            burnedInSubtitles: false,
+            postSubtitleRequired: true,
+            provider: "custom_provider",
+            subtitleScript: ["draft line"]
+          }
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_none_subtitle_workflow",
+      branchLabel: "None subtitle workflow",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      subtitleWorkflow: "none",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "bedroom",
+      subject: "viewer",
+      action: "checks drama rewards",
+      camera: "phone close-up",
+      lighting: "soft daylight",
+      style: "short-drama hook",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"subtitleWorkflow": \{/);
+  assert.match(text, /"burnedInSubtitles": false/);
+  assert.match(text, /"postSubtitleRequired": false/);
+  assert.match(text, /"provider": "pixel_tech"/);
+  assert.match(text, /"subtitleScript": \[\s*\]/);
 });
 
 test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {

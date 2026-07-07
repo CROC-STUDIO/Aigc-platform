@@ -139,7 +139,25 @@ function normalizeSubtitleWorkflow(value = {}, subtitles = [], fallback = {}) {
       ? subtitleScript
       : (normalizeStringList(subtitles).length
           ? normalizeStringList(subtitles)
-          : fallbackSubtitleScript)
+      : fallbackSubtitleScript)
+  };
+}
+
+function normalizeSubtitleWorkflowMode(mode = "") {
+  const normalizedMode = cleanString(mode).toLowerCase();
+  if (["none", "no_post_process", "off"].includes(normalizedMode)) {
+    return {
+      burnedInSubtitles: false,
+      postSubtitleRequired: false,
+      provider: "pixel_tech",
+      subtitleScript: []
+    };
+  }
+  return {
+    burnedInSubtitles: false,
+    postSubtitleRequired: true,
+    provider: "pixel_tech",
+    subtitleScript: []
   };
 }
 
@@ -428,17 +446,13 @@ export function buildSeedancePlanMessages({
   const draftSubtitleWorkflowObject = normalizeObject(draft.subtitleWorkflow);
   const subtitleWorkflow = (() => {
     if (branchSubtitleWorkflowText) {
-      return normalizeSubtitleWorkflow(
-        undefined,
-        [],
-        Object.keys(draftSubtitleWorkflowObject).length ? draftSubtitleWorkflowObject : undefined
-      );
+      return normalizeSubtitleWorkflowMode(branchSubtitleWorkflowText);
     }
     if (Object.keys(branchSubtitleWorkflowObject).length) {
       return normalizeSubtitleWorkflow(branchSubtitleWorkflowObject, [], draftSubtitleWorkflowObject);
     }
     if (draftSubtitleWorkflowText) {
-      return normalizeSubtitleWorkflow();
+      return normalizeSubtitleWorkflowMode(draftSubtitleWorkflowText);
     }
     if (Object.keys(draftSubtitleWorkflowObject).length) {
       return normalizeSubtitleWorkflow(draftSubtitleWorkflowObject);
