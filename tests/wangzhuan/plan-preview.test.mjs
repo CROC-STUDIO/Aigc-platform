@@ -726,6 +726,62 @@ test("Seedance plan validation falls back when template fields are blank and for
   assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
 });
 
+test("Seedance plan validation falls back to branch subtitleWorkflow string mode none", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: {}
+  }, {
+    branch: {
+      subtitleWorkflow: "none"
+    }
+  });
+
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, false);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+});
+
+test("Seedance plan validation falls back to draft subtitleWorkflow string mode none", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: {}
+  }, {
+    batch: {
+      templateSnapshot: {
+        draft: {
+          subtitleWorkflow: "none"
+        }
+      }
+    }
+  });
+
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, false);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+});
+
 test("strong commitment plan validation accepts any non-empty truth rule", () => {
   assert.doesNotThrow(() => validateBranchTruthRulesForPlan([{
     branchId: "branch_1",

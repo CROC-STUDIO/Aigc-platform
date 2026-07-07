@@ -161,6 +161,26 @@ function normalizeSubtitleWorkflowMode(mode = "") {
   };
 }
 
+function resolveNormalizedSubtitleWorkflow(value, fallback = undefined) {
+  const source = normalizeObject(value);
+  if (Object.keys(source).length) {
+    return normalizeSubtitleWorkflow(source, [], normalizeObject(fallback));
+  }
+  const text = cleanString(value);
+  if (text) {
+    return normalizeSubtitleWorkflowMode(text);
+  }
+  const fallbackObject = normalizeObject(fallback);
+  if (Object.keys(fallbackObject).length) {
+    return normalizeSubtitleWorkflow(fallbackObject);
+  }
+  const fallbackText = cleanString(fallback);
+  if (fallbackText) {
+    return normalizeSubtitleWorkflowMode(fallbackText);
+  }
+  return normalizeSubtitleWorkflow();
+}
+
 function normalizeSliceDiversity(value = {}, fallback = {}) {
   const source = normalizeObject(value);
   const fallbackSource = normalizeObject(fallback);
@@ -183,8 +203,10 @@ function normalizeSliceDiversity(value = {}, fallback = {}) {
 function resolveSeedancePlanValidationContext(input = {}) {
   const draft = normalizeObject(input.batch?.templateSnapshot?.draft);
   const branch = normalizeObject(input.branch);
-  const explicitSubtitleWorkflow = normalizeObject(input.subtitleWorkflow);
   const explicitSliceDiversity = normalizeObject(input.sliceDiversity);
+  const draftSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(draft.subtitleWorkflow);
+  const branchSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(branch.subtitleWorkflow, draftSubtitleWorkflow);
+  const explicitSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(input.subtitleWorkflow, branchSubtitleWorkflow);
   return {
     branch,
     branchId: branch.branchId,
@@ -199,11 +221,7 @@ function resolveSeedancePlanValidationContext(input = {}) {
     withdrawalVisual: cleanString(input.withdrawalVisual)
       || cleanString(branch.withdrawalVisual)
       || cleanString(draft.withdrawalVisual),
-    subtitleWorkflow: {
-      ...normalizeObject(draft.subtitleWorkflow),
-      ...normalizeObject(branch.subtitleWorkflow),
-      ...explicitSubtitleWorkflow
-    },
+    subtitleWorkflow: explicitSubtitleWorkflow,
     sliceDiversity: {
       ...normalizeObject(draft.sliceDiversity),
       ...normalizeObject(branch.sliceDiversity),
@@ -382,6 +400,13 @@ function sanitizePlanAssetReferences(plan = {}, branch = {}) {
 }
 
 export function validateSeedancePlan(plan = {}, context = {}) {
+  const contextSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(
+    context.subtitleWorkflow,
+    resolveNormalizedSubtitleWorkflow(
+      context.branch?.subtitleWorkflow,
+      context.batch?.templateSnapshot?.draft?.subtitleWorkflow
+    )
+  );
   const missingFields = REQUIRED_PLAN_FIELDS.filter((field) => !isNonEmptyString(plan[field]));
   if (missingFields.length) {
     throw new WangzhuanError("schema_invalid", "Seedance 预案不完整，请重试", {
@@ -419,7 +444,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     subtitleWorkflow: normalizeSubtitleWorkflow(
       plan.subtitleWorkflow,
       plan.subtitles,
-      context.subtitleWorkflow
+      contextSubtitleWorkflow
     ),
     sliceDiversity: normalizeSliceDiversity(plan.sliceDiversity, context.sliceDiversity)
   }, context.branch || {});
@@ -440,25 +465,10 @@ export function buildSeedancePlanMessages({
   const outputTemplateMode = resolveCleanString(branch.outputTemplateMode, draft.outputTemplateMode, "reference_fission");
   const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
-  const branchSubtitleWorkflowText = cleanString(branch.subtitleWorkflow);
-  const draftSubtitleWorkflowText = cleanString(draft.subtitleWorkflow);
-  const branchSubtitleWorkflowObject = normalizeObject(branch.subtitleWorkflow);
-  const draftSubtitleWorkflowObject = normalizeObject(draft.subtitleWorkflow);
-  const subtitleWorkflow = (() => {
-    if (branchSubtitleWorkflowText) {
-      return normalizeSubtitleWorkflowMode(branchSubtitleWorkflowText);
-    }
-    if (Object.keys(branchSubtitleWorkflowObject).length) {
-      return normalizeSubtitleWorkflow(branchSubtitleWorkflowObject, [], draftSubtitleWorkflowObject);
-    }
-    if (draftSubtitleWorkflowText) {
-      return normalizeSubtitleWorkflowMode(draftSubtitleWorkflowText);
-    }
-    if (Object.keys(draftSubtitleWorkflowObject).length) {
-      return normalizeSubtitleWorkflow(draftSubtitleWorkflowObject);
-    }
-    return normalizeSubtitleWorkflow();
-  })();
+  const subtitleWorkflow = resolveNormalizedSubtitleWorkflow(
+    branch.subtitleWorkflow,
+    resolveNormalizedSubtitleWorkflow(draft.subtitleWorkflow)
+  );
   const localeGuideText = formatPlanLocaleGuide(localeContext);
   const referenceSlotGuide = buildReferenceAssetSlotGuide(assetUrls, branch.assetFileNames || {});
   const referenceSlotGuideText = formatReferenceAssetSlotGuide(referenceSlotGuide);
