@@ -824,6 +824,84 @@ test("Seedance plan validation honors legacy plan subtitleWorkflow string mode p
   assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
 });
 
+test("Seedance plan validation normalizes object subtitleWorkflow boolean-like values", () => {
+  const falseStringPlan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: {
+      postSubtitleRequired: "false"
+    }
+  });
+  const zeroPlan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: {
+      postSubtitleRequired: 0
+    }
+  });
+
+  assert.equal(falseStringPlan.subtitleWorkflow.postSubtitleRequired, false);
+  assert.equal(zeroPlan.subtitleWorkflow.postSubtitleRequired, false);
+});
+
+test("Seedance plan validation falls back invalid outputTemplateMode to valid context mode", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    outputTemplateMode: "totally_invalid_mode"
+  }, {
+    outputTemplateMode: "three_slice_net_earning"
+  });
+
+  assert.equal(plan.outputTemplateMode, "three_slice_net_earning");
+});
+
+test("Seedance plan validation falls back invalid outputTemplateMode to safe default", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    outputTemplateMode: "totally_invalid_mode"
+  });
+
+  assert.equal(plan.outputTemplateMode, "reference_fission");
+});
+
 test("Seedance plan validation normalizes sliceDiversity string booleans defensively", () => {
   const plan = validateSeedancePlan({
     hook: "Try it during a break",

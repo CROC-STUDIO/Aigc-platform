@@ -20,6 +20,12 @@ const REQUIRED_PLAN_FIELDS = Object.freeze([
   "negativePrompt"
 ]);
 
+const OUTPUT_TEMPLATE_MODES = Object.freeze([
+  "reference_fission",
+  "three_slice_net_earning",
+  "short_drama_earning_highlight"
+]);
+
 const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   hook: "Opening hook in primary language; align to reference pacing without competitor branding",
   body: "Main script body in primary language for this 15s segment",
@@ -132,8 +138,8 @@ function normalizeSubtitleWorkflow(value = {}, subtitles = [], fallback = {}) {
   return {
     burnedInSubtitles: false,
     postSubtitleRequired: source.postSubtitleRequired !== undefined
-      ? source.postSubtitleRequired !== false
-      : fallbackSource.postSubtitleRequired !== false,
+      ? normalizeBooleanLike(source.postSubtitleRequired, true)
+      : normalizeBooleanLike(fallbackSource.postSubtitleRequired, true),
     provider: cleanString(source.provider) || cleanString(fallbackSource.provider) || "pixel_tech",
     subtitleScript: subtitleScript.length
       ? subtitleScript
@@ -170,6 +176,15 @@ function normalizeSubtitleWorkflowMode(mode = "") {
     provider: "pixel_tech",
     subtitleScript: []
   };
+}
+
+function normalizeOutputTemplateMode(value, fallback = "") {
+  const text = cleanString(value);
+  if (OUTPUT_TEMPLATE_MODES.includes(text)) return text;
+  const fallbackText = cleanString(fallback);
+  if (OUTPUT_TEMPLATE_MODES.includes(fallbackText)) return fallbackText;
+  if (!text) return fallbackText || "";
+  return fallbackText || "reference_fission";
 }
 
 function resolveNormalizedSubtitleWorkflow(value, fallback = undefined) {
@@ -455,7 +470,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     complianceNotes: normalizeStringList(plan.complianceNotes),
     segmentRole: cleanString(plan.segmentRole) || cleanString(context.segmentRole),
     sliceDurationSec: clampSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
-    outputTemplateMode: cleanString(plan.outputTemplateMode) || cleanString(context.outputTemplateMode),
+    outputTemplateMode: normalizeOutputTemplateMode(plan.outputTemplateMode, context.outputTemplateMode),
     moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
     withdrawalVisual: cleanString(plan.withdrawalVisual) || cleanString(context.withdrawalVisual),
     subtitleWorkflow: normalizeSubtitleWorkflow(
