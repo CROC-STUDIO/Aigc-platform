@@ -342,6 +342,88 @@ test("Seedance plan validation preserves wangzhuan output-template fields", () =
   assert.equal(plan.sliceDiversity.personChangedFromPrevious, true);
 });
 
+test("Seedance plan validation applies safe defaults for older plans without output-template fields", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: []
+  });
+
+  assert.equal(plan.segmentRole, "");
+  assert.equal(plan.sliceDurationSec, 15);
+  assert.equal(plan.outputTemplateMode, "");
+  assert.deepEqual(plan.moneyVisuals, []);
+  assert.equal(plan.withdrawalVisual, "");
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, true);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+  assert.deepEqual(plan.sliceDiversity, {
+    personChangedFromPrevious: false,
+    sceneChangedFromPrevious: false,
+    clothingChangedFromPrevious: false,
+    voiceChangedFromPrevious: false
+  });
+});
+
+test("Seedance plan validation falls back to context for output-template fields when plan omits them", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: []
+  }, {
+    segmentRole: "hook_slice",
+    sliceDurationSec: 12,
+    outputTemplateMode: "three_slice_net_earning",
+    moneyVisuals: ["coin_burst", "reward_number_growth"],
+    withdrawalVisual: "Pix option shown without exact amount",
+    subtitleWorkflow: {
+      burnedInSubtitles: true,
+      postSubtitleRequired: true,
+      provider: "pixel_tech",
+      subtitleScript: ["Context line 1", "Context line 2"]
+    },
+    sliceDiversity: {
+      personChangedFromPrevious: true,
+      sceneChangedFromPrevious: true,
+      clothingChangedFromPrevious: false,
+      voiceChangedFromPrevious: true
+    }
+  });
+
+  assert.equal(plan.segmentRole, "hook_slice");
+  assert.equal(plan.sliceDurationSec, 12);
+  assert.equal(plan.outputTemplateMode, "three_slice_net_earning");
+  assert.deepEqual(plan.moneyVisuals, ["coin_burst", "reward_number_growth"]);
+  assert.equal(plan.withdrawalVisual, "Pix option shown without exact amount");
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, true);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+  assert.deepEqual(plan.sliceDiversity, {
+    personChangedFromPrevious: true,
+    sceneChangedFromPrevious: true,
+    clothingChangedFromPrevious: false,
+    voiceChangedFromPrevious: true
+  });
+});
+
 test("strong commitment plan validation accepts any non-empty truth rule", () => {
   assert.doesNotThrow(() => validateBranchTruthRulesForPlan([{
     branchId: "branch_1",

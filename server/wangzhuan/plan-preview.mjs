@@ -89,30 +89,83 @@ function normalizeStringList(value) {
   return text ? [text] : [];
 }
 
+function normalizeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function clampSliceDuration(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 15;
   return Math.max(10, Math.min(15, Math.round(number)));
 }
 
-function normalizeSubtitleWorkflow(value = {}, subtitles = []) {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function normalizeSubtitleWorkflow(value = {}, subtitles = [], fallback = {}) {
+  const source = normalizeObject(value);
+  const fallbackSource = normalizeObject(fallback);
   const subtitleScript = normalizeStringList(source.subtitleScript);
+  const fallbackSubtitleScript = normalizeStringList(fallbackSource.subtitleScript);
   return {
     burnedInSubtitles: false,
-    postSubtitleRequired: source.postSubtitleRequired !== false,
-    provider: cleanString(source.provider) || "pixel_tech",
-    subtitleScript: subtitleScript.length ? subtitleScript : normalizeStringList(subtitles)
+    postSubtitleRequired: source.postSubtitleRequired !== undefined
+      ? source.postSubtitleRequired !== false
+      : fallbackSource.postSubtitleRequired !== false,
+    provider: cleanString(source.provider) || cleanString(fallbackSource.provider) || "pixel_tech",
+    subtitleScript: subtitleScript.length
+      ? subtitleScript
+      : (normalizeStringList(subtitles).length
+          ? normalizeStringList(subtitles)
+          : fallbackSubtitleScript)
   };
 }
 
-function normalizeSliceDiversity(value = {}) {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function normalizeSliceDiversity(value = {}, fallback = {}) {
+  const source = normalizeObject(value);
+  const fallbackSource = normalizeObject(fallback);
   return {
-    personChangedFromPrevious: Boolean(source.personChangedFromPrevious),
-    sceneChangedFromPrevious: Boolean(source.sceneChangedFromPrevious),
-    clothingChangedFromPrevious: Boolean(source.clothingChangedFromPrevious),
-    voiceChangedFromPrevious: Boolean(source.voiceChangedFromPrevious)
+    personChangedFromPrevious: source.personChangedFromPrevious !== undefined
+      ? Boolean(source.personChangedFromPrevious)
+      : Boolean(fallbackSource.personChangedFromPrevious),
+    sceneChangedFromPrevious: source.sceneChangedFromPrevious !== undefined
+      ? Boolean(source.sceneChangedFromPrevious)
+      : Boolean(fallbackSource.sceneChangedFromPrevious),
+    clothingChangedFromPrevious: source.clothingChangedFromPrevious !== undefined
+      ? Boolean(source.clothingChangedFromPrevious)
+      : Boolean(fallbackSource.clothingChangedFromPrevious),
+    voiceChangedFromPrevious: source.voiceChangedFromPrevious !== undefined
+      ? Boolean(source.voiceChangedFromPrevious)
+      : Boolean(fallbackSource.voiceChangedFromPrevious)
+  };
+}
+
+function resolveSeedancePlanValidationContext(input = {}) {
+  const draft = normalizeObject(input.batch?.templateSnapshot?.draft);
+  const branch = normalizeObject(input.branch);
+  const explicitSubtitleWorkflow = normalizeObject(input.subtitleWorkflow);
+  const explicitSliceDiversity = normalizeObject(input.sliceDiversity);
+  return {
+    branch,
+    branchId: branch.branchId,
+    branchVariantIndex: input.branchVariantIndex,
+    segmentIndex: input.segmentIndex,
+    segmentRole: cleanString(input.segmentRole) || cleanString(branch.segmentRole) || cleanString(draft.segmentRole),
+    sliceDurationSec: input.sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15,
+    outputTemplateMode: cleanString(input.outputTemplateMode)
+      || cleanString(branch.outputTemplateMode)
+      || cleanString(draft.outputTemplateMode),
+    moneyVisuals: resolveStringList(input.moneyVisuals, branch.moneyVisuals, draft.moneyVisuals),
+    withdrawalVisual: cleanString(input.withdrawalVisual)
+      || cleanString(branch.withdrawalVisual)
+      || cleanString(draft.withdrawalVisual),
+    subtitleWorkflow: {
+      ...normalizeObject(draft.subtitleWorkflow),
+      ...normalizeObject(branch.subtitleWorkflow),
+      ...explicitSubtitleWorkflow
+    },
+    sliceDiversity: {
+      ...normalizeObject(draft.sliceDiversity),
+      ...normalizeObject(branch.sliceDiversity),
+      ...explicitSliceDiversity
+    }
   };
 }
 
@@ -315,13 +368,17 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       rewardElement: cleanString(plan.mediaRefs?.rewardElement)
     }),
     complianceNotes: normalizeStringList(plan.complianceNotes),
-    segmentRole: cleanString(plan.segmentRole),
-    sliceDurationSec: clampSliceDuration(plan.sliceDurationSec || context.sliceDurationSec || 15),
+    segmentRole: cleanString(plan.segmentRole) || cleanString(context.segmentRole),
+    sliceDurationSec: clampSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
     outputTemplateMode: cleanString(plan.outputTemplateMode || context.outputTemplateMode),
-    moneyVisuals: normalizeStringList(plan.moneyVisuals),
-    withdrawalVisual: cleanString(plan.withdrawalVisual),
-    subtitleWorkflow: normalizeSubtitleWorkflow(plan.subtitleWorkflow, plan.subtitles),
-    sliceDiversity: normalizeSliceDiversity(plan.sliceDiversity)
+    moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
+    withdrawalVisual: cleanString(plan.withdrawalVisual || context.withdrawalVisual),
+    subtitleWorkflow: normalizeSubtitleWorkflow(
+      plan.subtitleWorkflow,
+      plan.subtitles,
+      context.subtitleWorkflow
+    ),
+    sliceDiversity: normalizeSliceDiversity(plan.sliceDiversity, context.sliceDiversity)
   }, context.branch || {});
 }
 
@@ -526,12 +583,10 @@ export async function generateSeedancePlan(context, input = {}) {
     ...context,
     currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
   }, messages, llmConfig);
-  const parsed = validateSeedancePlan(parseLlmJsonContent(content), {
-    branch: input.branch || {},
-    branchId: input.branch?.branchId,
-    branchVariantIndex: input.branchVariantIndex,
-    segmentIndex: input.segmentIndex
-  });
+  const parsed = validateSeedancePlan(
+    parseLlmJsonContent(content),
+    resolveSeedancePlanValidationContext(input)
+  );
   return parsed;
 }
 
@@ -561,12 +616,10 @@ export async function generateThirtySecondSeedancePlans(context, input = {}) {
   return [1, 2].map((segmentIndex) => {
     const segment = segments.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
       || segments[segmentIndex - 1];
-    return validateSeedancePlan(segment, {
-      branch: input.branch || {},
-      branchId: input.branch?.branchId,
-      branchVariantIndex: input.branchVariantIndex,
+    return validateSeedancePlan(segment, resolveSeedancePlanValidationContext({
+      ...input,
       segmentIndex
-    });
+    }));
   });
 }
 
