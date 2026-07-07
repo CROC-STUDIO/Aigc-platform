@@ -289,6 +289,14 @@ function isCodexImagePoolModel(model) {
   return String(model || "").trim() === "codex-gpt-image-2";
 }
 
+function codexConfigPath() {
+  return join(homedir(), ".codex", "config.toml");
+}
+
+function hasCodexTaiConfig() {
+  return existsSync(codexConfigPath());
+}
+
 const TAI_AUTH_ENV_KEYS = [
   "OPENAI_API_KEY",
   "OPENAI_KEY",
@@ -298,7 +306,7 @@ const TAI_AUTH_ENV_KEYS = [
 ];
 
 async function codexTaiEnv() {
-  const source = join(homedir(), ".codex", "config.toml");
+  const source = codexConfigPath();
   if (!existsSync(source)) {
     const error = new Error("当前机器未找到 Codex 配置文件，无法使用 codex-gpt-image-2 订阅池。请先配置 C:\\Users\\Touka\\.codex\\config.toml，或切换到个人 API Key 支持的生图模型。");
     error.status = 400;
@@ -320,7 +328,11 @@ async function checkModelAccess(body = {}) {
   if (imageModel) {
     const info = resolveImageModel(imageModel);
     if (isCodexImagePoolModel(info.model)) {
-      await codexTaiEnv();
+      if (hasCodexTaiConfig()) {
+        await codexTaiEnv();
+      } else {
+        await requireUserApiKeyForModel("gpt-image-2", "codex-gpt-image-2（服务器兼容模式，实际调用 gpt-image-2）");
+      }
     } else {
       await requireUserApiKeyForModel(info.model, info.label);
     }
@@ -1920,8 +1932,15 @@ async function runImageStage(job, promptDir, logPath) {
   let imageModel = job.imageModel || MODEL;
   let imageModelLabel = job.imageModelLabel || imageModel;
   let usesCodexPool = isCodexImagePoolModel(imageModel);
-  let apiKey = usesCodexPool ? "" : await requireUserApiKeyForModel(imageModel, imageModelLabel);
   let didFallbackToGptImage = false;
+  if (usesCodexPool && !hasCodexTaiConfig()) {
+    didFallbackToGptImage = true;
+    imageModel = "gpt-image-2";
+    imageModelLabel = "gpt-image-2";
+    usesCodexPool = false;
+    addLog("fallback", `FALLBACK ${job.name}: codex-gpt-image-2 subscription config not found on this server, using gpt-image-2 with current user's API Key`, { job: job.name, from: "codex-gpt-image-2", to: "gpt-image-2" });
+  }
+  let apiKey = usesCodexPool ? "" : await requireUserApiKeyForModel(imageModel, imageModelLabel);
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 

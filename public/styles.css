@@ -79,12 +79,21 @@
   cursor: pointer;
 }
 
-.media-preview-dialog video {
+.media-preview-dialog video,
+.media-preview-image {
   width: 100%;
   max-height: calc(92vh - 86px);
   object-fit: contain;
   border-radius: 10px;
   background: #05070d;
+}
+
+.media-preview-image {
+  display: block;
+}
+
+.media-preview-image[hidden] {
+  display: none;
 }
 
 * {
@@ -1018,6 +1027,10 @@ textarea {
   object-fit: cover;
   display: block;
   background: #0a0f11;
+}
+
+.guangdada-card img {
+  cursor: zoom-in;
 }
 
 .video-preview-wrap {

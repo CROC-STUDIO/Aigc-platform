@@ -875,6 +875,7 @@ function renderGuangdadaItems(items) {
     const button = card.querySelector(".guangdada-import button");
     const playButton = card.querySelector(".video-play-btn");
     const video = card.querySelector("video");
+    const image = card.querySelector("img");
     const folderSelect = card.querySelector(".guangdada-card-target");
     if (playButton && video) {
       playButton.addEventListener("click", (event) => {
@@ -890,6 +891,13 @@ function renderGuangdadaItems(items) {
       video.addEventListener("error", () => {
         playButton.textContent = "打开预览";
         playButton.title = "点击在当前页面预览视频";
+      });
+    }
+    if (image) {
+      image.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openGuangdadaImagePreview(item.proxyUrl || item.imageUrl || "", item.title || "image");
       });
     }
     const isRunning = Boolean(state.materials?.runState?.running);
@@ -966,6 +974,7 @@ function openGuangdadaVideoPreview(src, title = "video") {
           <button type="button" class="media-preview-close" aria-label="关闭">×</button>
         </div>
         <div class="media-preview-status"></div>
+        <img class="media-preview-image" alt="" />
         <video controls autoplay playsinline></video>
       </div>
     `;
@@ -977,7 +986,13 @@ function openGuangdadaVideoPreview(src, title = "video") {
   }
   modal.querySelector("strong").textContent = title;
   const status = modal.querySelector(".media-preview-status");
+  const image = modal.querySelector(".media-preview-image");
   const video = modal.querySelector("video");
+  if (image) {
+    image.hidden = true;
+    image.removeAttribute("src");
+  }
+  video.hidden = false;
   video.pause();
   video.removeAttribute("src");
   video.load();
@@ -997,11 +1012,56 @@ function openGuangdadaVideoPreview(src, title = "video") {
   video.play().catch(() => {});
 }
 
+function openGuangdadaImagePreview(src, title = "image") {
+  if (!src) return alert("暂无可预览的图片链接");
+  let modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "guangdadaVideoPreviewModal";
+    modal.className = "media-preview-modal";
+    modal.innerHTML = `
+      <div class="media-preview-dialog">
+        <div class="media-preview-head">
+          <strong></strong>
+          <button type="button" class="media-preview-close" aria-label="关闭">×</button>
+        </div>
+        <div class="media-preview-status"></div>
+        <img class="media-preview-image" alt="" />
+        <video controls autoplay playsinline></video>
+      </div>
+    `;
+    document.body.append(modal);
+    modal.querySelector(".media-preview-close").addEventListener("click", closeGuangdadaVideoPreview);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closeGuangdadaVideoPreview();
+    });
+  }
+  modal.querySelector("strong").textContent = title;
+  const status = modal.querySelector(".media-preview-status");
+  const video = modal.querySelector("video");
+  const image = modal.querySelector(".media-preview-image");
+  video?.pause();
+  if (video) {
+    video.hidden = true;
+    video.removeAttribute("src");
+    video.load();
+  }
+  if (status) status.textContent = "";
+  if (image) {
+    image.hidden = false;
+    image.alt = title;
+    image.src = src;
+  }
+  modal.classList.add("show");
+}
+
 function closeGuangdadaVideoPreview() {
   const modal = document.querySelector("#guangdadaVideoPreviewModal");
   if (!modal) return;
   const video = modal.querySelector("video");
   video?.pause();
+  const image = modal.querySelector(".media-preview-image");
+  if (image) image.removeAttribute("src");
   modal.classList.remove("show");
 }
 
@@ -1384,6 +1444,9 @@ function bindCompetitorDrop(block, item) {
 }
 
 els.batchTag.value = defaultBatchTag();
+if (els.imageModelSelect && !els.imageModelSelect.value) {
+  els.imageModelSelect.value = "ByteDance-Seedream-5-0-lite";
+}
 updateStartButtonState(false);
 els.guangdadaMinPopularity.value = "100000";
 els.guangdadaTopN.value = "3";
