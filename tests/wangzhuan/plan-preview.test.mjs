@@ -738,8 +738,7 @@ test("Seedance plan validation falls back to branch subtitleWorkflow string mode
     seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
     negativePrompt: "No competitor logo.",
     mediaRefs: {},
-    complianceNotes: [],
-    subtitleWorkflow: {}
+    complianceNotes: []
   }, {
     branch: {
       subtitleWorkflow: "none"
@@ -764,8 +763,7 @@ test("Seedance plan validation falls back to draft subtitleWorkflow string mode 
     seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
     negativePrompt: "No competitor logo.",
     mediaRefs: {},
-    complianceNotes: [],
-    subtitleWorkflow: {}
+    complianceNotes: []
   }, {
     batch: {
       templateSnapshot: {
@@ -780,6 +778,79 @@ test("Seedance plan validation falls back to draft subtitleWorkflow string mode 
   assert.equal(plan.subtitleWorkflow.postSubtitleRequired, false);
   assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
   assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+});
+
+test("Seedance plan validation honors legacy plan subtitleWorkflow string mode none", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: "none"
+  });
+
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, false);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+});
+
+test("Seedance plan validation honors legacy plan subtitleWorkflow string mode post_process", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    subtitleWorkflow: "post_process"
+  });
+
+  assert.equal(plan.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(plan.subtitleWorkflow.postSubtitleRequired, true);
+  assert.equal(plan.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(plan.subtitleWorkflow.subtitleScript, ["Break time", "App feedback"]);
+});
+
+test("Seedance plan validation normalizes sliceDiversity string booleans defensively", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: [],
+    sliceDiversity: {
+      personChangedFromPrevious: "false",
+      sceneChangedFromPrevious: "0",
+      clothingChangedFromPrevious: "no",
+      voiceChangedFromPrevious: "true"
+    }
+  });
+
+  assert.deepEqual(plan.sliceDiversity, {
+    personChangedFromPrevious: false,
+    sceneChangedFromPrevious: false,
+    clothingChangedFromPrevious: false,
+    voiceChangedFromPrevious: true
+  });
 });
 
 test("strong commitment plan validation accepts any non-empty truth rule", () => {

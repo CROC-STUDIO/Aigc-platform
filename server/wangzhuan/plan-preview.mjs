@@ -143,6 +143,17 @@ function normalizeSubtitleWorkflow(value = {}, subtitles = [], fallback = {}) {
   };
 }
 
+function normalizeBooleanLike(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = cleanString(value).toLowerCase();
+  if (!normalized) return fallback;
+  if (["false", "0", "no", "n", "off", "否", "不", "不是"].includes(normalized)) return false;
+  if (["true", "1", "yes", "y", "on", "是", "对", "好的"].includes(normalized)) return true;
+  return fallback;
+}
+
 function normalizeSubtitleWorkflowMode(mode = "") {
   const normalizedMode = cleanString(mode).toLowerCase();
   if (["none", "no_post_process", "off"].includes(normalizedMode)) {
@@ -186,17 +197,17 @@ function normalizeSliceDiversity(value = {}, fallback = {}) {
   const fallbackSource = normalizeObject(fallback);
   return {
     personChangedFromPrevious: source.personChangedFromPrevious !== undefined
-      ? Boolean(source.personChangedFromPrevious)
-      : Boolean(fallbackSource.personChangedFromPrevious),
+      ? normalizeBooleanLike(source.personChangedFromPrevious)
+      : normalizeBooleanLike(fallbackSource.personChangedFromPrevious),
     sceneChangedFromPrevious: source.sceneChangedFromPrevious !== undefined
-      ? Boolean(source.sceneChangedFromPrevious)
-      : Boolean(fallbackSource.sceneChangedFromPrevious),
+      ? normalizeBooleanLike(source.sceneChangedFromPrevious)
+      : normalizeBooleanLike(fallbackSource.sceneChangedFromPrevious),
     clothingChangedFromPrevious: source.clothingChangedFromPrevious !== undefined
-      ? Boolean(source.clothingChangedFromPrevious)
-      : Boolean(fallbackSource.clothingChangedFromPrevious),
+      ? normalizeBooleanLike(source.clothingChangedFromPrevious)
+      : normalizeBooleanLike(fallbackSource.clothingChangedFromPrevious),
     voiceChangedFromPrevious: source.voiceChangedFromPrevious !== undefined
-      ? Boolean(source.voiceChangedFromPrevious)
-      : Boolean(fallbackSource.voiceChangedFromPrevious)
+      ? normalizeBooleanLike(source.voiceChangedFromPrevious)
+      : normalizeBooleanLike(fallbackSource.voiceChangedFromPrevious)
   };
 }
 
@@ -407,6 +418,12 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       context.batch?.templateSnapshot?.draft?.subtitleWorkflow
     )
   );
+  const planSubtitleWorkflow = (() => {
+    if (plan.subtitleWorkflow === undefined || plan.subtitleWorkflow === null || plan.subtitleWorkflow === "") {
+      return undefined;
+    }
+    return resolveNormalizedSubtitleWorkflow(plan.subtitleWorkflow);
+  })();
   const missingFields = REQUIRED_PLAN_FIELDS.filter((field) => !isNonEmptyString(plan[field]));
   if (missingFields.length) {
     throw new WangzhuanError("schema_invalid", "Seedance 预案不完整，请重试", {
@@ -442,7 +459,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
     withdrawalVisual: cleanString(plan.withdrawalVisual) || cleanString(context.withdrawalVisual),
     subtitleWorkflow: normalizeSubtitleWorkflow(
-      plan.subtitleWorkflow,
+      planSubtitleWorkflow,
       plan.subtitles,
       contextSubtitleWorkflow
     ),
