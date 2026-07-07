@@ -285,6 +285,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(js, /function addBranch\(\)[\s\S]*sliceStrategy:\s*source\.sliceStrategy/);
   assert.match(js, /function addBranch\(\)[\s\S]*moneyVisuals:\s*source\.moneyVisuals/);
   assert.match(js, /function addBranch\(\)[\s\S]*subtitleWorkflow:\s*source\.subtitleWorkflow/);
+  assert.match(js, /for \(const el of \[[\s\S]*els\.outputTemplateMode[\s\S]*els\.sliceStrategy[\s\S]*els\.moneyVisuals[\s\S]*els\.subtitleWorkflow[\s\S]*\]\) \{\s*el\?\.addEventListener\("change", markPlanMaybeStale\);\s*el\?\.addEventListener\("input", markPlanMaybeStale\);/);
 
   assert.match(jobs, /"outputTemplateMode"/);
   assert.match(jobs, /"sliceStrategy"/);
