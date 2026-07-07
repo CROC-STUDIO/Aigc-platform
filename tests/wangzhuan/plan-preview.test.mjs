@@ -432,6 +432,49 @@ test("Seedance plan prompt preserves branch none subtitleWorkflow mode in prompt
   assert.match(text, /"subtitleScript": \[\s*\]/);
 });
 
+test("Seedance plan prompt falls back invalid branch outputTemplateMode to valid draft mode", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260708100000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_invalid_output_template_mode",
+      branchLabel: "Invalid output template mode",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "garbage_mode",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "living room",
+      subject: "viewer",
+      action: "checks drama rewards",
+      camera: "phone close-up",
+      lighting: "soft daylight",
+      style: "short-drama hook",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"outputTemplateMode": "three_slice_net_earning"/);
+  assert.doesNotMatch(text, /"outputTemplateMode": "garbage_mode"/);
+});
+
 test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {
   const messages = buildThirtySecondSeedancePlanMessages({
     batch: {
@@ -878,6 +921,35 @@ test("Seedance plan validation falls back invalid outputTemplateMode to valid co
     outputTemplateMode: "totally_invalid_mode"
   }, {
     outputTemplateMode: "three_slice_net_earning"
+  });
+
+  assert.equal(plan.outputTemplateMode, "three_slice_net_earning");
+});
+
+test("Seedance plan validation omits invalid branch outputTemplateMode and falls back to valid draft mode", () => {
+  const plan = validateSeedancePlan({
+    hook: "Try it during a break",
+    body: "A worker checks the app and sees feedback.",
+    voiceover: "I checked the app during my break.",
+    subtitles: ["Break time", "App feedback"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Worker with a phone in a local break area.",
+    seedancePrompt: "0-5s: worker checks phone; 5-10s: app close-up; 10-15s: feedback appears.",
+    negativePrompt: "No competitor logo.",
+    mediaRefs: {},
+    complianceNotes: []
+  }, {
+    branch: {
+      outputTemplateMode: "garbage_mode"
+    },
+    batch: {
+      templateSnapshot: {
+        draft: {
+          outputTemplateMode: "three_slice_net_earning"
+        }
+      }
+    }
   });
 
   assert.equal(plan.outputTemplateMode, "three_slice_net_earning");

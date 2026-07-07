@@ -240,9 +240,10 @@ function resolveSeedancePlanValidationContext(input = {}) {
     segmentIndex: input.segmentIndex,
     segmentRole: cleanString(input.segmentRole) || cleanString(branch.segmentRole) || cleanString(draft.segmentRole),
     sliceDurationSec: input.sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15,
-    outputTemplateMode: cleanString(input.outputTemplateMode)
-      || cleanString(branch.outputTemplateMode)
-      || cleanString(draft.outputTemplateMode),
+    outputTemplateMode: normalizeOutputTemplateMode(
+      input.outputTemplateMode,
+      normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode)
+    ),
     moneyVisuals: resolveStringList(input.moneyVisuals, branch.moneyVisuals, draft.moneyVisuals),
     withdrawalVisual: cleanString(input.withdrawalVisual)
       || cleanString(branch.withdrawalVisual)
@@ -433,6 +434,13 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       context.batch?.templateSnapshot?.draft?.subtitleWorkflow
     )
   );
+  const contextOutputTemplateMode = normalizeOutputTemplateMode(
+    context.outputTemplateMode,
+    normalizeOutputTemplateMode(
+      context.branch?.outputTemplateMode,
+      context.batch?.templateSnapshot?.draft?.outputTemplateMode
+    )
+  );
   const planSubtitleWorkflow = (() => {
     if (plan.subtitleWorkflow === undefined || plan.subtitleWorkflow === null || plan.subtitleWorkflow === "") {
       return undefined;
@@ -470,7 +478,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     complianceNotes: normalizeStringList(plan.complianceNotes),
     segmentRole: cleanString(plan.segmentRole) || cleanString(context.segmentRole),
     sliceDurationSec: clampSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
-    outputTemplateMode: normalizeOutputTemplateMode(plan.outputTemplateMode, context.outputTemplateMode),
+    outputTemplateMode: normalizeOutputTemplateMode(plan.outputTemplateMode, contextOutputTemplateMode),
     moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
     withdrawalVisual: cleanString(plan.withdrawalVisual) || cleanString(context.withdrawalVisual),
     subtitleWorkflow: normalizeSubtitleWorkflow(
@@ -494,7 +502,7 @@ export function buildSeedancePlanMessages({
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
   const localeContext = resolvePlanLocaleContext(batch, branch);
-  const outputTemplateMode = resolveCleanString(branch.outputTemplateMode, draft.outputTemplateMode, "reference_fission");
+  const outputTemplateMode = normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode);
   const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
   const subtitleWorkflow = resolveNormalizedSubtitleWorkflow(
