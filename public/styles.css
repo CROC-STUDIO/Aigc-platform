@@ -1281,7 +1281,7 @@ button.mini {
   accent-color: var(--accent);
 }
 
-.role-card .delete-material {
+.role-card .material-settings {
   position: absolute;
   top: 7px;
   right: 7px;
@@ -1291,22 +1291,61 @@ button.mini {
   display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid rgba(255, 107, 138, 0.55);
+  border: 1px solid rgba(172, 131, 255, 0.62);
   border-radius: 50%;
   color: #fff;
-  background: rgba(255, 64, 100, 0.86);
+  background: rgba(67, 45, 112, 0.9);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.3);
-  font-size: 17px;
+  font-size: 13px;
   line-height: 1;
-  font-weight: 900;
 }
 
-.role-card .delete-material:hover {
-  background: rgba(255, 64, 100, 1);
+.role-card .material-settings:hover {
+  background: rgba(142, 93, 255, 0.95);
   transform: scale(1.04);
 }
 
-.role-card .delete-material:disabled {
+.role-card .material-menu {
+  position: absolute;
+  top: 34px;
+  right: 7px;
+  z-index: 8;
+  min-width: 78px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(172, 131, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 17, 28, 0.96);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.42);
+}
+
+.role-card .material-menu[hidden] {
+  display: none;
+}
+
+.role-card .material-menu button {
+  width: 100%;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.role-card .material-menu button:hover {
+  background: rgba(142, 93, 255, 0.22);
+}
+
+.role-card .material-menu button.danger {
+  color: #ff8ea6;
+}
+
+.role-card .material-menu button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
@@ -1484,7 +1523,7 @@ button.mini {
 
 .competitor-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(74px, max-content)) minmax(88px, max-content) repeat(2, minmax(188px, max-content)) minmax(86px, max-content);
+  grid-template-columns: repeat(4, minmax(74px, max-content)) minmax(120px, max-content);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1545,24 +1584,14 @@ button.mini {
   text-align: center;
 }
 
-.count-field.size-field input {
-  width: 86px;
-  text-align: center;
-}
-
-.count-field.split-size-field {
-  min-width: 188px;
-  white-space: nowrap;
-}
-
-.count-field.split-size-field input {
+.count-field select {
   width: 58px;
-  text-align: center;
-}
-
-.count-field.split-size-field span {
-  color: var(--muted);
-  line-height: 1;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(5, 10, 14, 0.72);
+  color: var(--ink);
 }
 
 .empty-thumb {
@@ -1573,23 +1602,6 @@ button.mini {
   border-radius: 6px;
   color: var(--muted);
   background: rgba(8, 13, 15, 0.52);
-}
-
-.replace-role {
-  width: 100%;
-  height: 30px;
-  margin-top: 8px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  background: rgba(8, 13, 15, 0.62);
-  color: var(--ink);
-  box-shadow: none;
-  font-size: 12px;
-}
-
-.replace-role:hover {
-  border-color: var(--line-strong);
-  background: rgba(48, 42, 68, 0.86);
 }
 
 .log-list {
@@ -1704,18 +1716,8 @@ button.mini {
     justify-content: space-between;
   }
 
-  .replace-competitor,
-  .size-field,
-  .split-size-field {
+  .replace-competitor {
     grid-column: 1 / -1;
-  }
-
-  .count-field.size-field input {
-    width: min(150px, 55%);
-  }
-
-  .count-field.split-size-field input {
-    width: min(120px, 36%);
   }
 }
 
