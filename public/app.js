@@ -853,7 +853,8 @@ function renderGuangdadaItems(items) {
     const card = document.createElement("article");
     card.className = "guangdada-card";
     const videoPreviewUrl = item.proxyVideoUrl || item.videoUrl || "";
-    const preview = item.isVideoMaterial && (item.proxyVideoUrl || item.videoUrl)
+    const canPreviewVideo = Boolean(item.isVideoMaterial && videoPreviewUrl && isLikelyVideoPreviewUrl(videoPreviewUrl));
+    const preview = canPreviewVideo
       ? `<div class="video-preview-wrap">
           <video src="${escapeHtml(videoPreviewUrl)}" poster="${escapeHtml(item.proxyUrl || "")}" muted controls preload="metadata" playsinline></video>
           <button class="video-play-btn" type="button">播放</button>
@@ -923,6 +924,13 @@ function renderGuangdadaItems(items) {
   }
 }
 
+function isLikelyVideoPreviewUrl(url = "") {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  if (/\/api\/guangdada\/video\?/i.test(value)) return true;
+  return /\.(mp4|mov|webm|m4v|m3u8)(?:[?#].*)?$/i.test(value);
+}
+
 function renderRunState(runState) {
   els.totalCount.textContent = runState.total || 0;
   els.doneCount.textContent = runState.completed || 0;
@@ -957,6 +965,7 @@ function openGuangdadaVideoPreview(src, title = "video") {
           <strong></strong>
           <button type="button" class="media-preview-close" aria-label="关闭">×</button>
         </div>
+        <div class="media-preview-status"></div>
         <video controls autoplay playsinline></video>
       </div>
     `;
@@ -967,10 +976,21 @@ function openGuangdadaVideoPreview(src, title = "video") {
     });
   }
   modal.querySelector("strong").textContent = title;
+  const status = modal.querySelector(".media-preview-status");
   const video = modal.querySelector("video");
   video.pause();
   video.removeAttribute("src");
   video.load();
+  if (status) status.textContent = "视频加载中...";
+  video.onloadedmetadata = () => {
+    if (status) status.textContent = "";
+  };
+  video.oncanplay = () => {
+    if (status) status.textContent = "";
+  };
+  video.onerror = () => {
+    if (status) status.textContent = "视频预览失败：当前素材没有可播放的视频源，或远程视频链接已失效。";
+  };
   video.src = src;
   video.muted = false;
   modal.classList.add("show");

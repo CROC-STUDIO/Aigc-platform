@@ -958,6 +958,7 @@ async function readImageDimensions(imagePath) {
 }
 
 const remoteImageCache = new Map();
+const remoteVideoCache = new Map();
 
 function addLog(type, message, data = {}) {
   const runState = getRunState();
@@ -2974,12 +2975,37 @@ async function searchGuangdada(body) {
       if (list.length < basePayload.page_size || itemMap.size >= topN) break;
     }
   }
-  const items = Array.from(itemMap.values())
+  const items = await hydrateGuangdadaVideoUrls(Array.from(itemMap.values()))
+    .then((hydrated) => hydrated
     .sort((a, b) => b.popularity - a.popularity || normalizeUnixMs(b.timestamp) - normalizeUnixMs(a.timestamp))
-    .slice(0, topN);
+    .slice(0, topN));
   const result = { ok: true, cached: false, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
   await writeGuangdadaCache(cacheKey, result);
   return result;
+}
+
+async function hydrateGuangdadaVideoUrls(items) {
+  const hydrated = [];
+  for (const item of items) {
+    if (item.isVideoMaterial && !item.videoUrl && item.adKey) {
+      try {
+        const detailUrls = await guangdadaDetailUrls(item);
+        const videoUrl = detailUrls.videos[0] || "";
+        if (videoUrl) {
+          hydrated.push({
+            ...item,
+            videoUrl,
+            proxyVideoUrl: `/api/guangdada/video?url=${encodeURIComponent(videoUrl)}`
+          });
+          continue;
+        }
+      } catch {
+        // Keep the list result usable even when a detail request fails.
+      }
+    }
+    hydrated.push(item);
+  }
+  return hydrated;
 }
 
 function guangdadaCacheKey(value) {
@@ -2996,7 +3022,12 @@ async function readGuangdadaCache(cacheKey) {
       await rm(cachePath, { force: true }).catch(() => {});
       return null;
     }
-    return data.result || null;
+    const result = data.result || null;
+    if (result?.items?.some((item) => item?.isVideoMaterial && !item?.videoUrl && item?.adKey)) {
+      result.items = await hydrateGuangdadaVideoUrls(result.items);
+      await writeGuangdadaCache(cacheKey, result).catch(() => {});
+    }
+    return result;
   } catch {
     await rm(cachePath, { force: true }).catch(() => {});
     return null;
@@ -3360,18 +3391,14 @@ async function downloadRemoteImage(imageUrl, fileName = "guangdada.jpg") {
 
 async function downloadRemoteBinary(url) {
   const candidates = [
-    url,
-    `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(url)}`
+    { url, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8" } },
+    { url, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8", Referer: "" } },
+    { url: `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(url)}`, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8" } }
   ];
   let lastError = null;
   for (const candidate of candidates) {
     try {
-      const res = await fetch(candidate, {
-        headers: {
-          Referer: "http://120.27.200.123:3000/guangdada",
-          "User-Agent": "Mozilla/5.0"
-        }
-      });
+      const res = await fetch(candidate.url, { headers: candidate.headers });
       const buffer = Buffer.from(await res.arrayBuffer());
       const contentType = res.headers.get("content-type") || "";
       if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`);
@@ -3447,43 +3474,44 @@ async function proxyGuangdadaVideo(req, res, url) {
   const videoUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(videoUrl)) throw new Error("缺少有效的视频链接");
   assertAllowedGuangdadaMediaUrl(videoUrl);
-  const candidates = [
-    videoUrl,
-    `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(videoUrl)}`
-  ];
-  let lastError = null;
-  for (const candidate of candidates) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    const headers = {
-      Referer: "http://120.27.200.123:3000/guangdada",
-      "User-Agent": "Mozilla/5.0"
-    };
-    if (req.headers.range) headers.Range = req.headers.range;
-    try {
-      const upstream = await fetch(candidate, { signal: controller.signal, headers }).finally(() => clearTimeout(timeout));
-      if (!upstream.ok && upstream.status !== 206) {
-        lastError = new Error(`视频预览加载失败 HTTP ${upstream.status}`);
-        continue;
-      }
-      const responseHeaders = {
-        "Content-Type": upstream.headers.get("content-type") || "video/mp4",
-        "Accept-Ranges": upstream.headers.get("accept-ranges") || "bytes",
-        "Cache-Control": "public, max-age=300"
-      };
-      for (const key of ["content-length", "content-range"]) {
-        const value = upstream.headers.get(key);
-        if (value) responseHeaders[key.replace(/\b\w/g, (char) => char.toUpperCase())] = value;
-      }
-      res.writeHead(upstream.status === 206 ? 206 : 200, responseHeaders);
-      if (!upstream.body) return res.end();
-      return Readable.fromWeb(upstream.body).pipe(res);
-    } catch (error) {
-      clearTimeout(timeout);
-      lastError = error;
+  const cacheKey = videoUrl;
+  let cached = remoteVideoCache.get(cacheKey);
+  if (!cached || Date.now() - cached.time > 20 * 60 * 1000) {
+    const buffer = await downloadRemoteBinary(videoUrl);
+    const head = buffer.toString("ascii", 0, Math.min(buffer.length, 64)).toLowerCase();
+    const contentType = head.includes("webm") ? "video/webm" : "video/mp4";
+    cached = { time: Date.now(), buffer, contentType };
+    remoteVideoCache.set(cacheKey, cached);
+    if (remoteVideoCache.size > 40) {
+      const firstKey = remoteVideoCache.keys().next().value;
+      remoteVideoCache.delete(firstKey);
     }
   }
-  throw lastError || new Error("视频预览加载失败");
+  const total = cached.buffer.length;
+  const range = String(req.headers.range || "");
+  if (range) {
+    const match = range.match(/bytes=(\d*)-(\d*)/);
+    const startByte = match?.[1] ? Number(match[1]) : 0;
+    const endByte = match?.[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+    if (Number.isFinite(startByte) && Number.isFinite(endByte) && startByte <= endByte && startByte < total) {
+      res.writeHead(206, {
+        "Content-Type": cached.contentType,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=300",
+        "Content-Range": `bytes ${startByte}-${endByte}/${total}`,
+        "Content-Length": endByte - startByte + 1
+      });
+      res.end(cached.buffer.subarray(startByte, endByte + 1));
+      return;
+    }
+  }
+  res.writeHead(200, {
+    "Content-Type": cached.contentType,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "public, max-age=300",
+    "Content-Length": total
+  });
+  res.end(cached.buffer);
 }
 
 function assertAllowedGuangdadaMediaUrl(value) {

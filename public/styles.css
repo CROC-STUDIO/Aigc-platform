@@ -54,6 +54,13 @@
   gap: 12px;
 }
 
+.media-preview-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .media-preview-head strong {
   min-width: 0;
   overflow: hidden;
