@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
-import { checkReferenceVideo, draftReferenceVideoDecomposition } from "../../server/wangzhuan/reference-videos.mjs";
+import {
+  buildSceneAwareFrameTimestamps,
+  buildBatchReferenceFrameExtractionPlan,
+  checkReferenceVideo,
+  draftReferenceVideoDecomposition
+} from "../../server/wangzhuan/reference-videos.mjs";
 
 function dataUrl(bytes) {
   return `data:video/mp4;base64,${Buffer.alloc(bytes, 1).toString("base64")}`;
@@ -210,7 +215,7 @@ test("decomposition honors explicit zero retries", async () => {
   }
 });
 
-test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video file_url", async () => {
+test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gpt55-"));
   const calls = [];
   const frameRequests = [];
@@ -228,7 +233,7 @@ test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video 
       assert.equal(body.model, "gpt-5.5");
       const parts = body.messages?.flatMap((message) => message.content || []) || [];
       assert.equal(parts.some((part) => part?.type === "file"), false);
-      assert.equal(parts.filter((part) => part?.type === "image_url").length, 3);
+      assert.equal(parts.filter((part) => part?.type === "image_url").length, 10);
       return new Response(JSON.stringify({
         choices: [{
           message: {
@@ -253,6 +258,7 @@ test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video 
       userProjectRoot: root,
       sharedProjectRoot: root,
       config: {},
+      detectReferenceVideoScenes: async () => [0.8, 9.8],
       extractReferenceFrames: async ({ timestampsSec }) => {
         frameRequests.push(timestampsSec);
         return timestampsSec.map((timestampSec, index) => ({
@@ -270,7 +276,7 @@ test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video 
         storedPath: videoRelativePath,
         storageKey: "uploads/reference/decomposition-proxy.mp4",
         storageUrl: "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4",
-        durationSec: 2.4,
+        durationSec: 11,
         width: 480,
         height: 854,
         fps: 15
@@ -289,7 +295,7 @@ test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video 
     });
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(frameRequests[0], [0.5, 1.5, 2.3]);
+    assert.deepEqual(frameRequests[0], [0.25, 0.27, 0.53, 2.6, 3.8, 6.8, 8, 10.2, 10.6, 10.75]);
     assert.equal(result.decomposition.scene, "office");
   } finally {
     globalThis.fetch = originalFetch;
@@ -297,7 +303,7 @@ test("gpt-5.5 decomposition uses chat completions with 1fps frames and no video 
   }
 });
 
-test("gemini decomposition keeps S3 URL and uses 1fps default frames", async () => {
+test("gemini decomposition keeps S3 URL and uses scene-aware default frames", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gemini-"));
   const calls = [];
   const frameRequests = [];
@@ -315,7 +321,7 @@ test("gemini decomposition keeps S3 URL and uses 1fps default frames", async () 
       const parts = body.messages?.flatMap((message) => message.content || []) || [];
       const filePart = parts.find((part) => part?.type === "file");
       assert.equal(filePart?.file?.file_url, "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4");
-      assert.equal(parts.filter((part) => part?.type === "image_url").length, 3);
+      assert.equal(parts.filter((part) => part?.type === "image_url").length, 8);
       return new Response(JSON.stringify({
         choices: [{
           message: {
@@ -340,6 +346,7 @@ test("gemini decomposition keeps S3 URL and uses 1fps default frames", async () 
       userProjectRoot: root,
       sharedProjectRoot: root,
       config: {},
+      detectReferenceVideoScenes: async () => [0.7, 6.8],
       extractReferenceFrames: async ({ timestampsSec }) => {
         frameRequests.push(timestampsSec);
         return timestampsSec.map((timestampSec, index) => ({
@@ -357,7 +364,7 @@ test("gemini decomposition keeps S3 URL and uses 1fps default frames", async () 
         storedPath: videoRelativePath,
         storageKey: "uploads/reference/decomposition-proxy.mp4",
         storageUrl: "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4",
-        durationSec: 2.4,
+        durationSec: 8.4,
         width: 480,
         height: 854,
         fps: 15
@@ -376,12 +383,55 @@ test("gemini decomposition keeps S3 URL and uses 1fps default frames", async () 
     });
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(frameRequests[0], [0.5, 1.5, 2.3]);
+    assert.deepEqual(frameRequests[0], [0.23, 0.25, 0.47, 2.73, 4.77, 7.33, 7.87, 8.15]);
     assert.equal(result.decomposition.scene, "factory");
   } finally {
     globalThis.fetch = originalFetch;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("scene-aware frame sampling keeps 2 frames per scene, adds extras for long scenes, and forces start/end", () => {
+  const timestamps = buildSceneAwareFrameTimestamps(24, [4, 16], {
+    longSceneThresholdSec: 8,
+    maxFrames: 40
+  });
+  assert.deepEqual(timestamps, [
+    0.25,
+    1.33,
+    2.67,
+    6.4,
+    8,
+    12,
+    13.6,
+    17.6,
+    18.67,
+    21.33,
+    22.4,
+    23.75
+  ]);
+});
+
+test("scene-aware frame sampling never exceeds 40 frames", () => {
+  const sceneCuts = Array.from({ length: 24 }, (_, index) => index + 1);
+  const timestamps = buildSceneAwareFrameTimestamps(30, sceneCuts, {
+    longSceneThresholdSec: 100,
+    maxFrames: 40
+  });
+  assert.ok(timestamps.length <= 40);
+  assert.equal(timestamps[0], 0.25);
+  assert.equal(timestamps.at(-1), 29.75);
+});
+
+test("batch frame extraction plan maps all timestamps into one ffmpeg filter graph", () => {
+  const plan = buildBatchReferenceFrameExtractionPlan("/tmp/llm-frames", [0.25, 2.6, 10.75]);
+  assert.match(plan.filterComplex, /\[0:v\]split=3\[v0\]\[v1\]\[v2\]/);
+  assert.match(plan.filterComplex, /trim=start=0.25/);
+  assert.match(plan.filterComplex, /trim=start=2.6/);
+  assert.match(plan.filterComplex, /trim=start=10.75/);
+  assert.equal(plan.outputs.length, 3);
+  assert.deepEqual(plan.outputs.map((item) => item.timestampSec), [0.25, 2.6, 10.75]);
+  assert.equal(plan.outputArgs.filter((item) => item === "-map").length, 3);
 });
 
 test("decomposition dumps both llm request and llm response artifacts", async () => {

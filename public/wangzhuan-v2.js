@@ -120,7 +120,8 @@ const state = {
   recentPage: 1,
   recentLoading: false,
   disclaimerOverlayAsset: null,
-  confirmPlanSubmitting: false
+  confirmPlanSubmitting: false,
+  loggedTaskFailures: new Set()
 };
 
 let batchPollTimer = 0;
@@ -379,11 +380,13 @@ function activeBranch() {
 
 function showError(error, title = "操作失败") {
   const message = error?.message || String(error || "未知错误");
+  const requestId = String(error?.requestId || "").trim();
+  const detail = requestId ? `${message}（requestId: ${requestId}）` : message;
   if (els.globalError) {
     els.globalError.hidden = false;
-    els.globalError.textContent = `${title}：${message}`;
+    els.globalError.textContent = `${title}：${detail}`;
   }
-  log(`${title}：${message}`);
+  log(`${title}：${detail}`);
   if (error?.code === "unauthenticated") showLogin();
 }
 
@@ -445,7 +448,15 @@ async function api(path, options = {}) {
       ...(options.headers || {})
     }
   });
-  const payload = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+  if (!payload.requestId) payload.requestId = response.headers.get("X-Request-Id") || "";
+  if (!payload.message && text && !payload.code) payload.message = text.trim();
   if (!response.ok || payload.ok === false) {
     throw new WangzhuanApiError(payload, response.status);
   }
@@ -1046,7 +1057,10 @@ function renderPlanEditors(plans = []) {
 
 function hasGeneratedSeedancePlan(batch = state.batchDetail?.batch || state.batchDetail || {}) {
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
-  return plans.length > 0 || ["running", "succeeded"].includes(state.planJob?.status);
+  const batchStatus = String(batch?.status || "").trim();
+  return plans.length > 0
+    || ["queued", "running", "stitching", "qc", "partial_failed", "succeeded", "failed", "stopped", "skipped"].includes(batchStatus)
+    || ["running", "succeeded"].includes(state.planJob?.status);
 }
 
 function setPlanUpstreamLocked(locked) {
@@ -1215,6 +1229,44 @@ function currentDecomposition() {
     referenceVideoId: source.referenceVideoId || state.decompositionDraft?.referenceVideoId || state.referenceVideo?.referenceVideoId,
     schemaVersion: source.schemaVersion || state.decompositionDraft?.schemaVersion || "video_decomposition.v1"
   };
+}
+
+function countSeedanceReferenceAssets(branch = activeBranch()) {
+  const keys = new Set([
+    ...Object.keys(branch.assetFileNames || {}),
+    ...Object.keys(branch.assetUrls || {})
+  ]);
+  const items = [];
+  for (const key of keys) {
+    const fileName = String(branch.assetFileNames?.[key] || "").trim();
+    const url = String(branch.assetUrls?.[key] || "").trim();
+    if (!fileName && !url) continue;
+    items.push({
+      assetKey: key,
+      label: fileName || key
+    });
+  }
+  return {
+    count: items.length,
+    items
+  };
+}
+
+function assertSeedanceReferenceAssetLimit(branches = collectBranchDrafts()) {
+  for (const branch of branches) {
+    const summary = countSeedanceReferenceAssets(branch);
+    if (summary.count <= 9) continue;
+    throw new WangzhuanApiError({
+      code: "validation_error",
+      message: `Seedance 参考素材不能超过 9 个，请减少后重试（当前 ${summary.count} 个：${summary.items.map((item) => item.label).join(" / ")}）`,
+      data: {
+        branchId: branch.branchId || "",
+        assetCount: summary.count,
+        maxAssets: 9,
+        assetKeys: summary.items.map((item) => item.assetKey)
+      }
+    }, 400);
+  }
 }
 
 function planSignatureInput() {
@@ -1420,6 +1472,7 @@ function renderTasks() {
   const tasksInBatch = Array.isArray(batch?.tasks) ? batch.tasks : [];
   const outputsInBatch = Array.isArray(batch?.outputs) ? batch.outputs : [];
   const plans = Array.isArray(batch?.plans) ? batch.plans : [];
+  const decompositionReady = Boolean(currentDecomposition());
   const doneStatuses = new Set(["downloaded", "qc", "succeeded", "failed", "skipped", "stopped"]);
   const doneCount = tasksInBatch.filter((task) => doneStatuses.has(task.status)).length;
   const generationProgress = tasksInBatch.length ? Math.round((doneCount / tasksInBatch.length) * 100) : 0;
@@ -1456,9 +1509,27 @@ function renderTasks() {
   const planUpstreamLocked = hasGeneratedSeedancePlan(batch);
   setPlanUpstreamLocked(planUpstreamLocked);
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
-  els.planBatchBtn.disabled = planRetryable
+  const planBlockedByRewrite = !state.rewriteConfirmed;
+  const planBlockedByDecomposition = !decompositionReady;
+  const planDisabled = planRetryable
     ? false
-    : (planUpstreamLocked || state.stalePlanPreview);
+    : (planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition);
+  els.planBatchBtn.disabled = planDisabled;
+  if (planRetryable) {
+    els.planBatchBtn.title = "后台任务可能仍在运行，可重试查询 prompt 结果";
+  } else if (state.stalePlanPreview) {
+    els.planBatchBtn.title = "Seedance prompt 已失效，请重新生成";
+  } else if (planUpstreamLocked) {
+    els.planBatchBtn.title = "当前批次已有 Seedance prompt，请先确认或重开任务";
+  } else if (planBlockedByRewrite && planBlockedByDecomposition) {
+    els.planBatchBtn.title = "请先确认产品/投放信息，并等待视频拆解完成或手动填写脚本拆解";
+  } else if (planBlockedByRewrite) {
+    els.planBatchBtn.title = "请先确认产品/投放信息";
+  } else if (planBlockedByDecomposition) {
+    els.planBatchBtn.title = "视频拆解进行中；拆解完成或手动填写脚本拆解后，可直接生成 Seedance prompt";
+  } else {
+    els.planBatchBtn.title = "";
+  }
   els.confirmPlanBtn.disabled = state.confirmPlanSubmitting || !plans.length || state.stalePlanPreview;
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
   els.runQcBtn.disabled = !batch?.batchId || !isBatchQcRunnable(batch, tasksInBatch, outputsInBatch);
@@ -1596,6 +1667,32 @@ function retryableJobMessage(type, detail = "") {
   return cleanDetail
     ? `${prefix}，后台任务可能仍在运行，可重试查询。原因：${cleanDetail}`
     : `${prefix}，后台任务可能仍在运行，可重试查询。`;
+}
+
+function taskFailureHint(task = {}) {
+  const code = String(task.errorCode || "").trim();
+  const message = String(task.errorMessage || "").trim();
+  if (code === "continuity_reference_failed") {
+    return message || "30s 第二段生成依赖第一段连续性参考，但参考帧未准备好或未审核通过";
+  }
+  if (code === "no_segments") {
+    return message || "当前没有可用于拼接的分段视频";
+  }
+  return message;
+}
+
+function logTaskFailureDetails(batch = {}) {
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  for (const task of tasks) {
+    if (task.status !== "failed") continue;
+    const hint = taskFailureHint(task);
+    if (!hint) continue;
+    const taskId = String(task.generationTaskId || task.taskUid || "unknown");
+    const fingerprint = `${taskId}:${task.errorCode || ""}:${hint}`;
+    if (state.loggedTaskFailures.has(fingerprint)) continue;
+    state.loggedTaskFailures.add(fingerprint);
+    log(`子任务失败：${taskId} · ${hint}`);
+  }
 }
 
 function markBackgroundJobPollFailure(type, message, data = {}) {
@@ -1741,6 +1838,7 @@ function renderReminders({ batch, plans } = {}) {
   if (!state.referenceVideo) items.push("先上传参考视频");
   if (state.referenceVideo && !state.decompositionDraft) items.push("参考视频已上传，待 AI 拆解或手动填写脚本");
   if (!state.rewriteConfirmed) items.push("第 3 步产品/投放信息尚未确认");
+  if (state.rewriteConfirmed && !currentDecomposition()) items.push("产品信息已确认，等待视频拆解完成后可直接生成 Seedance prompt");
   if (!state.estimate) items.push("尚未生成 Seedance prompt");
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) items.push("本批任务较多，需要确认数量和消耗");
   if (state.stalePlanPreview) items.push("Seedance prompt 已失效，需要重新生成");
@@ -1837,7 +1935,11 @@ async function confirmRewriteInfo() {
     await uploadSeedanceAssetsForReview();
     await saveDraftBatch("rewrite_confirmed");
     state.rewriteConfirmed = true;
-    log("产品/投放信息已确认");
+    if (currentDecomposition()) {
+      log("产品/投放信息已确认");
+    } else {
+      log("产品/投放信息已确认，视频拆解尚未完成；拆解完成后可直接生成 Seedance prompt");
+    }
     renderTasks();
   } catch (error) {
     showError(error, "产品信息确认失败");
@@ -2003,6 +2105,7 @@ async function startDecompositionJob() {
 async function startPlanJob() {
   if (retryBackgroundJobPoll("plan")) return;
   els.planBatchBtn.disabled = true;
+  assertSeedanceReferenceAssetLimit();
   const estimateResult = state.estimate?.estimateId ? state.estimate : await estimateBatch();
   if (!estimateResult?.estimateId) {
     renderTasks();
@@ -2090,6 +2193,7 @@ async function loadBatchDetail(batchId) {
   if (!batchId) return null;
   const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
   state.batchDetail = data;
+  logTaskFailureDetails(data?.batch || data || {});
   renderTasks();
   return data;
 }
@@ -2177,6 +2281,7 @@ async function confirmPlanAndGenerate() {
     });
     state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
     log("Seedance prompt 已确认，已提交 Seedance 生成");
+    renderTasks();
     startBatchPolling(batch.batchId);
   } finally {
     state.confirmPlanSubmitting = false;
@@ -2223,6 +2328,7 @@ function startNewTask() {
   state.branchDraft = state.branches[0];
   state.draftSignature = "";
   state.stalePlanPreview = false;
+  state.loggedTaskFailures = new Set();
   $("#wzBatchName").value = generatedBatchName();
   els.referenceFile.value = "";
   renderVideoPreview("");
@@ -2277,6 +2383,7 @@ async function estimateBatch() {
     showError({ message: "请先点击第 3 步「确认信息」" }, "生成 Seedance prompt 失败");
     return null;
   }
+  assertSeedanceReferenceAssetLimit();
   await saveDraft("estimate");
   const request = estimateRequest();
   const data = await api("/api/wangzhuan/batches/estimate", {

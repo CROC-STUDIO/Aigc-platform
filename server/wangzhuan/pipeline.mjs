@@ -402,8 +402,11 @@ function continuityReferenceMedia(task = {}) {
   }];
 }
 
-async function ensureEventFile(context, batchId) {
-  await writeBatchWithTrigger(context, await readBatch(context, batchId), "batch_prepared");
+async function ensureEventFile(_context, _batchId) {
+  // `batch_prepared` was a legacy trigger name from the pre-preview flow.
+  // The current preview-required pipeline already persists the prepared batch
+  // via `writeBatch()`, so replaying a state transition here can incorrectly
+  // push `preview_required` runs through an unsupported transition.
 }
 
 async function writeProcessTraceFiles(context, batch) {

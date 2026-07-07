@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -51,6 +52,17 @@ test("buildPlanPreviewBatch does not reuse terminal draft batch ids", () => {
 
   assert.notEqual(batch.batchId, "wzb_20260629093333_0596");
   assert.equal(batch.status, "preview_required");
+});
+
+test("pipeline no longer replays legacy batch_prepared transition after plan preview preparation", async () => {
+  const source = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("async function ensureEventFile");
+  const end = source.indexOf("async function writeProcessTraceFiles", start);
+  const body = source.slice(start, end);
+
+  assert.ok(start >= 0);
+  assert.ok(end > start);
+  assert.doesNotMatch(body, /writeBatchWithTrigger\([^)]*"batch_prepared"/);
 });
 
 test("enrichPlanGenerationError attaches batchId to WangzhuanError data", () => {

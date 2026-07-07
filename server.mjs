@@ -3532,6 +3532,11 @@ function contentTypeForFile(fullPath) {
   return "application/octet-stream";
 }
 
+function attachmentNameForFile(fullPath) {
+  const raw = basename(fullPath) || "download";
+  return raw.replace(/["\r\n]/g, "_");
+}
+
 function localFileUrl(fullPath, version = "") {
   const suffix = version ? `&v=${encodeURIComponent(version)}` : "";
   return `/file?path=${encodeURIComponent(fullPath)}${suffix}`;
@@ -3804,6 +3809,9 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/file") {
       const full = safeInsideProject(url.searchParams.get("path") ?? "");
       if (!existsSync(full)) throw new Error("File does not exist");
+      if (url.searchParams.get("download") === "1") {
+        res.setHeader("Content-Disposition", `attachment; filename="${attachmentNameForFile(full)}"`);
+      }
       return sendProjectFile(req, res, full);
     }
     return serveStatic(req, res, url.pathname);

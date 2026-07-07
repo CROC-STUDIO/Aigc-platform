@@ -7,6 +7,8 @@ function cleanString(value, fallback = "") {
 function titleFromUrl(url) {
   const id = url.searchParams.get("id") || "";
   if (id) return id.split(".").filter(Boolean).pop() || id;
+  const appIdMatch = url.pathname.match(/\/id(\d+)(?:$|[/?#])/);
+  if (appIdMatch) return appIdMatch[1];
   const pathParts = url.pathname.split("/").filter(Boolean);
   return pathParts.at(-1)?.replace(/[-_]+/g, " ") || "";
 }
@@ -18,13 +20,30 @@ function detectStore(url) {
   return "unknown_store";
 }
 
+function decodeHtmlEntities(value = "") {
+  return cleanString(value)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\\u003d/g, "=")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\\//g, "/");
+}
+
 function emptyCandidates(productName = "") {
   return {
     productName,
     developer: "",
+    category: "",
+    shortDescription: "",
     description: "",
     icon: null,
-    screenshots: []
+    screenshots: [],
+    videoPreviews: [],
+    visibleTexts: [],
+    coreSellingPoints: []
   };
 }
 
@@ -52,6 +71,7 @@ function fallbackStoreResult(rawUrl, url) {
 function normalizeProviderResult(rawUrl, store, payload = {}, providerName = "custom_provider") {
   const candidates = payload.candidates && typeof payload.candidates === "object" ? payload.candidates : {};
   const screenshots = Array.isArray(candidates.screenshots) ? candidates.screenshots.filter((item) => item && typeof item === "object") : [];
+  const videoPreviews = Array.isArray(candidates.videoPreviews) ? candidates.videoPreviews.filter((item) => item && typeof item === "object") : [];
   return {
     url: rawUrl,
     store,
@@ -62,14 +82,362 @@ function normalizeProviderResult(rawUrl, store, payload = {}, providerName = "cu
     candidates: {
       productName: cleanString(candidates.productName),
       developer: cleanString(candidates.developer),
+      category: cleanString(candidates.category),
+      shortDescription: cleanString(candidates.shortDescription),
       description: cleanString(candidates.description),
       icon: candidates.icon && typeof candidates.icon === "object" ? candidates.icon : null,
-      screenshots
+      screenshots,
+      videoPreviews,
+      visibleTexts: normalizeStringList(candidates.visibleTexts),
+      coreSellingPoints: normalizeStringList(candidates.coreSellingPoints)
     },
     warnings: Array.isArray(payload.warnings) ? payload.warnings.map((item) => cleanString(item)).filter(Boolean) : [],
     nextStageNotes: Array.isArray(payload.nextStageNotes) ? payload.nextStageNotes.map((item) => cleanString(item)).filter(Boolean) : [],
     inspectedAt: new Date().toISOString()
   };
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanString(item)).filter(Boolean);
+  }
+  const text = cleanString(value);
+  return text ? [text] : [];
+}
+
+function appStoreCountry(url, request = {}) {
+  const explicit = cleanString(request.country || request.region || request.storeCountry);
+  if (explicit) return explicit.toLowerCase();
+  const firstPathPart = url.pathname.split("/").filter(Boolean)[0] || "";
+  return /^[a-z]{2}$/i.test(firstPathPart) ? firstPathPart.toLowerCase() : "us";
+}
+
+function appStoreLanguage(request = {}) {
+  const explicit = cleanString(request.language || request.lang || request.primaryLanguage);
+  if (!explicit) return "en_us";
+  return explicit.replace("-", "_").toLowerCase();
+}
+
+function appStoreLookupParams(rawUrl, url, request = {}) {
+  const idFromQuery = cleanString(url.searchParams.get("id"));
+  const idFromPath = cleanString(url.pathname.match(/\/id(\d+)(?:$|[/?#])/)?.[1]);
+  const bundleId = cleanString(request.bundleId || url.searchParams.get("bundleId"));
+  const appId = cleanString(request.appId || idFromQuery || idFromPath);
+  return {
+    appId,
+    bundleId,
+    country: appStoreCountry(url, request),
+    lang: appStoreLanguage(request),
+    originalUrl: rawUrl
+  };
+}
+
+function lookupAsset(url = "", kind = "asset", index = 1) {
+  const value = cleanString(url);
+  if (!value) return null;
+  return {
+    url: value,
+    label: `${kind}_${index}`,
+    fileName: `${kind}_${index}`
+  };
+}
+
+function appStoreVisibleTexts(result = {}) {
+  return [
+    result.trackName,
+    result.artistName,
+    result.primaryGenreName,
+    result.description,
+    result.releaseNotes
+  ].map((item) => cleanString(item)).filter(Boolean);
+}
+
+function appStoreCoreSellingPoints(result = {}) {
+  const description = cleanString(result.description);
+  return sellingPointsFromDescription(description);
+}
+
+function sellingPointsFromDescription(description = "") {
+  const text = cleanString(description);
+  if (!text) return [];
+  return text
+    .split(/\n+|(?<=[.!?。！？])\s+/)
+    .map((item) => item.replace(/^[-•\s]+/, "").trim())
+    .filter((item) => item.length >= 24)
+    .slice(0, 6);
+}
+
+function googlePlayPackageId(url, request = {}) {
+  return cleanString(request.appId || request.packageName || url.searchParams.get("id"));
+}
+
+function googlePlayCountry(request = {}) {
+  const explicit = cleanString(request.country || request.region || request.storeCountry || request.regions?.[0]);
+  return explicit ? explicit.toUpperCase() : "US";
+}
+
+function googlePlayLanguage(request = {}) {
+  const explicit = cleanString(request.language || request.lang || request.primaryLanguage);
+  return explicit ? explicit.replace("-", "_") : "en_US";
+}
+
+function htmlMetaContent(html = "", key = "") {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagPattern = new RegExp(`<meta\\b(?=[^>]*(?:property|name)=["']${escaped}["'])[^>]*>`, "i");
+  const tag = html.match(tagPattern)?.[0] || "";
+  const content = tag.match(/\bcontent=["']([^"']*)["']/i)?.[1] || "";
+  return decodeHtmlEntities(content);
+}
+
+function parseJsonLdScripts(html = "") {
+  const items = [];
+  const pattern = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const raw = decodeHtmlEntities(match[1]);
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) items.push(...parsed);
+      else if (parsed && typeof parsed === "object") items.push(parsed);
+    } catch {
+      // Ignore malformed structured data and keep meta fallbacks.
+    }
+  }
+  return items;
+}
+
+function firstSoftwareJsonLd(html = "") {
+  const items = parseJsonLdScripts(html);
+  return items.find((item) => {
+    const type = Array.isArray(item?.["@type"]) ? item["@type"].join(" ") : cleanString(item?.["@type"]);
+    return /SoftwareApplication|MobileApplication|GameApplication/i.test(type);
+  }) || items[0] || {};
+}
+
+function googlePlayImageUrls(html = "") {
+  const urls = new Set();
+  const patterns = [
+    /https?:\\?\/\\?\/play-lh\.googleusercontent\.com\\?\/[^"',<>\s\\]+/gi,
+    /https?:\/\/play-lh\.googleusercontent\.com\/[^"',<>\s\\]+/gi
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html))) {
+      const normalized = decodeHtmlEntities(match[0]).replace(/\\u003d/g, "=");
+      if (/^https?:\/\/play-lh\.googleusercontent\.com\//i.test(normalized)) urls.add(normalized);
+    }
+  }
+  return [...urls];
+}
+
+function googlePlayVideoUrls(html = "") {
+  const urls = new Set();
+  const patterns = [
+    /https?:\\?\/\\?\/(?:www\.)?youtube\.com\\?\/watch\?v=[A-Za-z0-9_-]+/gi,
+    /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[A-Za-z0-9_-]+/gi
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html))) {
+      const normalized = decodeHtmlEntities(match[0]);
+      if (/^https?:\/\/(?:www\.)?youtube\.com\/watch/i.test(normalized)) urls.add(normalized);
+    }
+  }
+  return [...urls];
+}
+
+function normalizeGooglePlayResult(rawUrl, pageUrl, html = "", packageId = "") {
+  const data = firstSoftwareJsonLd(html);
+  const productName = cleanString(data.name)
+    || htmlMetaContent(html, "og:title").replace(/\s+-\s+Apps on Google Play$/i, "");
+  const description = cleanString(data.description) || htmlMetaContent(html, "og:description");
+  const category = cleanString(data.applicationCategory || data.genre || data.category);
+  const developer = cleanString(data.author?.name || data.publisher?.name || data.offers?.seller?.name);
+  const iconUrl = cleanString(data.image?.url || data.image || htmlMetaContent(html, "og:image"));
+  const allImages = [
+    ...normalizeStringList(data.screenshot),
+    ...normalizeStringList(data.screenshotUrl),
+    ...normalizeStringList(data.screenshots),
+    ...googlePlayImageUrls(html)
+  ].map(decodeHtmlEntities).filter(Boolean);
+  const uniqueImages = [...new Set(allImages)];
+  const screenshots = uniqueImages
+    .filter((item) => item !== iconUrl)
+    .slice(0, 12)
+    .map((item, index) => lookupAsset(item, "google_play_screenshot", index + 1));
+  const videoPreviews = [
+    ...normalizeStringList(data.video),
+    ...normalizeStringList(data.trailer),
+    ...googlePlayVideoUrls(html)
+  ].map(decodeHtmlEntities)
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index)
+    .slice(0, 4)
+    .map((item, index) => lookupAsset(item, "google_play_preview", index + 1));
+
+  return {
+    url: rawUrl,
+    store: "google_play",
+    provider: {
+      name: "google_play_html",
+      status: "connected",
+      pageUrl
+    },
+    candidates: {
+      productName,
+      developer,
+      category,
+      shortDescription: cleanString(htmlMetaContent(html, "twitter:description")),
+      description,
+      icon: iconUrl ? {
+        url: iconUrl,
+        label: "google_play_icon",
+        fileName: "google_play_icon"
+      } : null,
+      screenshots,
+      videoPreviews,
+      visibleTexts: [
+        productName,
+        developer,
+        category,
+        description
+      ].filter(Boolean),
+      coreSellingPoints: sellingPointsFromDescription(description)
+    },
+    warnings: productName || description ? [] : [
+      "Google Play 页面已返回，但未解析到完整结构化字段；可能需要接入更稳定的商店页抓取 provider。"
+    ],
+    nextStageNotes: [
+      "Google Play 元数据来自公开商店页 HTML；页面结构可能随地区、语言或反爬策略变化。",
+      "截图和预览视频仍是远程 URL，使用前建议沉淀为产品素材。",
+      "coreSellingPoints 由描述文本自动拆句生成，进入 Seedance prompt 前建议允许用户确认。"
+    ],
+    inspectedAt: new Date().toISOString(),
+    ...(packageId ? { appId: packageId } : {})
+  };
+}
+
+async function inspectGooglePlayPage(context, request, url) {
+  const packageId = googlePlayPackageId(url, request);
+  if (!packageId) return null;
+  const pageUrl = new URL("https://play.google.com/store/apps/details");
+  pageUrl.searchParams.set("id", packageId);
+  pageUrl.searchParams.set("hl", googlePlayLanguage(request));
+  pageUrl.searchParams.set("gl", googlePlayCountry(request));
+
+  const fetchImpl = context.fetch || globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    throw new WangzhuanError("upstream_failed", "当前运行环境不支持 Google Play 页面请求", {
+      provider: "google_play_html"
+    }, 502);
+  }
+  const response = await fetchImpl(pageUrl, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": googlePlayLanguage(request).replace("_", "-"),
+      "User-Agent": "Mozilla/5.0 (compatible; AigcPlatformStoreInspector/1.0)"
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new WangzhuanError("upstream_failed", "Google Play 页面抓取失败", {
+      provider: "google_play_html",
+      status: response.status
+    }, 502);
+  }
+  return normalizeGooglePlayResult(request.url, pageUrl.toString(), text, packageId);
+}
+
+function normalizeAppStoreLookupResult(rawUrl, lookupUrl, result = {}) {
+  const screenshots = [
+    ...normalizeStringList(result.screenshotUrls),
+    ...normalizeStringList(result.ipadScreenshotUrls),
+    ...normalizeStringList(result.appletvScreenshotUrls)
+  ].map((item, index) => lookupAsset(item, "app_store_screenshot", index + 1)).filter(Boolean);
+  const videoPreviews = normalizeStringList(result.previewUrl)
+    .map((item, index) => lookupAsset(item, "app_store_preview", index + 1))
+    .filter(Boolean);
+  const iconUrl = cleanString(result.artworkUrl512 || result.artworkUrl100 || result.artworkUrl60);
+  return {
+    url: rawUrl,
+    store: "app_store",
+    provider: {
+      name: "apple_lookup",
+      status: "connected",
+      lookupUrl
+    },
+    candidates: {
+      productName: cleanString(result.trackName),
+      developer: cleanString(result.sellerName || result.artistName),
+      category: cleanString(result.primaryGenreName || result.genres?.[0]),
+      shortDescription: cleanString(result.primaryGenreName || result.trackContentRating),
+      description: cleanString(result.description),
+      icon: iconUrl ? {
+        url: iconUrl,
+        label: "app_store_icon",
+        fileName: "app_store_icon"
+      } : null,
+      screenshots,
+      videoPreviews,
+      visibleTexts: appStoreVisibleTexts(result),
+      coreSellingPoints: appStoreCoreSellingPoints(result)
+    },
+    warnings: [],
+    nextStageNotes: [
+      "App Store 元数据来自 Apple Lookup API；截图和预览视频仍是远程 URL，使用前建议沉淀为产品素材。",
+      "coreSellingPoints 由描述文本自动拆句生成，进入 Seedance prompt 前建议允许用户确认。"
+    ],
+    inspectedAt: new Date().toISOString()
+  };
+}
+
+async function inspectAppStoreLookup(context, request, url) {
+  const { appId, bundleId, country, lang } = appStoreLookupParams(request.url, url, request);
+  if (!appId && !bundleId) return null;
+  const lookupUrl = new URL("https://itunes.apple.com/lookup");
+  if (appId) lookupUrl.searchParams.set("id", appId);
+  else lookupUrl.searchParams.set("bundleId", bundleId);
+  lookupUrl.searchParams.set("country", country);
+  lookupUrl.searchParams.set("lang", lang);
+  lookupUrl.searchParams.set("entity", "software");
+
+  const fetchImpl = context.fetch || globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    throw new WangzhuanError("upstream_failed", "当前运行环境不支持 App Store Lookup 请求", {
+      provider: "apple_lookup"
+    }, 502);
+  }
+  const response = await fetchImpl(lookupUrl, {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new WangzhuanError("upstream_failed", "App Store Lookup 返回了不可解析的数据", {
+      provider: "apple_lookup"
+    }, 502);
+  }
+  if (!response.ok) {
+    throw new WangzhuanError("upstream_failed", "App Store Lookup 调用失败", {
+      provider: "apple_lookup",
+      status: response.status,
+      upstreamMessage: payload.errorMessage || ""
+    }, 502);
+  }
+  const result = Array.isArray(payload.results) ? payload.results[0] : null;
+  if (!result) {
+    throw new WangzhuanError("not_found", "App Store 未找到该应用", {
+      provider: "apple_lookup",
+      appId,
+      bundleId,
+      country
+    }, 404);
+  }
+  return normalizeAppStoreLookupResult(request.url, lookupUrl.toString(), result);
 }
 
 async function inspectWithProvider(context, request, url, store) {
@@ -137,5 +505,13 @@ export async function inspectStorePage(context, request = {}) {
   const store = detectStore(url);
   const providerResult = await inspectWithProvider(context, { ...request, url: rawUrl }, url, store);
   if (providerResult) return providerResult;
+  if (store === "google_play") {
+    const googlePlayResult = await inspectGooglePlayPage(context, { ...request, url: rawUrl }, url);
+    if (googlePlayResult) return googlePlayResult;
+  }
+  if (store === "app_store") {
+    const appStoreResult = await inspectAppStoreLookup(context, { ...request, url: rawUrl }, url);
+    if (appStoreResult) return appStoreResult;
+  }
   return fallbackStoreResult(rawUrl, url);
 }

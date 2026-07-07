@@ -536,14 +536,121 @@ function referenceFrameTimestamps(durationSec, frameCount) {
   });
 }
 
-function oneFramePerSecondTimestamps(durationSec) {
+function roundTimestampSec(value) {
+  return Math.round(numberOrZero(value) * 100) / 100;
+}
+
+function clampTimestampSec(durationSec, value) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0) return 0;
+  return roundTimestampSec(Math.min(Math.max(0, numberOrZero(value)), Math.max(0, duration - 0.1)));
+}
+
+function dedupeSortedTimestamps(timestampsSec = []) {
+  const unique = [];
+  for (const timestampSec of timestampsSec.slice().sort((a, b) => a - b)) {
+    const rounded = roundTimestampSec(timestampSec);
+    if (!unique.length || Math.abs(unique[unique.length - 1] - rounded) >= 0.01) {
+      unique.push(rounded);
+    }
+  }
+  return unique;
+}
+
+function normalizeSceneCuts(durationSec, sceneCutsSec = [], { minGapSec = 0.8 } = {}) {
   const duration = numberOrZero(durationSec);
   if (duration <= 0) return [];
-  const wholeSeconds = Math.max(1, Math.ceil(duration));
-  return Array.from({ length: wholeSeconds }, (_, index) => {
-    const timestamp = Math.min(index + 0.5, Math.max(0, duration - 0.1));
-    return Math.round(timestamp * 100) / 100;
-  });
+  const maxTimestamp = Math.max(0, duration - 0.1);
+  const sorted = sceneCutsSec
+    .map((value) => numberOrZero(value))
+    .filter((value) => value > 0 && value < maxTimestamp)
+    .sort((a, b) => a - b);
+  const normalized = [];
+  for (const value of sorted) {
+    if (!normalized.length || value - normalized[normalized.length - 1] >= minGapSec) {
+      normalized.push(roundTimestampSec(value));
+    }
+  }
+  return normalized;
+}
+
+function buildSceneSegments(durationSec, sceneCutsSec = [], options = {}) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0) return [];
+  const boundaries = [0, ...normalizeSceneCuts(duration, sceneCutsSec, options), duration];
+  const segments = [];
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startSec = boundaries[index];
+    const endSec = boundaries[index + 1];
+    if (endSec - startSec <= 0.05) continue;
+    segments.push({
+      index,
+      startSec: roundTimestampSec(startSec),
+      endSec: roundTimestampSec(endSec),
+      durationSec: roundTimestampSec(endSec - startSec)
+    });
+  }
+  return segments;
+}
+
+function segmentSampleTimestamps(durationSec, segment, { longSceneThresholdSec = 8 } = {}) {
+  if (!segment || segment.durationSec <= 0) return [];
+  const samples = [];
+  const pushRelative = (ratio) => {
+    const span = Math.max(0.05, segment.endSec - segment.startSec);
+    const value = segment.startSec + (span * ratio);
+    samples.push(clampTimestampSec(durationSec, value));
+  };
+  pushRelative(1 / 3);
+  pushRelative(2 / 3);
+  if (segment.durationSec >= longSceneThresholdSec) {
+    pushRelative(0.2);
+    pushRelative(0.8);
+  }
+  return dedupeSortedTimestamps(samples);
+}
+
+function buildSceneAwareFrameTimestamps(durationSec, sceneCutsSec = [], options = {}) {
+  const duration = numberOrZero(durationSec);
+  if (duration <= 0) return [];
+  const {
+    longSceneThresholdSec = 8,
+    maxFrames = 40,
+    minSceneGapSec = 0.8,
+    startFrameOffsetSec = 0.25,
+    endFrameOffsetSec = 0.25
+  } = options;
+  const segments = buildSceneSegments(duration, sceneCutsSec, { minGapSec: minSceneGapSec });
+  const samples = [];
+  samples.push(clampTimestampSec(duration, startFrameOffsetSec));
+  for (const segment of segments) {
+    samples.push(...segmentSampleTimestamps(duration, segment, { longSceneThresholdSec }));
+  }
+  samples.push(clampTimestampSec(duration, Math.max(0, duration - endFrameOffsetSec)));
+  const deduped = dedupeSortedTimestamps(samples);
+  if (deduped.length <= maxFrames) return deduped;
+  const forced = new Set([
+    String(clampTimestampSec(duration, startFrameOffsetSec)),
+    String(clampTimestampSec(duration, Math.max(0, duration - endFrameOffsetSec)))
+  ]);
+  const middle = deduped.filter((value) => !forced.has(String(value)));
+  const remaining = Math.max(0, maxFrames - forced.size);
+  const reduced = remaining > 0 ? referenceFrameTimestamps(duration, remaining).map((timestampSec) => {
+    let best = middle[0] ?? deduped[0];
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of middle) {
+      const distance = Math.abs(candidate - timestampSec);
+      if (distance < bestDistance) {
+        best = candidate;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }) : [];
+  return dedupeSortedTimestamps([
+    ...Array.from(forced).map((value) => Number(value)),
+    ...reduced
+  ]).slice(0, maxFrames);
 }
 
 function llmUsesGptFrameOnlyDecomposition(llmConfig = {}) {
@@ -563,33 +670,28 @@ async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs
   await rm(frameDir, { recursive: true, force: true }).catch(() => {});
   await mkdir(frameDir, { recursive: true });
   try {
-    for (let index = 0; index < timestampsSec.length; index += 1) {
-      const timestampSec = timestampsSec[index];
-      const framePath = join(frameDir, `frame-${String(index + 1).padStart(2, "0")}.jpg`);
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-ss",
-        String(timestampSec),
-        "-i",
-        filePath,
-        "-frames:v",
-        "1",
-        "-vf",
-        "scale='min(720,iw)':-2",
-        "-q:v",
-        "3",
-        framePath
-      ], {
-        encoding: "utf8",
-        maxBuffer: 1024 * 1024,
-        timeout: timeoutMs,
-        windowsHide: true
-      });
-      const buffer = await readFile(framePath);
+    const extractionPlan = buildBatchReferenceFrameExtractionPlan(frameDir, timestampsSec);
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i",
+      filePath,
+      "-filter_complex",
+      extractionPlan.filterComplex,
+      "-q:v",
+      "3",
+      ...extractionPlan.outputArgs
+    ], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: timeoutMs,
+      windowsHide: true
+    });
+    for (const output of extractionPlan.outputs) {
+      const buffer = await readFile(output.framePath);
       if (buffer.length) {
         frames.push({
-          index,
-          timestampSec,
+          index: output.index,
+          timestampSec: output.timestampSec,
           mimeType: "image/jpeg",
           dataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`
         });
@@ -601,6 +703,79 @@ async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs
   return frames;
 }
 
+function buildBatchReferenceFrameExtractionPlan(frameDir, timestampsSec = []) {
+  const normalizedTimestamps = timestampsSec.map((timestampSec, index) => ({
+    index,
+    timestampSec: roundTimestampSec(timestampSec),
+    outputLabel: `o${index}`,
+    inputLabel: `v${index}`,
+    framePath: join(frameDir, `frame-${String(index + 1).padStart(2, "0")}.jpg`)
+  }));
+  if (!normalizedTimestamps.length) {
+    return {
+      filterComplex: "",
+      outputArgs: [],
+      outputs: []
+    };
+  }
+  if (normalizedTimestamps.length === 1) {
+    const output = normalizedTimestamps[0];
+    return {
+      filterComplex: `[0:v]trim=start=${output.timestampSec},setpts=PTS-STARTPTS,select='eq(n\\,0)',scale='min(720,iw)':-2[${output.outputLabel}]`,
+      outputArgs: ["-map", `[${output.outputLabel}]`, "-frames:v", "1", output.framePath],
+      outputs: normalizedTimestamps
+    };
+  }
+  const splitOutputs = normalizedTimestamps.map((output) => `[${output.inputLabel}]`).join("");
+  const filterParts = [`[0:v]split=${normalizedTimestamps.length}${splitOutputs}`];
+  for (const output of normalizedTimestamps) {
+    filterParts.push(
+      `[${output.inputLabel}]trim=start=${output.timestampSec},setpts=PTS-STARTPTS,select='eq(n\\,0)',scale='min(720,iw)':-2[${output.outputLabel}]`
+    );
+  }
+  const outputArgs = normalizedTimestamps.flatMap((output) => [
+    "-map",
+    `[${output.outputLabel}]`,
+    "-frames:v",
+    "1",
+    output.framePath
+  ]);
+  return {
+    filterComplex: filterParts.join(";"),
+    outputArgs,
+    outputs: normalizedTimestamps
+  };
+}
+
+async function ffmpegDetectReferenceVideoScenes(filePath, {
+  threshold = 0.1,
+  timeoutMs = 25000,
+  minGapSec = 0.8
+} = {}) {
+  const { stderr = "" } = await execFileAsync("ffmpeg", [
+    "-hide_banner",
+    "-i",
+    filePath,
+    "-vf",
+    `select='gt(scene,${threshold})',showinfo`,
+    "-an",
+    "-f",
+    "null",
+    "-"
+  ], {
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: timeoutMs,
+    windowsHide: true
+  });
+  const timestamps = [];
+  const regex = /pts_time:([0-9]+(?:\.[0-9]+)?)/g;
+  for (const match of stderr.matchAll(regex)) {
+    timestamps.push(Number(match[1]));
+  }
+  return normalizeSceneCuts(Number.POSITIVE_INFINITY, timestamps, { minGapSec });
+}
+
 async function extractReferenceFrames(context, filePath, timestampsSec) {
   if (!timestampsSec.length) return [];
   if (typeof context.extractReferenceFrames === "function") {
@@ -610,11 +785,21 @@ async function extractReferenceFrames(context, filePath, timestampsSec) {
   return ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs });
 }
 
+async function detectReferenceVideoScenes(context, filePath, durationSec) {
+  if (typeof context.detectReferenceVideoScenes === "function") {
+    return context.detectReferenceVideoScenes({ filePath, durationSec });
+  }
+  const threshold = numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectThreshold) || 0.1;
+  const timeoutMs = numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectTimeoutMs) || 25000;
+  const minGapSec = numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectMinGapSec) || 0.8;
+  return ffmpegDetectReferenceVideoScenes(filePath, { threshold, timeoutMs, minGapSec });
+}
+
 async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {}) {
   const videoPath = resolveStoredVideoPath(context, probe.storedPath);
   const mimeType = probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
   const forceFramesOnly = llmUsesGptFrameOnlyDecomposition(llmConfig);
-  const useOneFramePerSecond = forceFramesOnly || llmUsesGeminiDecompositionUrlWithFrames(llmConfig);
+  const useSceneAwareFrames = forceFramesOnly || llmUsesGeminiDecompositionUrlWithFrames(llmConfig);
   const fileUrl = forceFramesOnly ? "" : resolveModelFileUrl(probe);
   const configuredFrameCount = clampInteger(
     context.config?.wangzhuan?.llm?.referenceFrameCount,
@@ -622,10 +807,24 @@ async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {})
     1,
     MAX_REFERENCE_FRAME_COUNT
   );
-  const timestampsSec = useOneFramePerSecond
-    ? oneFramePerSecondTimestamps(probe.durationSec)
-    : referenceFrameTimestamps(probe.durationSec, configuredFrameCount);
   const warnings = [];
+  let timestampsSec = referenceFrameTimestamps(probe.durationSec, configuredFrameCount);
+  if (useSceneAwareFrames) {
+    try {
+      const sceneCutsSec = await detectReferenceVideoScenes(context, videoPath, probe.durationSec);
+      timestampsSec = buildSceneAwareFrameTimestamps(probe.durationSec, sceneCutsSec, {
+        longSceneThresholdSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneLongThresholdSec) || 8,
+        maxFrames: clampInteger(context.config?.wangzhuan?.llm?.sceneMaxFrames, 40, 4, 40),
+        minSceneGapSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectMinGapSec) || 0.8
+      });
+    } catch (error) {
+      warnings.push({
+        code: "reference_scene_detect_failed",
+        message: "参考视频场景检测失败，已回退为基础抽帧",
+        reason: String(error?.message || error?.code || "unknown").slice(0, 160)
+      });
+    }
+  }
   let frames = [];
   try {
     frames = await extractReferenceFrames(context, videoPath, timestampsSec);
@@ -1557,4 +1756,10 @@ export async function decomposeReferenceVideo(context, request = {}) {
   };
 }
 
-export { callGeminiCompatibleLlm, callOpenAiCompatibleLlm, parseLlmJsonContent };
+export {
+  buildBatchReferenceFrameExtractionPlan,
+  buildSceneAwareFrameTimestamps,
+  callGeminiCompatibleLlm,
+  callOpenAiCompatibleLlm,
+  parseLlmJsonContent
+};

@@ -89,10 +89,14 @@ export function sendErrorEnvelope(res, error, requestId) {
   let safeError = error;
   if (!(safeError instanceof WangzhuanError)) {
     if (safeError?.code === "invalid_state_transition") {
+      const detail = safeError.details || {};
+      const fromStatus = detail.fromStatus || "__new__";
+      const toStatus = detail.toStatus || "unknown";
+      const triggerName = detail.triggerName || "unknown";
       safeError = new WangzhuanError(
         "invalid_state_transition",
-        "任务状态流转不被允许",
-        safeError.details || {},
+        `任务状态流转不被允许：${fromStatus} -> ${toStatus} by ${triggerName}`,
+        detail,
         409
       );
     } else {
