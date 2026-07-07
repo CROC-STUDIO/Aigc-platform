@@ -217,6 +217,108 @@ test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () 
   assert.match(text, /具体金额.*truthRules/);
 });
 
+test("Seedance plan prompt falls back when branch output-template strings are blank", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707123000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          sliceStrategy: "auto_10_15s_multi_slice",
+          moneyVisuals: ["coin_burst", "cash_rain"],
+          subtitleWorkflow: "post_process"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_blank_fallback",
+      branchLabel: "Blank fallback",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "   ",
+      sliceStrategy: "   ",
+      moneyVisuals: [],
+      subtitleWorkflow: "   ",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "bus commute",
+      subject: "commuter",
+      action: "checks app rewards",
+      camera: "phone close-up",
+      lighting: "daylight",
+      style: "UGC",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"outputTemplateMode": "three_slice_net_earning"/);
+  assert.match(text, /"sliceStrategy": "auto_10_15s_multi_slice"/);
+  assert.match(text, /"subtitleWorkflow": "post_process"/);
+});
+
+test("Seedance plan prompt preserves object-shaped subtitleWorkflow in prompt context", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707124000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          subtitleWorkflow: "post_process"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_object_subtitle_workflow",
+      branchLabel: "Object subtitle workflow",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      subtitleWorkflow: {
+        burnedInSubtitles: false,
+        postSubtitleRequired: true,
+        provider: "pixel_tech",
+        subtitleScript: ["Linha 1", "Linha 2"]
+      },
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "living room",
+      subject: "viewer",
+      action: "watches drama and checks rewards",
+      camera: "phone close-up",
+      lighting: "soft daylight",
+      style: "short-drama hook",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"subtitleWorkflow": \{/);
+  assert.match(text, /"provider": "pixel_tech"/);
+  assert.match(text, /"subtitleScript": \[/);
+  assert.match(text, /"Linha 1"/);
+});
+
 test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {
   const messages = buildThirtySecondSeedancePlanMessages({
     batch: {

@@ -98,6 +98,14 @@ function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function resolveCleanString(...values) {
+  for (const value of values) {
+    const text = cleanString(value);
+    if (text) return text;
+  }
+  return "";
+}
+
 function normalizeStringList(value) {
   if (Array.isArray(value)) {
     return value.map((item) => cleanString(item)).filter(Boolean);
@@ -411,10 +419,24 @@ export function buildSeedancePlanMessages({
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
   const localeContext = resolvePlanLocaleContext(batch, branch);
-  const outputTemplateMode = cleanString(branch.outputTemplateMode || draft.outputTemplateMode || "reference_fission");
-  const sliceStrategy = cleanString(branch.sliceStrategy || draft.sliceStrategy || "fixed_15s");
+  const outputTemplateMode = resolveCleanString(branch.outputTemplateMode, draft.outputTemplateMode, "reference_fission");
+  const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
-  const subtitleWorkflow = cleanString(branch.subtitleWorkflow || draft.subtitleWorkflow || "post_process");
+  const branchSubtitleWorkflow = branch.subtitleWorkflow;
+  const draftSubtitleWorkflow = draft.subtitleWorkflow;
+  const subtitleWorkflow = (() => {
+    const branchSubtitleWorkflowText = cleanString(branchSubtitleWorkflow);
+    if (branchSubtitleWorkflowText) return branchSubtitleWorkflowText;
+    if (branchSubtitleWorkflow && typeof branchSubtitleWorkflow === "object" && !Array.isArray(branchSubtitleWorkflow)) {
+      return branchSubtitleWorkflow;
+    }
+    const draftSubtitleWorkflowText = cleanString(draftSubtitleWorkflow);
+    if (draftSubtitleWorkflowText) return draftSubtitleWorkflowText;
+    if (draftSubtitleWorkflow && typeof draftSubtitleWorkflow === "object" && !Array.isArray(draftSubtitleWorkflow)) {
+      return draftSubtitleWorkflow;
+    }
+    return "post_process";
+  })();
   const localeGuideText = formatPlanLocaleGuide(localeContext);
   const referenceSlotGuide = buildReferenceAssetSlotGuide(assetUrls, branch.assetFileNames || {});
   const referenceSlotGuideText = formatReferenceAssetSlotGuide(referenceSlotGuide);
