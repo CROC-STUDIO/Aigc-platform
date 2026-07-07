@@ -30,6 +30,23 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
   seedancePrompt: "15s 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
   negativePrompt: "Things to avoid in generation",
+  segmentRole: "Role of this slice: hook_slice, proof_slice, withdrawal_slice, cta_slice, or continuity_slice",
+  sliceDurationSec: "Target slice duration, preferably 10-15 seconds for multi-slice net-earning materials",
+  outputTemplateMode: "reference_fission | three_slice_net_earning | short_drama_earning_highlight",
+  moneyVisuals: ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"],
+  withdrawalVisual: "Withdrawal or reward proof visual without invented exact amounts unless truthRules provide them",
+  subtitleWorkflow: {
+    burnedInSubtitles: false,
+    postSubtitleRequired: true,
+    provider: "pixel_tech",
+    subtitleScript: ["Short post-process subtitle lines"]
+  },
+  sliceDiversity: {
+    personChangedFromPrevious: "true for segmentIndex > 1 unless continuity mode explicitly requires same person",
+    sceneChangedFromPrevious: "true for segmentIndex > 1 unless continuity mode explicitly requires same scene",
+    clothingChangedFromPrevious: "true for segmentIndex > 1 unless continuity mode explicitly requires same clothing",
+    voiceChangedFromPrevious: "true for segmentIndex > 1 unless continuity mode explicitly requires same voice"
+  },
   mediaRefs: {
     productIcon: "URL or empty",
     productScreenshot: "URL or empty",
@@ -394,6 +411,10 @@ export function buildSeedancePlanMessages({
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
   const localeContext = resolvePlanLocaleContext(batch, branch);
+  const outputTemplateMode = cleanString(branch.outputTemplateMode || draft.outputTemplateMode || "reference_fission");
+  const sliceStrategy = cleanString(branch.sliceStrategy || draft.sliceStrategy || "fixed_15s");
+  const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
+  const subtitleWorkflow = cleanString(branch.subtitleWorkflow || draft.subtitleWorkflow || "post_process");
   const localeGuideText = formatPlanLocaleGuide(localeContext);
   const referenceSlotGuide = buildReferenceAssetSlotGuide(assetUrls, branch.assetFileNames || {});
   const referenceSlotGuideText = formatReferenceAssetSlotGuide(referenceSlotGuide);
@@ -438,6 +459,10 @@ export function buildSeedancePlanMessages({
       targetChannel: localeContext.targetChannel,
       targetChannels: branch.targetChannels || (localeContext.targetChannel ? [localeContext.targetChannel] : []),
       outputRatio: localeContext.outputRatio,
+      outputTemplateMode,
+      sliceStrategy,
+      moneyVisuals,
+      subtitleWorkflow,
       promiseLevel: branch.promiseLevel || draft.promiseLevel,
       materialDirection: branch.materialDirection,
       voiceoverStyle: localeContext.voiceoverStyle,
@@ -467,6 +492,15 @@ export function buildSeedancePlanMessages({
     "",
     "字段说明：",
     JSON.stringify(SEEDANCE_PLAN_SCHEMA_HINT, null, 2),
+    "",
+    "网赚出量模板规则：",
+    "1. outputTemplateMode=three_slice_net_earning 时，优先采用三段式或多段式拼接结构；每个切片建议10-15秒，后端可按模型能力拆成 Seedance 片段。",
+    "2. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
+    "3. 每个切片都要围绕“网赚安利 + 提现展示”展开，形式以单人或双人口播推荐 + 产品界面展示为主，减少大段屏幕文字。",
+    "4. outputTemplateMode=short_drama_earning_highlight 时，开头先给短剧高光或冲突钩子，中后段切换至赚钱安利链路，重点展示产品剧源、产品界面、看短剧得奖励的链路，结尾强化提现能力。",
+    "5. moneyVisuals 可使用真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录，也可扩展为满屏撒钱/撒金币或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。",
+    "6. withdrawalVisual 必须说明提现展示方式，例如 Pix/Nubank 选项、银行卡到账动画、提现记录截图或本地支付方式；具体金额、门槛和到账时间只能来自 truthRules。",
+    "7. Seedance 原视频不得烧录字幕、不得生成长字幕或密集画面文字；字幕内容写入 subtitleWorkflow.subtitleScript，供 Pixel Tech 或后处理贴字幕。",
     "",
     "Seedance prompt 补充要求：",
     "1. seedancePrompt 必须按镜头拆分，每个镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",

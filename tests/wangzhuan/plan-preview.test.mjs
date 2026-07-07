@@ -158,6 +158,65 @@ test("Seedance plan prompt strongly binds locale to people, visible text, and cu
   assert.match(text, /所有用户可见金额、余额、提现档位、奖励金额、UI 金额符号、字幕金额和口播金额只能使用 currencySymbol/);
 });
 
+test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707120000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          sliceStrategy: "auto_10_15s_multi_slice",
+          moneyVisuals: ["coin_burst", "cash_rain", "withdrawal_success"],
+          subtitleWorkflow: "post_process"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "BR workers",
+      productName: "Drama Gold",
+      language: "pt-BR",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      sliceStrategy: "auto_10_15s_multi_slice",
+      moneyVisuals: ["coin_burst", "cash_rain", "withdrawal_success"],
+      subtitleWorkflow: "post_process",
+      promiseLevel: "strong_conversion",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "bus commute",
+      subject: "commuter",
+      action: "watches drama and checks rewards",
+      camera: "handheld phone close-up",
+      lighting: "daylight",
+      style: "short-drama hook",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /三段式拼接|multi-slice|多段式/);
+  assert.match(text, /每个切片.*10-15秒/);
+  assert.match(text, /人物、场景、服装.*变化/);
+  assert.match(text, /网赚安利.*提现展示/);
+  assert.match(text, /短剧高光.*赚钱安利/);
+  assert.match(text, /真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录/);
+  assert.match(text, /Seedance 原视频不得烧录字幕/);
+  assert.match(text, /subtitleWorkflow/);
+  assert.match(text, /无具体金额的数字增长|不含具体金额/);
+  assert.match(text, /具体金额.*truthRules/);
+});
+
 test("30s Seedance plan prompt requires one complete storyboard split into two continuous segments", () => {
   const messages = buildThirtySecondSeedancePlanMessages({
     batch: {
