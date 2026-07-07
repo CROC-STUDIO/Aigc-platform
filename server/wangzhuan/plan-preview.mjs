@@ -422,20 +422,24 @@ export function buildSeedancePlanMessages({
   const outputTemplateMode = resolveCleanString(branch.outputTemplateMode, draft.outputTemplateMode, "reference_fission");
   const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
-  const branchSubtitleWorkflow = branch.subtitleWorkflow;
-  const draftSubtitleWorkflow = draft.subtitleWorkflow;
+  const branchSubtitleWorkflowText = cleanString(branch.subtitleWorkflow);
+  const draftSubtitleWorkflowText = cleanString(draft.subtitleWorkflow);
+  const branchSubtitleWorkflowObject = normalizeObject(branch.subtitleWorkflow);
+  const draftSubtitleWorkflowObject = normalizeObject(draft.subtitleWorkflow);
   const subtitleWorkflow = (() => {
-    const branchSubtitleWorkflowText = cleanString(branchSubtitleWorkflow);
-    if (branchSubtitleWorkflowText) return branchSubtitleWorkflowText;
-    if (branchSubtitleWorkflow && typeof branchSubtitleWorkflow === "object" && !Array.isArray(branchSubtitleWorkflow)) {
-      return branchSubtitleWorkflow;
+    if (branchSubtitleWorkflowText) {
+      return normalizeSubtitleWorkflow();
     }
-    const draftSubtitleWorkflowText = cleanString(draftSubtitleWorkflow);
-    if (draftSubtitleWorkflowText) return draftSubtitleWorkflowText;
-    if (draftSubtitleWorkflow && typeof draftSubtitleWorkflow === "object" && !Array.isArray(draftSubtitleWorkflow)) {
-      return draftSubtitleWorkflow;
+    if (Object.keys(branchSubtitleWorkflowObject).length) {
+      return normalizeSubtitleWorkflow(branchSubtitleWorkflowObject, [], draftSubtitleWorkflowObject);
     }
-    return "post_process";
+    if (draftSubtitleWorkflowText) {
+      return normalizeSubtitleWorkflow();
+    }
+    if (Object.keys(draftSubtitleWorkflowObject).length) {
+      return normalizeSubtitleWorkflow(draftSubtitleWorkflowObject);
+    }
+    return normalizeSubtitleWorkflow();
   })();
   const localeGuideText = formatPlanLocaleGuide(localeContext);
   const referenceSlotGuide = buildReferenceAssetSlotGuide(assetUrls, branch.assetFileNames || {});

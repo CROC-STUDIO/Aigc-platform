@@ -264,7 +264,10 @@ test("Seedance plan prompt falls back when branch output-template strings are bl
   const text = messagesText(messages);
   assert.match(text, /"outputTemplateMode": "three_slice_net_earning"/);
   assert.match(text, /"sliceStrategy": "auto_10_15s_multi_slice"/);
-  assert.match(text, /"subtitleWorkflow": "post_process"/);
+  assert.match(text, /"subtitleWorkflow": \{/);
+  assert.match(text, /"burnedInSubtitles": false/);
+  assert.match(text, /"postSubtitleRequired": true/);
+  assert.match(text, /"provider": "pixel_tech"/);
 });
 
 test("Seedance plan prompt preserves object-shaped subtitleWorkflow in prompt context", () => {
@@ -314,6 +317,8 @@ test("Seedance plan prompt preserves object-shaped subtitleWorkflow in prompt co
 
   const text = messagesText(messages);
   assert.match(text, /"subtitleWorkflow": \{/);
+  assert.match(text, /"burnedInSubtitles": false/);
+  assert.match(text, /"postSubtitleRequired": true/);
   assert.match(text, /"provider": "pixel_tech"/);
   assert.match(text, /"subtitleScript": \[/);
   assert.match(text, /"Linha 1"/);
