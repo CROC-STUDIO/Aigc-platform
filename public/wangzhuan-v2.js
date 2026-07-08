@@ -999,6 +999,7 @@ function removeActiveBranch() {
 function currentDraft() {
   const branches = collectBranchDrafts();
   const primary = branches[0] || {};
+  const active = branches[state.activeBranchIndex] || primary;
   return {
     displayName: value(els.displayName) || value(els.productName) || "未命名模板",
     productName: primary.productName || value(els.productName),
@@ -1011,10 +1012,10 @@ function currentDraft() {
     languages: [value(els.language) || "en-US"],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
-    outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
-    sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
-    moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
-    subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
+    outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
+    sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
+    moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+    subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
@@ -1313,7 +1314,7 @@ function planSignatureInput() {
   const region = value(els.targetRegion);
   const language = value(els.language);
   const branches = collectBranchDrafts();
-  const primary = branches[0] || {};
+  const active = branches[state.activeBranchIndex] || branches[0] || {};
   return {
     productName: value(els.productName),
     productLink: value(els.productLink),
@@ -1333,10 +1334,10 @@ function planSignatureInput() {
     languages: [language],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
-    outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
-    sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
-    moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
-    subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
+    outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
+    sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
+    moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+    subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
@@ -1355,7 +1356,7 @@ function estimateRequest() {
   const language = value(els.language);
   const disclaimerFields = disclaimerRequestFields();
   const branches = collectBranchDrafts();
-  const primary = branches[0] || {};
+  const active = branches[state.activeBranchIndex] || branches[0] || {};
   return {
     batchName: value($("#wzBatchName")),
     projectName: value($("#wzProjectName")),
@@ -1387,10 +1388,10 @@ function estimateRequest() {
         languages: [language],
         materialDirection: effectiveMaterialDirection(),
         materialDirectionCustom: value(els.materialDirectionCustom),
-        outputTemplateMode: primary.outputTemplateMode || value(els.outputTemplateMode),
-        sliceStrategy: primary.sliceStrategy || value(els.sliceStrategy),
-        moneyVisuals: primary.moneyVisuals || selectedValues(els.moneyVisuals),
-        subtitleWorkflow: primary.subtitleWorkflow || value(els.subtitleWorkflow),
+        outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
+        sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
+        moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+        subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
         voiceoverStyle: value(els.voiceoverStyle),
         promiseLevel: value(els.promiseLevel),
         truthRules: collectTruthRules(),
