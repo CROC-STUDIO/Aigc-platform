@@ -1079,6 +1079,10 @@ function isAssetReviewApproved(status = "") {
   return ["approved", "active", "success", "succeeded", "pass", "passed"].includes(String(status || "").trim().toLowerCase());
 }
 
+function planListValue(value) {
+  return Array.isArray(value) ? value.join("\n") : String(value || "");
+}
+
 function renderPlanEditors(plans = []) {
   if (!plans.length) {
     els.planBox.className = "wz-list empty-line";
@@ -1089,10 +1093,18 @@ function renderPlanEditors(plans = []) {
   els.planBox.innerHTML = plans.map((plan, index) => `
     <section class="wz-v2-plan-editor" data-plan-id="${plan.planId || ""}">
       <h3>Prompt ${index + 1}${plan.branchLabel ? ` · ${plan.branchLabel}` : ""}</h3>
-      <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${plan.hook || ""}</textarea></label>
-      <label>口播 <textarea data-plan-field="voiceover" class="wz-json-box compact">${plan.voiceover || ""}</textarea></label>
-      <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${plan.seedancePrompt || ""}</textarea></label>
-      <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${plan.negativePrompt || ""}</textarea></label>
+      <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${escapeHtml(plan.hook || "")}</textarea></label>
+      <label>正文脚本 <textarea data-plan-field="body" class="wz-json-box compact">${escapeHtml(plan.body || "")}</textarea></label>
+      <label>口播 <textarea data-plan-field="voiceover" class="wz-json-box compact">${escapeHtml(plan.voiceover || "")}</textarea></label>
+      <label>字幕脚本（后处理） <textarea data-plan-field="subtitles" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitles))}</textarea></label>
+      <label>CTA <textarea data-plan-field="cta" class="wz-json-box compact">${escapeHtml(plan.cta || "")}</textarea></label>
+      <label>Ending <textarea data-plan-field="ending" class="wz-json-box compact">${escapeHtml(plan.ending || "")}</textarea></label>
+      <label>首帧 Image Prompt <textarea data-plan-field="imagePrompt" class="wz-json-box compact">${escapeHtml(plan.imagePrompt || "")}</textarea></label>
+      <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
+      <label>网赚视觉元素 <textarea data-plan-field="moneyVisuals" class="wz-json-box compact">${escapeHtml(planListValue(plan.moneyVisuals))}</textarea></label>
+      <label>提现展示 <textarea data-plan-field="withdrawalVisual" class="wz-json-box compact">${escapeHtml(plan.withdrawalVisual || "")}</textarea></label>
+      <label>后处理字幕 <textarea data-plan-field="subtitleScript" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitleWorkflow?.subtitleScript))}</textarea></label>
+      <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${escapeHtml(plan.negativePrompt || "")}</textarea></label>
     </section>
   `).join("");
 }
@@ -1130,17 +1142,39 @@ function setPlanUpstreamLocked(locked) {
   }
 }
 
+function splitLines(value = "") {
+  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
 function collectEditablePlans() {
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
   return plans.map((plan) => {
     const editor = els.planBox?.querySelector(`[data-plan-id="${CSS.escape(plan.planId || "")}"]`);
     const read = (field) => editor?.querySelector(`[data-plan-field="${field}"]`)?.value.trim();
+    const readList = (field) => splitLines(read(field) || "");
+    const subtitles = readList("subtitles");
+    const moneyVisuals = readList("moneyVisuals");
+    const subtitleScript = readList("subtitleScript");
     return {
       ...plan,
       hook: read("hook") ?? plan.hook,
+      body: read("body") ?? plan.body,
       voiceover: read("voiceover") ?? plan.voiceover,
+      subtitles: subtitles.length ? subtitles : plan.subtitles,
+      cta: read("cta") ?? plan.cta,
+      ending: read("ending") ?? plan.ending,
+      imagePrompt: read("imagePrompt") ?? plan.imagePrompt,
       seedancePrompt: read("seedancePrompt") ?? plan.seedancePrompt,
+      moneyVisuals: moneyVisuals.length ? moneyVisuals : plan.moneyVisuals,
+      withdrawalVisual: read("withdrawalVisual") ?? plan.withdrawalVisual,
+      subtitleWorkflow: {
+        ...(plan.subtitleWorkflow || {}),
+        burnedInSubtitles: false,
+        postSubtitleRequired: plan.subtitleWorkflow?.postSubtitleRequired !== false,
+        provider: plan.subtitleWorkflow?.provider || "pixel_tech",
+        subtitleScript: subtitleScript.length ? subtitleScript : (plan.subtitleWorkflow?.subtitleScript || plan.subtitles || [])
+      },
       negativePrompt: read("negativePrompt") ?? plan.negativePrompt
     };
   });

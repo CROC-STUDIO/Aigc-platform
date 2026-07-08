@@ -309,6 +309,24 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(jobs, /const PLAN_SIGNATURE_FIELDS = Object\.freeze\(\[[\s\S]*"outputTemplateMode"[\s\S]*"sliceStrategy"[\s\S]*"moneyVisuals"[\s\S]*"subtitleWorkflow"[\s\S]*"branches"[\s\S]*\]\)/);
 });
 
+test("v2 plan editor exposes output-template plan fields", async () => {
+  const js = await readFile(new URL("../../public/wangzhuan-v2.js", import.meta.url), "utf8");
+  const pipeline = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
+
+  assert.match(js, /data-plan-field="body"/);
+  assert.match(js, /data-plan-field="imagePrompt"/);
+  assert.match(js, /data-plan-field="subtitles"/);
+  assert.match(js, /data-plan-field="cta"/);
+  assert.match(js, /data-plan-field="ending"/);
+  assert.match(js, /data-plan-field="moneyVisuals"/);
+  assert.match(js, /data-plan-field="withdrawalVisual"/);
+  assert.match(js, /data-plan-field="subtitleScript"/);
+  assert.match(js, /readList\("moneyVisuals"\)/);
+  assert.match(js, /subtitleWorkflow:\s*\{/);
+  assert.match(pipeline, /buildGenerationPlanRecord\([\s\S]*planPayload:\s*\{[\s\S]*segmentRole[\s\S]*sliceDurationSec[\s\S]*outputTemplateMode[\s\S]*moneyVisuals[\s\S]*withdrawalVisual[\s\S]*subtitleWorkflow[\s\S]*sliceDiversity/);
+  assert.match(pipeline, /const nextScript = \{[\s\S]*segmentRole:\s*plan\.segmentRole[\s\S]*sliceDurationSec:\s*plan\.sliceDurationSec[\s\S]*outputTemplateMode:\s*plan\.outputTemplateMode[\s\S]*moneyVisuals:\s*plan\.moneyVisuals[\s\S]*withdrawalVisual:\s*plan\.withdrawalVisual[\s\S]*subtitleWorkflow:\s*plan\.subtitleWorkflow[\s\S]*sliceDiversity:\s*plan\.sliceDiversity/);
+});
+
 test("wangzhuan v2 restores task-manager backflow links in place", async () => {
   const js = await readText("public/wangzhuan-v2.js");
   assert.match(js, /readWorkbenchRestoreRequest/);

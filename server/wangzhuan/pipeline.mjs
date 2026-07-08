@@ -607,6 +607,13 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           subtitles = planPayload.subtitles;
           complianceNotes = planPayload.complianceNotes;
           mediaRefs = planPayload.mediaRefs;
+          const segmentRole = planPayload.segmentRole;
+          const sliceDurationSec = planPayload.sliceDurationSec;
+          const outputTemplateMode = planPayload.outputTemplateMode;
+          const moneyVisuals = planPayload.moneyVisuals;
+          const withdrawalVisual = planPayload.withdrawalVisual;
+          const subtitleWorkflow = planPayload.subtitleWorkflow;
+          const sliceDiversity = planPayload.sliceDiversity;
           planRecord = buildGenerationPlanRecord({
             batch,
             branch,
@@ -626,7 +633,14 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               seedancePrompt,
               negativePrompt,
               mediaRefs,
-              complianceNotes
+              complianceNotes,
+              segmentRole,
+              sliceDurationSec,
+              outputTemplateMode,
+              moneyVisuals,
+              withdrawalVisual,
+              subtitleWorkflow,
+              sliceDiversity
             }
           });
           plans.push(planRecord);
@@ -656,7 +670,14 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
             seedancePrompt,
             negativePrompt,
             mediaRefs,
-            complianceNotes
+            complianceNotes,
+            segmentRole: planRecord.segmentRole,
+            sliceDurationSec: planRecord.sliceDurationSec,
+            outputTemplateMode: planRecord.outputTemplateMode,
+            moneyVisuals: planRecord.moneyVisuals,
+            withdrawalVisual: planRecord.withdrawalVisual,
+            subtitleWorkflow: planRecord.subtitleWorkflow,
+            sliceDiversity: planRecord.sliceDiversity
           } : {}),
           promptPath: userRelative(context, promptTarget),
           scriptPath: userRelative(context, scriptTarget)
@@ -1072,7 +1093,14 @@ async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, 
       seedancePrompt: plan.seedancePrompt,
       negativePrompt: plan.negativePrompt,
       mediaRefs: plan.mediaRefs,
-      complianceNotes: plan.complianceNotes
+      complianceNotes: plan.complianceNotes,
+      segmentRole: plan.segmentRole,
+      sliceDurationSec: plan.sliceDurationSec,
+      outputTemplateMode: plan.outputTemplateMode,
+      moneyVisuals: plan.moneyVisuals,
+      withdrawalVisual: plan.withdrawalVisual,
+      subtitleWorkflow: plan.subtitleWorkflow,
+      sliceDiversity: plan.sliceDiversity
     };
     nextScripts.push(nextScript);
     if (script.scriptPath) {
