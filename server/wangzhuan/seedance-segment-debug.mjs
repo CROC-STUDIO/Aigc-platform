@@ -152,6 +152,7 @@ function normalizeStringList(value) {
 
 function segmentRoleFor(globalIndex, total) {
   if (globalIndex === 1) return "hook_slice";
+  if (total === 2) return "proof_slice";
   if (globalIndex === total) return "withdrawal_slice";
   return "proof_slice";
 }
@@ -227,8 +228,9 @@ export function renderSeedancePromptsMarkdown(plan = {}) {
 export function normalizeStorySegments(value, context = {}) {
   const source = Array.isArray(value?.storySegments) ? value.storySegments : (Array.isArray(value) ? value : []);
   const durationSec = roundSec(context.durationSec);
-  return source.map((segment, index) => {
-    const startSec = roundSec(segment.startSec ?? (index === 0 ? 0 : source[index - 1]?.endSec));
+  const normalizedSegments = [];
+  for (const [index, segment] of source.entries()) {
+    const startSec = roundSec(segment.startSec ?? (index === 0 ? 0 : normalizedSegments[index - 1]?.endSec));
     const fallbackEnd = index === source.length - 1 && durationSec > 0
       ? durationSec
       : startSec + numberOrFallback(segment.durationSec, 0);
@@ -251,8 +253,9 @@ export function normalizeStorySegments(value, context = {}) {
       if (!normalized[key]) throw new Error(`storySegments[${index}].${key} 缺失`);
     }
     if (normalized.endSec <= normalized.startSec) throw new Error(`storySegments[${index}] 时间范围无效`);
-    return normalized;
-  });
+    normalizedSegments.push(normalized);
+  }
+  return normalizedSegments;
 }
 
 export function buildSegmentAnalysisMessages(input = {}) {

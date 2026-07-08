@@ -202,6 +202,26 @@ test("buildSeedanceSlices preserves seven dimensions and subtitle workflow", () 
   assert.deepEqual(slices[0].subtitleWorkflow.subtitleScript, ["Watch clips", "See reward feedback"]);
 });
 
+test("buildSeedanceSlices uses proof role for the second slice when total is two", () => {
+  const slices = buildSeedanceSlices([
+    {
+      storySegmentIndex: 1,
+      startSec: 0,
+      endSec: 16,
+      durationSec: 16,
+      scene: "bus stop",
+      subject: "commuter holding phone",
+      action: "checks drama reward task",
+      camera: "handheld close-up then reaction",
+      lighting: "natural daylight",
+      style: "UGC short-drama ad",
+      quality: "realistic 720p vertical video"
+    }
+  ]);
+
+  assert.deepEqual(slices.map((slice) => slice.segmentRole), ["hook_slice", "proof_slice"]);
+});
+
 test("renderSeedancePromptsMarkdown includes duration, dimensions, prompts, and subtitle script", () => {
   const markdown = renderSeedancePromptsMarkdown({
     slices: [
@@ -258,6 +278,37 @@ test("normalizeStorySegments requires the seven dimensions", () => {
     () => normalizeStorySegments({ storySegments: [{ startSec: 0, endSec: 8, scene: "street" }] }),
     /subject 缺失/
   );
+});
+
+test("normalizeStorySegments chains missing timing from the prior normalized segment", () => {
+  const segments = normalizeStorySegments({
+    storySegments: [
+      {
+        startSec: 0,
+        durationSec: 8,
+        scene: "bus stop",
+        subject: "commuter holding phone",
+        action: "checks drama reward task",
+        camera: "handheld close-up",
+        lighting: "daylight",
+        style: "UGC",
+        quality: "realistic vertical"
+      },
+      {
+        durationSec: 8,
+        scene: "street corner",
+        subject: "commuter watching drama",
+        action: "sees reward feedback",
+        camera: "phone screen insert",
+        lighting: "daylight",
+        style: "UGC",
+        quality: "realistic vertical"
+      }
+    ]
+  });
+
+  assert.equal(segments[1].startSec, 8);
+  assert.equal(segments[1].endSec, 16);
 });
 
 test("buildSegmentAnalysisMessages encodes segment and money-effect rules", () => {
