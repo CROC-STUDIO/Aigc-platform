@@ -87,3 +87,55 @@ test("15s generation preserves existing pending task submit behavior", () => {
 
   assert.equal(isGenerationTaskSubmitReady(batch, pending), true);
 });
+
+test("30s three-slice request stays on legacy two-segment continuity gating", () => {
+  const batch = {
+    estimate: {
+      durationSec: 30,
+      request: { sliceStrategy: "three_slice" }
+    },
+    tasks: [
+      task({ generationTaskId: "gen_three_1", segmentIndex: 1 }),
+      task({ generationTaskId: "gen_three_2", segmentIndex: 2 }),
+      task({ generationTaskId: "gen_three_3", segmentIndex: 3 })
+    ]
+  };
+
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[0]), true);
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[1]), false);
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[2]), false);
+});
+
+test("30s auto multi-slice request stays on legacy two-segment continuity gating", () => {
+  const batch = {
+    estimate: {
+      durationSec: 30,
+      request: { sliceStrategy: "auto_10_15s_multi_slice" }
+    },
+    tasks: [
+      task({ generationTaskId: "gen_auto_1", segmentIndex: 1 }),
+      task({ generationTaskId: "gen_auto_2", segmentIndex: 2 })
+    ]
+  };
+
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[0]), true);
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[1]), false);
+});
+
+test("non-30s three-slice generation does not use continuity gating", () => {
+  const batch = {
+    estimate: {
+      durationSec: 36,
+      request: { sliceStrategy: "three_slice" }
+    },
+    tasks: [
+      task({ generationTaskId: "gen_36_1", segmentIndex: 1 }),
+      task({ generationTaskId: "gen_36_2", segmentIndex: 2 }),
+      task({ generationTaskId: "gen_36_3", segmentIndex: 3 })
+    ]
+  };
+
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[0]), true);
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[1]), true);
+  assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[2]), true);
+});

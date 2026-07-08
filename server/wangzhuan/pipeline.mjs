@@ -82,6 +82,9 @@ async function readBatch(context, batchId) {
 async function writeBatchWithTrigger(context, batch, triggerName = "batch_write") {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
+  if (typeof context.writeBatchForTest === "function") {
+    return context.writeBatchForTest(next, triggerName);
+  }
   const synced = await syncBatchFacts(context, next, triggerName);
   if (synced?.skipped) {
     const detail = synced.error?.message || synced.error?.code || null;
@@ -144,13 +147,15 @@ function resolveSliceStrategy(batch = {}) {
 
 export function buildSlicePlan({ durationSec = 15, sliceStrategy = "fixed_15s" } = {}) {
   const duration = Math.max(10, Number(durationSec) || 15);
-  const count = sliceStrategy === "three_slice"
+  const count = Number(duration) === 30
+    ? 2
+    : sliceStrategy === "three_slice"
     ? 3
     : sliceStrategy === "two_15s"
       ? 2
       : sliceStrategy === "auto_10_15s_multi_slice"
         ? Math.max(1, Math.ceil(duration / 15))
-        : Number(duration) === 30 ? 2 : 1;
+        : 1;
   const base = Math.max(10, Math.min(15, Math.round(duration / count)));
   const slices = [];
   let startSec = 0;
@@ -174,6 +179,10 @@ export function planSegmentMultiplier(batch = {}) {
     durationSec: Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15),
     sliceStrategy: resolveSliceStrategy(batch)
   }).length;
+}
+
+function usesThirtySecondContinuityPlan(batch = {}) {
+  return Number(batch.estimate?.durationSec) === 30 && planSegmentMultiplier(batch) === 2;
 }
 
 function promptAssetLines(assetUrls = {}) {
@@ -426,7 +435,7 @@ function isApprovedContinuityReference(reference = {}) {
 
 export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
   if (task.status !== "pending") return false;
-  if (Number(batch.estimate?.durationSec || 15) !== 30) return true;
+  if (!usesThirtySecondContinuityPlan(batch)) return true;
   if (!previousSegmentDownloaded(Array.isArray(batch.tasks) ? batch.tasks : [], task)) return false;
   if (Number(task.segmentIndex || 1) <= 1) return true;
   return isApprovedContinuityReference(task.continuityReference);
@@ -564,24 +573,26 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
     sliceStrategy: resolveSliceStrategy(batch)
   });
   const segmentMultiplier = slicePlan.length;
-  const usesThirtySecondContinuityPlan = Number(batch.estimate?.durationSec) === 30 && segmentMultiplier === 2;
+  const useThirtySecondContinuityPlan = usesThirtySecondContinuityPlan(batch);
   const branchDrafts = normalizeBranchDrafts(batch.templateSnapshot?.draft, batch.estimate?.request?.branches);
   if (useLlmPlans) {
     validateBranchTruthRulesForPlan(branchDrafts);
   }
   let sequence = 1;
   const variantCount = Number(batch.estimate?.variantCount || 0);
-  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (usesThirtySecondContinuityPlan ? 1 : segmentMultiplier) : 0;
+  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (useThirtySecondContinuityPlan ? 1 : segmentMultiplier) : 0;
   let planSequence = 0;
 
   for (const branch of branchDrafts) {
     const branchChannel = branch.targetChannels?.[0] || batch.estimate?.request?.targetChannel || "generic";
     const branchPromiseLevel = branch.promiseLevel || batch.estimate?.request?.promiseLevel || "stable";
-    const channelRules = await getChannelRules(context, { channel: branchChannel, promiseLevel: branchPromiseLevel });
+    const channelRules = typeof context.getChannelRulesForTest === "function"
+      ? await context.getChannelRulesForTest({ channel: branchChannel, promiseLevel: branchPromiseLevel })
+      : await getChannelRules(context, { channel: branchChannel, promiseLevel: branchPromiseLevel });
     const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
     for (let branchVariantIndex = 1; branchVariantIndex <= Number(batch.estimate?.variantCount || 0); branchVariantIndex += 1) {
       let thirtySecondPlanPayloads = null;
-      if (useLlmPlans && usesThirtySecondContinuityPlan) {
+      if (useLlmPlans && useThirtySecondContinuityPlan) {
         planSequence += 1;
         options.onPlanProgress?.({
           index: planSequence,
@@ -657,7 +668,12 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           complianceNotes = planPayload.complianceNotes;
           mediaRefs = planPayload.mediaRefs;
           const segmentRole = planPayload.segmentRole || slice.segmentRole;
-          const sliceDurationSec = planPayload.sliceDurationSec || slice.durationSec;
+          const sliceDurationSec = slice.durationSec;
+          planPayload = {
+            ...planPayload,
+            segmentRole,
+            sliceDurationSec
+          };
           const outputTemplateMode = planPayload.outputTemplateMode;
           const moneyVisuals = planPayload.moneyVisuals;
           const withdrawalVisual = planPayload.withdrawalVisual;

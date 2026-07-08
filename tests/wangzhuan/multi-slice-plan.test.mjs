@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
+import { buildGenerationPlanRecord } from "../../server/wangzhuan/plan-preview.mjs";
 import {
   buildSlicePlan,
-  planSegmentMultiplier
+  planSegmentMultiplier,
+  prepareBatchForPipeline
 } from "../../server/wangzhuan/pipeline.mjs";
 
 test("planSegmentMultiplier supports three-slice output template", () => {
@@ -60,7 +64,106 @@ test("buildSlicePlan resolves fixed, two-slice, and auto strategies", () => {
   ]);
 });
 
-test("prepareBatchForPipeline writes slice duration and role into payloads", async () => {
+test("buildSlicePlan constrains 30s multi-slice requests to legacy two-segment plan", () => {
+  assert.deepEqual(buildSlicePlan({
+    durationSec: 30,
+    sliceStrategy: "three_slice"
+  }), [
+    { segmentIndex: 1, startSec: 0, endSec: 15, durationSec: 15, segmentRole: "hook_slice" },
+    { segmentIndex: 2, startSec: 15, endSec: 30, durationSec: 15, segmentRole: "proof_slice" }
+  ]);
+  assert.equal(planSegmentMultiplier({
+    estimate: {
+      durationSec: 30,
+      request: { sliceStrategy: "auto_10_15s_multi_slice" }
+    }
+  }), 2);
+});
+
+function testContext(root) {
+  return {
+    userId: "tester",
+    user: { username: "tester" },
+    userProjectRoot: root,
+    sharedProjectRoot: root,
+    config: {},
+    writeBatchForTest: async (batch) => batch,
+    getChannelRulesForTest: async () => ({ rules: [] })
+  };
+}
+
+function testBatch({ durationSec, sliceStrategy }) {
+  return {
+    batchId: "wzb_20260707121212_abcd",
+    userId: "tester",
+    status: "draft",
+    createdAt: "2026-07-07T12:12:12.000Z",
+    estimate: {
+      durationSec,
+      variantCount: 1,
+      outputRatio: "9:16",
+      request: {
+        sliceStrategy,
+        targetChannel: "tiktok"
+      }
+    },
+    templateSnapshot: {
+      draft: {
+        productName: "Drama Gold",
+        language: "pt-BR",
+        regions: ["BR"],
+        sliceStrategy,
+        branches: [{
+          branchId: "branch_1",
+          branchLabel: "BR workers",
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          targetChannels: ["tiktok"]
+        }]
+      }
+    },
+    decomposition: {
+      action: "Show drama watching and reward feedback",
+      rewardFeedback: "reward feedback",
+      scene: "bus stop"
+    }
+  };
+}
+
+test("prepareBatchForPipeline behaviorally creates coherent 36s three-slice tasks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-multi-slice-"));
+  const prepared = await prepareBatchForPipeline(testContext(root), testBatch({
+    durationSec: 36,
+    sliceStrategy: "three_slice"
+  }));
+
+  assert.equal(prepared.scripts.length, 3);
+  assert.equal(prepared.tasks.length, 3);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [12, 12, 12]);
+  assert.deepEqual(prepared.tasks.map((task) => task.durationSec), [12, 12, 12]);
+  assert.deepEqual(prepared.scripts.map((script) => script.segmentRole), ["hook_slice", "proof_slice", "withdrawal_slice"]);
+  assert.deepEqual(prepared.tasks.map((task) => task.segmentRole), ["hook_slice", "proof_slice", "withdrawal_slice"]);
+  assert.deepEqual(prepared.scripts.map((script) => script.sliceDurationSec), [12, 12, 12]);
+  assert.deepEqual(prepared.tasks.map((task) => task.sliceDurationSec), [12, 12, 12]);
+});
+
+test("prepareBatchForPipeline keeps 30s three-slice requests on two 15s tasks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-30s-legacy-"));
+  const prepared = await prepareBatchForPipeline(testContext(root), testBatch({
+    durationSec: 30,
+    sliceStrategy: "three_slice"
+  }));
+
+  assert.equal(prepared.scripts.length, 2);
+  assert.equal(prepared.tasks.length, 2);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [15, 15]);
+  assert.deepEqual(prepared.tasks.map((task) => task.durationSec), [15, 15]);
+  assert.deepEqual(prepared.scripts.map((script) => script.segmentRole), ["hook_slice", "proof_slice"]);
+  assert.deepEqual(prepared.tasks.map((task) => task.segmentRole), ["hook_slice", "proof_slice"]);
+});
+
+test("prepareBatchForPipeline source writes slice duration and role into payloads", async () => {
   const source = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
 
   assert.match(source, /const slicePlan = buildSlicePlan\(/);
@@ -70,4 +173,39 @@ test("prepareBatchForPipeline writes slice duration and role into payloads", asy
   assert.match(source, /sliceDurationSec: planRecord\?\.sliceDurationSec \|\| slice\.durationSec/);
   assert.match(source, /segmentRole: slice\.segmentRole/);
   assert.match(source, /sliceDurationSec: slice\.durationSec/);
+});
+
+test("buildGenerationPlanRecord carries per-slice duration", () => {
+  const record = buildGenerationPlanRecord({
+    batch: { batchId: "wzb_20260707121212_abcd" },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "BR workers",
+      branchIndex: 1
+    },
+    scriptId: "scr_abcd_001",
+    generationTaskId: "gen_abcd_001",
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sequence: 1,
+    planPayload: {
+      hook: "Hook",
+      body: "Body",
+      voiceover: "Voiceover",
+      subtitles: ["Subtitle"],
+      cta: "",
+      ending: "",
+      imagePrompt: "Image prompt",
+      seedancePrompt: "Seedance prompt",
+      negativePrompt: "No exact amount",
+      mediaRefs: {},
+      complianceNotes: [],
+      segmentRole: "hook_slice",
+      sliceDurationSec: 12
+    }
+  });
+
+  assert.equal(record.durationSec, 12);
+  assert.equal(record.sliceDurationSec, 12);
+  assert.equal(record.segmentRole, "hook_slice");
 });
