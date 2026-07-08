@@ -773,7 +773,7 @@ export function buildGenerationPlanRecord({
     branchVariantIndex,
     variantIndex: sequence,
     segmentIndex,
-    durationSec: 15,
+    durationSec: planPayload.sliceDurationSec || 15,
     previewType: "seedance_plan",
     ...planPayload,
     status

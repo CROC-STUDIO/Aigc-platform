@@ -40,6 +40,7 @@ const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
 const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc", "preview_required"]);
 const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "skipped", "stopped"]);
+const SLICE_ROLES = ["hook_slice", "proof_slice", "withdrawal_slice", "cta_slice"];
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -102,7 +103,7 @@ export async function writeBatch(context, batch, triggerName = "batch_write") {
   return writeBatchWithTrigger(context, batch, triggerName);
 }
 
-function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaimers = []) {
+function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaimers = [], durationSec = 15) {
   const productName = branch?.productName || batch.templateSnapshot?.draft?.productName || "Product";
   const materialDirection = branch?.materialDirection || batch.templateSnapshot?.draft?.materialDirection;
   const decomposition = batch.decomposition || {};
@@ -118,7 +119,7 @@ function scriptBody(batch, branch, variantIndex, segmentIndex, requiredDisclaime
     materialDirection ? `Creative angle: ${materialDirection}.` : "",
     languages.length ? `Primary spoken language is ${languages[0]}${languages.length > 1 ? `, with locale coverage for ${languages.join(", ")}` : ""}.` : "",
     regions.length ? `Target regions: ${regions.join(", ")}.` : "",
-    `Segment ${segmentIndex} keeps pacing within 15 seconds and includes ${rewardFeedback}.`,
+    `Segment ${segmentIndex} keeps pacing within ${durationSec} seconds and includes ${rewardFeedback}.`,
     ...requiredDisclaimers.map((item) => `Disclaimer: ${item}.`)
   ].filter(Boolean).join(" ");
 }
@@ -133,6 +134,46 @@ function rewardExpression(batch, branch) {
   const rules = branch?.truthRules || batch.templateSnapshot?.draft?.truthRules;
   if (!rules?.rewardAmountRange) return undefined;
   return `${rules.rewardAmountRange} when ${rules.rewardCondition}`;
+}
+
+function resolveSliceStrategy(batch = {}) {
+  return batch.estimate?.request?.sliceStrategy
+    || batch.templateSnapshot?.draft?.sliceStrategy
+    || "fixed_15s";
+}
+
+export function buildSlicePlan({ durationSec = 15, sliceStrategy = "fixed_15s" } = {}) {
+  const duration = Math.max(10, Number(durationSec) || 15);
+  const count = sliceStrategy === "three_slice"
+    ? 3
+    : sliceStrategy === "two_15s"
+      ? 2
+      : sliceStrategy === "auto_10_15s_multi_slice"
+        ? Math.max(1, Math.ceil(duration / 15))
+        : Number(duration) === 30 ? 2 : 1;
+  const base = Math.max(10, Math.min(15, Math.round(duration / count)));
+  const slices = [];
+  let startSec = 0;
+  for (let index = 0; index < count; index += 1) {
+    const isLast = index === count - 1;
+    const endSec = isLast ? duration : Math.min(duration, startSec + base);
+    slices.push({
+      segmentIndex: index + 1,
+      startSec,
+      endSec,
+      durationSec: Math.max(10, Math.min(15, Math.round(endSec - startSec))),
+      segmentRole: SLICE_ROLES[index] || "proof_slice"
+    });
+    startSec = endSec;
+  }
+  return slices;
+}
+
+export function planSegmentMultiplier(batch = {}) {
+  return buildSlicePlan({
+    durationSec: Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15),
+    sliceStrategy: resolveSliceStrategy(batch)
+  }).length;
 }
 
 function promptAssetLines(assetUrls = {}) {
@@ -518,14 +559,19 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   const scripts = [];
   const tasks = [];
   const plans = [];
-  const segmentMultiplier = Number(batch.estimate?.durationSec) === 30 ? 2 : 1;
+  const slicePlan = buildSlicePlan({
+    durationSec: Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15),
+    sliceStrategy: resolveSliceStrategy(batch)
+  });
+  const segmentMultiplier = slicePlan.length;
+  const usesThirtySecondContinuityPlan = Number(batch.estimate?.durationSec) === 30 && segmentMultiplier === 2;
   const branchDrafts = normalizeBranchDrafts(batch.templateSnapshot?.draft, batch.estimate?.request?.branches);
   if (useLlmPlans) {
     validateBranchTruthRulesForPlan(branchDrafts);
   }
   let sequence = 1;
   const variantCount = Number(batch.estimate?.variantCount || 0);
-  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (segmentMultiplier === 2 ? 1 : segmentMultiplier) : 0;
+  const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (usesThirtySecondContinuityPlan ? 1 : segmentMultiplier) : 0;
   let planSequence = 0;
 
   for (const branch of branchDrafts) {
@@ -535,7 +581,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
     const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
     for (let branchVariantIndex = 1; branchVariantIndex <= Number(batch.estimate?.variantCount || 0); branchVariantIndex += 1) {
       let thirtySecondPlanPayloads = null;
-      if (useLlmPlans && segmentMultiplier === 2) {
+      if (useLlmPlans && usesThirtySecondContinuityPlan) {
         planSequence += 1;
         options.onPlanProgress?.({
           index: planSequence,
@@ -555,6 +601,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
         });
       }
       for (let segmentIndex = 1; segmentIndex <= segmentMultiplier; segmentIndex += 1) {
+        const slice = slicePlan[segmentIndex - 1] || { segmentIndex, durationSec: 15, segmentRole: "proof_slice" };
         const scriptId = makeScriptId(batch.batchId, sequence);
         const generationTaskId = makeGenerationTaskId(batch.batchId, sequence);
         const segmentSuffix = segmentMultiplier > 1 ? `_segment${segmentIndex}` : "";
@@ -562,7 +609,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
         const promptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_seedance.txt`);
         const imagePromptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_image.txt`);
         let hook = scriptHook(batch, branch, branchVariantIndex);
-        let body = scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers);
+        let body = scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers, slice.durationSec);
         let cta = branch.cta || batch.decomposition?.cta || "Install now";
         let ending = branch.ending || "Try it today";
         let seedancePrompt = "";
@@ -592,6 +639,8 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               channelRules,
               branchVariantIndex,
               segmentIndex,
+              segmentRole: slice.segmentRole,
+              sliceDurationSec: slice.durationSec,
               knowledgeNotes: options.knowledgeNotes,
               llmConfig: options.llmConfig || {}
             });
@@ -607,8 +656,8 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           subtitles = planPayload.subtitles;
           complianceNotes = planPayload.complianceNotes;
           mediaRefs = planPayload.mediaRefs;
-          const segmentRole = planPayload.segmentRole;
-          const sliceDurationSec = planPayload.sliceDurationSec;
+          const segmentRole = planPayload.segmentRole || slice.segmentRole;
+          const sliceDurationSec = planPayload.sliceDurationSec || slice.durationSec;
           const outputTemplateMode = planPayload.outputTemplateMode;
           const moneyVisuals = planPayload.moneyVisuals;
           const withdrawalVisual = planPayload.withdrawalVisual;
@@ -655,7 +704,9 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           branchVariantIndex,
           variantIndex: sequence,
           segmentIndex,
-          durationSec: 15,
+          durationSec: slice.durationSec,
+          segmentRole: planRecord?.segmentRole || slice.segmentRole,
+          sliceDurationSec: planRecord?.sliceDurationSec || slice.durationSec,
           hook,
           body,
           cta,
@@ -703,6 +754,9 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           branchLabel: branch.branchLabel,
           branchVariantIndex,
           segmentIndex,
+          durationSec: slice.durationSec,
+          segmentRole: planRecord?.segmentRole || slice.segmentRole,
+          sliceDurationSec: planRecord?.sliceDurationSec || slice.durationSec,
           status: useLlmPlans ? "pending_preview" : "pending",
           modelImage: MODEL_IMAGE,
           modelVideo: resolveSeedanceModel(batch),
