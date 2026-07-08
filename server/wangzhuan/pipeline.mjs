@@ -450,6 +450,29 @@ export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
   return isApprovedContinuityReference(task.continuityReference);
 }
 
+export function buildSubtitlePostProcessArtifact(batch = {}) {
+  const scripts = Array.isArray(batch.scripts) ? batch.scripts : [];
+  return {
+    schemaVersion: "subtitle-postprocess.v1",
+    batchId: batch.batchId || "",
+    provider: "pixel_tech",
+    items: scripts
+      .filter((script) => script.subtitleWorkflow?.postSubtitleRequired === true)
+      .map((script) => ({
+        scriptId: script.scriptId || "",
+        generationTaskId: script.generationTaskId || "",
+        branchId: script.branchId || "",
+        segmentIndex: Number(script.segmentIndex || 1),
+        durationSec: Number(script.durationSec || 15),
+        burnedInSubtitles: false,
+        provider: script.subtitleWorkflow?.provider || "pixel_tech",
+        subtitleScript: Array.isArray(script.subtitleWorkflow?.subtitleScript) && script.subtitleWorkflow.subtitleScript.length
+          ? script.subtitleWorkflow.subtitleScript
+          : (Array.isArray(script.subtitles) ? script.subtitles : [])
+      }))
+  };
+}
+
 function continuityReferenceMedia(task = {}) {
   if (!isApprovedContinuityReference(task.continuityReference)) return [];
   return [{
@@ -562,6 +585,7 @@ async function writeProcessTraceFiles(context, batch) {
     model: MODEL_VIDEO,
     items: promptItems
   });
+  await writeAtomicJson(join(root, "04-subtitle-postprocess.json"), buildSubtitlePostProcessArtifact(batch));
   await writeAtomicJson(join(root, "05-video-tasks.json"), {
     schemaVersion: "video-tasks.v1",
     tasks: batch.tasks

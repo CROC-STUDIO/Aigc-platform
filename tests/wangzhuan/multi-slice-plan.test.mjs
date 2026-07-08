@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { buildGenerationPlanRecord } from "../../server/wangzhuan/plan-preview.mjs";
 import {
+  buildSubtitlePostProcessArtifact,
   buildSlicePlan,
   planSegmentMultiplier,
   prepareBatchForPipeline
@@ -272,4 +273,69 @@ test("buildGenerationPlanRecord carries per-slice duration", () => {
   assert.equal(record.durationSec, 12);
   assert.equal(record.sliceDurationSec, 12);
   assert.equal(record.segmentRole, "hook_slice");
+});
+
+test("buildSubtitlePostProcessArtifact exports Pixel Tech subtitle handoff data", () => {
+  const artifact = buildSubtitlePostProcessArtifact({
+    batchId: "wzb_20260707121212_abcd",
+    scripts: [{
+      scriptId: "script_1",
+      generationTaskId: "gen_1",
+      branchId: "branch_1",
+      segmentIndex: 1,
+      durationSec: 12,
+      subtitles: ["Ganhe no intervalo", "Veja as regras"],
+      subtitleWorkflow: {
+        burnedInSubtitles: false,
+        postSubtitleRequired: true,
+        provider: "pixel_tech",
+        subtitleScript: ["Ganhe no intervalo", "Veja as regras"]
+      }
+    }]
+  });
+
+  assert.equal(artifact.schemaVersion, "subtitle-postprocess.v1");
+  assert.equal(artifact.batchId, "wzb_20260707121212_abcd");
+  assert.equal(artifact.provider, "pixel_tech");
+  assert.equal(artifact.items[0].scriptId, "script_1");
+  assert.equal(artifact.items[0].generationTaskId, "gen_1");
+  assert.equal(artifact.items[0].branchId, "branch_1");
+  assert.equal(artifact.items[0].segmentIndex, 1);
+  assert.equal(artifact.items[0].durationSec, 12);
+  assert.equal(artifact.items[0].burnedInSubtitles, false);
+  assert.equal(artifact.items[0].provider, "pixel_tech");
+  assert.deepEqual(artifact.items[0].subtitleScript, ["Ganhe no intervalo", "Veja as regras"]);
+});
+
+test("buildSubtitlePostProcessArtifact filters required items and falls back to script subtitles", () => {
+  const artifact = buildSubtitlePostProcessArtifact({
+    batchId: "wzb_20260707121212_abcd",
+    scripts: [{
+      scriptId: "script_required",
+      generationTaskId: "gen_required",
+      branchId: "branch_1",
+      segmentIndex: 2,
+      durationSec: 14,
+      subtitles: ["Fallback one", "Fallback two"],
+      subtitleWorkflow: {
+        postSubtitleRequired: true,
+        provider: "pixel_tech",
+        subtitleScript: []
+      }
+    }, {
+      scriptId: "script_skipped",
+      generationTaskId: "gen_skipped",
+      branchId: "branch_2",
+      subtitles: ["Skip"],
+      subtitleWorkflow: {
+        postSubtitleRequired: false,
+        provider: "pixel_tech",
+        subtitleScript: ["Skip"]
+      }
+    }]
+  });
+
+  assert.equal(artifact.items.length, 1);
+  assert.equal(artifact.items[0].scriptId, "script_required");
+  assert.deepEqual(artifact.items[0].subtitleScript, ["Fallback one", "Fallback two"]);
 });
