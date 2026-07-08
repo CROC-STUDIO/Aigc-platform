@@ -28,16 +28,16 @@ const OUTPUT_TEMPLATE_MODES = Object.freeze([
 
 const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   hook: "Opening hook in primary language; align to reference pacing without competitor branding",
-  body: "Main script body in primary language for this 15s segment",
+  body: "Main script body in primary language for the current slice duration",
   voiceover: "Spoken lines in primary language",
   subtitles: ["Short subtitle lines in primary language, one beat per line"],
   cta: "Optional call to action in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require a CTA",
   ending: "Optional ending beat in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require an ending card/beat",
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
-  seedancePrompt: "15s 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
+  seedancePrompt: "Current-slice 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
   negativePrompt: "Things to avoid in generation",
   segmentRole: "Role of this slice: hook_slice, proof_slice, withdrawal_slice, cta_slice, or continuity_slice",
-  sliceDurationSec: "Target slice duration, preferably 10-15 seconds for multi-slice net-earning materials",
+  sliceDurationSec: "Current slice duration in seconds; prefer 10-15 seconds for multi-slice net-earning materials when feasible",
   outputTemplateMode: "reference_fission | three_slice_net_earning | short_drama_earning_highlight",
   moneyVisuals: ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"],
   withdrawalVisual: "Withdrawal or reward proof visual without invented exact amounts unless truthRules provide them",
@@ -497,6 +497,7 @@ export function buildSeedancePlanMessages({
   channelRules = {},
   branchVariantIndex,
   segmentIndex,
+  sliceDurationSec,
   knowledgeNotes = ""
 }) {
   const draft = batch.templateSnapshot?.draft || {};
@@ -504,6 +505,7 @@ export function buildSeedancePlanMessages({
   const localeContext = resolvePlanLocaleContext(batch, branch);
   const outputTemplateMode = normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode);
   const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
+  const currentSliceDurationSec = clampSliceDuration(sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15);
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
   const subtitleWorkflow = resolveNormalizedSubtitleWorkflow(
     branch.subtitleWorkflow,
@@ -555,6 +557,7 @@ export function buildSeedancePlanMessages({
       outputRatio: localeContext.outputRatio,
       outputTemplateMode,
       sliceStrategy,
+      sliceDurationSec: currentSliceDurationSec,
       moneyVisuals,
       subtitleWorkflow,
       promiseLevel: branch.promiseLevel || draft.promiseLevel,
@@ -581,7 +584,8 @@ export function buildSeedancePlanMessages({
     "",
     `变体编号 branchVariantIndex=${branchVariantIndex}`,
     `分段编号 segmentIndex=${segmentIndex}`,
-    `输出时长 durationSec=15`,
+    `输出时长 durationSec=${currentSliceDurationSec}`,
+    `当前切片时长 sliceDurationSec=${currentSliceDurationSec}s`,
     notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
     "",
     "字段说明：",

@@ -217,6 +217,56 @@ test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () 
   assert.match(text, /具体金额.*truthRules/);
 });
 
+test("Seedance plan prompt uses current slice duration instead of hardcoded 15s", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707120500_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          sliceStrategy: "three_slice"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "BR workers",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      sliceStrategy: "three_slice",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "bus commute",
+      subject: "commuter",
+      action: "checks app rewards",
+      camera: "phone close-up",
+      lighting: "daylight",
+      style: "UGC",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /输出时长 durationSec=12/);
+  assert.match(text, /当前切片时长 sliceDurationSec=12s/);
+  assert.match(text, /"sliceDurationSec": 12/);
+  assert.match(text, /Current-slice 9:16 Seedance omni_reference prompt/);
+  assert.doesNotMatch(text, /输出时长 durationSec=15/);
+  assert.doesNotMatch(text, /15s 9:16 Seedance omni_reference prompt/);
+});
+
 test("Seedance plan prompt falls back when branch output-template strings are blank", () => {
   const messages = buildSeedancePlanMessages({
     batch: {
