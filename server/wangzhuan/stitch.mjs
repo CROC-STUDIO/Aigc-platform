@@ -207,6 +207,9 @@ async function applyDisclaimerOverlay(context, sourcePath, targetPath, overlay, 
 
 async function readBatch(context, batchId) {
   validateBatchId(batchId);
+  if (typeof context.readBatchForTest === "function") {
+    return context.readBatchForTest(batchId);
+  }
   if (!await hasWangzhuanFactsStore()) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
   }
@@ -222,6 +225,9 @@ async function readBatch(context, batchId) {
 async function writeBatch(context, batch, triggerName = "stitch_progress") {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
+  if (typeof context.writeBatchForTest === "function") {
+    return context.writeBatchForTest(next, triggerName);
+  }
   const synced = await syncBatchFacts(context, next, triggerName);
   if (synced?.skipped) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存业务状态");
@@ -410,6 +416,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         });
       }
       const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video", { required: true });
+      const durationSec = Number(entry.task.durationSec || entry.script.durationSec || batch.estimate?.durationSec || 15);
       outputs.push({
         outputId,
         sourceType: "pipeline",
@@ -419,14 +426,14 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         branchLabel: entry.script.branchLabel || "",
         branchVariantIndex: entry.script.branchVariantIndex || entry.script.variantIndex,
         generationTaskIds: [entry.task.generationTaskId],
-        durationSec: 15,
+        durationSec,
         kind: "segment_video",
         filePath,
         displayFileName: buildOutputDisplayName({
           batch,
           script: entry.script,
           outputId,
-          durationSec: 15
+          durationSec
         }),
         previewUrl: storage.storageUrl,
         storageKey: storage.storageKey,
@@ -622,8 +629,12 @@ export async function materializeBatchSegmentOutputs(context, batchId) {
 }
 
 export async function finalizeFifteenSecondBatch(context, batchId) {
+  return finalizeSegmentBatch(context, batchId);
+}
+
+export async function finalizeSegmentBatch(context, batchId) {
   const batch = await readBatch(context, batchId);
-  if (Number(batch.estimate?.durationSec) !== 15) return batch;
+  if (Number(batch.estimate?.durationSec) === 30) return batch;
   if (["qc", "succeeded", "partial_failed", "failed", "stopped"].includes(batch.status)) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "waiting_upstream")) return batch;

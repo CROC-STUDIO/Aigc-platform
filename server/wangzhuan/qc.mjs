@@ -53,6 +53,9 @@ function batchDir(context, batchId) {
 
 async function readBatch(context, batchId) {
   validateBatchId(batchId);
+  if (typeof context.readBatchForTest === "function") {
+    return context.readBatchForTest(batchId);
+  }
   if (!await hasWangzhuanFactsStore()) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法读取业务状态");
   }
@@ -68,6 +71,9 @@ async function readBatch(context, batchId) {
 async function writeBatch(context, batch) {
   const now = new Date().toISOString();
   const next = { ...batch, updatedAt: now };
+  if (typeof context.writeBatchForTest === "function") {
+    return context.writeBatchForTest(next, "qc_completed");
+  }
   const synced = await syncBatchFacts(context, next, "qc_completed");
   if (synced?.skipped) {
     throw new WangzhuanError("database_unavailable", "数据库未连接，无法保存业务状态");
@@ -742,7 +748,7 @@ async function deterministicVideoChecks(context, batch, output) {
 }
 
 function videoSpecCheck(context, output) {
-  if (![15, 30].includes(Number(output.durationSec)) || !output.kind) {
+  if (!(Number(output.durationSec) > 0) || !output.kind) {
     return check("video_spec", "fail", "输出缺少时长或类型记录", "output");
   }
   const localPath = tryResolveUserPath(context, output.filePath);
@@ -1126,8 +1132,10 @@ function shouldRunModelVideoQc(context, batch, output) {
   const hasLocalVideo = Boolean(tryResolveUserPath(context, output.filePath));
   if (!hasLocalVideo && !outputHasRemoteAsset(output)) return false;
   const isFinalStitchedOutput = output.kind === "stitched_video";
-  const isFinalSingleSegmentOutput = Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15;
-  if (!isFinalStitchedOutput && !isFinalSingleSegmentOutput) return false;
+  const isFinalSegmentOutput = Number(batch.estimate?.durationSec) !== 30
+    && output.kind === "segment_video"
+    && Number(output.durationSec) > 0;
+  if (!isFinalStitchedOutput && !isFinalSegmentOutput) return false;
   if (typeof context.callWangzhuanLlm === "function" || typeof context.callWangzhuanQcLlm === "function") return true;
   const qcLlm = context.config?.wangzhuan?.qcLlm;
   const llm = context.config?.wangzhuan?.llm;
@@ -1230,7 +1238,9 @@ async function channelRuleCheck(context, batch, tasks) {
   const draft = batch.templateSnapshot?.draft || {};
   const channel = draft.targetChannels?.[0] || batch.estimate?.request?.targetChannel || "generic";
   const promiseLevel = draft.promiseLevel || batch.estimate?.request?.promiseLevel || "stable";
-  const rules = await getChannelRules(context, { channel, promiseLevel });
+  const rules = typeof context.getChannelRulesForTest === "function"
+    ? await context.getChannelRulesForTest({ channel, promiseLevel })
+    : await getChannelRules(context, { channel, promiseLevel });
   const text = textForPolicy(batch, tasks);
   const forbidden = rules.rules.flatMap((rule) => rule.forbiddenTerms || []);
   const hit = forbidden.find((term) => term && text.includes(String(term).toLowerCase()));
@@ -1277,7 +1287,7 @@ function downloadEligibility(batch, output, qcStatus) {
   if (qcStatus !== "pass") return false;
   if (output.sourceType !== "pipeline") return false;
   if (output.kind === "stitched_video" && Number(output.durationSec) === 30) return true;
-  if (Number(batch.estimate?.durationSec) === 15 && Number(output.durationSec) === 15) return true;
+  if (Number(batch.estimate?.durationSec) !== 30 && output.kind === "segment_video" && Number(output.durationSec) > 0) return true;
   return false;
 }
 
@@ -1454,6 +1464,8 @@ export async function runBatchQc(context, batchId) {
 export const qcPathHelpers = {
   tryResolveUserPath,
   videoSpecCheck,
+  downloadEligibility,
+  shouldRunModelVideoQc,
   templateSnapshotCheck,
   deterministicVideoChecks
 };

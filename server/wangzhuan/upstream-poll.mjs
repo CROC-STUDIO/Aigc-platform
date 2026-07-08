@@ -10,7 +10,7 @@ import {
   normalizeSeedanceTaskStatus,
   summarizeSeedancePollResponse
 } from "./seedance-provider.mjs";
-import { finalizeFifteenSecondBatch, stitchBatchSegments } from "./stitch.mjs";
+import { finalizeSegmentBatch, stitchBatchSegments } from "./stitch.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { WangzhuanError } from "./http.mjs";
 
@@ -44,7 +44,7 @@ function batchNeedsUpstreamPoll(batch = {}) {
   if (!ACTIVE_POLL_BATCH_STATUSES.has(batch.status)) return false;
   const durationSec = Number(batch.estimate?.durationSec || 15);
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
-  if (durationSec === 15) {
+  if (durationSec !== 30) {
     return !outputs.some((output) => output.kind === "segment_video")
       && tasks.some((task) => task.status === "downloaded");
   }
@@ -386,7 +386,7 @@ export async function pollUpstreamBatch(context, batchId) {
     advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video");
   } else {
     const beforeStatus = batch.status;
-    batch = await finalizeFifteenSecondBatch(context, batchId);
+    batch = await finalizeSegmentBatch(context, batchId);
     advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "segment_video");
   }
 
