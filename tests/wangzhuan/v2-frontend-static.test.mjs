@@ -325,10 +325,15 @@ test("v2 plan editor exposes output-template plan fields", async () => {
   assert.match(js, /const text = fieldValue\(field\);\s*\n\s*return text === undefined \? undefined : splitLines\(text\);/);
   assert.match(js, /subtitles:\s*subtitles \?\? plan\.subtitles/);
   assert.match(js, /moneyVisuals:\s*moneyVisuals \?\? plan\.moneyVisuals/);
-  assert.match(js, /subtitleScript:\s*subtitleScript \?\? \(plan\.subtitleWorkflow\?\.subtitleScript \|\| plan\.subtitles \|\| \[\]\)/);
+  assert.match(js, /function planSubtitlePostRequired\(subtitleWorkflow\)/);
+  assert.match(js, /\["none", "off", "no_post_process"\]\.includes\(mode\)/);
+  assert.match(js, /const subtitleWorkflow = plan\.subtitleWorkflow && typeof plan\.subtitleWorkflow === "object" && !Array\.isArray\(plan\.subtitleWorkflow\)/);
+  assert.match(js, /postSubtitleRequired:\s*planSubtitlePostRequired\(plan\.subtitleWorkflow\)/);
+  assert.match(js, /subtitleScript:\s*subtitleScript \?\? \(subtitleWorkflow\.subtitleScript \|\| plan\.subtitles \|\| \[\]\)/);
   assert.doesNotMatch(js, /subtitles:\s*subtitles\.length \? subtitles : plan\.subtitles/);
   assert.doesNotMatch(js, /moneyVisuals:\s*moneyVisuals\.length \? moneyVisuals : plan\.moneyVisuals/);
   assert.doesNotMatch(js, /subtitleScript:\s*subtitleScript\.length \? subtitleScript :/);
+  assert.doesNotMatch(js, /postSubtitleRequired:\s*plan\.subtitleWorkflow\?\.postSubtitleRequired !== false/);
   assert.match(js, /subtitleWorkflow:\s*\{/);
   assert.match(pipeline, /buildGenerationPlanRecord\([\s\S]*planPayload:\s*\{[\s\S]*segmentRole[\s\S]*sliceDurationSec[\s\S]*outputTemplateMode[\s\S]*moneyVisuals[\s\S]*withdrawalVisual[\s\S]*subtitleWorkflow[\s\S]*sliceDiversity/);
   assert.match(pipeline, /const nextScript = \{[\s\S]*segmentRole:\s*plan\.segmentRole[\s\S]*sliceDurationSec:\s*plan\.sliceDurationSec[\s\S]*outputTemplateMode:\s*plan\.outputTemplateMode[\s\S]*moneyVisuals:\s*plan\.moneyVisuals[\s\S]*withdrawalVisual:\s*plan\.withdrawalVisual[\s\S]*subtitleWorkflow:\s*plan\.subtitleWorkflow[\s\S]*sliceDiversity:\s*plan\.sliceDiversity/);

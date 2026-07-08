@@ -1146,6 +1146,17 @@ function splitLines(value = "") {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
+function planSubtitlePostRequired(subtitleWorkflow) {
+  if (typeof subtitleWorkflow === "string") {
+    const mode = subtitleWorkflow.trim().toLowerCase();
+    return !["none", "off", "no_post_process"].includes(mode);
+  }
+  if (subtitleWorkflow && typeof subtitleWorkflow === "object") {
+    return subtitleWorkflow.postSubtitleRequired !== false;
+  }
+  return true;
+}
+
 function collectEditablePlans() {
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
@@ -1163,6 +1174,9 @@ function collectEditablePlans() {
     const subtitles = readList("subtitles");
     const moneyVisuals = readList("moneyVisuals");
     const subtitleScript = readList("subtitleScript");
+    const subtitleWorkflow = plan.subtitleWorkflow && typeof plan.subtitleWorkflow === "object" && !Array.isArray(plan.subtitleWorkflow)
+      ? plan.subtitleWorkflow
+      : {};
     return {
       ...plan,
       hook: read("hook") ?? plan.hook,
@@ -1176,11 +1190,11 @@ function collectEditablePlans() {
       moneyVisuals: moneyVisuals ?? plan.moneyVisuals,
       withdrawalVisual: read("withdrawalVisual") ?? plan.withdrawalVisual,
       subtitleWorkflow: {
-        ...(plan.subtitleWorkflow || {}),
+        ...subtitleWorkflow,
         burnedInSubtitles: false,
-        postSubtitleRequired: plan.subtitleWorkflow?.postSubtitleRequired !== false,
-        provider: plan.subtitleWorkflow?.provider || "pixel_tech",
-        subtitleScript: subtitleScript ?? (plan.subtitleWorkflow?.subtitleScript || plan.subtitles || [])
+        postSubtitleRequired: planSubtitlePostRequired(plan.subtitleWorkflow),
+        provider: subtitleWorkflow.provider || "pixel_tech",
+        subtitleScript: subtitleScript ?? (subtitleWorkflow.subtitleScript || plan.subtitles || [])
       },
       negativePrompt: read("negativePrompt") ?? plan.negativePrompt
     };
