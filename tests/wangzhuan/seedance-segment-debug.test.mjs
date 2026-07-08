@@ -382,3 +382,37 @@ test("runSeedanceSegmentDebugCli writes outputs using injected analysis dependen
   assert.deepEqual(result.plan.slices.map((slice) => slice.durationSec), [8, 8]);
   assert.match(await readFile(result.paths.promptsPath, "utf8"), /Brazilian commuter/);
 });
+
+test("runSeedanceSegmentDebugCli writes raw LLM output when story validation fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-invalid-"));
+  const videoPath = join(root, "reference.mp4");
+  const outputDir = join(root, "out");
+  const rawContent = JSON.stringify({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 8,
+        durationSec: 8,
+        scene: "bus stop"
+      }
+    ]
+  });
+  await writeFile(videoPath, "fake video bytes");
+
+  await assert.rejects(
+    () => runSeedanceSegmentDebugCli({
+      videoPath,
+      outputDir,
+      dependencies: {
+        probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+        detectScenes: async () => [],
+        extractFrames: async () => [],
+        callLlm: async () => rawContent
+      }
+    }),
+    /subject 缺失/
+  );
+
+  assert.equal(await readFile(join(outputDir, "llm-raw-response.txt"), "utf8"), `${rawContent}\n`);
+});

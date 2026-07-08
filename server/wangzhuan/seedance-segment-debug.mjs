@@ -380,6 +380,11 @@ async function defaultCallLlm(messages, options = {}) {
   return callOpenAiCompatibleLlm(llmConfig, messages);
 }
 
+async function writeRawLlmResponse(outputDir, rawContent) {
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(`${outputDir}/llm-raw-response.txt`, `${String(rawContent || "")}\n`);
+}
+
 export async function runSeedanceSegmentDebugCli(options = {}) {
   const videoPath = requireValue(options.videoPath, "--video 必填");
   const outputDir = requireValue(options.outputDir, "--out 必填");
@@ -415,15 +420,15 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
   });
   const rawContent = await callLlm(messages, options);
   let parsed;
+  let storySegments;
   try {
     parsed = typeof rawContent === "string" ? parseLlmJsonContent(rawContent) : rawContent;
+    storySegments = normalizeStorySegments(parsed, { durationSec: probe.durationSec });
   } catch (error) {
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(`${outputDir}/llm-raw-response.txt`, `${String(rawContent || "")}\n`);
+    await writeRawLlmResponse(outputDir, rawContent);
     throw error;
   }
 
-  const storySegments = normalizeStorySegments(parsed, { durationSec: probe.durationSec });
   const slices = buildSeedanceSlices(storySegments, options);
   const analysis = {
     sourceVideo: {
