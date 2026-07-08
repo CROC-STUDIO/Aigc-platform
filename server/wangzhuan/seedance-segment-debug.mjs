@@ -224,6 +224,72 @@ export function renderSeedancePromptsMarkdown(plan = {}) {
   return `${lines.join("\n").trim()}\n`;
 }
 
+export function normalizeStorySegments(value, context = {}) {
+  const source = Array.isArray(value?.storySegments) ? value.storySegments : (Array.isArray(value) ? value : []);
+  const durationSec = roundSec(context.durationSec);
+  return source.map((segment, index) => {
+    const startSec = roundSec(segment.startSec ?? (index === 0 ? 0 : source[index - 1]?.endSec));
+    const fallbackEnd = index === source.length - 1 && durationSec > 0
+      ? durationSec
+      : startSec + numberOrFallback(segment.durationSec, 0);
+    const endSec = roundSec(segment.endSec ?? fallbackEnd);
+    const normalized = {
+      storySegmentIndex: Math.max(1, Math.round(numberOrFallback(segment.storySegmentIndex, index + 1))),
+      startSec,
+      endSec,
+      durationSec: roundSec(segment.durationSec || (endSec - startSec)),
+      ...copySevenDimensions(segment),
+      coreHook: cleanString(segment.coreHook || segment.hook),
+      explosivePoint: cleanString(segment.explosivePoint || segment.burstPoint || segment.baoDian),
+      moneyEffects: normalizeStringList(segment.moneyEffects),
+      imagePrompt: cleanString(segment.imagePrompt),
+      seedancePrompt: cleanString(segment.seedancePrompt),
+      negativePrompt: cleanString(segment.negativePrompt),
+      subtitles: normalizeStringList(segment.subtitles || segment.subtitleScript)
+    };
+    for (const key of SEVEN_DIMENSIONS) {
+      if (!normalized[key]) throw new Error(`storySegments[${index}].${key} 缺失`);
+    }
+    if (normalized.endSec <= normalized.startSec) throw new Error(`storySegments[${index}] 时间范围无效`);
+    return normalized;
+  });
+}
+
+export function buildSegmentAnalysisMessages(input = {}) {
+  const frameLines = (input.frames || []).map((frame) => `- frame ${frame.index ?? ""} at ${frame.timestampSec}s`).join("\n") || "- no frames";
+  const sceneCuts = (input.sceneCutsSec || []).join(", ") || "none";
+  const truthRules = input.truthRules && Object.keys(input.truthRules).length ? JSON.stringify(input.truthRules) : "{}";
+  const userText = [
+    "Analyze the reference video into narrative story segments for Seedance ad generation.",
+    `Source video: ${input.videoPath || ""}`,
+    `Duration: ${input.durationSec || 0}s`,
+    `Language: ${input.language || "pt-BR"}`,
+    `Region: ${input.region || "BR"}`,
+    `Product: ${input.productName || "Product"}`,
+    `Currency: ${input.currencySymbol || ""}`,
+    `Scene cut hints, for reference only: ${sceneCuts}`,
+    "Extracted frames:",
+    frameLines,
+    "Required for every story segment: scene, subject, action, camera, lighting, style, quality, coreHook, explosivePoint, moneyEffects.",
+    "The LLM chooses the story segment count. Scene cuts are hints, not authoritative boundaries.",
+    "For wangzhuan effects, include visual motifs such as reward_number_growth, coin_burst, cash_rain, withdrawal_success, arrival_animation, withdrawal_record, real_cash_sound_cue when they fit.",
+    "Do not invent exact payout amounts, thresholds, arrival speeds, or guaranteed earnings unless truthRules explicitly allow them.",
+    `truthRules: ${truthRules}`,
+    "Return strict JSON only: {\"storySegments\":[{\"storySegmentIndex\":1,\"startSec\":0,\"endSec\":12,\"durationSec\":12,\"scene\":\"...\",\"subject\":\"...\",\"action\":\"...\",\"camera\":\"...\",\"lighting\":\"...\",\"style\":\"...\",\"quality\":\"...\",\"coreHook\":\"...\",\"explosivePoint\":\"...\",\"moneyEffects\":[\"reward_number_growth\"],\"imagePrompt\":\"...\",\"seedancePrompt\":\"... no burned subtitles ...\",\"negativePrompt\":\"...\",\"subtitles\":[\"...\"]}]}"
+  ].join("\n");
+
+  return [
+    {
+      role: "system",
+      content: "You are a Seedance wangzhuan video analyst. Preserve the source video's narrative structure, but redesign people, scene, clothing, props, and money visuals for safe original ad generation."
+    },
+    {
+      role: "user",
+      content: userText
+    }
+  ];
+}
+
 export async function writeDebugOutputs(outputDir, payload = {}) {
   await mkdir(outputDir, { recursive: true });
   const analysisPath = `${outputDir}/analysis.json`;
