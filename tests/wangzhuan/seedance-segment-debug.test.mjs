@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
   buildSegmentAnalysisMessages,
@@ -14,6 +16,8 @@ import {
   splitStorySegmentIntoSlices,
   writeDebugOutputs
 } from "../../server/wangzhuan/seedance-segment-debug.mjs";
+
+const execFileAsync = promisify(execFile);
 
 test("parseDebugCliArgs requires a local video path", () => {
   assert.throws(
@@ -412,6 +416,43 @@ test("runSeedanceSegmentDebugCli writes raw LLM output when story validation fai
       }
     }),
     /subject 缺失/
+  );
+
+  assert.equal(await readFile(join(outputDir, "llm-raw-response.txt"), "utf8"), `${rawContent}\n`);
+});
+
+test("seedance segment debug CLI module is import safe", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    "await import('./scripts/wangzhuan-seedance-segment-debug.mjs'); console.log('import-ok')"
+  ], {
+    cwd: resolve("."),
+    encoding: "utf8",
+    timeout: 20000
+  });
+
+  assert.equal(stdout, "import-ok\n");
+});
+
+test("runSeedanceSegmentDebugCli writes raw LLM output when JSON parsing fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-parse-invalid-"));
+  const videoPath = join(root, "reference.mp4");
+  const outputDir = join(root, "out");
+  const rawContent = "{not json";
+  await writeFile(videoPath, "fake video bytes");
+
+  await assert.rejects(
+    () => runSeedanceSegmentDebugCli({
+      videoPath,
+      outputDir,
+      dependencies: {
+        probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+        detectScenes: async () => [],
+        extractFrames: async () => [],
+        callLlm: async () => rawContent
+      }
+    })
   );
 
   assert.equal(await readFile(join(outputDir, "llm-raw-response.txt"), "utf8"), `${rawContent}\n`);
