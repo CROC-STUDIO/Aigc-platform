@@ -1,5 +1,5 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 
 const SEVEN_DIMENSIONS = Object.freeze([
   "scene",
@@ -37,7 +37,22 @@ function requireValue(value, message) {
   return text;
 }
 
-export function parseDebugCliArgs(argv = process.argv.slice(2), { cwd = process.cwd(), now = new Date() } = {}) {
+function resolvePathUnderCwd(cwd, value, label, { allowOutsideWorkspace = false } = {}) {
+  const resolvedPath = resolve(cwd, value);
+  if (allowOutsideWorkspace) return resolvedPath;
+
+  const relativePath = relative(cwd, resolvedPath);
+  if (relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"))) {
+    return resolvedPath;
+  }
+
+  throw new Error(`${label} 必须位于当前工作目录内`);
+}
+
+export function parseDebugCliArgs(
+  argv = process.argv.slice(2),
+  { cwd = process.cwd(), now = new Date(), allowOutsideWorkspace = false } = {}
+) {
   const values = {};
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -50,15 +65,18 @@ export function parseDebugCliArgs(argv = process.argv.slice(2), { cwd = process.
   }
 
   const video = requireValue(values.video, "--video 必填");
-  const stamp = now.toISOString().replace(/[:.]/g, "-");
+  const output = cleanString(values.out) || `tmp/seedance-segment-debug/${now.toISOString().replace(/[:.]/g, "-")}`;
+  const truthRulesJson = cleanString(values["truth-rules-json"]);
   return {
     videoPath: resolve(cwd, video),
-    outputDir: resolve(cwd, cleanString(values.out) || `tmp/seedance-segment-debug/${stamp}`),
+    outputDir: resolvePathUnderCwd(cwd, output, "--out", { allowOutsideWorkspace }),
     language: cleanString(values.language) || "pt-BR",
     region: cleanString(values.region) || "BR",
     productName: cleanString(values["product-name"]) || "Product",
     currencySymbol: cleanString(values["currency-symbol"]),
-    truthRulesPath: cleanString(values["truth-rules-json"]) ? resolve(cwd, values["truth-rules-json"]) : "",
+    truthRulesPath: truthRulesJson
+      ? resolvePathUnderCwd(cwd, truthRulesJson, "--truth-rules-json", { allowOutsideWorkspace })
+      : "",
     minSliceSec: Math.max(1, Math.round(numberOrFallback(values["min-slice-sec"], 8))),
     maxSliceSec: Math.max(1, Math.round(numberOrFallback(values["max-slice-sec"], 15)))
   };
@@ -71,6 +89,10 @@ export function splitStorySegmentIntoSlices(segment = {}, options = {}) {
   const durationSec = roundSec(segment.durationSec || (numberOrFallback(segment.endSec, 0) - startSec));
   const endSec = roundSec(segment.endSec || (startSec + durationSec));
   const storySegmentIndex = Math.max(1, Math.round(numberOrFallback(segment.storySegmentIndex, 1)));
+
+  if (durationSec > maxSliceSec * 2) {
+    throw new Error(`storySegmentIndex=${storySegmentIndex} 时长超过两段 Seedance slice 上限`);
+  }
 
   if (durationSec <= maxSliceSec) {
     return [{
