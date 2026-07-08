@@ -210,6 +210,22 @@ test("prepareBatchForPipeline keeps 30s three-slice requests on two 15s tasks", 
   assert.deepEqual(prepared.tasks.map((task) => task.segmentRole), ["hook_slice", "proof_slice"]);
 });
 
+test("prepareBatchForPipeline fallback prompt uses coherent 16s slice duration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-16s-fallback-"));
+  const prepared = await prepareBatchForPipeline(testContext(root), testBatch({
+    durationSec: 16,
+    sliceStrategy: "auto_10_15s_multi_slice"
+  }));
+
+  assert.equal(prepared.scripts.length, 1);
+  assert.equal(prepared.tasks.length, 1);
+  assert.equal(prepared.scripts[0].durationSec, 16);
+  assert.equal(prepared.tasks[0].durationSec, 16);
+  const prompt = await readFile(join(root, prepared.scripts[0].promptPath), "utf8");
+  assert.match(prompt, /Task: create a 16 second 9:16 Seedance image-to-video prompt\./);
+  assert.doesNotMatch(prompt, /Task: create a 15 second 9:16 Seedance image-to-video prompt\./);
+});
+
 test("prepareBatchForPipeline source writes slice duration and role into payloads", async () => {
   const source = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
 
@@ -220,6 +236,7 @@ test("prepareBatchForPipeline source writes slice duration and role into payload
   assert.match(source, /sliceDurationSec: planRecord\?\.sliceDurationSec \|\| slice\.durationSec/);
   assert.match(source, /segmentRole: slice\.segmentRole/);
   assert.match(source, /sliceDurationSec: slice\.durationSec/);
+  assert.match(source, /Task: create a \$\{script\.durationSec \|\| 15\} second 9:16 Seedance image-to-video prompt/);
 });
 
 test("buildGenerationPlanRecord carries per-slice duration", () => {

@@ -249,7 +249,7 @@ function buildPrompt(batch, script, kind) {
     `Locale rule: all on-screen UI text, subtitles, CTA phrasing, and voiceover must match the primary language ${languages[0] || "en-US"}; multi-language config (${languages.join(", ")}) and target regions (${regions.join(", ") || "US"}) should only affect localization style, scenario, and wording choices, never mixed-language output in one segment.`,
     "Protagonist rule: seedancePrompt must name a specific profession/identity and reflect it in clothing, props, scene, and voiceover tone; do not use generic labels like user or young woman.",
     "Do not include competitor names, watermarks, logos, signed URLs, or policy-unsafe income guarantees.",
-    kind === "image" ? "Task: create the first-frame image prompt for Seedance." : "Task: create a 15 second 9:16 Seedance image-to-video prompt."
+    kind === "image" ? "Task: create the first-frame image prompt for Seedance." : `Task: create a ${script.durationSec || 15} second 9:16 Seedance image-to-video prompt.`
   ].filter(Boolean);
   return `${lines.join("\n")}\n`;
 }

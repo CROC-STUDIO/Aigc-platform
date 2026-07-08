@@ -124,10 +124,10 @@ function normalizeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function clampSliceDuration(value) {
+function normalizeSliceDuration(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 15;
-  return Math.max(10, Math.min(15, Math.round(number)));
+  return Math.max(1, Math.round(number));
 }
 
 function normalizeSubtitleWorkflow(value = {}, subtitles = [], fallback = {}) {
@@ -477,7 +477,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     }),
     complianceNotes: normalizeStringList(plan.complianceNotes),
     segmentRole: cleanString(plan.segmentRole) || cleanString(context.segmentRole),
-    sliceDurationSec: clampSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
+    sliceDurationSec: normalizeSliceDuration(plan.sliceDurationSec ?? context.sliceDurationSec ?? 15),
     outputTemplateMode: normalizeOutputTemplateMode(plan.outputTemplateMode, contextOutputTemplateMode),
     moneyVisuals: resolveStringList(plan.moneyVisuals, context.moneyVisuals),
     withdrawalVisual: cleanString(plan.withdrawalVisual) || cleanString(context.withdrawalVisual),
@@ -505,7 +505,7 @@ export function buildSeedancePlanMessages({
   const localeContext = resolvePlanLocaleContext(batch, branch);
   const outputTemplateMode = normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode);
   const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
-  const currentSliceDurationSec = clampSliceDuration(sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15);
+  const currentSliceDurationSec = normalizeSliceDuration(sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15);
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
   const subtitleWorkflow = resolveNormalizedSubtitleWorkflow(
     branch.subtitleWorkflow,

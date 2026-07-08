@@ -267,6 +267,70 @@ test("Seedance plan prompt uses current slice duration instead of hardcoded 15s"
   assert.doesNotMatch(text, /15s 9:16 Seedance omni_reference prompt/);
 });
 
+test("Seedance plan prompt and validation preserve coherent 16s slice duration", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707120600_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          outputTemplateMode: "three_slice_net_earning",
+          sliceStrategy: "auto_10_15s_multi_slice"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "pt-BR", targetRegions: ["BR"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "BR workers",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      outputTemplateMode: "three_slice_net_earning",
+      sliceStrategy: "auto_10_15s_multi_slice",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "bus commute",
+      subject: "commuter",
+      action: "checks app rewards",
+      camera: "phone close-up",
+      lighting: "daylight",
+      style: "UGC",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 16
+  });
+  const text = messagesText(messages);
+  assert.match(text, /输出时长 durationSec=16/);
+  assert.match(text, /当前切片时长 sliceDurationSec=16s/);
+  assert.match(text, /"sliceDurationSec": 16/);
+
+  const plan = validateSeedancePlan({
+    hook: "Hook",
+    body: "Body",
+    voiceover: "Voiceover",
+    subtitles: ["Subtitle"],
+    cta: "",
+    ending: "",
+    imagePrompt: "Image prompt",
+    seedancePrompt: "0-16s: coherent single slice.",
+    negativePrompt: "No exact amount",
+    mediaRefs: {},
+    complianceNotes: []
+  }, {
+    sliceDurationSec: 16
+  });
+
+  assert.equal(plan.sliceDurationSec, 16);
+});
+
 test("Seedance plan prompt falls back when branch output-template strings are blank", () => {
   const messages = buildSeedancePlanMessages({
     batch: {
