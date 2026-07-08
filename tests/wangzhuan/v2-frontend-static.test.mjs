@@ -275,7 +275,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(js, /sliceStrategy:\s*value\(els\.sliceStrategy\)/);
   assert.match(js, /moneyVisuals:\s*selectedValues\(els\.moneyVisuals\)/);
   assert.match(js, /subtitleWorkflow:\s*value\(els\.subtitleWorkflow\)/);
-  assert.match(js, /const signatureFields = \[[\s\S]*"outputTemplateMode"[\s\S]*"sliceStrategy"[\s\S]*"moneyVisuals"[\s\S]*"subtitleWorkflow"[\s\S]*\]/);
+  assert.match(js, /const signatureFields = \[[\s\S]*"outputTemplateMode"[\s\S]*"sliceStrategy"[\s\S]*"moneyVisuals"[\s\S]*"subtitleWorkflow"[\s\S]*"branches"[\s\S]*\]/);
   assert.match(js, /function currentDraft\(\)[\s\S]*const active = branches\[state\.activeBranchIndex\] \|\| primary/);
   assert.match(js, /function currentDraft\(\)[\s\S]*outputTemplateMode:\s*active\.outputTemplateMode \|\| value\(els\.outputTemplateMode\)/);
   assert.match(js, /function currentDraft\(\)[\s\S]*sliceStrategy:\s*active\.sliceStrategy \|\| value\(els\.sliceStrategy\)/);
@@ -286,6 +286,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(js, /function planSignatureInput\(\)[\s\S]*sliceStrategy:\s*active\.sliceStrategy \|\| value\(els\.sliceStrategy\)/);
   assert.match(js, /function planSignatureInput\(\)[\s\S]*moneyVisuals:\s*active\.moneyVisuals \|\| selectedValues\(els\.moneyVisuals\)/);
   assert.match(js, /function planSignatureInput\(\)[\s\S]*subtitleWorkflow:\s*active\.subtitleWorkflow \|\| value\(els\.subtitleWorkflow\)/);
+  assert.match(js, /function planSignatureInput\(\)[\s\S]*branches\s*\n\s*\}/);
   assert.match(js, /function estimateRequest\(\)[\s\S]*const active = branches\[state\.activeBranchIndex\] \|\| branches\[0\] \|\| \{\}/);
   assert.match(js, /function estimateRequest\(\)[\s\S]*outputTemplateMode:\s*active\.outputTemplateMode \|\| value\(els\.outputTemplateMode\)/);
   assert.match(js, /function estimateRequest\(\)[\s\S]*sliceStrategy:\s*active\.sliceStrategy \|\| value\(els\.sliceStrategy\)/);
@@ -305,6 +306,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.match(jobs, /"sliceStrategy"/);
   assert.match(jobs, /"moneyVisuals"/);
   assert.match(jobs, /"subtitleWorkflow"/);
+  assert.match(jobs, /const PLAN_SIGNATURE_FIELDS = Object\.freeze\(\[[\s\S]*"outputTemplateMode"[\s\S]*"sliceStrategy"[\s\S]*"moneyVisuals"[\s\S]*"subtitleWorkflow"[\s\S]*"branches"[\s\S]*\]\)/);
 });
 
 test("wangzhuan v2 restores task-manager backflow links in place", async () => {

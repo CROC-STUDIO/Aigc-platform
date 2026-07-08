@@ -16,6 +16,7 @@ const signatureFields = [
   "sliceStrategy",
   "moneyVisuals",
   "subtitleWorkflow",
+  "branches",
   "voiceoverStyle",
   "promiseLevel",
   "currencySymbol",

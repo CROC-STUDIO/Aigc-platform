@@ -21,6 +21,7 @@ const PLAN_SIGNATURE_FIELDS = Object.freeze([
   "sliceStrategy",
   "moneyVisuals",
   "subtitleWorkflow",
+  "branches",
   "voiceoverStyle",
   "promiseLevel",
   "currencySymbol",
