@@ -450,24 +450,76 @@ export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
   return isApprovedContinuityReference(task.continuityReference);
 }
 
+function isFalseLike(value) {
+  return value === false
+    || value === 0
+    || ["false", "0", "none", "off", "no_post_process"].includes(String(value || "").trim().toLowerCase());
+}
+
+function isTrueLike(value) {
+  return value === true
+    || value === 1
+    || ["true", "1", "post_process", "pixel_tech"].includes(String(value || "").trim().toLowerCase());
+}
+
+function normalizeSubtitleWorkflowForArtifact(value) {
+  if (isFalseLike(value)) {
+    return { postSubtitleRequired: false, provider: "pixel_tech", subtitleScript: [] };
+  }
+  if (isTrueLike(value)) {
+    return { postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: [] };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { postSubtitleRequired: false, provider: "pixel_tech", subtitleScript: [] };
+  }
+  return {
+    postSubtitleRequired: !isFalseLike(value.postSubtitleRequired),
+    provider: value.provider || "pixel_tech",
+    subtitleScript: Array.isArray(value.subtitleScript) ? value.subtitleScript : []
+  };
+}
+
+function taskMatchesScript(task = {}, script = {}) {
+  if (task.scriptId && script.scriptId && task.scriptId === script.scriptId) return true;
+  if (task.planId && script.planId && task.planId === script.planId) return true;
+  if (!task.scriptId && !task.planId) {
+    return (task.branchId || "") === (script.branchId || "")
+      && Number(task.segmentIndex || 1) === Number(script.segmentIndex || 1)
+      && Number(task.branchVariantIndex || task.variantIndex || 1) === Number(script.branchVariantIndex || script.variantIndex || 1);
+  }
+  return false;
+}
+
+function findGenerationTaskForScript(tasks = [], script = {}) {
+  return tasks.find((task) => task.scriptId && script.scriptId && task.scriptId === script.scriptId)
+    || tasks.find((task) => task.planId && script.planId && task.planId === script.planId)
+    || tasks.find((task) => taskMatchesScript(task, script));
+}
+
 export function buildSubtitlePostProcessArtifact(batch = {}) {
   const scripts = Array.isArray(batch.scripts) ? batch.scripts : [];
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   return {
     schemaVersion: "subtitle-postprocess.v1",
     batchId: batch.batchId || "",
     provider: "pixel_tech",
     items: scripts
-      .filter((script) => script.subtitleWorkflow?.postSubtitleRequired === true)
       .map((script) => ({
-        scriptId: script.scriptId || "",
-        generationTaskId: script.generationTaskId || "",
-        branchId: script.branchId || "",
-        segmentIndex: Number(script.segmentIndex || 1),
-        durationSec: Number(script.durationSec || 15),
+        script,
+        task: findGenerationTaskForScript(tasks, script),
+        workflow: normalizeSubtitleWorkflowForArtifact(script.subtitleWorkflow)
+      }))
+      .filter(({ workflow }) => workflow.postSubtitleRequired)
+      .map(({ script, task, workflow }) => ({
+        scriptId: script.scriptId || task?.scriptId || "",
+        generationTaskId: task?.generationTaskId || script.generationTaskId || "",
+        branchId: script.branchId || task?.branchId || "",
+        segmentIndex: Number(script.segmentIndex || task?.segmentIndex || 1),
+        durationSec: Number(script.durationSec || task?.durationSec || 15),
         burnedInSubtitles: false,
-        provider: script.subtitleWorkflow?.provider || "pixel_tech",
-        subtitleScript: Array.isArray(script.subtitleWorkflow?.subtitleScript) && script.subtitleWorkflow.subtitleScript.length
-          ? script.subtitleWorkflow.subtitleScript
+        provider: workflow.provider || "pixel_tech",
+        subtitleScript: workflow.subtitleScript.length
+          ? workflow.subtitleScript
           : (Array.isArray(script.subtitles) ? script.subtitles : [])
       }))
   };

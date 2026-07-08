@@ -280,7 +280,6 @@ test("buildSubtitlePostProcessArtifact exports Pixel Tech subtitle handoff data"
     batchId: "wzb_20260707121212_abcd",
     scripts: [{
       scriptId: "script_1",
-      generationTaskId: "gen_1",
       branchId: "branch_1",
       segmentIndex: 1,
       durationSec: 12,
@@ -291,6 +290,13 @@ test("buildSubtitlePostProcessArtifact exports Pixel Tech subtitle handoff data"
         provider: "pixel_tech",
         subtitleScript: ["Ganhe no intervalo", "Veja as regras"]
       }
+    }],
+    tasks: [{
+      scriptId: "script_1",
+      generationTaskId: "gen_1",
+      branchId: "branch_1",
+      segmentIndex: 1,
+      durationSec: 12
     }]
   });
 
@@ -312,7 +318,6 @@ test("buildSubtitlePostProcessArtifact filters required items and falls back to 
     batchId: "wzb_20260707121212_abcd",
     scripts: [{
       scriptId: "script_required",
-      generationTaskId: "gen_required",
       branchId: "branch_1",
       segmentIndex: 2,
       durationSec: 14,
@@ -324,7 +329,6 @@ test("buildSubtitlePostProcessArtifact filters required items and falls back to 
       }
     }, {
       scriptId: "script_skipped",
-      generationTaskId: "gen_skipped",
       branchId: "branch_2",
       subtitles: ["Skip"],
       subtitleWorkflow: {
@@ -332,10 +336,110 @@ test("buildSubtitlePostProcessArtifact filters required items and falls back to 
         provider: "pixel_tech",
         subtitleScript: ["Skip"]
       }
+    }],
+    tasks: [{
+      scriptId: "script_required",
+      generationTaskId: "gen_required",
+      branchId: "branch_1",
+      segmentIndex: 2,
+      durationSec: 14
+    }, {
+      scriptId: "script_skipped",
+      generationTaskId: "gen_skipped",
+      branchId: "branch_2",
+      segmentIndex: 1,
+      durationSec: 15
     }]
   });
 
   assert.equal(artifact.items.length, 1);
   assert.equal(artifact.items[0].scriptId, "script_required");
+  assert.equal(artifact.items[0].generationTaskId, "gen_required");
   assert.deepEqual(artifact.items[0].subtitleScript, ["Fallback one", "Fallback two"]);
+});
+
+test("buildSubtitlePostProcessArtifact supports legacy workflow values and task fallbacks", () => {
+  const artifact = buildSubtitlePostProcessArtifact({
+    batchId: "wzb_20260707121212_abcd",
+    scripts: [{
+      scriptId: "script_post_process",
+      planId: "plan_1",
+      branchId: "branch_1",
+      branchVariantIndex: 1,
+      segmentIndex: 1,
+      subtitles: ["Legacy post process"],
+      subtitleWorkflow: "post_process"
+    }, {
+      scriptId: "script_plan_match",
+      planId: "plan_2",
+      branchId: "branch_1",
+      branchVariantIndex: 1,
+      segmentIndex: 2,
+      subtitles: ["Plan match"],
+      subtitleWorkflow: {
+        postSubtitleRequired: "true",
+        provider: "",
+        subtitleScript: ["Plan subtitle"]
+      }
+    }, {
+      scriptId: "script_branch_match",
+      branchId: "branch_2",
+      branchVariantIndex: 3,
+      segmentIndex: 2,
+      subtitles: ["Branch fallback"],
+      subtitleWorkflow: 1
+    }, {
+      scriptId: "script_none",
+      branchId: "branch_3",
+      segmentIndex: 1,
+      subtitles: ["None"],
+      subtitleWorkflow: "none"
+    }, {
+      scriptId: "script_false_string",
+      branchId: "branch_4",
+      segmentIndex: 1,
+      subtitles: ["False"],
+      subtitleWorkflow: {
+        postSubtitleRequired: "false",
+        subtitleScript: ["False"]
+      }
+    }],
+    tasks: [{
+      scriptId: "script_post_process",
+      generationTaskId: "gen_script_match",
+      branchId: "branch_1",
+      branchVariantIndex: 1,
+      segmentIndex: 1,
+      durationSec: 12
+    }, {
+      planId: "plan_2",
+      generationTaskId: "gen_plan_match",
+      branchId: "branch_1",
+      branchVariantIndex: 1,
+      segmentIndex: 2,
+      durationSec: 13
+    }, {
+      generationTaskId: "gen_branch_match",
+      branchId: "branch_2",
+      branchVariantIndex: 3,
+      segmentIndex: 2,
+      durationSec: 14
+    }]
+  });
+
+  assert.deepEqual(artifact.items.map((item) => item.scriptId), [
+    "script_post_process",
+    "script_plan_match",
+    "script_branch_match"
+  ]);
+  assert.deepEqual(artifact.items.map((item) => item.generationTaskId), [
+    "gen_script_match",
+    "gen_plan_match",
+    "gen_branch_match"
+  ]);
+  assert.deepEqual(artifact.items.map((item) => item.durationSec), [12, 13, 14]);
+  assert.deepEqual(artifact.items.map((item) => item.provider), ["pixel_tech", "pixel_tech", "pixel_tech"]);
+  assert.deepEqual(artifact.items[0].subtitleScript, ["Legacy post process"]);
+  assert.deepEqual(artifact.items[1].subtitleScript, ["Plan subtitle"]);
+  assert.deepEqual(artifact.items[2].subtitleScript, ["Branch fallback"]);
 });
