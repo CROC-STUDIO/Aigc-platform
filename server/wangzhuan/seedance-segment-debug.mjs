@@ -1,5 +1,6 @@
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 
 const SEVEN_DIMENSIONS = Object.freeze([
   "scene",
@@ -41,12 +42,31 @@ function resolvePathUnderCwd(cwd, value, label, { allowOutsideWorkspace = false 
   const resolvedPath = resolve(cwd, value);
   if (allowOutsideWorkspace) return resolvedPath;
 
-  const relativePath = relative(cwd, resolvedPath);
-  if (relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"))) {
+  const realCwd = realpathSync(cwd);
+  const targetRealPath = label === "--out"
+    ? realpathSync(nearestExistingParent(resolvedPath))
+    : realpathSync(resolvedPath);
+
+  if (isPathInside(targetRealPath, realCwd)) {
     return resolvedPath;
   }
 
   throw new Error(`${label} 必须位于当前工作目录内`);
+}
+
+function nearestExistingParent(targetPath) {
+  let currentPath = targetPath;
+  while (!existsSync(currentPath)) {
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) return currentPath;
+    currentPath = parentPath;
+  }
+  return currentPath;
+}
+
+function isPathInside(targetPath, rootPath) {
+  const relativePath = relative(rootPath, targetPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
 }
 
 export function parseDebugCliArgs(

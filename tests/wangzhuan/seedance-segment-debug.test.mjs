@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -19,7 +19,8 @@ test("parseDebugCliArgs requires a local video path", () => {
   );
 });
 
-test("parseDebugCliArgs normalizes defaults and optional fields", () => {
+test("parseDebugCliArgs normalizes defaults and optional fields", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "seedance-debug-defaults-"));
   const parsed = parseDebugCliArgs([
     "--video", "./fixtures/source.mp4",
     "--out", "tmp/debug-run",
@@ -27,10 +28,10 @@ test("parseDebugCliArgs normalizes defaults and optional fields", () => {
     "--region", "BR",
     "--product-name", "Drama Gold",
     "--currency-symbol", "R$"
-  ], { cwd: "/repo" });
+  ], { cwd });
 
-  assert.equal(parsed.videoPath, resolve("/repo", "./fixtures/source.mp4"));
-  assert.equal(parsed.outputDir, resolve("/repo", "tmp/debug-run"));
+  assert.equal(parsed.videoPath, resolve(cwd, "./fixtures/source.mp4"));
+  assert.equal(parsed.outputDir, resolve(cwd, "tmp/debug-run"));
   assert.equal(parsed.language, "pt-BR");
   assert.equal(parsed.region, "BR");
   assert.equal(parsed.productName, "Drama Gold");
@@ -39,22 +40,29 @@ test("parseDebugCliArgs normalizes defaults and optional fields", () => {
   assert.equal(parsed.maxSliceSec, 15);
 });
 
-test("parseDebugCliArgs rejects output paths outside cwd", () => {
+test("parseDebugCliArgs rejects output paths outside cwd", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "seedance-debug-outside-"));
   assert.throws(
     () => parseDebugCliArgs([
       "--video", "/videos/source.mp4",
       "--out", "../../outside"
-    ], { cwd: "/repo/project" }),
+    ], { cwd }),
     /--out 必须位于当前工作目录内/
   );
 });
 
-test("parseDebugCliArgs rejects truth-rules paths outside cwd", () => {
+test("parseDebugCliArgs rejects truth-rules paths outside cwd", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-truth-outside-"));
+  const cwd = join(root, "workspace");
+  const outside = join(root, "truth.json");
+  await mkdir(cwd);
+  await writeFile(outside, "{}\n");
+
   assert.throws(
     () => parseDebugCliArgs([
       "--video", "/videos/source.mp4",
-      "--truth-rules-json", "../../truth.json"
-    ], { cwd: "/repo/project" }),
+      "--truth-rules-json", "../truth.json"
+    ], { cwd }),
     /--truth-rules-json 必须位于当前工作目录内/
   );
 });
@@ -68,6 +76,41 @@ test("parseDebugCliArgs allows explicit internal override for paths outside cwd"
 
   assert.equal(parsed.outputDir, resolve("/repo/project", "../../outside"));
   assert.equal(parsed.truthRulesPath, resolve("/repo/project", "../../truth.json"));
+});
+
+test("parseDebugCliArgs rejects output paths through symlinked parents", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-paths-"));
+  const cwd = join(root, "workspace");
+  const outside = join(root, "outside");
+  await mkdir(cwd);
+  await mkdir(outside);
+  await symlink(outside, join(cwd, "link-out"));
+
+  assert.throws(
+    () => parseDebugCliArgs([
+      "--video", "/videos/source.mp4",
+      "--out", "link-out/run"
+    ], { cwd }),
+    /--out 必须位于当前工作目录内/
+  );
+});
+
+test("parseDebugCliArgs rejects truth-rules paths through symlinks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-truth-"));
+  const cwd = join(root, "workspace");
+  const outside = join(root, "outside");
+  await mkdir(cwd);
+  await mkdir(outside);
+  await writeFile(join(outside, "truth.json"), "{}\n");
+  await symlink(join(outside, "truth.json"), join(cwd, "truth-link.json"));
+
+  assert.throws(
+    () => parseDebugCliArgs([
+      "--video", "/videos/source.mp4",
+      "--truth-rules-json", "truth-link.json"
+    ], { cwd }),
+    /--truth-rules-json 必须位于当前工作目录内/
+  );
 });
 
 test("splitStorySegmentIntoSlices keeps short story segment as one slice", () => {
