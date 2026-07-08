@@ -1151,8 +1151,15 @@ function collectEditablePlans() {
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
   return plans.map((plan) => {
     const editor = els.planBox?.querySelector(`[data-plan-id="${CSS.escape(plan.planId || "")}"]`);
-    const read = (field) => editor?.querySelector(`[data-plan-field="${field}"]`)?.value.trim();
-    const readList = (field) => splitLines(read(field) || "");
+    const fieldValue = (field) => {
+      const fieldEl = editor?.querySelector(`[data-plan-field="${field}"]`);
+      return fieldEl ? fieldEl.value.trim() : undefined;
+    };
+    const read = (field) => fieldValue(field);
+    const readList = (field) => {
+      const text = fieldValue(field);
+      return text === undefined ? undefined : splitLines(text);
+    };
     const subtitles = readList("subtitles");
     const moneyVisuals = readList("moneyVisuals");
     const subtitleScript = readList("subtitleScript");
@@ -1161,19 +1168,19 @@ function collectEditablePlans() {
       hook: read("hook") ?? plan.hook,
       body: read("body") ?? plan.body,
       voiceover: read("voiceover") ?? plan.voiceover,
-      subtitles: subtitles.length ? subtitles : plan.subtitles,
+      subtitles: subtitles ?? plan.subtitles,
       cta: read("cta") ?? plan.cta,
       ending: read("ending") ?? plan.ending,
       imagePrompt: read("imagePrompt") ?? plan.imagePrompt,
       seedancePrompt: read("seedancePrompt") ?? plan.seedancePrompt,
-      moneyVisuals: moneyVisuals.length ? moneyVisuals : plan.moneyVisuals,
+      moneyVisuals: moneyVisuals ?? plan.moneyVisuals,
       withdrawalVisual: read("withdrawalVisual") ?? plan.withdrawalVisual,
       subtitleWorkflow: {
         ...(plan.subtitleWorkflow || {}),
         burnedInSubtitles: false,
         postSubtitleRequired: plan.subtitleWorkflow?.postSubtitleRequired !== false,
         provider: plan.subtitleWorkflow?.provider || "pixel_tech",
-        subtitleScript: subtitleScript.length ? subtitleScript : (plan.subtitleWorkflow?.subtitleScript || plan.subtitles || [])
+        subtitleScript: subtitleScript ?? (plan.subtitleWorkflow?.subtitleScript || plan.subtitles || [])
       },
       negativePrompt: read("negativePrompt") ?? plan.negativePrompt
     };
