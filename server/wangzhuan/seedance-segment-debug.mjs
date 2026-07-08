@@ -1,6 +1,12 @@
+import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
+import { promisify } from "node:util";
+
+import { callOpenAiCompatibleLlm, parseLlmJsonContent } from "./reference-videos.mjs";
+
+const execFileAsync = promisify(execFile);
 
 const SEVEN_DIMENSIONS = Object.freeze([
   "scene",
@@ -313,6 +319,135 @@ export async function assertLocalVideoFile(videoPath) {
 export async function loadTruthRules(truthRulesPath) {
   if (!truthRulesPath) return {};
   return JSON.parse(await readFile(truthRulesPath, "utf8"));
+}
+
+async function defaultProbeVideo(videoPath) {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error",
+    "-select_streams", "v:0",
+    "-show_entries", "stream=width,height:format=duration",
+    "-of", "json",
+    videoPath
+  ], {
+    encoding: "utf8",
+    timeout: 20000,
+    maxBuffer: 2 * 1024 * 1024,
+    windowsHide: true
+  });
+  const parsed = JSON.parse(stdout || "{}");
+  const stream = Array.isArray(parsed.streams) ? parsed.streams[0] || {} : {};
+  const durationSec = roundSec(parsed.format?.duration || 0);
+  const width = Math.round(numberOrFallback(stream.width, 0));
+  const height = Math.round(numberOrFallback(stream.height, 0));
+  return {
+    durationSec,
+    width,
+    height,
+    ratio: width && height ? `${width}:${height}` : ""
+  };
+}
+
+function defaultFrameTimestamps(durationSec) {
+  const duration = roundSec(durationSec);
+  if (duration <= 0) return [];
+  return [0.25, duration * 0.25, duration * 0.5, duration * 0.75, Math.max(0.25, duration - 0.25)]
+    .map(roundSec)
+    .filter((value, index, list) => list.indexOf(value) === index);
+}
+
+async function defaultDetectScenes() {
+  return [];
+}
+
+async function defaultExtractFrames() {
+  return [];
+}
+
+function resolveLlmConfigFromEnv(options = {}) {
+  return {
+    provider: cleanString(options.provider) || cleanString(process.env.WANGZHUAN_LLM_PROVIDER) || "skylink",
+    model: cleanString(options.model) || cleanString(process.env.WANGZHUAN_LLM_MODEL) || "gpt-5.4",
+    endpoint: cleanString(options.endpoint) || cleanString(process.env.WANGZHUAN_LLM_ENDPOINT) || cleanString(process.env.OPENAI_BASE_URL) || "https://api.openai.com/v1",
+    apiKey: cleanString(options.apiKey) || cleanString(process.env.WANGZHUAN_LLM_API_KEY) || cleanString(process.env.OPENAI_API_KEY),
+    apiKeyEnv: cleanString(options.apiKeyEnv) || "WANGZHUAN_LLM_API_KEY",
+    temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.2,
+    timeoutMs: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 300000
+  };
+}
+
+async function defaultCallLlm(messages, options = {}) {
+  const llmConfig = resolveLlmConfigFromEnv(options.llmConfig || {});
+  return callOpenAiCompatibleLlm(llmConfig, messages);
+}
+
+export async function runSeedanceSegmentDebugCli(options = {}) {
+  const videoPath = requireValue(options.videoPath, "--video 必填");
+  const outputDir = requireValue(options.outputDir, "--out 必填");
+  await assertLocalVideoFile(videoPath);
+
+  const dependencies = options.dependencies || {};
+  const probeVideo = dependencies.probeVideo || defaultProbeVideo;
+  const detectScenes = dependencies.detectScenes || defaultDetectScenes;
+  const extractFrames = dependencies.extractFrames || defaultExtractFrames;
+  const callLlm = dependencies.callLlm || defaultCallLlm;
+
+  const truthRules = options.truthRules || await loadTruthRules(options.truthRulesPath);
+  const probe = await probeVideo(videoPath, options);
+  let sceneCutList = [];
+  try {
+    const sceneCutsSec = await detectScenes(videoPath, probe, options);
+    sceneCutList = Array.isArray(sceneCutsSec) ? sceneCutsSec.map(roundSec) : [];
+  } catch {
+    sceneCutList = [];
+  }
+
+  const frames = await extractFrames(videoPath, {
+    ...probe,
+    timestampsSec: defaultFrameTimestamps(probe.durationSec)
+  }, options);
+  const messages = buildSegmentAnalysisMessages({
+    ...options,
+    videoPath,
+    durationSec: probe.durationSec,
+    sceneCutsSec: sceneCutList,
+    frames,
+    truthRules
+  });
+  const rawContent = await callLlm(messages, options);
+  let parsed;
+  try {
+    parsed = typeof rawContent === "string" ? parseLlmJsonContent(rawContent) : rawContent;
+  } catch (error) {
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(`${outputDir}/llm-raw-response.txt`, `${String(rawContent || "")}\n`);
+    throw error;
+  }
+
+  const storySegments = normalizeStorySegments(parsed, { durationSec: probe.durationSec });
+  const slices = buildSeedanceSlices(storySegments, options);
+  const analysis = {
+    sourceVideo: {
+      path: videoPath,
+      fileName: basename(videoPath),
+      durationSec: probe.durationSec,
+      width: probe.width || 0,
+      height: probe.height || 0,
+      ratio: probe.ratio || "",
+      sceneCutsSec: sceneCutList
+    },
+    storySegments
+  };
+  const plan = {
+    language: options.language || "pt-BR",
+    region: options.region || "BR",
+    productName: options.productName || "Product",
+    currencySymbol: options.currencySymbol || "",
+    minSliceSec: options.minSliceSec || 8,
+    maxSliceSec: options.maxSliceSec || 15,
+    slices
+  };
+  const paths = await writeDebugOutputs(outputDir, { analysis, plan });
+  return { analysis, plan, paths };
 }
 
 export const seedanceSegmentDebugInternals = {

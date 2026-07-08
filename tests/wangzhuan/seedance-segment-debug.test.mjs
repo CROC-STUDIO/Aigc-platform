@@ -10,6 +10,7 @@ import {
   normalizeStorySegments,
   parseDebugCliArgs,
   renderSeedancePromptsMarkdown,
+  runSeedanceSegmentDebugCli,
   splitStorySegmentIntoSlices,
   writeDebugOutputs
 } from "../../server/wangzhuan/seedance-segment-debug.mjs";
@@ -329,4 +330,55 @@ test("buildSegmentAnalysisMessages encodes segment and money-effect rules", () =
   assert.match(text, /reward_number_growth/);
   assert.match(text, /no burned subtitles/i);
   assert.match(text, /Do not invent exact payout amounts/);
+});
+
+test("runSeedanceSegmentDebugCli writes outputs using injected analysis dependencies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-run-"));
+  const videoPath = join(root, "reference.mp4");
+  await writeFile(videoPath, "fake video bytes");
+
+  const result = await runSeedanceSegmentDebugCli({
+    videoPath,
+    outputDir: join(root, "out"),
+    language: "pt-BR",
+    region: "BR",
+    productName: "Drama Gold",
+    currencySymbol: "R$",
+    minSliceSec: 8,
+    maxSliceSec: 15,
+    dependencies: {
+      probeVideo: async () => ({ durationSec: 16, width: 720, height: 1280, ratio: "9:16" }),
+      detectScenes: async () => [4, 9],
+      extractFrames: async () => [{ index: 1, timestampSec: 0.25, dataUrl: "data:image/jpeg;base64,AA==" }],
+      callLlm: async () => JSON.stringify({
+        storySegments: [
+          {
+            storySegmentIndex: 1,
+            startSec: 0,
+            endSec: 16,
+            durationSec: 16,
+            scene: "bus stop",
+            subject: "commuter holding phone",
+            action: "checks drama reward task",
+            camera: "handheld close-up then reaction",
+            lighting: "natural daylight",
+            style: "UGC short-drama ad",
+            quality: "realistic 720p vertical video",
+            coreHook: "missed bus turns into earning discovery",
+            explosivePoint: "reward number keeps rising during drama clip",
+            moneyEffects: ["reward_number_growth"],
+            imagePrompt: "Brazilian commuter holding phone at bus stop.",
+            seedancePrompt: "0-8s and 8-16s source-inspired UGC, no burned subtitles.",
+            negativePrompt: "No watermark.",
+            subtitles: ["Watch drama", "Check reward feedback"]
+          }
+        ]
+      })
+    }
+  });
+
+  assert.equal(result.analysis.storySegments.length, 1);
+  assert.equal(result.plan.slices.length, 2);
+  assert.deepEqual(result.plan.slices.map((slice) => slice.durationSec), [8, 8]);
+  assert.match(await readFile(result.paths.promptsPath, "utf8"), /Brazilian commuter/);
 });
