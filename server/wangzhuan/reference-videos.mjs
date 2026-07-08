@@ -1761,5 +1761,7 @@ export {
   buildSceneAwareFrameTimestamps,
   callGeminiCompatibleLlm,
   callOpenAiCompatibleLlm,
+  detectReferenceVideoScenes,
+  extractReferenceFrames,
   parseLlmJsonContent
 };

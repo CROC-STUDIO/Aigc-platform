@@ -435,6 +435,13 @@ test("seedance segment debug CLI module is import safe", async () => {
   assert.equal(stdout, "import-ok\n");
 });
 
+test("seedance segment debug module imports existing reference video frame utilities", async () => {
+  const source = await readFile("server/wangzhuan/seedance-segment-debug.mjs", "utf8");
+  assert.match(source, /buildSceneAwareFrameTimestamps/);
+  assert.match(source, /detectReferenceVideoScenes/);
+  assert.match(source, /extractReferenceFrames/);
+});
+
 test("runSeedanceSegmentDebugCli writes raw LLM output when JSON parsing fails", async () => {
   const root = await mkdtemp(join(tmpdir(), "seedance-debug-parse-invalid-"));
   const videoPath = join(root, "reference.mp4");

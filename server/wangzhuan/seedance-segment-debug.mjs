@@ -4,7 +4,13 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { callOpenAiCompatibleLlm, parseLlmJsonContent } from "./reference-videos.mjs";
+import {
+  buildSceneAwareFrameTimestamps,
+  callOpenAiCompatibleLlm,
+  detectReferenceVideoScenes,
+  extractReferenceFrames,
+  parseLlmJsonContent
+} from "./reference-videos.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -347,20 +353,49 @@ async function defaultProbeVideo(videoPath) {
   };
 }
 
-function defaultFrameTimestamps(durationSec) {
+function createReferenceContext(options = {}) {
+  return {
+    userProjectRoot: process.cwd(),
+    sharedProjectRoot: process.cwd(),
+    config: {
+      wangzhuan: {
+        llm: {
+          frameExtractTimeoutMs: Number(process.env.WANGZHUAN_DEBUG_FRAME_TIMEOUT_MS || 20000),
+          sceneDetectTimeoutMs: Number(process.env.WANGZHUAN_DEBUG_SCENE_TIMEOUT_MS || 25000),
+          sceneDetectThreshold: Number(process.env.WANGZHUAN_DEBUG_SCENE_THRESHOLD || 0.1),
+          sceneDetectMinGapSec: Number(process.env.WANGZHUAN_DEBUG_SCENE_MIN_GAP_SEC || 0.8),
+          sceneLongThresholdSec: Number(process.env.WANGZHUAN_DEBUG_SCENE_LONG_THRESHOLD_SEC || 8),
+          sceneMaxFrames: Number(process.env.WANGZHUAN_DEBUG_SCENE_MAX_FRAMES || 40)
+        }
+      }
+    },
+    ...(options.context || {})
+  };
+}
+
+function defaultFrameTimestamps(durationSec, sceneCutsSec = [], options = {}) {
   const duration = roundSec(durationSec);
   if (duration <= 0) return [];
+  const timestamps = buildSceneAwareFrameTimestamps(duration, sceneCutsSec, {
+    longSceneThresholdSec: Number(process.env.WANGZHUAN_DEBUG_SCENE_LONG_THRESHOLD_SEC || 8),
+    maxFrames: Number(process.env.WANGZHUAN_DEBUG_SCENE_MAX_FRAMES || 40),
+    minSceneGapSec: Number(process.env.WANGZHUAN_DEBUG_SCENE_MIN_GAP_SEC || 0.8)
+  });
+  if (timestamps.length) return timestamps;
   return [0.25, duration * 0.25, duration * 0.5, duration * 0.75, Math.max(0.25, duration - 0.25)]
     .map(roundSec)
     .filter((value, index, list) => list.indexOf(value) === index);
 }
 
-async function defaultDetectScenes() {
-  return [];
+async function defaultDetectScenes(videoPath, probe, options = {}) {
+  return detectReferenceVideoScenes(createReferenceContext(options), videoPath, probe.durationSec);
 }
 
-async function defaultExtractFrames() {
-  return [];
+async function defaultExtractFrames(videoPath, probe, options = {}) {
+  const timestampsSec = Array.isArray(probe.timestampsSec) && probe.timestampsSec.length
+    ? probe.timestampsSec
+    : defaultFrameTimestamps(probe.durationSec, options.sceneCutsSec || [], options);
+  return extractReferenceFrames(createReferenceContext(options), videoPath, timestampsSec);
 }
 
 function resolveLlmConfigFromEnv(options = {}) {
@@ -406,10 +441,11 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
     sceneCutList = [];
   }
 
-  const frames = await extractFrames(videoPath, {
+  const frameProbe = {
     ...probe,
-    timestampsSec: defaultFrameTimestamps(probe.durationSec)
-  }, options);
+    timestampsSec: defaultFrameTimestamps(probe.durationSec, sceneCutList, options)
+  };
+  const frames = await extractFrames(videoPath, frameProbe, { ...options, sceneCutsSec: sceneCutList });
   const messages = buildSegmentAnalysisMessages({
     ...options,
     videoPath,
