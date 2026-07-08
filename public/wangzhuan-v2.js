@@ -1083,6 +1083,10 @@ function planListValue(value) {
   return Array.isArray(value) ? value.join("\n") : String(value || "");
 }
 
+function sliceDiversityValue(value = {}) {
+  return JSON.stringify(value && typeof value === "object" && !Array.isArray(value) ? value : {}, null, 2);
+}
+
 function renderPlanEditors(plans = []) {
   if (!plans.length) {
     els.planBox.className = "wz-list empty-line";
@@ -1101,9 +1105,18 @@ function renderPlanEditors(plans = []) {
       <label>Ending <textarea data-plan-field="ending" class="wz-json-box compact">${escapeHtml(plan.ending || "")}</textarea></label>
       <label>首帧 Image Prompt <textarea data-plan-field="imagePrompt" class="wz-json-box compact">${escapeHtml(plan.imagePrompt || "")}</textarea></label>
       <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
+      <label>切片角色 <input data-plan-field="segmentRole" value="${escapeHtml(plan.segmentRole || "")}" placeholder="hook_slice / proof_slice / withdrawal_slice" /></label>
+      <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="10" max="15" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
+      <label>输出模板模式 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="three_slice_net_earning" /></label>
       <label>网赚视觉元素 <textarea data-plan-field="moneyVisuals" class="wz-json-box compact">${escapeHtml(planListValue(plan.moneyVisuals))}</textarea></label>
       <label>提现展示 <textarea data-plan-field="withdrawalVisual" class="wz-json-box compact">${escapeHtml(plan.withdrawalVisual || "")}</textarea></label>
+      <label>字幕后处理 <select data-plan-field="postSubtitleRequired">
+        <option value="true"${planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>需要后处理字幕</option>
+        <option value="false"${!planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>不做后处理字幕</option>
+      </select></label>
+      <label>字幕服务商 <input data-plan-field="subtitleProvider" value="${escapeHtml(plan.subtitleWorkflow?.provider || "pixel_tech")}" /></label>
       <label>后处理字幕 <textarea data-plan-field="subtitleScript" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitleWorkflow?.subtitleScript))}</textarea></label>
+      <label>切片差异 JSON <textarea data-plan-field="sliceDiversity" class="wz-json-box compact">${escapeHtml(sliceDiversityValue(plan.sliceDiversity))}</textarea></label>
       <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${escapeHtml(plan.negativePrompt || "")}</textarea></label>
     </section>
   `).join("");
@@ -1157,6 +1170,25 @@ function planSubtitlePostRequired(subtitleWorkflow) {
   return true;
 }
 
+function parsePlanBoolean(value, fallback = true) {
+  if (value === undefined) return fallback;
+  const text = String(value || "").trim().toLowerCase();
+  if (["false", "0", "no", "none", "off", "no_post_process"].includes(text)) return false;
+  if (["true", "1", "yes", "post_process", "on"].includes(text)) return true;
+  return fallback;
+}
+
+function parsePlanJsonObject(value, fallback = {}) {
+  if (value === undefined) return fallback;
+  if (!String(value || "").trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function collectEditablePlans() {
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
@@ -1174,9 +1206,11 @@ function collectEditablePlans() {
     const subtitles = readList("subtitles");
     const moneyVisuals = readList("moneyVisuals");
     const subtitleScript = readList("subtitleScript");
+    const sliceDurationSecText = read("sliceDurationSec");
     const subtitleWorkflow = plan.subtitleWorkflow && typeof plan.subtitleWorkflow === "object" && !Array.isArray(plan.subtitleWorkflow)
       ? plan.subtitleWorkflow
       : {};
+    const postSubtitleRequired = parsePlanBoolean(read("postSubtitleRequired"), planSubtitlePostRequired(plan.subtitleWorkflow));
     return {
       ...plan,
       hook: read("hook") ?? plan.hook,
@@ -1187,15 +1221,19 @@ function collectEditablePlans() {
       ending: read("ending") ?? plan.ending,
       imagePrompt: read("imagePrompt") ?? plan.imagePrompt,
       seedancePrompt: read("seedancePrompt") ?? plan.seedancePrompt,
+      segmentRole: read("segmentRole") ?? plan.segmentRole,
+      sliceDurationSec: sliceDurationSecText === undefined ? plan.sliceDurationSec : Number(sliceDurationSecText),
+      outputTemplateMode: read("outputTemplateMode") ?? plan.outputTemplateMode,
       moneyVisuals: moneyVisuals ?? plan.moneyVisuals,
       withdrawalVisual: read("withdrawalVisual") ?? plan.withdrawalVisual,
       subtitleWorkflow: {
         ...subtitleWorkflow,
         burnedInSubtitles: false,
-        postSubtitleRequired: planSubtitlePostRequired(plan.subtitleWorkflow),
-        provider: subtitleWorkflow.provider || "pixel_tech",
+        postSubtitleRequired,
+        provider: read("subtitleProvider") ?? subtitleWorkflow.provider ?? "pixel_tech",
         subtitleScript: subtitleScript ?? (subtitleWorkflow.subtitleScript || plan.subtitles || [])
       },
+      sliceDiversity: parsePlanJsonObject(read("sliceDiversity"), plan.sliceDiversity),
       negativePrompt: read("negativePrompt") ?? plan.negativePrompt
     };
   });

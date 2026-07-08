@@ -1687,7 +1687,14 @@ export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes 
         seedancePrompt: plan.seedancePrompt,
         negativePrompt: plan.negativePrompt,
         mediaRefs: plan.mediaRefs,
-        complianceNotes: plan.complianceNotes
+        complianceNotes: plan.complianceNotes,
+        segmentRole: plan.segmentRole,
+        sliceDurationSec: plan.sliceDurationSec,
+        outputTemplateMode: plan.outputTemplateMode,
+        moneyVisuals: plan.moneyVisuals,
+        withdrawalVisual: plan.withdrawalVisual,
+        subtitleWorkflow: plan.subtitleWorkflow,
+        sliceDiversity: plan.sliceDiversity
       })),
       branchDrafts: Array.isArray(branchDrafts) ? branchDrafts : [],
       assetReviewConfirmed: Boolean(options.assetReviewConfirmed),

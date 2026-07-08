@@ -311,6 +311,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
 
 test("v2 plan editor exposes output-template plan fields", async () => {
   const js = await readFile(new URL("../../public/wangzhuan-v2.js", import.meta.url), "utf8");
+  const common = await readFile(new URL("../../public/wangzhuan-common.js", import.meta.url), "utf8");
   const pipeline = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
 
   assert.match(js, /data-plan-field="body"/);
@@ -318,23 +319,36 @@ test("v2 plan editor exposes output-template plan fields", async () => {
   assert.match(js, /data-plan-field="subtitles"/);
   assert.match(js, /data-plan-field="cta"/);
   assert.match(js, /data-plan-field="ending"/);
+  assert.match(js, /data-plan-field="segmentRole"/);
+  assert.match(js, /data-plan-field="sliceDurationSec"/);
+  assert.match(js, /data-plan-field="outputTemplateMode"/);
   assert.match(js, /data-plan-field="moneyVisuals"/);
   assert.match(js, /data-plan-field="withdrawalVisual"/);
+  assert.match(js, /data-plan-field="postSubtitleRequired"/);
+  assert.match(js, /data-plan-field="subtitleProvider"/);
   assert.match(js, /data-plan-field="subtitleScript"/);
+  assert.match(js, /data-plan-field="sliceDiversity"/);
   assert.match(js, /readList\("moneyVisuals"\)/);
   assert.match(js, /const text = fieldValue\(field\);\s*\n\s*return text === undefined \? undefined : splitLines\(text\);/);
   assert.match(js, /subtitles:\s*subtitles \?\? plan\.subtitles/);
   assert.match(js, /moneyVisuals:\s*moneyVisuals \?\? plan\.moneyVisuals/);
+  assert.match(js, /segmentRole:\s*read\("segmentRole"\) \?\? plan\.segmentRole/);
+  assert.match(js, /sliceDurationSec:\s*sliceDurationSecText === undefined \? plan\.sliceDurationSec : Number\(sliceDurationSecText\)/);
+  assert.match(js, /outputTemplateMode:\s*read\("outputTemplateMode"\) \?\? plan\.outputTemplateMode/);
+  assert.match(js, /function parsePlanBoolean\(value, fallback = true\)/);
   assert.match(js, /function planSubtitlePostRequired\(subtitleWorkflow\)/);
   assert.match(js, /\["none", "off", "no_post_process"\]\.includes\(mode\)/);
   assert.match(js, /const subtitleWorkflow = plan\.subtitleWorkflow && typeof plan\.subtitleWorkflow === "object" && !Array\.isArray\(plan\.subtitleWorkflow\)/);
-  assert.match(js, /postSubtitleRequired:\s*planSubtitlePostRequired\(plan\.subtitleWorkflow\)/);
+  assert.match(js, /const postSubtitleRequired = parsePlanBoolean\(read\("postSubtitleRequired"\), planSubtitlePostRequired\(plan\.subtitleWorkflow\)\)/);
+  assert.match(js, /postSubtitleRequired,\s*\n\s*provider:\s*read\("subtitleProvider"\) \?\? subtitleWorkflow\.provider \?\? "pixel_tech"/);
   assert.match(js, /subtitleScript:\s*subtitleScript \?\? \(subtitleWorkflow\.subtitleScript \|\| plan\.subtitles \|\| \[\]\)/);
+  assert.match(js, /sliceDiversity:\s*parsePlanJsonObject\(read\("sliceDiversity"\), plan\.sliceDiversity\)/);
   assert.doesNotMatch(js, /subtitles:\s*subtitles\.length \? subtitles : plan\.subtitles/);
   assert.doesNotMatch(js, /moneyVisuals:\s*moneyVisuals\.length \? moneyVisuals : plan\.moneyVisuals/);
   assert.doesNotMatch(js, /subtitleScript:\s*subtitleScript\.length \? subtitleScript :/);
   assert.doesNotMatch(js, /postSubtitleRequired:\s*plan\.subtitleWorkflow\?\.postSubtitleRequired !== false/);
   assert.match(js, /subtitleWorkflow:\s*\{/);
+  assert.match(common, /plans: plans\.map\(\(plan\) => \(\{[\s\S]*segmentRole:\s*plan\.segmentRole[\s\S]*sliceDurationSec:\s*plan\.sliceDurationSec[\s\S]*outputTemplateMode:\s*plan\.outputTemplateMode[\s\S]*moneyVisuals:\s*plan\.moneyVisuals[\s\S]*withdrawalVisual:\s*plan\.withdrawalVisual[\s\S]*subtitleWorkflow:\s*plan\.subtitleWorkflow[\s\S]*sliceDiversity:\s*plan\.sliceDiversity/);
   assert.match(pipeline, /buildGenerationPlanRecord\([\s\S]*planPayload:\s*\{[\s\S]*segmentRole[\s\S]*sliceDurationSec[\s\S]*outputTemplateMode[\s\S]*moneyVisuals[\s\S]*withdrawalVisual[\s\S]*subtitleWorkflow[\s\S]*sliceDiversity/);
   assert.match(pipeline, /const nextScript = \{[\s\S]*segmentRole:\s*plan\.segmentRole[\s\S]*sliceDurationSec:\s*plan\.sliceDurationSec[\s\S]*outputTemplateMode:\s*plan\.outputTemplateMode[\s\S]*moneyVisuals:\s*plan\.moneyVisuals[\s\S]*withdrawalVisual:\s*plan\.withdrawalVisual[\s\S]*subtitleWorkflow:\s*plan\.subtitleWorkflow[\s\S]*sliceDiversity:\s*plan\.sliceDiversity/);
 });

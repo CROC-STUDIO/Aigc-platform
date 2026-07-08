@@ -1048,7 +1048,7 @@ function editablePlanById(request = {}) {
   return map;
 }
 
-async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request = {}) {
+export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request = {}) {
   const edits = editablePlanById(request);
   const now = new Date().toISOString();
   const nextPlans = [];
