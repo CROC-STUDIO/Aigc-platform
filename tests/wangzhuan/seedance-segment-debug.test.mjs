@@ -278,6 +278,31 @@ test("writeDebugOutputs writes analysis, plan, and markdown files", async () => 
   assert.match(await readFile(paths.promptsPath, "utf8"), /Seedance Segment Debug Prompts/);
 });
 
+test("design doc documents implemented CLI command and output files", async () => {
+  const designDoc = await readFile(
+    "docs/superpowers/specs/2026-07-08-seedance-segment-debug-cli-design.md",
+    "utf8"
+  );
+  const cliSource = await readFile("scripts/wangzhuan-seedance-segment-debug.mjs", "utf8");
+  const helperSource = await readFile("server/wangzhuan/seedance-segment-debug.mjs", "utf8");
+  const outputFiles = [
+    ...helperSource.matchAll(/const \w+Path = `\$\{outputDir\}\/([^`]+)`;/g)
+  ].map((match) => match[1]);
+
+  assert.match(cliSource, /runSeedanceSegmentDebugCli/);
+  assert.match(designDoc, /node scripts\/wangzhuan-seedance-segment-debug\.mjs/);
+  assert.match(designDoc, /--video \/absolute\/path\/reference\.mp4/);
+  assert.deepEqual(outputFiles.sort(), [
+    "analysis.json",
+    "seedance-plan.json",
+    "seedance-prompts.md"
+  ]);
+
+  for (const fileName of outputFiles) {
+    assert.match(designDoc, new RegExp(`\`${fileName}\``));
+  }
+});
+
 test("normalizeStorySegments requires the seven dimensions", () => {
   assert.throws(
     () => normalizeStorySegments({ storySegments: [{ startSec: 0, endSec: 8, scene: "street" }] }),
