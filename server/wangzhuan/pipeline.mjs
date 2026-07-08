@@ -145,28 +145,37 @@ function resolveSliceStrategy(batch = {}) {
     || "fixed_15s";
 }
 
+function preferredSliceCount(duration, sliceStrategy) {
+  if (Number(duration) === 30) return 2;
+  if (sliceStrategy === "three_slice") return 3;
+  if (sliceStrategy === "two_15s") return 2;
+  if (sliceStrategy === "auto_10_15s_multi_slice") return Math.max(1, Math.ceil(duration / 15));
+  return 1;
+}
+
+function feasibleSliceCount(duration, preferredCount) {
+  const maxFeasible = Math.max(1, Math.floor(duration / 10));
+  const minFeasible = Math.max(1, Math.ceil(duration / 15));
+  if (minFeasible > maxFeasible) return maxFeasible;
+  const count = Math.max(minFeasible, Math.min(preferredCount, maxFeasible));
+  return Math.max(1, count);
+}
+
 export function buildSlicePlan({ durationSec = 15, sliceStrategy = "fixed_15s" } = {}) {
   const duration = Math.max(10, Number(durationSec) || 15);
-  const count = Number(duration) === 30
-    ? 2
-    : sliceStrategy === "three_slice"
-    ? 3
-    : sliceStrategy === "two_15s"
-      ? 2
-      : sliceStrategy === "auto_10_15s_multi_slice"
-        ? Math.max(1, Math.ceil(duration / 15))
-        : 1;
-  const base = Math.max(10, Math.min(15, Math.round(duration / count)));
+  const count = feasibleSliceCount(duration, preferredSliceCount(duration, sliceStrategy));
+  const base = Math.floor(duration / count);
+  const remainder = duration % count;
   const slices = [];
   let startSec = 0;
   for (let index = 0; index < count; index += 1) {
-    const isLast = index === count - 1;
-    const endSec = isLast ? duration : Math.min(duration, startSec + base);
+    const sliceDuration = base + (index >= count - remainder ? 1 : 0);
+    const endSec = startSec + sliceDuration;
     slices.push({
       segmentIndex: index + 1,
       startSec,
       endSec,
-      durationSec: Math.max(10, Math.min(15, Math.round(endSec - startSec))),
+      durationSec: sliceDuration,
       segmentRole: SLICE_ROLES[index] || "proof_slice"
     });
     startSec = endSec;

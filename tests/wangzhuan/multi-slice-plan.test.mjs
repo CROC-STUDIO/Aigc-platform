@@ -80,6 +80,53 @@ test("buildSlicePlan constrains 30s multi-slice requests to legacy two-segment p
   }), 2);
 });
 
+function assertCoherentSlicePlan(plan, durationSec) {
+  assert.ok(plan.length > 0);
+  let cursor = 0;
+  let totalDuration = 0;
+  for (const [index, slice] of plan.entries()) {
+    assert.equal(slice.segmentIndex, index + 1);
+    assert.equal(slice.startSec, cursor);
+    assert.equal(slice.durationSec, slice.endSec - slice.startSec);
+    assert.ok(slice.durationSec > 0);
+    totalDuration += slice.durationSec;
+    cursor = slice.endSec;
+  }
+  assert.equal(cursor, durationSec);
+  assert.equal(totalDuration, durationSec);
+}
+
+test("buildSlicePlan keeps uneven totals coherent", () => {
+  const sixteenSecondAuto = buildSlicePlan({
+    durationSec: 16,
+    sliceStrategy: "auto_10_15s_multi_slice"
+  });
+  assertCoherentSlicePlan(sixteenSecondAuto, 16);
+  assert.deepEqual(sixteenSecondAuto, [
+    { segmentIndex: 1, startSec: 0, endSec: 16, durationSec: 16, segmentRole: "hook_slice" }
+  ]);
+
+  const twentySecondThreeSlice = buildSlicePlan({
+    durationSec: 20,
+    sliceStrategy: "three_slice"
+  });
+  assertCoherentSlicePlan(twentySecondThreeSlice, 20);
+  assert.deepEqual(twentySecondThreeSlice, [
+    { segmentIndex: 1, startSec: 0, endSec: 10, durationSec: 10, segmentRole: "hook_slice" },
+    { segmentIndex: 2, startSec: 10, endSec: 20, durationSec: 10, segmentRole: "proof_slice" }
+  ]);
+
+  const twentyNineSecondThreeSlice = buildSlicePlan({
+    durationSec: 29,
+    sliceStrategy: "three_slice"
+  });
+  assertCoherentSlicePlan(twentyNineSecondThreeSlice, 29);
+  assert.deepEqual(twentyNineSecondThreeSlice, [
+    { segmentIndex: 1, startSec: 0, endSec: 14, durationSec: 14, segmentRole: "hook_slice" },
+    { segmentIndex: 2, startSec: 14, endSec: 29, durationSec: 15, segmentRole: "proof_slice" }
+  ]);
+});
+
 function testContext(root) {
   return {
     userId: "tester",
