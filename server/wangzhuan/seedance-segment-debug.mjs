@@ -31,6 +31,8 @@ const DEFAULT_MONEY_EFFECTS = Object.freeze([
   "withdrawal_success"
 ]);
 
+const EXACT_MONEY_CLAIM_REGEX = /(?:R\$|[$€£¥]|\b(?:USD|BRL|MXN)\b)\s*\d(?:[\d.,]*\d)?|\d(?:[\d.,]*\d)?\s*(?:R\$|[$€£¥]|\b(?:USD|BRL|MXN)\b)/iu;
+
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -162,6 +164,30 @@ function normalizeStringList(value) {
   return text ? [text] : [];
 }
 
+function hasTruthRules(truthRules = {}) {
+  return !!truthRules && typeof truthRules === "object" && Object.keys(truthRules).length > 0;
+}
+
+function collectStringFields(value, path = "") {
+  if (typeof value === "string") return [{ path, value }];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectStringFields(item, `${path}[${index}]`));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, item]) => collectStringFields(item, path ? `${path}.${key}` : key));
+  }
+  return [];
+}
+
+export function enforceNoExactMoneyClaimsWithoutTruthRules(storySegments = [], truthRules = {}) {
+  if (hasTruthRules(truthRules)) return;
+  const fields = collectStringFields(storySegments, "storySegments");
+  const violation = fields.find((field) => EXACT_MONEY_CLAIM_REGEX.test(field.value));
+  if (violation) {
+    throw new Error(`exact money claim requires truthRules: ${violation.path}`);
+  }
+}
+
 function segmentRoleFor(globalIndex, total) {
   if (globalIndex === 1) return "hook_slice";
   if (total === 2) return "proof_slice";
@@ -271,7 +297,8 @@ export function normalizeStorySegments(value, context = {}) {
 }
 
 export function buildSegmentAnalysisMessages(input = {}) {
-  const frameLines = (input.frames || []).map((frame) => `- frame ${frame.index ?? ""} at ${frame.timestampSec}s`).join("\n") || "- no frames";
+  const frames = Array.isArray(input.frames) ? input.frames : [];
+  const frameLines = frames.map((frame) => `- frame ${frame.index ?? ""} at ${frame.timestampSec}s`).join("\n") || "- no frames";
   const sceneCuts = (input.sceneCutsSec || []).join(", ") || "none";
   const truthRules = input.truthRules && Object.keys(input.truthRules).length ? JSON.stringify(input.truthRules) : "{}";
   const userText = [
@@ -293,6 +320,16 @@ export function buildSegmentAnalysisMessages(input = {}) {
     "Return strict JSON only: {\"storySegments\":[{\"storySegmentIndex\":1,\"startSec\":0,\"endSec\":12,\"durationSec\":12,\"scene\":\"...\",\"subject\":\"...\",\"action\":\"...\",\"camera\":\"...\",\"lighting\":\"...\",\"style\":\"...\",\"quality\":\"...\",\"coreHook\":\"...\",\"explosivePoint\":\"...\",\"moneyEffects\":[\"reward_number_growth\"],\"imagePrompt\":\"...\",\"seedancePrompt\":\"... no burned subtitles ...\",\"negativePrompt\":\"...\",\"subtitles\":[\"...\"]}]}"
   ].join("\n");
 
+  const userContent = [
+    { type: "text", text: userText },
+    ...frames
+      .filter((frame) => cleanString(frame?.dataUrl))
+      .map((frame) => ({
+        type: "image_url",
+        image_url: { url: cleanString(frame.dataUrl) }
+      }))
+  ];
+
   return [
     {
       role: "system",
@@ -300,7 +337,7 @@ export function buildSegmentAnalysisMessages(input = {}) {
     },
     {
       role: "user",
-      content: userText
+      content: userContent
     }
   ];
 }
@@ -466,6 +503,7 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
   try {
     parsed = typeof rawContent === "string" ? parseLlmJsonContent(rawContent) : rawContent;
     storySegments = normalizeStorySegments(parsed, { durationSec: probe.durationSec });
+    enforceNoExactMoneyClaimsWithoutTruthRules(storySegments, truthRules);
   } catch (error) {
     await writeRawLlmResponse(outputDir, rawContent);
     throw error;

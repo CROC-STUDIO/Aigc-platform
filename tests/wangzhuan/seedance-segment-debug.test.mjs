@@ -19,6 +19,20 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+function messageContentText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => typeof part === "string" ? part : part?.text || "")
+      .join("\n");
+  }
+  return "";
+}
+
+function allMessageText(messages) {
+  return messages.map((message) => messageContentText(message.content)).join("\n");
+}
+
 test("parseDebugCliArgs requires a local video path", () => {
   assert.throws(
     () => parseDebugCliArgs([]),
@@ -350,10 +364,17 @@ test("buildSegmentAnalysisMessages encodes segment and money-effect rules", () =
     productName: "Drama Gold",
     currencySymbol: "R$",
     sceneCutsSec: [4, 9],
-    frames: [{ index: 1, timestampSec: 0.25 }]
+    frames: [{ index: 1, timestampSec: 0.25, dataUrl: "data:image/jpeg;base64,AA==" }]
   });
-  const text = messages.map((message) => message.content).join("\n");
+  const userContent = messages.find((message) => message.role === "user")?.content;
+  const text = allMessageText(messages);
 
+  assert.equal(Array.isArray(userContent), true);
+  assert.deepEqual(userContent[1], {
+    type: "image_url",
+    image_url: { url: "data:image/jpeg;base64,AA==" }
+  });
+  assert.match(text, /frame 1 at 0.25s/);
   assert.match(text, /scene, subject, action, camera, lighting, style, quality/);
   assert.match(text, /Scene cuts are hints, not authoritative boundaries/);
   assert.match(text, /reward_number_growth/);
@@ -460,7 +481,7 @@ test("runSeedanceSegmentDebugCli completes when scene detection fails", async ()
 test("runSeedanceSegmentDebugCli completes when frame extraction fails", async () => {
   const root = await mkdtemp(join(tmpdir(), "seedance-debug-frame-fail-"));
   const videoPath = join(root, "reference.mp4");
-  let llmUserContent = "";
+  let llmUserContent = [];
   await writeFile(videoPath, "fake video bytes");
 
   const result = await runSeedanceSegmentDebugCli({
@@ -503,7 +524,98 @@ test("runSeedanceSegmentDebugCli completes when frame extraction fails", async (
   });
 
   assert.equal(result.plan.slices.length, 1);
-  assert.match(llmUserContent, /Extracted frames:\n- no frames/);
+  assert.match(messageContentText(llmUserContent), /Extracted frames:\n- no frames/);
+});
+
+test("runSeedanceSegmentDebugCli rejects exact money claims without truthRules and preserves raw output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-money-reject-"));
+  const videoPath = join(root, "reference.mp4");
+  const outputDir = join(root, "out");
+  const rawContent = JSON.stringify({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 8,
+        durationSec: 8,
+        scene: "bus stop",
+        subject: "commuter holding phone",
+        action: "checks drama task and sees reward_number_growth",
+        camera: "handheld close-up",
+        lighting: "natural daylight",
+        style: "UGC short-drama ad",
+        quality: "realistic 720p vertical video",
+        coreHook: "R$ 50 reward surprise",
+        explosivePoint: "cash_rain without concrete amount",
+        moneyEffects: ["reward_number_growth", "coin_burst", "cash_rain"],
+        imagePrompt: "Brazilian commuter holding phone at bus stop.",
+        seedancePrompt: "Phone UI shows R$ 50 reward, no burned subtitles.",
+        negativePrompt: "No watermark.",
+        subtitles: ["Earn R$ 50 today"]
+      }
+    ]
+  });
+  await writeFile(videoPath, "fake video bytes");
+
+  await assert.rejects(
+    () => runSeedanceSegmentDebugCli({
+      videoPath,
+      outputDir,
+      dependencies: {
+        probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+        detectScenes: async () => [],
+        extractFrames: async () => [],
+        callLlm: async () => rawContent
+      }
+    }),
+    /exact money claim requires truthRules/
+  );
+
+  assert.equal(await readFile(join(outputDir, "llm-raw-response.txt"), "utf8"), `${rawContent}\n`);
+});
+
+test("runSeedanceSegmentDebugCli allows exact money claims when truthRules are present", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-money-allow-"));
+  const videoPath = join(root, "reference.mp4");
+  await writeFile(videoPath, "fake video bytes");
+
+  const result = await runSeedanceSegmentDebugCli({
+    videoPath,
+    outputDir: join(root, "out"),
+    truthRules: { payoutExample: "R$ 50 is authorized copy from product rules" },
+    dependencies: {
+      probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+      detectScenes: async () => [],
+      extractFrames: async () => [],
+      callLlm: async () => JSON.stringify({
+        storySegments: [
+          {
+            storySegmentIndex: 1,
+            startSec: 0,
+            endSec: 8,
+            durationSec: 8,
+            scene: "bus stop",
+            subject: "commuter holding phone",
+            action: "checks drama task",
+            camera: "handheld close-up",
+            lighting: "natural daylight",
+            style: "UGC short-drama ad",
+            quality: "realistic 720p vertical video",
+            coreHook: "authorized R$ 50 reward example",
+            explosivePoint: "reward_number_growth with coin_burst",
+            moneyEffects: ["reward_number_growth", "coin_burst"],
+            imagePrompt: "Brazilian commuter holding phone at bus stop.",
+            seedancePrompt: "Phone UI shows R$ 50 reward, no burned subtitles.",
+            negativePrompt: "No watermark.",
+            subtitles: ["R$ 50 reward example"]
+          }
+        ]
+      })
+    }
+  });
+
+  assert.equal(result.plan.slices.length, 1);
+  assert.match(result.plan.slices[0].seedancePrompt, /R\$ 50/);
 });
 
 test("runSeedanceSegmentDebugCli writes raw LLM output when story validation fails", async () => {
