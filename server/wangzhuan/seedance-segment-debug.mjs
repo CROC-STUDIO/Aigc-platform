@@ -445,7 +445,13 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
     ...probe,
     timestampsSec: defaultFrameTimestamps(probe.durationSec, sceneCutList, options)
   };
-  const frames = await extractFrames(videoPath, frameProbe, { ...options, sceneCutsSec: sceneCutList });
+  let frames = [];
+  try {
+    const extractedFrames = await extractFrames(videoPath, frameProbe, { ...options, sceneCutsSec: sceneCutList });
+    frames = Array.isArray(extractedFrames) ? extractedFrames : [];
+  } catch {
+    frames = [];
+  }
   const messages = buildSegmentAnalysisMessages({
     ...options,
     videoPath,

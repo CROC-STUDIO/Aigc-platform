@@ -387,6 +387,100 @@ test("runSeedanceSegmentDebugCli writes outputs using injected analysis dependen
   assert.match(await readFile(result.paths.promptsPath, "utf8"), /Brazilian commuter/);
 });
 
+test("runSeedanceSegmentDebugCli completes when scene detection fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-scene-fail-"));
+  const videoPath = join(root, "reference.mp4");
+  await writeFile(videoPath, "fake video bytes");
+
+  const result = await runSeedanceSegmentDebugCli({
+    videoPath,
+    outputDir: join(root, "out"),
+    dependencies: {
+      probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+      detectScenes: async () => {
+        throw new Error("scene detector unavailable");
+      },
+      extractFrames: async () => [{ index: 1, timestampSec: 0.25, dataUrl: "data:image/jpeg;base64,AA==" }],
+      callLlm: async () => JSON.stringify({
+        storySegments: [
+          {
+            storySegmentIndex: 1,
+            startSec: 0,
+            endSec: 8,
+            durationSec: 8,
+            scene: "bus stop",
+            subject: "commuter holding phone",
+            action: "checks drama reward task",
+            camera: "handheld close-up",
+            lighting: "natural daylight",
+            style: "UGC short-drama ad",
+            quality: "realistic 720p vertical video",
+            coreHook: "missed bus turns into earning discovery",
+            explosivePoint: "reward number keeps rising",
+            moneyEffects: ["reward_number_growth"],
+            imagePrompt: "Brazilian commuter holding phone at bus stop.",
+            seedancePrompt: "Source-inspired UGC, no burned subtitles.",
+            negativePrompt: "No watermark.",
+            subtitles: ["Watch drama"]
+          }
+        ]
+      })
+    }
+  });
+
+  assert.deepEqual(result.analysis.sourceVideo.sceneCutsSec, []);
+  assert.equal(result.plan.slices.length, 1);
+});
+
+test("runSeedanceSegmentDebugCli completes when frame extraction fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seedance-debug-frame-fail-"));
+  const videoPath = join(root, "reference.mp4");
+  let llmUserContent = "";
+  await writeFile(videoPath, "fake video bytes");
+
+  const result = await runSeedanceSegmentDebugCli({
+    videoPath,
+    outputDir: join(root, "out"),
+    dependencies: {
+      probeVideo: async () => ({ durationSec: 8, width: 720, height: 1280, ratio: "9:16" }),
+      detectScenes: async () => [3],
+      extractFrames: async () => {
+        throw new Error("ffmpeg unavailable");
+      },
+      callLlm: async (messages) => {
+        llmUserContent = messages.find((message) => message.role === "user")?.content || "";
+        return JSON.stringify({
+          storySegments: [
+            {
+              storySegmentIndex: 1,
+              startSec: 0,
+              endSec: 8,
+              durationSec: 8,
+              scene: "bus stop",
+              subject: "commuter holding phone",
+              action: "checks drama reward task",
+              camera: "handheld close-up",
+              lighting: "natural daylight",
+              style: "UGC short-drama ad",
+              quality: "realistic 720p vertical video",
+              coreHook: "missed bus turns into earning discovery",
+              explosivePoint: "reward number keeps rising",
+              moneyEffects: ["reward_number_growth"],
+              imagePrompt: "Brazilian commuter holding phone at bus stop.",
+              seedancePrompt: "Source-inspired UGC, no burned subtitles.",
+              negativePrompt: "No watermark.",
+              subtitles: ["Watch drama"]
+            }
+          ]
+        });
+      }
+    }
+  });
+
+  assert.equal(result.plan.slices.length, 1);
+  assert.match(llmUserContent, /Extracted frames:\n- no frames/);
+});
+
 test("runSeedanceSegmentDebugCli writes raw LLM output when story validation fails", async () => {
   const root = await mkdtemp(join(tmpdir(), "seedance-debug-invalid-"));
   const videoPath = join(root, "reference.mp4");
@@ -437,9 +531,9 @@ test("seedance segment debug CLI module is import safe", async () => {
 
 test("seedance segment debug module imports existing reference video frame utilities", async () => {
   const source = await readFile("server/wangzhuan/seedance-segment-debug.mjs", "utf8");
-  assert.match(source, /buildSceneAwareFrameTimestamps/);
-  assert.match(source, /detectReferenceVideoScenes/);
-  assert.match(source, /extractReferenceFrames/);
+  assert.match(source, /function defaultFrameTimestamps[\s\S]*?buildSceneAwareFrameTimestamps/);
+  assert.match(source, /async function defaultDetectScenes[\s\S]*?detectReferenceVideoScenes/);
+  assert.match(source, /async function defaultExtractFrames[\s\S]*?extractReferenceFrames/);
 });
 
 test("runSeedanceSegmentDebugCli writes raw LLM output when JSON parsing fails", async () => {
