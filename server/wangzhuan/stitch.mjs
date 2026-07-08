@@ -21,6 +21,7 @@ import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson 
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
 const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded", "succeeded"]);
+const FAILED_TASK_STATUSES = new Set(["failed", "skipped", "stopped"]);
 const execFileAsync = promisify(execFile);
 const DEFAULT_STITCH_TIMEOUT_MS = 120000;
 const DEFAULT_OVERLAY_TIMEOUT_MS = 120000;
@@ -390,6 +391,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
   for (const group of groups) {
     for (const entry of group.entries) {
       if (existingByTask.has(entry.task.generationTaskId)) continue;
+      if (FAILED_TASK_STATUSES.has(entry.task.status)) continue;
       const outputId = takeOutputId(batch, sequenceState);
       const target = segmentOutputPath(context, batch.batchId, outputId);
       const filePath = userRelative(context, target);
@@ -609,6 +611,9 @@ export async function materializeBatchSegmentOutputs(context, batchId) {
   }
   const sequenceState = { next: nextOutputSequence(batch) };
   const segmentOutputs = await materializeSegmentOutputs(context, batch, groups, sequenceState);
+  if (!segmentOutputs.length) {
+    throw new WangzhuanError("no_segments", "没有可用于产出的分段视频", { batchId });
+  }
   const existingNonSegmentOutputs = (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => output.kind !== "segment_video");
   const tasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
     const segment = segmentOutputs.find((output) => (output.generationTaskIds || []).includes(task.generationTaskId));
@@ -645,7 +650,13 @@ export async function finalizeSegmentBatch(context, batchId) {
     working = await materializeBatchSegmentOutputs(context, batchId);
   }
   if (working.status === "running" || working.status === "queued") {
-    working = await writeBatch(context, { ...working, status: "qc" }, "generation_completed");
+    const hasFailedTasks = (Array.isArray(working.tasks) ? working.tasks : [])
+      .some((task) => FAILED_TASK_STATUSES.has(task.status));
+    working = await writeBatch(
+      context,
+      { ...working, status: hasFailedTasks ? "partial_failed" : "qc" },
+      hasFailedTasks ? "generation_partial_failed" : "generation_completed"
+    );
   }
   return working;
 }

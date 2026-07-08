@@ -76,14 +76,63 @@ function buildBatch(root) {
   };
 }
 
+function buildMixedOutcomeBatch(root) {
+  const batch = buildBatch(root);
+  return {
+    ...batch,
+    estimate: {
+      ...batch.estimate,
+      durationSec: 24
+    },
+    scripts: [
+      {
+        ...batch.scripts[0],
+        durationSec: 12
+      },
+      {
+        ...batch.scripts[0],
+        scriptId: "scr_abcd_002",
+        segmentIndex: 2,
+        durationSec: 12,
+        promptPath: "prompts/gen_abcd_002_seedance.txt",
+        scriptPath: "scripts/scr_abcd_002.json"
+      }
+    ],
+    tasks: [
+      {
+        ...batch.tasks[0],
+        durationSec: 12
+      },
+      {
+        ...batch.tasks[0],
+        generationTaskId: "gen_abcd_002",
+        seedanceTaskId: "seedance_remote_002",
+        scriptId: "scr_abcd_002",
+        segmentIndex: 2,
+        durationSec: 12,
+        status: "failed",
+        outputPath: "",
+        errorCode: "upstream_failed",
+        errorMessage: "Seedance failed",
+        promptPath: "prompts/gen_abcd_002_seedance.txt"
+      }
+    ],
+    _root: root
+  };
+}
+
 async function writeBatchFiles(root, batch) {
   await mkdir(join(root, "upstream"), { recursive: true });
   await mkdir(join(root, "prompts"), { recursive: true });
   await mkdir(join(root, "scripts"), { recursive: true });
   await writeFile(join(root, "upstream/gen_abcd_001.mp4"), "fake-video", "utf8");
-  await writeFile(join(root, batch.tasks[0].promptPath), "Seedance prompt", "utf8");
-  await writeFile(join(root, "prompts/gen_abcd_001_image.txt"), "Image prompt", "utf8");
-  await writeFile(join(root, batch.scripts[0].scriptPath), JSON.stringify(batch.scripts[0]), "utf8");
+  for (const task of batch.tasks) {
+    await writeFile(join(root, task.promptPath), "Seedance prompt", "utf8");
+    await writeFile(join(root, "prompts", `${task.generationTaskId}_image.txt`), "Image prompt", "utf8");
+  }
+  for (const script of batch.scripts) {
+    await writeFile(join(root, script.scriptPath), JSON.stringify(script), "utf8");
+  }
 }
 
 function testContext(root, state) {
@@ -147,5 +196,22 @@ test("QC accepts passing non-30 segment output as final downloadable output", as
     assert.equal(videoSpecCheck(testContext(root, state), output).status, "pass");
     assert.equal(shouldRunModelVideoQc(testContext(root, state), state.batch, output), true);
     assert.equal(downloadEligibility(state.batch, output, "pass"), true);
+  });
+});
+
+test("non-30 mixed outcome materializes successful slices and settles partial_failed", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildMixedOutcomeBatch(root) };
+    await writeBatchFiles(root, state.batch);
+
+    const finalized = await finalizeSegmentBatch(testContext(root, state), state.batch.batchId);
+
+    assert.equal(finalized.status, "partial_failed");
+    assert.equal(finalized.outputs.length, 1);
+    assert.equal(finalized.outputs[0].generationTaskIds[0], "gen_abcd_001");
+    assert.equal(finalized.outputs[0].durationSec, 12);
+    assert.equal(finalized.tasks[0].status, "downloaded");
+    assert.equal(finalized.tasks[1].status, "failed");
+    assert.equal((await readFile(join(root, finalized.outputs[0].filePath), "utf8")), "fake-video");
   });
 });
