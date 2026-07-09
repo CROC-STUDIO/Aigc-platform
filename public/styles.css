@@ -10125,6 +10125,8 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
 
 .wz-v2-body .wz-asset-slot .wz-v2-asset-file {
   display: inline-flex;
+  align-items: center;
+  gap: 4px;
   max-width: 100%;
   padding: 2px 6px;
   border: 1px solid rgba(141, 240, 180, 0.28);
@@ -10136,9 +10138,112 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   overflow-wrap: anywhere;
 }
 
+.wz-v2-body .wz-asset-slot .wz-v2-asset-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #0d1f17;
+  background: rgba(141, 240, 180, 0.78);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wz-v2-body .wz-asset-slot .wz-v2-asset-remove:hover {
+  background: #8df0b4;
+}
+
 .wz-v2-body .wz-asset-slot[data-has-asset="1"] {
   border-style: solid;
   border-color: rgba(72, 245, 138, 0.38);
+}
+
+.wz-v2-body .wz-product-library {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 9px;
+  border: 1px solid rgba(65, 220, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(65, 220, 255, 0.055);
+}
+
+.wz-v2-body .wz-product-library-detail {
+  min-height: 54px;
+}
+
+.wz-v2-body .wz-product-library-card {
+  display: grid;
+  gap: 8px;
+  color: #dbe7ff;
+}
+
+.wz-v2-body .wz-product-library-title {
+  display: grid;
+  gap: 3px;
+}
+
+.wz-v2-body .wz-product-library-title strong {
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.wz-v2-body .wz-product-library-title small,
+.wz-v2-body .wz-product-library-card p {
+  margin: 0;
+  color: #9ea9c0;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wz-v2-body .wz-product-library-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.wz-v2-body .wz-product-library-points span {
+  padding: 3px 7px;
+  border: 1px solid rgba(141, 240, 180, 0.22);
+  border-radius: 999px;
+  color: #dfffea;
+  background: rgba(141, 240, 180, 0.075);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.wz-v2-body .wz-product-library-assets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  gap: 6px;
+}
+
+.wz-v2-body .wz-product-library-assets figure {
+  min-width: 0;
+  margin: 0;
+}
+
+.wz-v2-body .wz-product-library-assets img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.wz-v2-body .wz-product-library-assets figcaption {
+  margin-top: 3px;
+  color: #8f98ad;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wz-v2-body input::placeholder,

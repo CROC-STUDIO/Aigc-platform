@@ -2481,6 +2481,168 @@ export async function loadOutputDetailFromMysql(context, outputId) {
   }
 }
 
+export async function syncCodexExecJobFact(job = {}) {
+  const pool = await getPool();
+  if (!pool || !job?.jobUid || !job?.batchId) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    await conn.execute(
+      `INSERT INTO codex_exec_jobs
+        (job_uid, batch_uid, prompt_draft_uid, job_type, status, model_name, cwd_path, request_id,
+         context_path, result_path, stdout_path, stderr_path, exit_code, duration_ms,
+         error_code, error_message, started_at, finished_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        prompt_draft_uid = VALUES(prompt_draft_uid),
+        status = VALUES(status),
+        model_name = VALUES(model_name),
+        cwd_path = VALUES(cwd_path),
+        request_id = VALUES(request_id),
+        context_path = VALUES(context_path),
+        result_path = VALUES(result_path),
+        stdout_path = VALUES(stdout_path),
+        stderr_path = VALUES(stderr_path),
+        exit_code = VALUES(exit_code),
+        duration_ms = VALUES(duration_ms),
+        error_code = VALUES(error_code),
+        error_message = VALUES(error_message),
+        started_at = VALUES(started_at),
+        finished_at = VALUES(finished_at),
+        updated_at = UTC_TIMESTAMP(3)`,
+      [
+        job.jobUid,
+        job.batchId,
+        job.promptDraftUid || null,
+        job.jobType || "seedance_prompt_base",
+        job.status || "queued",
+        job.model || job.modelName || "",
+        job.cwdPath || "",
+        job.requestId || null,
+        job.contextPath || null,
+        job.resultPath || null,
+        job.stdoutPath || null,
+        job.stderrPath || null,
+        job.exitCode ?? null,
+        job.durationMs ?? null,
+        job.errorCode || null,
+        job.errorMessage || null,
+        mysqlDate(job.startedAt),
+        mysqlDate(job.finishedAt)
+      ]
+    );
+    return { skipped: false };
+  } finally {
+    conn.release();
+  }
+}
+
+export async function syncCodexPromptDraftFact(record = {}) {
+  const pool = await getPool();
+  if (!pool || !record?.promptDraftUid || !record?.batchId) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    await conn.execute(
+      `INSERT INTO codex_prompt_drafts
+        (prompt_draft_uid, batch_uid, draft_type, version, status, uses_approved_assets,
+         prompt_text, negative_prompt_text, reasoning_summary, compliance_checks_json,
+         warnings_json, approved_asset_keys_used_json, context_json, context_path,
+         result_path, request_id, created_by_user, confirmed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        draft_type = VALUES(draft_type),
+        version = VALUES(version),
+        status = VALUES(status),
+        uses_approved_assets = VALUES(uses_approved_assets),
+        prompt_text = VALUES(prompt_text),
+        negative_prompt_text = VALUES(negative_prompt_text),
+        reasoning_summary = VALUES(reasoning_summary),
+        compliance_checks_json = VALUES(compliance_checks_json),
+        warnings_json = VALUES(warnings_json),
+        approved_asset_keys_used_json = VALUES(approved_asset_keys_used_json),
+        context_json = VALUES(context_json),
+        context_path = VALUES(context_path),
+        result_path = VALUES(result_path),
+        request_id = VALUES(request_id),
+        created_by_user = VALUES(created_by_user),
+        confirmed_at = VALUES(confirmed_at),
+        updated_at = UTC_TIMESTAMP(3)`,
+      [
+        record.promptDraftUid,
+        record.batchId,
+        record.draftType || "base",
+        Number(record.version || 1),
+        record.status || "ready",
+        record.usesApprovedAssets ? 1 : 0,
+        record.prompt || "",
+        record.negativePrompt || null,
+        record.reasoningSummary || null,
+        json(record.complianceChecks || []),
+        json(record.warnings || []),
+        json(record.approvedAssetKeysUsed || []),
+        json(record.context || {}),
+        record.contextPath || null,
+        record.resultPath || null,
+        record.requestId || null,
+        record.createdByUser || null,
+        mysqlDate(record.confirmedAt)
+      ]
+    );
+    return { skipped: false };
+  } finally {
+    conn.release();
+  }
+}
+
+function codexPromptDraftFromRow(row) {
+  if (!row) return null;
+  return {
+    promptDraftUid: row.prompt_draft_uid,
+    batchId: row.batch_uid,
+    draftType: row.draft_type,
+    version: Number(row.version || 1),
+    status: row.status,
+    usesApprovedAssets: Boolean(row.uses_approved_assets),
+    prompt: row.prompt_text || "",
+    negativePrompt: row.negative_prompt_text || "",
+    reasoningSummary: row.reasoning_summary || "",
+    complianceChecks: parseJsonValue(row.compliance_checks_json, []),
+    warnings: parseJsonValue(row.warnings_json, []),
+    approvedAssetKeysUsed: parseJsonValue(row.approved_asset_keys_used_json, []),
+    context: parseJsonValue(row.context_json, {}),
+    contextPath: row.context_path || "",
+    resultPath: row.result_path || "",
+    requestId: row.request_id || "",
+    createdByUser: row.created_by_user || "",
+    createdAt: isoDate(row.created_at),
+    updatedAt: isoDate(row.updated_at),
+    confirmedAt: isoDate(row.confirmed_at)
+  };
+}
+
+export async function loadCodexPromptDraftFact(batchId, promptDraftUid = "") {
+  const pool = await getPool();
+  if (!pool || !batchId) return null;
+  const conn = await pool.getConnection();
+  try {
+    let sql = `SELECT *
+      FROM codex_prompt_drafts
+      WHERE batch_uid = ?`;
+    const params = [batchId];
+    if (promptDraftUid) {
+      sql += " AND prompt_draft_uid = ?";
+      params.push(promptDraftUid);
+    }
+    sql += " ORDER BY updated_at DESC, id DESC LIMIT 1";
+    const [rows] = await conn.execute(sql, params);
+    return codexPromptDraftFromRow(rows[0]);
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load codex prompt draft: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
 const REMIX_SOURCE_SUBMIT_LOCKED_STATUSES = ["queued", "running", "qc", "preview_required", "succeeded"];
 
 export async function loadActiveRemixFromMysql(context) {

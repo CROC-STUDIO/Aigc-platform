@@ -1,0 +1,90 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  repairSeedancePromptContract,
+  repairFormalPlanContract,
+  MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS
+} from "../../server/wangzhuan/plan-repair.mjs";
+
+test("repairSeedancePromptContract locks language region currency subtitle and carrier visual", () => {
+  const prompt = repairSeedancePromptContract("UGC shot with $50 payout text.", {
+    targetLanguage: "id-ID",
+    targetRegion: "ID",
+    currencySymbol: "Rp",
+    currencyName: "Indonesian rupiah",
+    localeIdentity: "Indonesian Bahasa-speaking people in Jakarta-style commute scenes",
+    characterDiversity: "Indonesian office worker in cafe, batik-accent shirt",
+    moneyVisuals: ["coin_burst"],
+    conversionEffectOpportunities: [{ effect: "cash_rain", placement: "top overlay" }],
+    mandatoryMoneyVisualCarrier: true
+  });
+
+  assert.match(prompt, /targetLanguage=id-ID/);
+  assert.match(prompt, /targetRegion=ID/);
+  assert.match(prompt, /Rp/);
+  assert.doesNotMatch(prompt, /\$50/);
+  assert.match(prompt, /no burned subtitles/i);
+  assert.match(prompt, /Mandatory wangzhuan visual carrier repair/);
+});
+
+test("repairFormalPlanContract injects mandatory visuals only on carrier slice", () => {
+  const carrier = repairFormalPlanContract({
+    hook: "Hook",
+    body: "Body",
+    seedancePrompt: "Clean app proof shot.",
+    imagePrompt: "Phone close-up.",
+    negativePrompt: "No watermark.",
+    subtitles: ["打开应用"]
+  }, {
+    targetLanguage: "zh-CN",
+    targetRegion: "CN",
+    currencySymbol: "¥",
+    currencyName: "Chinese yuan",
+    mandatoryMoneyVisualCarrier: true,
+    sliceDurationSec: 12
+  });
+
+  assert.equal(carrier.sliceDurationSec, 12);
+  assert.ok(MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS.some((item) => carrier.moneyVisuals.includes(item)));
+  assert.match(carrier.seedancePrompt, /Mandatory wangzhuan visual carrier repair/);
+
+  const nonCarrier = repairFormalPlanContract({
+    hook: "Hook",
+    body: "Body",
+    seedancePrompt: "Clean drama scene.",
+    imagePrompt: "Drama screen.",
+    negativePrompt: "No watermark.",
+    subtitles: ["继续观看"]
+  }, {
+    targetLanguage: "zh-CN",
+    targetRegion: "CN",
+    currencySymbol: "¥",
+    mandatoryMoneyVisualCarrier: false,
+    isOpeningSlice: false
+  });
+
+  assert.deepEqual(nonCarrier.moneyVisuals, []);
+  assert.doesNotMatch(nonCarrier.seedancePrompt, /Mandatory wangzhuan visual carrier repair/);
+});
+
+test("repairFormalPlanContract keeps subtitles in subtitleWorkflow", () => {
+  const repaired = repairFormalPlanContract({
+    hook: "Hook",
+    body: "Body",
+    seedancePrompt: "Phone app shot with captions.",
+    imagePrompt: "Phone close-up.",
+    negativePrompt: "No watermark.",
+    subtitles: ["领取奖励", "继续看剧"],
+    subtitleWorkflow: { postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: [] }
+  }, {
+    targetLanguage: "zh-CN",
+    targetRegion: "CN",
+    currencySymbol: "¥"
+  });
+
+  assert.equal(repaired.subtitleWorkflow.burnedInSubtitles, false);
+  assert.equal(repaired.subtitleWorkflow.provider, "pixel_tech");
+  assert.deepEqual(repaired.subtitleWorkflow.subtitleScript, ["领取奖励", "继续看剧"]);
+  assert.match(repaired.seedancePrompt, /no burned subtitles/i);
+});

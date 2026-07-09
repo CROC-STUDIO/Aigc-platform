@@ -33,6 +33,13 @@ import {
 } from "./remix.mjs";
 import { retryStitch } from "./stitch.mjs";
 import { inspectStorePage } from "./store-page.mjs";
+import {
+  generateSeedancePromptFromParsedProductLink,
+  getParsedProductLinkReviewStatus,
+  parseProductLinkForSeedance,
+  reviewParsedProductLinkAssets
+} from "./product-link-codex.mjs";
+import { autoGenerateSeedancePrompt } from "./auto-seedance-prompt.mjs";
 import { pollUpstreamBatch } from "./upstream-poll.mjs";
 import { adminTemplateAction, listTemplates, saveTemplate } from "./templates.mjs";
 import {
@@ -54,7 +61,22 @@ import {
   normalizeExpansionRequest,
   runOutputExpansion
 } from "./output-expansion.mjs";
-import { loadOutputDetailFromMysql } from "./mysql-facts.mjs";
+import {
+  loadCodexPromptDraftFact,
+  loadOutputDetailFromMysql,
+  syncCodexExecJobFact,
+  syncCodexPromptDraftFact
+} from "./mysql-facts.mjs";
+import {
+  generateBaseSeedancePrompt,
+  loadSeedancePromptDraft,
+  refineSeedancePromptWithApprovedAssets
+} from "./codex-prompt.mjs";
+import {
+  getProductInfoItem,
+  listProductInfoItems,
+  loadProductInfoAsset
+} from "./product-info-library.mjs";
 
 function buildContext(context) {
   return {
@@ -136,6 +158,41 @@ function outputExpansionJobsRoute(pathname) {
   return { outputId: decodeURIComponent(match[1]) };
 }
 
+function productInfoRoute(pathname) {
+  if (pathname === "/api/wangzhuan/product-info") return { collection: true };
+  const assetMatch = pathname.match(/^\/api\/wangzhuan\/product-info\/([^/]+)\/assets\/([^/]+)$/);
+  if (assetMatch) {
+    return {
+      productId: decodeURIComponent(assetMatch[1]),
+      assetName: decodeURIComponent(assetMatch[2]),
+      asset: true
+    };
+  }
+  const detailMatch = pathname.match(/^\/api\/wangzhuan\/product-info\/([^/]+)$/);
+  if (detailMatch) return { productId: decodeURIComponent(detailMatch[1]) };
+  return null;
+}
+
+function codexSeedancePromptRoute(pathname) {
+  if (pathname !== "/api/wangzhuan/codex/seedance-prompt") return null;
+  return { collection: true };
+}
+
+function codexSeedancePromptJobRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/codex\/seedance-prompt-jobs\/([^/]+)$/);
+  if (!match) return null;
+  return { jobId: decodeURIComponent(match[1]) };
+}
+
+function autoSeedancePromptJobsRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/auto-seedance-prompt-jobs(?:\/([^/]+))?$/);
+  if (!match) return null;
+  return {
+    batchId: match[1],
+    jobId: match[2] ? decodeURIComponent(match[2]) : ""
+  };
+}
+
 function sendZip(res, zip, requestId) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/\D/g, "");
   res.writeHead(200, {
@@ -155,6 +212,17 @@ function sendBinary(res, buffer, requestId, fileName = "video-ops-output.bin") {
     "X-Request-Id": requestId
   });
   res.end(buffer);
+}
+
+function sendProductAsset(res, asset, requestId) {
+  res.writeHead(200, {
+    "Content-Type": asset.mimeType || "application/octet-stream",
+    "Content-Length": asset.buffer.length,
+    "Cache-Control": "private, max-age=300",
+    "Content-Disposition": `inline; filename="${asset.fileName || "product-asset"}"`,
+    "X-Request-Id": requestId
+  });
+  res.end(asset.buffer);
 }
 
 export async function handleWangzhuanRequest(req, res, url, context) {
@@ -197,8 +265,10 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       const body = await context.readJson(req);
       const job = createBackgroundJob("decomposition", async ({ log, progress }) => {
         log("AI 拆解视频已开始");
-        progress(30, "正在调用拆解模型");
+        progress(12, "正在检查拆解缓存和视频基础信息");
+        log("正在读取视频基础信息、模型、地区和语言配置");
         const runDraft = scoped.draftReferenceVideoDecomposition || context.draftReferenceVideoDecomposition || draftReferenceVideoDecomposition;
+        progress(28, "正在进行场景切点、抽帧和 LLM 秒级剧情拆解");
         const result = await runDraft(scoped, body, {
           requestId,
           streamHandlers: {
@@ -217,6 +287,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
             )
           }
         });
+        if (result?.draft?.source === "cache") {
+          log("命中拆解缓存，跳过 LLM 调用", { cacheKey: result.draft.cacheKey });
+        }
         progress(95, "正在整理拆解字段");
         return result;
       }, {
@@ -255,6 +328,51 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/store-page/inspect") {
       return sendOk(res, await inspectStorePage(scoped, await context.readJson(req)), requestId);
     }
+    const productInfo = productInfoRoute(url.pathname);
+    if (productInfo && req.method === "GET" && productInfo.collection) {
+      return sendOk(res, await listProductInfoItems(scoped), requestId);
+    }
+    if (productInfo && req.method === "GET" && productInfo.asset) {
+      return sendProductAsset(res, await loadProductInfoAsset(scoped, productInfo.productId, productInfo.assetName), requestId);
+    }
+    if (productInfo && req.method === "GET" && productInfo.productId) {
+      return sendOk(res, await getProductInfoItem(scoped, productInfo.productId), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-link/parse") {
+      const handler = scoped.parseProductLinkForSeedance || context.parseProductLinkForSeedance || parseProductLinkForSeedance;
+      return sendOk(res, await handler(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-link/assets/review") {
+      const handler = scoped.reviewParsedProductLinkAssets || context.reviewParsedProductLinkAssets || reviewParsedProductLinkAssets;
+      return sendOk(res, await handler(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "GET" && url.pathname === "/api/wangzhuan/product-link/assets/review-status") {
+      const batchId = String(url.searchParams.get("batchId") || "").trim();
+      const handler = scoped.getParsedProductLinkReviewStatus || context.getParsedProductLinkReviewStatus || getParsedProductLinkReviewStatus;
+      return sendOk(res, await handler(scoped, batchId), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-link/codex/seedance-prompt/base") {
+      const handler = scoped.generateSeedancePromptFromParsedProductLink || context.generateSeedancePromptFromParsedProductLink || generateSeedancePromptFromParsedProductLink;
+      return sendOk(res, await handler({
+        ...scoped,
+        syncCodexExecJobFact: scoped.syncCodexExecJobFact || context.syncCodexExecJobFact || syncCodexExecJobFact,
+        syncCodexPromptDraftFact: scoped.syncCodexPromptDraftFact || context.syncCodexPromptDraftFact || syncCodexPromptDraftFact
+      }, {
+        ...(await context.readJson(req)),
+        requestId
+      }, "base"), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/product-link/codex/seedance-prompt/refine") {
+      const handler = scoped.generateSeedancePromptFromParsedProductLink || context.generateSeedancePromptFromParsedProductLink || generateSeedancePromptFromParsedProductLink;
+      return sendOk(res, await handler({
+        ...scoped,
+        syncCodexExecJobFact: scoped.syncCodexExecJobFact || context.syncCodexExecJobFact || syncCodexExecJobFact,
+        syncCodexPromptDraftFact: scoped.syncCodexPromptDraftFact || context.syncCodexPromptDraftFact || syncCodexPromptDraftFact
+      }, {
+        ...(await context.readJson(req)),
+        requestId
+      }, "refine"), requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/estimate") {
       return sendOk(res, await estimateBatch(scoped, await context.readJson(req)), requestId);
     }
@@ -266,6 +384,145 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/plan") {
       return sendOk(res, await prepareBatchPlanFromEstimate(scoped, await context.readJson(req)), requestId);
+    }
+    const codexPromptRoute = codexSeedancePromptRoute(url.pathname);
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/codex/seedance-prompt-jobs") {
+      const body = await context.readJson(req);
+      const mode = String(body.mode || "base").trim() || "base";
+      const generator = mode === "refine"
+        ? (scoped.refineSeedancePromptWithApprovedAssets || context.refineSeedancePromptWithApprovedAssets || refineSeedancePromptWithApprovedAssets)
+        : (scoped.generateBaseSeedancePrompt || context.generateBaseSeedancePrompt || generateBaseSeedancePrompt);
+      const job = createBackgroundJob("codex_seedance_prompt", async ({ log, progress }) => {
+        log(mode === "refine" ? "Codex 正在优化 Seedance prompt" : "Codex 正在生成 Seedance prompt");
+        progress(25, "正在调用 Codex");
+        const result = await generator({
+          context: {
+            ...scoped,
+            syncCodexExecJobFact: scoped.syncCodexExecJobFact || context.syncCodexExecJobFact || syncCodexExecJobFact,
+            syncCodexPromptDraftFact: scoped.syncCodexPromptDraftFact || context.syncCodexPromptDraftFact || syncCodexPromptDraftFact
+          },
+          ...body,
+          requestId
+        });
+        progress(95, "正在整理 prompt 结果");
+        return result;
+      }, {
+        context: scoped,
+        subjectType: "batch",
+        subjectId: String(body.batchId || "")
+      });
+      return sendOk(res, {
+        ...job,
+        codexPromptJobId: job.id,
+        mode,
+        batchId: String(body.batchId || "")
+      }, requestId);
+    }
+    const codexPromptJob = codexSeedancePromptJobRoute(url.pathname);
+    if (codexPromptJob && req.method === "GET") {
+      const job = await getBackgroundJob(scoped, codexPromptJob.jobId);
+      if (!job) throw new WangzhuanError("job_not_found", "Codex prompt 任务不存在或已过期", { jobId: codexPromptJob.jobId }, 404);
+      return sendOk(res, {
+        ...job,
+        codexPromptJobId: job.id,
+        promptDraft: job.result || null
+      }, requestId);
+    }
+    if (codexPromptRoute && req.method === "POST") {
+      const body = await context.readJson(req);
+      const mode = String(body.mode || "base").trim() || "base";
+      const generator = mode === "refine"
+        ? (scoped.refineSeedancePromptWithApprovedAssets || context.refineSeedancePromptWithApprovedAssets || refineSeedancePromptWithApprovedAssets)
+        : (scoped.generateBaseSeedancePrompt || context.generateBaseSeedancePrompt || generateBaseSeedancePrompt);
+      const result = await generator({
+        context: {
+          ...scoped,
+          syncCodexExecJobFact: scoped.syncCodexExecJobFact || context.syncCodexExecJobFact || syncCodexExecJobFact,
+          syncCodexPromptDraftFact: scoped.syncCodexPromptDraftFact || context.syncCodexPromptDraftFact || syncCodexPromptDraftFact
+        },
+        ...body,
+        requestId
+      });
+      return sendOk(res, result, requestId);
+    }
+    const autoSeedancePromptJob = autoSeedancePromptJobsRoute(url.pathname);
+    if (autoSeedancePromptJob && req.method === "POST" && !autoSeedancePromptJob.jobId) {
+      const body = await context.readJson(req);
+      const job = createBackgroundJob("auto_seedance_prompt", async ({ log, progress }) => {
+        log("自动生成 Seedance prompt 已开始");
+        progress(20, "正在检查批次信息与素材审核");
+        const result = await (scoped.autoGenerateSeedancePrompt || context.autoGenerateSeedancePrompt || autoGenerateSeedancePrompt)({
+          ...scoped,
+          getBatchDetail: scoped.getBatchDetail || context.getBatchDetail || getBatchDetail,
+          confirmBatchAssets: scoped.confirmBatchAssets || context.confirmBatchAssets || confirmBatchAssets,
+          generateBaseSeedancePrompt: scoped.generateBaseSeedancePrompt || context.generateBaseSeedancePrompt || generateBaseSeedancePrompt,
+          refineSeedancePromptWithApprovedAssets: scoped.refineSeedancePromptWithApprovedAssets || context.refineSeedancePromptWithApprovedAssets || refineSeedancePromptWithApprovedAssets,
+          syncCodexExecJobFact: scoped.syncCodexExecJobFact || context.syncCodexExecJobFact || syncCodexExecJobFact,
+          syncCodexPromptDraftFact: scoped.syncCodexPromptDraftFact || context.syncCodexPromptDraftFact || syncCodexPromptDraftFact
+        }, autoSeedancePromptJob.batchId, {
+          ...body,
+          requestId
+        });
+        progress(95, "正在整理 Seedance prompt 结果");
+        return result;
+      }, {
+        context: scoped,
+        subjectType: "batch",
+        subjectId: autoSeedancePromptJob.batchId
+      });
+      return sendOk(res, {
+        ...job,
+        autoSeedancePromptJobId: job.id,
+        batchId: autoSeedancePromptJob.batchId
+      }, requestId);
+    }
+    if (autoSeedancePromptJob && req.method === "GET" && autoSeedancePromptJob.jobId) {
+      const job = await getBackgroundJob(scoped, autoSeedancePromptJob.jobId);
+      if (!job || job.subjectId !== autoSeedancePromptJob.batchId) {
+        throw new WangzhuanError("job_not_found", "自动生成 Seedance prompt 任务不存在或已过期", {
+          batchId: autoSeedancePromptJob.batchId,
+          jobId: autoSeedancePromptJob.jobId
+        }, 404);
+      }
+      return sendOk(res, {
+        ...job,
+        autoSeedancePromptJobId: job.id,
+        promptDraft: job.result?.promptDraft || null
+      }, requestId);
+    }
+    if (autoSeedancePromptJob && req.method === "GET" && !autoSeedancePromptJob.jobId) {
+      const [latest] = await listBackgroundJobs(scoped, {
+        type: "auto_seedance_prompt",
+        subjectType: "batch",
+        subjectId: autoSeedancePromptJob.batchId
+      });
+      if (!latest) {
+        throw new WangzhuanError("job_not_found", "自动生成 Seedance prompt 任务不存在或已过期", {
+          batchId: autoSeedancePromptJob.batchId
+        }, 404);
+      }
+      return sendOk(res, {
+        ...latest,
+        autoSeedancePromptJobId: latest.id,
+        promptDraft: latest.result?.promptDraft || null
+      }, requestId);
+    }
+    if (codexPromptRoute && req.method === "GET") {
+      const batchId = String(url.searchParams.get("batchId") || "").trim();
+      const promptDraftId = String(url.searchParams.get("promptDraftId") || "").trim();
+      if (!batchId) {
+        throw new WangzhuanError("validation_error", "batchId 不能为空", { field: "batchId" });
+      }
+      const fromMysql = await (scoped.loadCodexPromptDraftFact || context.loadCodexPromptDraftFact || loadCodexPromptDraftFact)(batchId, promptDraftId);
+      if (fromMysql) return sendOk(res, fromMysql, requestId);
+      const fromJson = promptDraftId
+        ? await (scoped.loadSeedancePromptDraft || context.loadSeedancePromptDraft || loadSeedancePromptDraft)(scoped, batchId, promptDraftId)
+        : null;
+      if (fromJson) return sendOk(res, fromJson, requestId);
+      throw new WangzhuanError("batch_not_found", "Codex prompt 草稿不存在", {
+        batchId,
+        promptDraftId
+      }, 404);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/plan-jobs") {
       const body = await context.readJson(req);
@@ -483,6 +740,13 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       path: url.pathname
     }, 404);
   } catch (error) {
+    console.error(`[wangzhuan-api] requestId=${requestId} ${req.method} ${url.pathname} failed`, {
+      name: error?.name || "",
+      code: error?.code || "",
+      message: error?.message || "",
+      stack: error?.stack || "",
+      data: error?.data || error?.details || {}
+    });
     return sendErrorEnvelope(res, error, requestId);
   }
 }

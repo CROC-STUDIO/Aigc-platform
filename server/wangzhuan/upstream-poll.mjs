@@ -4,13 +4,25 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { reviewSeedanceAsset } from "./asset-review.mjs";
-import { readBatch, submitPendingGenerationTasks, writeBatch, writeTaskMaps } from "./pipeline.mjs";
+import {
+  findContinuitySourceTask,
+  readBatch,
+  submitPendingGenerationTasks,
+  taskNeedsContinuityReference,
+  writeBatch,
+  writeTaskMaps
+} from "./pipeline.mjs";
 import {
   createSeedanceProviderClient,
   normalizeSeedanceTaskStatus,
   summarizeSeedancePollResponse
 } from "./seedance-provider.mjs";
-import { finalizeSegmentBatch, stitchBatchSegments } from "./stitch.mjs";
+import {
+  finalizeSegmentBatch,
+  hasMultiSliceStitchGroups,
+  isBatchReadyForStitch,
+  stitchBatchSegments
+} from "./stitch.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { WangzhuanError } from "./http.mjs";
 
@@ -124,31 +136,18 @@ function generationTaskPollChanged(before = {}, after = {}) {
     || Boolean(before.responseSummary?.videoUrlStored) !== Boolean(after.responseSummary?.videoUrlStored);
 }
 
-function taskSegmentKey(task = {}) {
-  return [
-    task.branchId || "default",
-    String(task.branchVariantIndex || task.variantIndex || 1)
-  ].join(":");
-}
-
 function isApprovedContinuityReference(reference = {}) {
   const status = String(reference.review?.status || "").toLowerCase();
   return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
 }
 
 async function attachContinuityReferences(context, batch, tasks, now) {
-  if (Number(batch.estimate?.durationSec || 15) !== 30) return { tasks, changed: false };
   const nextTasks = [...tasks];
   let changed = false;
   for (let index = 0; index < nextTasks.length; index += 1) {
     const task = nextTasks[index];
-    if (task.status !== "pending" || Number(task.segmentIndex || 1) <= 1 || task.continuityReference) continue;
-    const previous = nextTasks.find((candidate) => {
-      return taskSegmentKey(candidate) === taskSegmentKey(task)
-        && Number(candidate.segmentIndex || 1) === Number(task.segmentIndex || 1) - 1
-        && candidate.status === "downloaded"
-        && Boolean(candidate.outputPath);
-    });
+    if (task.status !== "pending" || task.continuityReference || !taskNeedsContinuityReference(batch, task)) continue;
+    const previous = findContinuitySourceTask(nextTasks, task);
     if (!previous) continue;
     try {
       const continuityReference = await extractContinuityFrame(context, batch, previous);
@@ -362,9 +361,7 @@ export async function pollUpstreamBatch(context, batchId) {
   }
 
   const durationSec = Number(batch.estimate?.durationSec || 15);
-  const continuity = durationSec === 30
-    ? await attachContinuityReferences(context, batch, nextTasks, now)
-    : { tasks: nextTasks, changed: false };
+  const continuity = await attachContinuityReferences(context, batch, nextTasks, now);
   if (tasksChanged || continuity.changed) {
     batch = await writeBatch(context, {
       ...batch,
@@ -375,14 +372,20 @@ export async function pollUpstreamBatch(context, batchId) {
   }
 
   let advanced = false;
-  if (durationSec === 30) {
+  if (durationSec === 30 || hasMultiSliceStitchGroups(batch)) {
     if (tasksChanged && (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) {
       const submitted = await submitPendingGenerationTasks(context, batchId);
       batch = submitted.batch;
       if (submitted.submittedCount > 0) advanced = true;
     }
     const beforeStatus = batch.status;
-    batch = await advanceThirtySecondBatch(context, batchId);
+    if (durationSec === 30) {
+      batch = await advanceThirtySecondBatch(context, batchId);
+    } else if (isBatchReadyForStitch(batch)) {
+      batch = (await stitchBatchSegments(context, batchId)).batch;
+    } else {
+      batch = await finalizeSegmentBatch(context, batchId);
+    }
     advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video");
   } else {
     const beforeStatus = batch.status;

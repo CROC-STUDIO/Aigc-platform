@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
 import { qcPathHelpers } from "../../server/wangzhuan/qc.mjs";
-import { finalizeSegmentBatch } from "../../server/wangzhuan/stitch.mjs";
+import { finalizeSegmentBatch, hasMultiSliceStitchGroups, isBatchReadyForStitch, stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
 
 const { videoSpecCheck, downloadEligibility, shouldRunModelVideoQc } = qcPathHelpers;
 
@@ -126,6 +126,7 @@ async function writeBatchFiles(root, batch) {
   await mkdir(join(root, "prompts"), { recursive: true });
   await mkdir(join(root, "scripts"), { recursive: true });
   await writeFile(join(root, "upstream/gen_abcd_001.mp4"), "fake-video", "utf8");
+  await writeFile(join(root, "upstream/gen_abcd_002.mp4"), "fake-video-2", "utf8").catch(() => {});
   for (const task of batch.tasks) {
     await writeFile(join(root, task.promptPath), "Seedance prompt", "utf8");
     await writeFile(join(root, "prompts", `${task.generationTaskId}_image.txt`), "Image prompt", "utf8");
@@ -133,6 +134,30 @@ async function writeBatchFiles(root, batch) {
   for (const script of batch.scripts) {
     await writeFile(join(root, script.scriptPath), JSON.stringify(script), "utf8");
   }
+}
+
+async function installFakeFfmpeg(root) {
+  const binDir = join(root, "bin");
+  await mkdir(binDir, { recursive: true });
+  const ffmpegPath = join(binDir, "ffmpeg");
+  await writeFile(ffmpegPath, `#!/bin/sh
+if [ "$1" = "-version" ]; then
+  echo "ffmpeg fake"
+  exit 0
+fi
+out=""
+for arg in "$@"; do
+  out="$arg"
+done
+printf 'stitched-video' > "$out"
+exit 0
+`, "utf8");
+  await chmod(ffmpegPath, 0o755);
+  const previousPath = process.env.PATH || "";
+  process.env.PATH = `${binDir}:${previousPath}`;
+  return () => {
+    process.env.PATH = previousPath;
+  };
 }
 
 function testContext(root, state) {
@@ -154,6 +179,7 @@ function testContext(root, state) {
       return batch;
     },
     getChannelRulesForTest: async () => ({ rules: [] }),
+    recordTelemetryEvent: async () => ({}),
     syncWangzhuanAsset: async ({ fullPath, assetKind }) => ({
       assetKind,
       storageKey: `mock/${assetKind}.mp4`,
@@ -213,5 +239,124 @@ test("non-30 mixed outcome materializes successful slices and settles partial_fa
     assert.equal(finalized.tasks[0].status, "downloaded");
     assert.equal(finalized.tasks[1].status, "failed");
     assert.equal((await readFile(join(root, finalized.outputs[0].filePath), "utf8")), "fake-video");
+  });
+});
+
+test("non-30 multi-slice batch becomes stitch-ready only after every slice is downloaded", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildMixedOutcomeBatch(root) };
+
+    assert.equal(isBatchReadyForStitch(state.batch), false);
+
+    state.batch.tasks[1] = {
+      ...state.batch.tasks[1],
+      status: "downloaded",
+      outputPath: "upstream/gen_abcd_002.mp4",
+      errorCode: undefined,
+      errorMessage: undefined
+    };
+
+    assert.equal(isBatchReadyForStitch(state.batch), true);
+  });
+});
+
+test("non-30 multi-slice batch stitches downloaded slices by branch variant", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const state = { batch: buildMixedOutcomeBatch(root) };
+      state.batch.tasks[1] = {
+        ...state.batch.tasks[1],
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_002.mp4",
+        errorCode: undefined,
+        errorMessage: undefined
+      };
+      await writeBatchFiles(root, state.batch);
+
+      const detail = await stitchBatchSegments(testContext(root, state), state.batch.batchId);
+      const stitched = detail.batch.outputs.find((output) => output.kind === "stitched_video");
+
+      assert.equal(detail.batch.status, "qc");
+      assert.ok(stitched);
+      assert.deepEqual(stitched.generationTaskIds, ["gen_abcd_001", "gen_abcd_002"]);
+      assert.equal(stitched.durationSec, 24);
+      assert.equal((await readFile(join(root, stitched.filePath), "utf8")), "stitched-video");
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("stitched batch appends CTA and Ending image videos after Seedance segments", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const state = { batch: buildMixedOutcomeBatch(root) };
+      state.batch.tasks[1] = {
+        ...state.batch.tasks[1],
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_002.mp4",
+        errorCode: undefined,
+        errorMessage: undefined
+      };
+      const branchDraft = {
+        assetStoredPaths: {
+          ctaAsset: "product-assets/branch_1/ctaAsset/cta.png",
+          endingAsset: "product-assets/branch_1/endingAsset/ending.png"
+        },
+        assetFileNames: {
+          ctaAsset: "cta.png",
+          endingAsset: "ending.png"
+        }
+      };
+      state.batch.scripts = state.batch.scripts.map((script) => ({
+        ...script,
+        branchDraft
+      }));
+      await writeBatchFiles(root, state.batch);
+      await mkdir(join(root, "product-assets/branch_1/ctaAsset"), { recursive: true });
+      await mkdir(join(root, "product-assets/branch_1/endingAsset"), { recursive: true });
+      await writeFile(join(root, "product-assets/branch_1/ctaAsset/cta.png"), "fake-cta-image", "utf8");
+      await writeFile(join(root, "product-assets/branch_1/endingAsset/ending.png"), "fake-ending-image", "utf8");
+
+      const detail = await stitchBatchSegments(testContext(root, state), state.batch.batchId);
+      const stitched = detail.batch.outputs.find((output) => output.kind === "stitched_video");
+
+      assert.ok(stitched);
+      assert.equal(stitched.durationSec, 28);
+      assert.deepEqual(stitched.tailSegments.map((item) => item.assetKey), ["ctaAsset", "endingAsset"]);
+      for (const tail of stitched.tailSegments) {
+        assert.equal(tail.durationSec, 2);
+        assert.equal((await readFile(join(root, tail.filePath), "utf8")), "stitched-video");
+      }
+      const report = detail.batch.stitchReports.at(-1);
+      assert.deepEqual(report.tailSegments.map((item) => item.assetKey), ["ctaAsset", "endingAsset"]);
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("single Seedance slice with final tail images is stitch-ready", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildBatch(root) };
+    state.batch.scripts[0] = {
+      ...state.batch.scripts[0],
+      branchDraft: {
+        assetStoredPaths: {
+          ctaAsset: "product-assets/branch_1/ctaAsset/cta.png"
+        }
+      }
+    };
+    state.batch.tasks[0] = {
+      ...state.batch.tasks[0],
+      seedanceTaskId: "seedance_remote_001",
+      status: "downloaded",
+      outputPath: "upstream/gen_abcd_001.mp4"
+    };
+
+    assert.equal(hasMultiSliceStitchGroups(state.batch), true);
+    assert.equal(isBatchReadyForStitch(state.batch), true);
   });
 });

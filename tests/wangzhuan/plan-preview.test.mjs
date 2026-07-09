@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildThirtySecondSeedancePlanMessages,
   buildSeedancePlanMessages,
+  generateSeedancePlan,
   generateThirtySecondSeedancePlans,
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
@@ -12,6 +13,84 @@ import {
 function messagesText(messages) {
   return messages.map((message) => message.content).join("\n\n");
 }
+
+test("Seedance plan prompt includes fission story segment and carrier context", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260709120000_abcd",
+      templateSnapshot: { draft: { productName: "Drama App", language: "zh-CN", regions: ["CN"], currencySymbol: "¥" } },
+      estimate: { request: { targetRegions: ["CN"], language: "zh-CN" } }
+    },
+    branch: {
+      branchId: "branch_1",
+      productName: "Drama App",
+      languages: ["zh-CN"],
+      regions: ["CN"],
+      currencySymbol: "¥",
+      truthRules: {}
+    },
+    decomposition: {
+      wholeVideoConversion: { coreConversionTone: "fast proof with drama hook" },
+      storySegments: [{
+        storySegmentIndex: 1,
+        segmentRhythm: "fast opening",
+        segmentStructureSkeleton: "conflict hook -> reward proof",
+        timelineItems: [{ startSec: 0, endSec: 2, type: "drama_action", content: "conflict" }],
+        conversionSignals: { earningsNumber: { present: true, shouldReplicate: true, evidence: "counter rises" } },
+        conversionEffectOpportunities: [{ effect: "coin_burst", placement: "phone tap" }]
+      }]
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12,
+    currentSlice: {
+      storySegmentIndex: 1,
+      durationSec: 12,
+      conversionEffectOpportunities: [{ effect: "coin_burst", placement: "phone tap" }]
+    },
+    mandatoryMoneyVisualCarrier: true
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /fast proof with drama hook/);
+  assert.match(text, /segmentStructureSkeleton/);
+  assert.match(text, /conversionEffectOpportunities/);
+  assert.match(text, /mandatoryMoneyVisualCarrier/);
+  assert.match(text, /final-video high-attraction/);
+});
+
+test("generateSeedancePlan repairs prompt before returning validated plan", async () => {
+  const context = {
+    callWangzhuanLlm: async () => JSON.stringify({
+      hook: "Hook",
+      body: "Body",
+      voiceover: "Voiceover",
+      subtitles: ["打开应用"],
+      cta: "",
+      ending: "",
+      imagePrompt: "Phone proof.",
+      seedancePrompt: "UGC shot with $50 reward text.",
+      negativePrompt: "No watermark."
+    })
+  };
+
+  const plan = await generateSeedancePlan(context, {
+    batch: { templateSnapshot: { draft: { productName: "App", language: "zh-CN", regions: ["CN"], currencySymbol: "¥" } }, estimate: { request: {} } },
+    branch: { branchId: "b1", productName: "App", languages: ["zh-CN"], regions: ["CN"], currencySymbol: "¥", truthRules: {} },
+    decomposition: {},
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12,
+    mandatoryMoneyVisualCarrier: true
+  });
+
+  assert.doesNotMatch(plan.seedancePrompt, /\$50/);
+  assert.match(plan.seedancePrompt, /¥/);
+  assert.match(plan.seedancePrompt, /no burned subtitles/i);
+  assert.ok(plan.moneyVisuals.includes("real_cash_stack"));
+});
 
 test("Seedance plan prompt requires visual reconstruction with Seedance formula", () => {
   const messages = buildSeedancePlanMessages({
@@ -205,16 +284,139 @@ test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () 
   });
 
   const text = messagesText(messages);
-  assert.match(text, /三段式拼接|multi-slice|多段式/);
-  assert.match(text, /每个切片.*10-15秒/);
+  assert.match(text, /出量模板由参考视频拆解决定/);
+  assert.match(text, /切片策略由参考视频剧情段落决定/);
+  assert.match(text, /storySegments\/seedanceSlices/);
+  assert.match(text, /8-15s/);
+  assert.match(text, /不要因为前端枚举值强行改成固定三段式或短剧高光模板/);
   assert.match(text, /人物、场景、服装.*变化/);
-  assert.match(text, /网赚安利.*提现展示/);
-  assert.match(text, /短剧高光.*赚钱安利/);
+  assert.match(text, /主要依据参考视频拆解中该段是否存在对应结构/);
   assert.match(text, /真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录/);
   assert.match(text, /Seedance 原视频不得烧录字幕/);
   assert.match(text, /subtitleWorkflow/);
   assert.match(text, /无具体金额的数字增长|不含具体金额/);
   assert.match(text, /具体金额.*truthRules/);
+});
+
+test("Seedance plan prompt includes selected target segment count rules", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260709130000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "pt-BR",
+          regions: ["BR"],
+          currencySymbol: "R$",
+          targetSegmentCount: 3
+        }
+      },
+      estimate: {
+        outputRatio: "9:16",
+        request: {
+          language: "pt-BR",
+          targetRegions: ["BR"],
+          targetSegmentCount: 3
+        }
+      }
+    },
+    branch: {
+      branchId: "branch_1",
+      productName: "Drama Gold",
+      languages: ["pt-BR"],
+      regions: ["BR"],
+      currencySymbol: "R$",
+      targetSegmentCount: 3,
+      truthRules: {}
+    },
+    decomposition: {
+      storySegments: [{
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 26,
+        durationSec: 26,
+        scene: "home",
+        subject: "student",
+        action: "hook and proof",
+        camera: "selfie",
+        lighting: "warm",
+        style: "UGC",
+        quality: "clear"
+      }]
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 9,
+    currentSlice: { segmentIndex: 1, startSec: 0, endSec: 9, durationSec: 9 }
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /"targetSegmentCount": 3/);
+  assert.match(text, /user_selected_3_segments/);
+  assert.match(text, /将参考视频剧情段落合并或拆分成用户选择的目标段数/);
+  assert.match(text, /不要继续按原始拆解段数生成/);
+});
+
+test("Seedance plan prompt treats CTA and Ending images as final-tail only assets", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260709140000_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Reward App",
+          language: "zh-CN",
+          regions: ["CN"],
+          currencySymbol: "¥"
+        }
+      },
+      estimate: { request: { language: "zh-CN", targetRegions: ["CN"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      productName: "Reward App",
+      languages: ["zh-CN"],
+      regions: ["CN"],
+      currencySymbol: "¥",
+      assetUrls: {
+        productIcon: "https://assets.test/icon.png",
+        ctaAsset: "https://assets.test/cta.png",
+        endingAsset: "https://assets.test/ending.png"
+      },
+      assetFileNames: {
+        productIcon: "icon.png",
+        ctaAsset: "cta.png",
+        endingAsset: "ending.png"
+      },
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "living room phone proof",
+      subject: "viewer with phone",
+      action: "checks reward feedback",
+      camera: "close-up",
+      lighting: "soft",
+      style: "UGC",
+      quality: "clear"
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 2,
+    totalSegmentCount: 2,
+    isFinalSeedanceSlice: true
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /CTA 图 \/ Ending 图引用规则/);
+  assert.match(text, /仅图片尾图素材，不属于普通 Seedance 参考素材 slot/);
+  assert.match(text, /isFinalSeedanceSlice=true/);
+  assert.match(text, /实际 CTA 图视频片段和 Ending 图视频片段会在 Seedance 视频之后由 ffmpeg 拼接/);
+  assert.match(text, /mediaRefs\.ctaAsset/);
+  assert.match(text, /mediaRefs\.endingAsset/);
+  assert.match(text, /CTA 图 \/ Ending 图只允许出现在最终切片末尾/);
+  assert.match(text, /图片1 = 产品 Logo/);
+  assert.doesNotMatch(text, /图片2 = CTA 图/);
+  assert.doesNotMatch(text, /图片2 = Ending 图/);
 });
 
 test("Seedance plan prompt uses current slice duration instead of hardcoded 15s", () => {

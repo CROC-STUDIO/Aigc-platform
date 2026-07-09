@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 import { execFile } from "node:child_process";
@@ -24,6 +25,7 @@ import {
   buildDecompositionUserPrompt
 } from "./decomposition-prompt.mjs";
 import { flattenDecompositionFieldValue } from "./decomposition-text.mjs";
+import { normalizeFissionAnalysis } from "./fission-analysis.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
@@ -85,6 +87,29 @@ const DECOMPOSITION_CONTAINER_KEYS = Object.freeze([
   "脚本拆解",
   "视频拆解"
 ]);
+
+const FISSION_DECOMPOSITION_FIELDS = Object.freeze([
+  "sourceVideoProfile",
+  "wholeVideoConversion",
+  "wholeVideoSummary",
+  "storySegments",
+  "seedanceSlices"
+]);
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashPayload(value) {
+  return createHash("sha256").update(stableJson(value), "utf8").digest("hex");
+}
 
 function sanitizeFileName(name) {
   const parsed = parse(basename(name || "reference.mp4"));
@@ -383,6 +408,7 @@ export async function checkReferenceVideo(context, request = {}) {
     referenceVideoId,
     fileName,
     mimeType: mimeType || mimeForExt(ext),
+    fileHash: String(request.fileHash || request.sha256 || "").trim(),
     sizeBytes: uploadSizeBytes,
     durationSec,
     width,
@@ -426,6 +452,64 @@ export async function checkReferenceVideo(context, request = {}) {
   });
 
   return { referenceVideo: { ...probe, previewUrl: storage.storageUrl } };
+}
+
+function decompositionCacheKey(probe = {}, request = {}, llmConfig = {}) {
+  const fileHash = String(request.fileHash || request.sha256 || probe.fileHash || "").trim();
+  if (!fileHash) return "";
+  return hashPayload({
+    fileHash,
+    provider: llmConfig.provider || "",
+    model: llmConfig.model || "",
+    language: request.language || request.primaryLanguage || "",
+    targetRegion: request.targetRegion || "",
+    targetRegions: request.targetRegions || request.regions || [],
+    promptVersion: "fission_decomposition_v1"
+  });
+}
+
+function decompositionCachePath(context, cacheKey) {
+  if (!cacheKey) return "";
+  return join(wangzhuanPaths(context).referenceVideosDir, "_decomposition-cache", `${cacheKey}.json`);
+}
+
+async function loadCachedDecomposition(context, probe, request, llmConfig) {
+  const cacheKey = decompositionCacheKey(probe, request, llmConfig);
+  const target = decompositionCachePath(context, cacheKey);
+  if (!target) return null;
+  try {
+    const parsed = JSON.parse(await readFile(target, "utf8"));
+    if (!parsed?.decomposition) return null;
+    return {
+      cacheKey,
+      decomposition: parsed.decomposition
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedDecomposition(context, probe, request, llmConfig, decomposition) {
+  const cacheKey = decompositionCacheKey(probe, request, llmConfig);
+  const target = decompositionCachePath(context, cacheKey);
+  if (!target || !decomposition || decomposition.missingFields?.length) return;
+  await mkdir(join(wangzhuanPaths(context).referenceVideosDir, "_decomposition-cache"), { recursive: true });
+  await writeAtomicJson(target, {
+    cacheKey,
+    fileHash: probe.fileHash || request.fileHash || request.sha256 || "",
+    referenceVideoId: probe.referenceVideoId,
+    llmConfig: {
+      provider: llmConfig.provider || "",
+      model: llmConfig.model || ""
+    },
+    request: {
+      language: request.language || request.primaryLanguage || "",
+      targetRegion: request.targetRegion || "",
+      targetRegions: request.targetRegions || request.regions || []
+    },
+    decomposition,
+    updatedAt: new Date().toISOString()
+  });
 }
 
 function mimeForExt(ext) {
@@ -487,6 +571,7 @@ export function validateVideoDecomposition(referenceVideoId, decomposition = {})
     ...(normalized.rewardFeedback ? { rewardFeedback: String(normalized.rewardFeedback) } : {}),
     ...(normalized.cta ? { cta: String(normalized.cta) } : {}),
     ...(normalized.disclaimer ? { disclaimer: String(normalized.disclaimer) } : {}),
+    ...normalized.fissionAnalysis,
     missingFields
   };
 }
@@ -498,6 +583,26 @@ function firstStringValue(source, keys) {
     if (value && typeof value === "object") return flattenDecompositionFieldValue(value);
   }
   return "";
+}
+
+function backfillRequiredFieldsFromStorySegments(normalized = {}, source = {}) {
+  const segments = Array.isArray(source?.storySegments) ? source.storySegments : [];
+  const first = segments.find((item) => item && typeof item === "object" && !Array.isArray(item));
+  if (!first) return normalized;
+  for (const field of ["scene", "subject", "action", "camera", "lighting", "style", "quality"]) {
+    if (normalized[field]) continue;
+    const value = firstStringValue(first, DECOMPOSITION_FIELD_ALIASES[field] || [field]);
+    if (value) normalized[field] = value;
+  }
+  if (!normalized.hook) {
+    const hook = firstStringValue(first, [
+      ...(DECOMPOSITION_FIELD_ALIASES.hook || []),
+      "coreHook",
+      "core_hook"
+    ]);
+    if (hook) normalized.hook = hook;
+  }
+  return normalized;
 }
 
 function normalizeVideoDecompositionPayload(raw = {}) {
@@ -513,6 +618,13 @@ function normalizeVideoDecompositionPayload(raw = {}) {
   }
   for (const field of ["subtitleArea", "appIconArea"]) {
     if (source?.[field]) normalized[field] = source[field];
+  }
+  backfillRequiredFieldsFromStorySegments(normalized, source);
+  if (FISSION_DECOMPOSITION_FIELDS.some((field) => Object.hasOwn(source || {}, field))) {
+    normalized.fissionAnalysis = normalizeFissionAnalysis({
+      ...source,
+      ...Object.fromEntries(DECOMPOSITION_REQUIRED_FIELDS.map((field) => [field, normalized[field] || ""]))
+    });
   }
   return normalized;
 }
@@ -904,12 +1016,15 @@ function videoProbePrompt(probe) {
   ].join("\n");
 }
 
-function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionInputs = {}) {
-  const promptText = buildDecompositionUserPrompt(probe, request, llmConfig, videoProbePrompt);
+function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionInputs = {}, options = {}) {
+  const promptText = buildDecompositionUserPrompt(probe, request, llmConfig, videoProbePrompt, {
+    compact: Boolean(options.compact)
+  });
+  const forceFramesOnly = Boolean(options.forceFramesOnly);
   const userContent = [
     { type: "text", text: promptText }
   ];
-  if (visionInputs.fileUrl) {
+  if (!forceFramesOnly && visionInputs.fileUrl) {
     userContent.push({
       type: "file",
       file: {
@@ -917,7 +1032,7 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
         file_url: visionInputs.fileUrl
       }
     });
-  } else if (visionInputs.fileDataUrl) {
+  } else if (!forceFramesOnly && visionInputs.fileDataUrl) {
     userContent.push({
       type: "file",
       file: {
@@ -942,6 +1057,32 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
       content: userContent
     }
   ];
+}
+
+function isFramesOnlyFallbackError(error) {
+  if (!error) return false;
+  const text = [
+    error.message,
+    error.data?.upstreamMessage,
+    error.data?.reason
+  ].filter(Boolean).join(" ");
+  return /file_data|payload|too large|Invalid PDF input|request entity too large|413/i.test(text);
+}
+
+function framesOnlyVisionInput(visionInputs = {}, reason = "file_data_unavailable") {
+  return {
+    ...visionInputs,
+    fileUrl: "",
+    fileDataUrl: "",
+    warnings: [
+      ...(Array.isArray(visionInputs.warnings) ? visionInputs.warnings : []),
+      {
+        code: "reference_video_frames_only_fallback",
+        message: "视频文件输入失败，已回退为仅抽帧输入",
+        reason
+      }
+    ]
+  };
 }
 
 async function inlineReferenceVideoVisionInput(context, probe, visionInputs = {}, reason = "file_url_unavailable") {
@@ -1481,7 +1622,10 @@ export function buildGeminiRequestBody(messages, temperature) {
 }
 
 async function invokeDecompositionLlmOnce(context, probe, request, llmConfig, visionInputs, options = {}) {
-  const messages = buildDecompositionMessages(probe, request, llmConfig, visionInputs);
+  const messages = buildDecompositionMessages(probe, request, llmConfig, visionInputs, {
+    compact: Boolean(options.compactPrompt),
+    forceFramesOnly: Boolean(options.forceFramesOnly)
+  });
   const dumpHooks = buildStreamingDumpHooks(context, probe, llmConfig, options.requestId);
   if (typeof context.callWangzhuanLlm === "function") {
     return context.callWangzhuanLlm({
@@ -1496,11 +1640,13 @@ async function invokeDecompositionLlmOnce(context, probe, request, llmConfig, vi
       },
       referenceVideo: {
         ...probe,
-        fileUrl: visionInputs.fileUrl,
-        fileDataUrl: visionInputs.fileDataUrl,
+        fileUrl: options.forceFramesOnly ? "" : visionInputs.fileUrl,
+        fileDataUrl: options.forceFramesOnly ? "" : visionInputs.fileDataUrl,
         frameCount: visionInputs.frames.length
       },
-      visionInputs
+      visionInputs: options.forceFramesOnly
+        ? { ...visionInputs, fileUrl: "", fileDataUrl: "" }
+        : visionInputs
     });
   }
   const streamHandlers = options.streamHandlers;
@@ -1572,27 +1718,78 @@ async function invokeDecompositionLlmOnce(context, probe, request, llmConfig, vi
     });
 }
 
+const DECOMPOSITION_RETRY_TIMEOUT_CAP_MS = 120000;
+const DECOMPOSITION_RETRY_BACKOFF_BASE_MS = 1000;
+const DECOMPOSITION_RETRY_BACKOFF_MAX_MS = 8000;
+
+/** 重试用更短的超时：首试可以等满配置窗口，但重试快速失败，避免每次都耗满导致总时长成倍膨胀。 */
+function decompositionRetryTimeoutMs(baseTimeoutMs) {
+  const base = Number(baseTimeoutMs);
+  if (!Number.isFinite(base) || base <= 0) return DECOMPOSITION_RETRY_TIMEOUT_CAP_MS;
+  return Math.min(base, DECOMPOSITION_RETRY_TIMEOUT_CAP_MS);
+}
+
+/** 指数退避：第 1 次重试等 1s，之后翻倍，封顶 8s，给上游一点缓冲又不至于拖太久。 */
+function decompositionRetryBackoffMs(retryIndex) {
+  const delay = DECOMPOSITION_RETRY_BACKOFF_BASE_MS * (2 ** Math.max(0, retryIndex));
+  return Math.min(delay, DECOMPOSITION_RETRY_BACKOFF_MAX_MS);
+}
+
+function delayMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function parseAndValidateDecompositionContent(probe, content) {
+  const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
+  if (decomposition.missingFields.length) {
+    throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {
+      referenceVideoId: probe.referenceVideoId,
+      missingFields: decomposition.missingFields
+    });
+  }
+  return decomposition;
+}
+
+function isCompactPromptRetryError(error) {
+  return error?.code === "schema_invalid" || error?.data?.reason === "invalid_json";
+}
+
 async function invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options = {}) {
   const maxRetries = Number.isFinite(Number(llmConfig.maxRetries))
     ? Math.max(0, Math.trunc(Number(llmConfig.maxRetries)))
     : 3;
+  const retryTimeoutMs = decompositionRetryTimeoutMs(llmConfig.timeoutMs);
   let lastError;
   let activeVisionInputs = visionInputs;
   let fellBackToInlineFile = false;
+  let fellBackToFramesOnly = false;
+  let useCompactPrompt = false;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    // 首试用完整超时窗口；真正的重试收紧到更短的超时，快速失败而不是每次都等满。
+    const activeLlmConfig = attempt > 0 && retryTimeoutMs < Number(llmConfig.timeoutMs || 0)
+      ? { ...llmConfig, timeoutMs: retryTimeoutMs }
+      : llmConfig;
     try {
       if (attempt > 0 && options.streamHandlers?.onRetry) {
         options.streamHandlers.onRetry({
           attempt,
           maxRetries,
-          inputMode: activeVisionInputs.fileUrl ? "file_url" : "file_data",
-          reason: lastError?.data?.reason || "",
+          timeoutMs: activeLlmConfig.timeoutMs,
+          inputMode: activeVisionInputs.fileUrl
+            ? "file_url"
+            : (activeVisionInputs.fileDataUrl ? "file_data" : "frames_only"),
+          reason: lastError?.data?.reason || lastError?.code || "",
           upstreamMessage: String(lastError?.data?.upstreamMessage || lastError?.message || "").slice(0, 300),
           code: String(lastError?.code || ""),
           status: Number(lastError?.data?.status || 0) || undefined
         });
       }
-      return await invokeDecompositionLlmOnce(context, probe, request, llmConfig, activeVisionInputs, options);
+      const content = await invokeDecompositionLlmOnce(context, probe, request, activeLlmConfig, activeVisionInputs, {
+        ...options,
+        compactPrompt: useCompactPrompt,
+        forceFramesOnly: fellBackToFramesOnly
+      });
+      return parseAndValidateDecompositionContent(probe, content);
     } catch (error) {
       lastError = error;
       if (!fellBackToInlineFile && activeVisionInputs.fileUrl && isModelFileUrlUnavailableError(error)) {
@@ -1611,20 +1808,38 @@ async function invokeDecompositionLlm(context, probe, request, llmConfig, vision
         attempt -= 1;
         continue;
       }
+      if (
+        !fellBackToFramesOnly
+        && (activeVisionInputs.frames?.length || 0) > 0
+        && isFramesOnlyFallbackError(error)
+      ) {
+        fellBackToFramesOnly = true;
+        if (options.streamHandlers?.onFallback) {
+          options.streamHandlers.onFallback({
+            from: activeVisionInputs.fileUrl ? "file_url" : "file_data",
+            to: "frames_only",
+            reason: String(error?.data?.upstreamMessage || error?.message || "file_data_unavailable").slice(0, 160)
+          });
+        }
+        activeVisionInputs = framesOnlyVisionInput(activeVisionInputs, "file_data_unavailable");
+        visionInputs.fileUrl = activeVisionInputs.fileUrl;
+        visionInputs.fileDataUrl = activeVisionInputs.fileDataUrl;
+        visionInputs.warnings = activeVisionInputs.warnings;
+        attempt -= 1;
+        continue;
+      }
+      if (isCompactPromptRetryError(error)) {
+        useCompactPrompt = true;
+      }
       if (attempt >= maxRetries || !isRetryableLlmError(error)) throw error;
+      // 决定重试：退避一小段再进入下一轮，避免对瞬时故障的上游连续打点。
+      await delayMs(decompositionRetryBackoffMs(attempt));
     }
   }
   throw lastError;
 }
 
-async function finalizeDraftDecomposition(context, probe, request, llmConfig, content) {
-  const decomposition = validateVideoDecomposition(probe.referenceVideoId, parseLlmJsonContent(content));
-  if (decomposition.missingFields.length) {
-    throw new WangzhuanError("schema_invalid", "模型拆解结果不完整，请重试或手动补充", {
-      referenceVideoId: probe.referenceVideoId,
-      missingFields: decomposition.missingFields
-    });
-  }
+async function finalizeDraftDecomposition(context, probe, request, llmConfig, decomposition) {
   const recordEvent = typeof context.recordTelemetryEvent === "function"
     ? context.recordTelemetryEvent
     : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
@@ -1634,6 +1849,7 @@ async function finalizeDraftDecomposition(context, probe, request, llmConfig, co
     model: llmConfig.model,
     status: "drafted"
   });
+  await writeCachedDecomposition(context, probe, request, llmConfig, decomposition);
   return {
     decomposition,
     draft: {
@@ -1652,9 +1868,30 @@ export async function draftReferenceVideoDecomposition(context, request = {}, op
     throw new WangzhuanError("invalid_video", "参考视频检查未通过，不能自动拆解", { referenceVideoId: probe.referenceVideoId });
   }
   const llmConfig = resolveLlmConfig(context.config || {}, request.llmConfig || {});
+  const cached = await loadCachedDecomposition(context, probe, request, llmConfig);
+  if (cached?.decomposition) {
+    const decomposition = validateVideoDecomposition(probe.referenceVideoId, {
+      ...cached.decomposition,
+      referenceVideoId: probe.referenceVideoId
+    });
+    return {
+      decomposition,
+      draft: {
+        source: "cache",
+        provider: llmConfig.provider,
+        model: llmConfig.model,
+        referenceVideoId: probe.referenceVideoId,
+        cacheKey: cached.cacheKey
+      },
+      warnings: [{
+        code: "decomposition_cache_hit",
+        message: "命中相同视频、模型、地区和语言的拆解缓存"
+      }]
+    };
+  }
   const visionInputs = await collectReferenceVideoVisionInputs(context, probe, llmConfig);
-  const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options);
-  const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, content);
+  const decomposition = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options);
+  const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, decomposition);
   return {
     ...result,
     warnings: visionInputs.warnings
@@ -1673,7 +1910,7 @@ export async function draftReferenceVideoDecompositionStream(context, request = 
     const visionInputs = await collectReferenceVideoVisionInputs(context, probe, llmConfig);
     writeSseLog(res, `model=${llmConfig.model} provider=${llmConfig.provider}`);
     writeSseLog(res, "POST upstream stream=true …");
-    const content = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, {
+    const decomposition = await invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, {
       requestId,
       streamHandlers: {
         onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
@@ -1690,7 +1927,7 @@ export async function draftReferenceVideoDecompositionStream(context, request = 
     });
     writeSseLog(res, "");
     writeSseLog(res, "[DONE] received — parsing JSON …");
-    const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, content);
+    const result = await finalizeDraftDecomposition(context, probe, request, llmConfig, decomposition);
     writeSseLog(res, "parse ok — decomposition ready");
     writeSseDone(res, {
       ...result,

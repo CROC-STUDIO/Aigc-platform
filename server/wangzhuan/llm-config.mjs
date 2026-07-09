@@ -41,11 +41,12 @@ function cleanMaxRetries(value) {
 export function isRetryableLlmError(error) {
   if (!(error instanceof Error)) return false;
   const code = error.code || error?.data?.code;
+  if (code === "schema_invalid") return true;
   if (code !== "model_failed") return false;
   const reason = error.data?.reason;
-  if (reason === "timeout" || reason === "request_failed") return true;
+  if (reason === "timeout" || reason === "request_failed" || reason === "invalid_json") return true;
   const status = Number(error.data?.status || 0);
-  return status >= 500;
+  return status === 429 || status >= 500;
 }
 
 function normalizeModel(provider, model) {

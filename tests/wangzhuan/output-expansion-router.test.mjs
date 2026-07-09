@@ -107,7 +107,7 @@ test("POST /api/wangzhuan/outputs/:outputId/expand returns queued expansion job"
   assert.equal(response.statusCode, 200);
   assert.equal(response.payload.code, "ok");
   assert.equal(response.payload.data.status, "queued");
-  assert.match(response.payload.data.jobId, /^decompjob_|^planjob_/);
+  assert.match(response.payload.data.jobId, /^expandjob_/);
   assert.equal(response.payload.data.outputId, "out_001");
   assert.equal(response.payload.data.sizeKey, "800x800");
 });

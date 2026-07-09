@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { adminTemplateAction } from "../../server/wangzhuan/templates.mjs";
+import { adminTemplateAction, saveTemplate } from "../../server/wangzhuan/templates.mjs";
 
 const user = {
   userId: "admin",
@@ -94,4 +94,32 @@ test("legacy delete without versionId still deletes all versions of the selected
   assert.equal(store.templates.find((item) => item.versionId === "tpl_bonus_v2").status, "deleted");
   assert.equal(store.templates.find((item) => item.versionId === "tpl_cash_v1").status, "active");
   assert.equal(store.defaultTemplateId, "");
+});
+
+test("save template normalizes legacy duration when target segment count drives slicing", async () => {
+  const context = templateContext({
+    schemaVersion: "templates.v1",
+    defaultTemplateId: "",
+    nextTemplateSeq: 1,
+    templates: []
+  });
+
+  const result = await saveTemplate(context, {
+    mode: "create",
+    draft: {
+      displayName: "Fission Template",
+      productName: "Product",
+      currencySymbol: "$",
+      language: "en-US",
+      regions: ["US"],
+      targetChannels: ["meta_ads"],
+      defaultOutputRatio: "9:16",
+      defaultDurationSec: 56.375,
+      targetSegmentCount: "follow_decomposition",
+      promiseLevel: "stable"
+    }
+  });
+
+  assert.equal(result.template.draft.defaultDurationSec, 15);
+  assert.equal(result.template.draft.targetSegmentCount, "follow_decomposition");
 });

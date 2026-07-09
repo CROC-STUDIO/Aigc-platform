@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { buildGenerationPlanRecord } from "../../server/wangzhuan/plan-preview.mjs";
 import {
+  adjustSlicePlanToTargetCount,
   buildSubtitlePostProcessArtifact,
   buildSlicePlan,
   planSegmentMultiplier,
@@ -227,16 +228,200 @@ test("prepareBatchForPipeline fallback prompt uses coherent 16s slice duration",
   assert.doesNotMatch(prompt, /Task: create a 15 second 9:16 Seedance image-to-video prompt\./);
 });
 
+test("prepareBatchForPipeline prefers decomposition seedanceSlices over mechanical slice plan", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-fission-slices-"));
+  const batch = testBatch({ durationSec: 40, sliceStrategy: "auto_10_15s_multi_slice" });
+  batch.decomposition = {
+    ...batch.decomposition,
+    seedanceSlices: [
+      {
+        segmentIndex: 1,
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 11,
+        durationSec: 11,
+        segmentRole: "hook_slice",
+        scene: "room",
+        subject: "creator",
+        action: "hook",
+        camera: "selfie",
+        lighting: "warm",
+        style: "UGC",
+        quality: "clear"
+      },
+      {
+        segmentIndex: 2,
+        storySegmentIndex: 2,
+        seedanceSliceIndex: 1,
+        startSec: 11,
+        endSec: 24,
+        durationSec: 13,
+        segmentRole: "proof_slice",
+        scene: "cafe",
+        subject: "worker",
+        action: "proof",
+        camera: "close-up",
+        lighting: "daylight",
+        style: "UGC",
+        quality: "clear"
+      }
+    ]
+  };
+
+  const prepared = await prepareBatchForPipeline(testContext(root), batch);
+  assert.equal(prepared.scripts.length, 2);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [11, 13]);
+  assert.deepEqual(prepared.scripts.map((script) => script.storySegmentIndex), [1, 2]);
+  assert.deepEqual(prepared.tasks.map((task) => task.sliceDurationSec), [11, 13]);
+});
+
+test("targetSegmentCount overrides decomposition slice count", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-target-segments-"));
+  const batch = testBatch({ durationSec: 24, sliceStrategy: "auto_10_15s_multi_slice" });
+  batch.estimate.request.targetSegmentCount = 1;
+  batch.templateSnapshot.draft.targetSegmentCount = 1;
+  batch.decomposition = {
+    ...batch.decomposition,
+    seedanceSlices: [
+      {
+        segmentIndex: 1,
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 11,
+        durationSec: 11,
+        segmentRole: "hook_slice",
+        scene: "room",
+        subject: "creator",
+        action: "hook",
+        camera: "selfie",
+        lighting: "warm",
+        style: "UGC",
+        quality: "clear"
+      },
+      {
+        segmentIndex: 2,
+        storySegmentIndex: 2,
+        seedanceSliceIndex: 1,
+        startSec: 11,
+        endSec: 24,
+        durationSec: 13,
+        segmentRole: "proof_slice",
+        scene: "cafe",
+        subject: "worker",
+        action: "proof",
+        camera: "close-up",
+        lighting: "daylight",
+        style: "UGC",
+        quality: "clear"
+      }
+    ]
+  };
+
+  assert.equal(planSegmentMultiplier(batch), 1);
+  const prepared = await prepareBatchForPipeline(testContext(root), batch);
+  assert.equal(prepared.scripts.length, 1);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [24]);
+  assert.equal(prepared.scripts[0].targetSegmentMerge, true);
+});
+
+test("adjustSlicePlanToTargetCount can split into selected segment count", () => {
+  const adjusted = adjustSlicePlanToTargetCount([
+    { segmentIndex: 1, startSec: 0, endSec: 26, durationSec: 26, segmentRole: "hook_slice" }
+  ], 2);
+
+  assert.deepEqual(adjusted.map((slice) => slice.durationSec), [13, 13]);
+  assert.deepEqual(adjusted.map((slice) => slice.segmentIndex), [1, 2]);
+  assert.equal(adjusted[0].targetSegmentSplit, true);
+  assert.equal(adjusted[1].targetSegmentSplit, true);
+});
+
+test("prepareBatchForPipeline derives slices from storySegments when seedanceSlices are absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-story-slices-"));
+  const batch = testBatch({ durationSec: 26, sliceStrategy: "fixed_15s" });
+  batch.decomposition = {
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 26,
+        durationSec: 26,
+        scene: "home",
+        subject: "student",
+        action: "claim then app proof",
+        camera: "selfie then close-up",
+        lighting: "soft indoor",
+        style: "UGC",
+        quality: "clear",
+        sliceSplitHints: [{ splitSec: 12, reason: "claim changes into app proof" }]
+      }
+    ]
+  };
+
+  const prepared = await prepareBatchForPipeline(testContext(root), batch);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [12, 14]);
+  assert.equal(prepared.scripts[0].sliceSplitReason, "claim changes into app proof");
+});
+
+test("prepareBatchForPipeline passes fission slice context to LLM plan generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-fission-plan-context-"));
+  const seen = [];
+  const context = {
+    ...testContext(root),
+    generateSeedancePlanForTest: async (_context, input) => {
+      seen.push(input);
+      return {
+        hook: "Hook",
+        body: "Body",
+        voiceover: "Voiceover",
+        subtitles: ["Subtitle"],
+        cta: "",
+        ending: "",
+        imagePrompt: "Image prompt",
+        seedancePrompt: "Seedance prompt no burned subtitles.",
+        negativePrompt: "No watermark",
+        sliceDurationSec: input.sliceDurationSec,
+        segmentRole: input.currentSlice.segmentRole,
+        moneyVisuals: [],
+        conversionEffectOpportunities: input.currentSlice.conversionEffectOpportunities,
+        subtitleWorkflow: { burnedInSubtitles: false, postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: ["Subtitle"] },
+        sliceDiversity: {}
+      };
+    }
+  };
+  const batch = testBatch({ durationSec: 12, sliceStrategy: "fixed_15s" });
+  batch.decomposition = {
+    seedanceSlices: [{
+      storySegmentIndex: 1,
+      seedanceSliceIndex: 1,
+      startSec: 0,
+      endSec: 12,
+      durationSec: 12,
+      segmentRole: "hook_slice",
+      conversionEffectOpportunities: [{ effect: "coin_burst" }]
+    }]
+  };
+
+  const prepared = await prepareBatchForPipeline(context, batch, { useLlmPlans: true });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].currentSlice.storySegmentIndex, 1);
+  assert.equal(seen[0].mandatoryMoneyVisualCarrier, true);
+  assert.deepEqual(prepared.plans[0].conversionEffectOpportunities, [{ effect: "coin_burst" }]);
+  assert.deepEqual(prepared.tasks[0].conversionEffectOpportunities, [{ effect: "coin_burst" }]);
+});
+
 test("prepareBatchForPipeline source writes slice duration and role into payloads", async () => {
   const source = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
 
-  assert.match(source, /const slicePlan = buildSlicePlan\(/);
+  assert.match(source, /const slicePlan = buildSlicePlanFromDecomposition\(batch\)/);
   assert.match(source, /const segmentMultiplier = slicePlan\.length/);
   assert.match(source, /durationSec: slice\.durationSec/);
   assert.match(source, /segmentRole: planRecord\?\.segmentRole \|\| slice\.segmentRole/);
-  assert.match(source, /sliceDurationSec: planRecord\?\.sliceDurationSec \|\| slice\.durationSec/);
+  assert.match(source, /sliceDurationSec: planRecord\?\.sliceDurationSec \|\| slice\.sliceDurationSec \|\| slice\.durationSec/);
   assert.match(source, /segmentRole: slice\.segmentRole/);
-  assert.match(source, /sliceDurationSec: slice\.durationSec/);
+  assert.match(source, /sliceDurationSec: slice\.sliceDurationSec \|\| slice\.durationSec/);
+  assert.match(source, /currentSlice: slice/);
   assert.match(source, /Task: create a \$\{script\.durationSec \|\| 15\} second 9:16 Seedance image-to-video prompt/);
 });
 

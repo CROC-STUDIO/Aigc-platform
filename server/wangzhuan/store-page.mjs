@@ -47,7 +47,46 @@ function emptyCandidates(productName = "") {
   };
 }
 
+function emptyMetadata() {
+  return {
+    appId: "",
+    bundleId: "",
+    storeUrl: "",
+    contentRating: "",
+    sourceLanguages: [],
+    rating: null,
+    ratingCount: null,
+    version: "",
+    releaseDate: "",
+    minimumOsVersion: "",
+    fileSizeBytes: ""
+  };
+}
+
+function emptyProductBrief(productName = "") {
+  return {
+    productName,
+    category: "",
+    developer: "",
+    description: "",
+    contentRating: "",
+    coreSellingPoints: [],
+    targetAudience: [],
+    mustShow: [],
+    mustAvoid: [
+      "不要编造商店页未提供的价格、订阅权益、收益、奖励、排名、评分或用户规模。",
+      "不要把商店评分、下载量或评论数写进 Seedance prompt，除非用户明确确认可用。"
+    ],
+    assetSlots: {
+      productIcon: "",
+      productScreenshots: [],
+      productRecording: ""
+    }
+  };
+}
+
 function fallbackStoreResult(rawUrl, url) {
+  const productName = titleFromUrl(url);
   return {
     url: rawUrl,
     store: detectStore(url),
@@ -55,7 +94,9 @@ function fallbackStoreResult(rawUrl, url) {
       name: "url_fallback",
       status: "fallback_only"
     },
-    candidates: emptyCandidates(titleFromUrl(url)),
+    candidates: emptyCandidates(productName),
+    metadata: emptyMetadata(),
+    productBrief: emptyProductBrief(productName),
     warnings: [
       "当前先使用链接解析兜底信息；如需 icon、截图和完整商店描述，需要接入商店页抓取服务。"
     ],
@@ -72,6 +113,22 @@ function normalizeProviderResult(rawUrl, store, payload = {}, providerName = "cu
   const candidates = payload.candidates && typeof payload.candidates === "object" ? payload.candidates : {};
   const screenshots = Array.isArray(candidates.screenshots) ? candidates.screenshots.filter((item) => item && typeof item === "object") : [];
   const videoPreviews = Array.isArray(candidates.videoPreviews) ? candidates.videoPreviews.filter((item) => item && typeof item === "object") : [];
+  const normalizedCandidates = {
+    productName: cleanString(candidates.productName),
+    developer: cleanString(candidates.developer),
+    category: cleanString(candidates.category),
+    shortDescription: cleanString(candidates.shortDescription),
+    description: cleanString(candidates.description),
+    icon: candidates.icon && typeof candidates.icon === "object" ? candidates.icon : null,
+    screenshots,
+    videoPreviews,
+    visibleTexts: normalizeStringList(candidates.visibleTexts),
+    coreSellingPoints: normalizeStringList(candidates.coreSellingPoints)
+  };
+  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  const productBrief = payload.productBrief && typeof payload.productBrief === "object"
+    ? payload.productBrief
+    : buildProductBrief(normalizedCandidates, metadata);
   return {
     url: rawUrl,
     store,
@@ -79,18 +136,9 @@ function normalizeProviderResult(rawUrl, store, payload = {}, providerName = "cu
       name: providerName,
       status: "connected"
     },
-    candidates: {
-      productName: cleanString(candidates.productName),
-      developer: cleanString(candidates.developer),
-      category: cleanString(candidates.category),
-      shortDescription: cleanString(candidates.shortDescription),
-      description: cleanString(candidates.description),
-      icon: candidates.icon && typeof candidates.icon === "object" ? candidates.icon : null,
-      screenshots,
-      videoPreviews,
-      visibleTexts: normalizeStringList(candidates.visibleTexts),
-      coreSellingPoints: normalizeStringList(candidates.coreSellingPoints)
-    },
+    candidates: normalizedCandidates,
+    metadata: normalizeMetadata(metadata),
+    productBrief,
     warnings: Array.isArray(payload.warnings) ? payload.warnings.map((item) => cleanString(item)).filter(Boolean) : [],
     nextStageNotes: Array.isArray(payload.nextStageNotes) ? payload.nextStageNotes.map((item) => cleanString(item)).filter(Boolean) : [],
     inspectedAt: new Date().toISOString()
@@ -103,6 +151,69 @@ function normalizeStringList(value) {
   }
   const text = cleanString(value);
   return text ? [text] : [];
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function stringValue(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function normalizeMetadata(value = {}) {
+  return {
+    appId: stringValue(value.appId),
+    bundleId: stringValue(value.bundleId),
+    storeUrl: cleanString(value.storeUrl),
+    contentRating: cleanString(value.contentRating),
+    sourceLanguages: normalizeStringList(value.sourceLanguages),
+    rating: numberOrNull(value.rating),
+    ratingCount: numberOrNull(value.ratingCount),
+    version: cleanString(value.version),
+    releaseDate: cleanString(value.releaseDate),
+    minimumOsVersion: cleanString(value.minimumOsVersion),
+    fileSizeBytes: cleanString(value.fileSizeBytes)
+  };
+}
+
+function mustShowFromCandidates(candidates = {}) {
+  const items = [];
+  if (candidates.icon?.url) items.push("产品 logo/icon");
+  if (candidates.screenshots?.length) items.push("产品截图中的真实 UI、页面布局和功能入口");
+  if (candidates.videoPreviews?.length) items.push("产品预览视频中的真实操作路径和动效节奏");
+  for (const point of normalizeStringList(candidates.coreSellingPoints).slice(0, 4)) {
+    items.push(point);
+  }
+  return [...new Set(items)].slice(0, 8);
+}
+
+function buildProductBrief(candidates = {}, metadata = {}) {
+  const normalizedMetadata = normalizeMetadata(metadata);
+  return {
+    productName: cleanString(candidates.productName),
+    category: cleanString(candidates.category),
+    developer: cleanString(candidates.developer),
+    description: cleanString(candidates.description),
+    contentRating: normalizedMetadata.contentRating,
+    coreSellingPoints: normalizeStringList(candidates.coreSellingPoints),
+    targetAudience: [],
+    mustShow: mustShowFromCandidates(candidates),
+    mustAvoid: [
+      "不要编造商店页未提供的价格、订阅权益、收益、奖励、排名、评分或用户规模。",
+      "不要把商店评分、下载量或评论数写进 Seedance prompt，除非用户明确确认可用。",
+      "不要照搬竞品品牌、水印、用户评论或未经确认的宣传语。"
+    ],
+    assetSlots: {
+      productIcon: cleanString(candidates.icon?.url),
+      productScreenshots: (Array.isArray(candidates.screenshots) ? candidates.screenshots : [])
+        .map((item) => cleanString(item.url))
+        .filter(Boolean),
+      productRecording: cleanString(candidates.videoPreviews?.[0]?.url)
+    }
+  };
 }
 
 function appStoreCountry(url, request = {}) {
@@ -275,6 +386,34 @@ function normalizeGooglePlayResult(rawUrl, pageUrl, html = "", packageId = "") {
     .slice(0, 4)
     .map((item, index) => lookupAsset(item, "google_play_preview", index + 1));
 
+  const candidates = {
+    productName,
+    developer,
+    category,
+    shortDescription: cleanString(htmlMetaContent(html, "twitter:description")),
+    description,
+    icon: iconUrl ? {
+      url: iconUrl,
+      label: "google_play_icon",
+      fileName: "google_play_icon"
+    } : null,
+    screenshots,
+    videoPreviews,
+    visibleTexts: [
+      productName,
+      developer,
+      category,
+      description
+    ].filter(Boolean),
+    coreSellingPoints: sellingPointsFromDescription(description)
+  };
+  const metadata = normalizeMetadata({
+    appId: packageId,
+    storeUrl: pageUrl,
+    contentRating: cleanString(data.contentRating),
+    rating: data.aggregateRating?.ratingValue,
+    ratingCount: data.aggregateRating?.ratingCount || data.aggregateRating?.reviewCount
+  });
   return {
     url: rawUrl,
     store: "google_play",
@@ -283,27 +422,9 @@ function normalizeGooglePlayResult(rawUrl, pageUrl, html = "", packageId = "") {
       status: "connected",
       pageUrl
     },
-    candidates: {
-      productName,
-      developer,
-      category,
-      shortDescription: cleanString(htmlMetaContent(html, "twitter:description")),
-      description,
-      icon: iconUrl ? {
-        url: iconUrl,
-        label: "google_play_icon",
-        fileName: "google_play_icon"
-      } : null,
-      screenshots,
-      videoPreviews,
-      visibleTexts: [
-        productName,
-        developer,
-        category,
-        description
-      ].filter(Boolean),
-      coreSellingPoints: sellingPointsFromDescription(description)
-    },
+    candidates,
+    metadata,
+    productBrief: buildProductBrief(candidates, metadata),
     warnings: productName || description ? [] : [
       "Google Play 页面已返回，但未解析到完整结构化字段；可能需要接入更稳定的商店页抓取 provider。"
     ],
@@ -358,6 +479,35 @@ function normalizeAppStoreLookupResult(rawUrl, lookupUrl, result = {}) {
     .map((item, index) => lookupAsset(item, "app_store_preview", index + 1))
     .filter(Boolean);
   const iconUrl = cleanString(result.artworkUrl512 || result.artworkUrl100 || result.artworkUrl60);
+  const candidates = {
+    productName: cleanString(result.trackName),
+    developer: cleanString(result.sellerName || result.artistName),
+    category: cleanString(result.primaryGenreName || result.genres?.[0]),
+    shortDescription: cleanString(result.primaryGenreName || result.trackContentRating),
+    description: cleanString(result.description),
+    icon: iconUrl ? {
+      url: iconUrl,
+      label: "app_store_icon",
+      fileName: "app_store_icon"
+    } : null,
+    screenshots,
+    videoPreviews,
+    visibleTexts: appStoreVisibleTexts(result),
+    coreSellingPoints: appStoreCoreSellingPoints(result)
+  };
+  const metadata = normalizeMetadata({
+    appId: result.trackId,
+    bundleId: result.bundleId,
+    storeUrl: result.trackViewUrl,
+    contentRating: result.trackContentRating,
+    sourceLanguages: result.languageCodesISO2A,
+    rating: result.averageUserRating,
+    ratingCount: result.userRatingCount,
+    version: result.version,
+    releaseDate: result.currentVersionReleaseDate || result.releaseDate,
+    minimumOsVersion: result.minimumOsVersion,
+    fileSizeBytes: result.fileSizeBytes
+  });
   return {
     url: rawUrl,
     store: "app_store",
@@ -366,22 +516,9 @@ function normalizeAppStoreLookupResult(rawUrl, lookupUrl, result = {}) {
       status: "connected",
       lookupUrl
     },
-    candidates: {
-      productName: cleanString(result.trackName),
-      developer: cleanString(result.sellerName || result.artistName),
-      category: cleanString(result.primaryGenreName || result.genres?.[0]),
-      shortDescription: cleanString(result.primaryGenreName || result.trackContentRating),
-      description: cleanString(result.description),
-      icon: iconUrl ? {
-        url: iconUrl,
-        label: "app_store_icon",
-        fileName: "app_store_icon"
-      } : null,
-      screenshots,
-      videoPreviews,
-      visibleTexts: appStoreVisibleTexts(result),
-      coreSellingPoints: appStoreCoreSellingPoints(result)
-    },
+    candidates,
+    metadata,
+    productBrief: buildProductBrief(candidates, metadata),
     warnings: [],
     nextStageNotes: [
       "App Store 元数据来自 Apple Lookup API；截图和预览视频仍是远程 URL，使用前建议沉淀为产品素材。",

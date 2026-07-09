@@ -19,6 +19,7 @@ const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
+const IMAGE_ONLY_PRODUCT_ASSET_KEYS = new Set(["ctaAsset", "endingAsset"]);
 const MAX_PRODUCT_ASSET_BYTES = 100 * 1024 * 1024;
 const MAX_DISCLAIMER_ASSET_BYTES = 5 * 1024 * 1024;
 
@@ -66,6 +67,12 @@ export async function uploadProductAsset(context, request = {}) {
   const ext = extname(fileName).toLowerCase();
   const allowedMimes = allowedMimeForExt(ext);
   const mimeType = String(request.mimeType || "").toLowerCase();
+  if (IMAGE_ONLY_PRODUCT_ASSET_KEYS.has(baseAssetKey) && !IMAGE_EXTS.has(ext)) {
+    throw new WangzhuanError("invalid_material", `${baseAssetKey === "ctaAsset" ? "CTA 图" : "Ending 图"}只能上传图片`, {
+      field: "fileName",
+      allowedExts: [...IMAGE_EXTS]
+    });
+  }
   if (!allowedMimes.size || (mimeType && !allowedMimes.has(mimeType))) {
     throw new WangzhuanError("invalid_material", "素材格式不符合要求，请上传图片或视频", {
       field: "fileName",

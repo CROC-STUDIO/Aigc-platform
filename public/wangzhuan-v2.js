@@ -14,6 +14,7 @@ const signatureFields = [
   "materialDirectionCustom",
   "outputTemplateMode",
   "sliceStrategy",
+  "targetSegmentCount",
   "moneyVisuals",
   "subtitleWorkflow",
   "branches",
@@ -56,6 +57,9 @@ const els = {
   currencyCustom: $("#wzCurrencyCustom"),
   productName: $("#wzProductName"),
   productLink: $("#wzProductLink"),
+  productLibrarySelect: $("#wzProductLibrarySelect"),
+  applyProductLibraryBtn: $("#wzApplyProductLibraryBtn"),
+  productLibraryDetail: $("#wzProductLibraryDetail"),
   materialDirection: $("#wzMaterialDirection"),
   materialDirectionCustom: $("#wzMaterialDirectionCustom"),
   outputTemplateMode: $("#wzOutputTemplateMode"),
@@ -66,6 +70,7 @@ const els = {
   promiseLevel: $("#wzPromiseLevel"),
   truthDetails: $("#wzTruthDetails"),
   truthFields: $("#wzTruthFields"),
+  codexTestStoreLink: $("#wzCodexTestStoreLink"),
   cta: $("#wzCta"),
   ending: $("#wzEnding"),
   uploadSeedanceAssetsBtn: $("#wzUploadSeedanceAssetsBtn"),
@@ -78,6 +83,7 @@ const els = {
   planLlmModel: $("#wzPlanLlmModel"),
   planLlmEndpoint: $("#wzPlanLlmEndpoint"),
   planLlmTemperature: $("#wzPlanLlmTemperature"),
+  codexPromptTestBtn: $("#wzCodexPromptTestBtn"),
   planBatchBtn: $("#wzPlanBatchBtn"),
   confirmPlanBtn: $("#wzConfirmPlanBtn"),
   planBox: $("#wzPlanBox"),
@@ -112,6 +118,8 @@ const state = {
   decompositionDraft: null,
   estimate: null,
   planJob: null,
+  codexPromptTestJob: null,
+  codexPromptTestResult: null,
   batchDetail: null,
   templates: [],
   selectedTemplate: null,
@@ -128,6 +136,10 @@ const state = {
   recentPagination: null,
   recentPage: 1,
   recentLoading: false,
+  productLibraryItems: [],
+  productLibraryDetails: new Map(),
+  productLibraryLoading: false,
+  pendingAssetFiles: new Map(),
   disclaimerOverlayAsset: null,
   confirmPlanSubmitting: false,
   loggedTaskFailures: new Set()
@@ -138,10 +150,16 @@ let batchPollNetworkErrorActive = false;
 const DECOMPOSITION_LLM_TIMEOUT_MS = 180_000;
 const GEMINI_DECOMPOSITION_TIMEOUT_MS = 300_000;
 const POLL_INTERVAL_MS = 1500;
+// 软超时：过了预期窗口不停止轮询，只降频继续查，直到后端真正返回终态。
+const SLOW_POLL_INTERVAL_MS = 5_000;
 const VISIBLE_LOG_LIMIT = 50;
 const OLDER_LOG_PAGE_SIZE = 50;
 const RECENT_PAGE_SIZE = 5;
 const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-fast-260128";
+const AUTO_OUTPUT_TEMPLATE_MODE = "reference_fission";
+const AUTO_SLICE_STRATEGY = "auto_10_15s_multi_slice";
+const FOLLOW_DECOMPOSITION_SEGMENT_COUNT = "follow_decomposition";
+const DEFAULT_MONEY_VISUALS = ["cash", "coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success", "arrival_animation", "withdrawal_record"];
 const DEFAULT_VARIANT_COUNT = 3;
 const MAX_VARIANT_COUNT = 10;
 const MULTI_ASSET_LIMITS = Object.freeze({
@@ -166,6 +184,8 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzDisplayName",
   "#wzProductName",
   "#wzProductLink",
+  "#wzProductLibrarySelect",
+  "#wzApplyProductLibraryBtn",
   "#wzCreateTemplateBtn",
   "#wzAddBranchBtn",
   "#wzRemoveBranchBtn",
@@ -310,7 +330,7 @@ function decompositionTimeoutMs(model = selectedDecompositionModel()) {
 }
 
 function decompositionMaxRetries(model = selectedDecompositionModel()) {
-  return isGeminiDecompositionModel(model) ? 3 : 0;
+  return isGeminiDecompositionModel(model) ? 3 : 2;
 }
 
 function decompositionJobTimeoutWindowMs(model = selectedDecompositionModel()) {
@@ -378,6 +398,113 @@ function assetInputFiles(input, assetKey) {
   const files = Array.from(input?.files || []);
   const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
   return files.slice(0, limit);
+}
+
+function nextAssetEntryKey(branch = activeBranch(), assetKey = "") {
+  const used = new Set(branchAssetEntryKeys(branch, assetKey));
+  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+  for (let index = 0; index < limit; index += 1) {
+    const entryKey = assetEntryKey(assetKey, index);
+    if (!used.has(entryKey)) return entryKey;
+  }
+  return "";
+}
+
+function pendingAppendFiles(input, assetKey) {
+  const branch = activeBranch();
+  const existingCount = branchAssetEntryKeys(branch, assetKey).length;
+  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+  const files = Array.from(input?.files || []);
+  return files.slice(0, Math.max(0, limit - existingCount));
+}
+
+function pendingAssetFileKey(branchId, entryKey) {
+  return `${branchId || ""}::${entryKey || ""}`;
+}
+
+function setPendingAssetFile(branchId, entryKey, file) {
+  if (!entryKey || !file) return;
+  state.pendingAssetFiles.set(pendingAssetFileKey(branchId, entryKey), file);
+}
+
+function getPendingAssetFile(branchId, entryKey) {
+  return state.pendingAssetFiles.get(pendingAssetFileKey(branchId, entryKey)) || null;
+}
+
+function clearPendingAssetFile(branchId, entryKey) {
+  state.pendingAssetFiles.delete(pendingAssetFileKey(branchId, entryKey));
+}
+
+function syncAssetInputDataset(input, branch, entryKey) {
+  if (!input) return;
+  input.dataset.uploadedFileName = branch.assetFileNames?.[entryKey] || "";
+  input.dataset.storageUrl = branch.assetUrls?.[entryKey] || "";
+  input.dataset.storageKey = branch.assetStorageKeys?.[entryKey] || "";
+  input.dataset.storedPath = branch.assetStoredPaths?.[entryKey] || "";
+  input.dataset.assetId = branch.assetReviews?.[entryKey]?.assetId || "";
+  input.dataset.reviewStatus = branch.assetReviews?.[entryKey]?.status || "";
+  input.dataset.reviewReason = branch.assetReviews?.[entryKey]?.reviewReason || "";
+}
+
+function commitSelectedAssetFiles(input, assetKey) {
+  const branch = activeBranch();
+  const files = pendingAppendFiles(input, assetKey);
+  if (!files.length) {
+    input.value = "";
+    renderAssetReviewState();
+    return;
+  }
+  const uploadedKeys = [];
+  for (const file of files) {
+    const entryKey = nextAssetEntryKey(branch, assetKey);
+    if (!entryKey) break;
+    updateBranchAsset(entryKey, { fileName: file.name });
+    setPendingAssetFile(branch.branchId, entryKey, file);
+    uploadedKeys.push(entryKey);
+  }
+  input.value = "";
+  const lastKey = uploadedKeys.at(-1) || branchAssetEntryKeys(branch, assetKey).at(-1) || "";
+  syncAssetInputDataset(input, branch, lastKey);
+  renderAssetReviewState();
+  markPlanMaybeStale();
+}
+
+function validateAssetAppendLimit(input, assetKey) {
+  const branch = activeBranch();
+  const existingCount = branchAssetEntryKeys(branch, assetKey).length;
+  const selectedCount = input?.files?.length || 0;
+  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
+  if (existingCount + selectedCount <= limit) return true;
+  showError({
+    message: `${input.closest(".wz-asset-slot")?.textContent?.trim() || assetKey} 最多 ${limit} 个，当前已有 ${existingCount} 个，只能继续添加 ${Math.max(0, limit - existingCount)} 个`
+  }, "素材数量超限");
+  input.value = "";
+  renderAssetReviewState();
+  return false;
+}
+
+function validateImageOnlyEndingAsset(input, assetKey) {
+  if (!["ctaAsset", "endingAsset"].includes(assetKey)) return true;
+  const invalid = Array.from(input?.files || []).find((file) => !String(file.type || "").startsWith("image/"));
+  if (!invalid) return true;
+  showError({
+    code: "invalid_material",
+    message: `${assetKey === "ctaAsset" ? "CTA 图" : "Ending 图"}只能上传图片，不能上传视频`
+  }, "素材格式不支持");
+  input.value = "";
+  renderAssetReviewState();
+  return false;
+}
+
+function targetSegmentCountValue() {
+  const raw = value(els.duration) || FOLLOW_DECOMPOSITION_SEGMENT_COUNT;
+  if (raw === FOLLOW_DECOMPOSITION_SEGMENT_COUNT) return FOLLOW_DECOMPOSITION_SEGMENT_COUNT;
+  const count = Number(raw);
+  return Number.isInteger(count) && count >= 1 && count <= 5 ? count : FOLLOW_DECOMPOSITION_SEGMENT_COUNT;
+}
+
+function compatibleDurationSecValue() {
+  return 15;
 }
 
 function defaultBranchDraft(index = 0, seed = {}) {
@@ -455,6 +582,12 @@ function stableJson(value) {
 
 async function sha256Hex(text) {
   const bytes = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function fileSha256Hex(file) {
+  const bytes = await file.arrayBuffer();
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -650,12 +783,31 @@ function pruneBranchAssetsForInput(assetKey, keepKeys = []) {
   const keep = new Set(keepKeys);
   for (const key of branchAssetEntryKeys(branch, assetKey)) {
     if (keep.has(key)) continue;
+    clearPendingAssetFile(branch.branchId, key);
     delete branch.assetFileNames[key];
     delete branch.assetUrls[key];
     delete branch.assetStorageKeys[key];
     delete branch.assetStoredPaths[key];
     delete branch.assetReviews[key];
   }
+}
+
+function removeBranchAssetEntry(entryKey) {
+  const branch = activeBranch();
+  if (!entryKey || !branch.assetFileNames?.[entryKey]) return;
+  clearPendingAssetFile(branch.branchId, entryKey);
+  delete branch.assetFileNames[entryKey];
+  delete branch.assetUrls[entryKey];
+  delete branch.assetStorageKeys[entryKey];
+  delete branch.assetStoredPaths[entryKey];
+  delete branch.assetReviews[entryKey];
+  const baseKey = String(entryKey).replace(/_\d+$/, "");
+  const selector = assetInputs.find(([key]) => key === baseKey)?.[1];
+  const input = selector ? $(selector) : null;
+  const lastKey = branchAssetEntryKeys(branch, baseKey).at(-1) || "";
+  syncAssetInputDataset(input, branch, lastKey);
+  renderAssetReviewState();
+  markPlanMaybeStale();
 }
 
 function disclaimerRequestFields() {
@@ -705,9 +857,10 @@ function collectCurrentBranchDraft() {
     languages: [language],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
-    outputTemplateMode: value(els.outputTemplateMode),
-    sliceStrategy: value(els.sliceStrategy),
-    moneyVisuals: selectedValues(els.moneyVisuals),
+    outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+    sliceStrategy: AUTO_SLICE_STRATEGY,
+    targetSegmentCount: targetSegmentCountValue(),
+    moneyVisuals: branch.moneyVisuals || DEFAULT_MONEY_VISUALS,
     subtitleWorkflow: value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
@@ -718,7 +871,7 @@ function collectCurrentBranchDraft() {
     variantPrompt: value(els.variantPrompt),
     customPrompt: value(els.customPrompt),
     negativePrompt: value(els.negativePrompt),
-    defaultDurationSec: Number(value(els.duration) || 15),
+    defaultDurationSec: compatibleDurationSecValue(),
     defaultOutputRatio: value(els.outputRatio) || "9:16",
     ...disclaimerRequestFields(),
     assetFileNames: { ...(branch.assetFileNames || {}) },
@@ -754,21 +907,22 @@ function loadBranchToForm(branch = activeBranch()) {
   els.displayName.value = branch.displayName || "";
   els.productName.value = branch.productName || "";
   els.productLink.value = branch.productLink || "";
+  if (els.productLibrarySelect && branch.productInfoId) els.productLibrarySelect.value = branch.productInfoId;
   els.cta.value = branch.cta || "";
   els.ending.value = branch.ending || "";
   setCurrencyValue(branch.currencySymbol || "$");
   els.targetChannel.value = branch.targetChannel || branch.targetChannels?.[0] || "meta_ads";
   els.targetRegion.value = branch.targetRegion || branch.targetRegions?.[0] || branch.regions?.[0] || "US";
   els.language.value = branch.language || branch.languages?.[0] || "en-US";
-  els.duration.value = String(branch.defaultDurationSec || 15);
+  els.duration.value = String(branch.targetSegmentCount || FOLLOW_DECOMPOSITION_SEGMENT_COUNT);
   els.outputRatio.value = branch.defaultOutputRatio || "9:16";
   els.promiseLevel.value = branch.promiseLevel || "strong_conversion";
   applyTruthRules(branch.truthRules || {});
   els.materialDirection.value = branch.materialDirection || "other";
   els.materialDirectionCustom.value = branch.materialDirectionCustom || "跟随竞品";
-  if (els.outputTemplateMode) els.outputTemplateMode.value = branch.outputTemplateMode || "three_slice_net_earning";
-  if (els.sliceStrategy) els.sliceStrategy.value = branch.sliceStrategy || "auto_10_15s_multi_slice";
-  setSelectedValues(els.moneyVisuals, branch.moneyVisuals || ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"]);
+  if (els.outputTemplateMode) els.outputTemplateMode.value = AUTO_OUTPUT_TEMPLATE_MODE;
+  if (els.sliceStrategy) els.sliceStrategy.value = AUTO_SLICE_STRATEGY;
+  setSelectedValues(els.moneyVisuals, branch.moneyVisuals || DEFAULT_MONEY_VISUALS);
   if (els.subtitleWorkflow) els.subtitleWorkflow.value = branch.subtitleWorkflow || "post_process";
   els.voiceoverStyle.value = branch.voiceoverStyle || "遵循竞品";
   els.variantPrompt.value = branch.variantPrompt || "";
@@ -802,6 +956,7 @@ function loadBranchToForm(branch = activeBranch()) {
   }
   syncMaterialDirectionCustom();
   renderAssetReviewState();
+  showSelectedProductLibraryDetail().catch(() => {});
 }
 
 function firstPresent(...values) {
@@ -874,6 +1029,7 @@ function restoreV2FromBatchDetail(detail = {}) {
     state.decompositionDraft = decomposition;
     state.decompositionEditedFields.clear();
     renderDecompositionForm(decomposition, { preserveUserInput: false });
+    els.decompositionStatus.hidden = false;
     els.decompositionStatus.textContent = "已从任务管理恢复 AI 拆解结果。";
   }
 
@@ -888,7 +1044,9 @@ function restoreV2FromBatchDetail(detail = {}) {
   loadBranchToForm(state.branchDraft);
   if (draft.seedanceModel && $("#wzModelSelect")) $("#wzModelSelect").value = draft.seedanceModel;
   syncSeedanceModel();
-  if (request.durationSec && els.duration) els.duration.value = String(request.durationSec);
+  if (els.duration) {
+    els.duration.value = String(request.targetSegmentCount || draft.targetSegmentCount || FOLLOW_DECOMPOSITION_SEGMENT_COUNT);
+  }
   if (request.outputRatio && els.outputRatio) els.outputRatio.value = request.outputRatio;
   if (request.seedanceModel && $("#wzModelSelect")) $("#wzModelSelect").value = request.seedanceModel;
   syncSeedanceModel();
@@ -954,8 +1112,9 @@ function addBranch() {
     currencySymbol: source.currencySymbol,
     promiseLevel: source.promiseLevel,
     truthRules: source.truthRules,
-    outputTemplateMode: source.outputTemplateMode,
-    sliceStrategy: source.sliceStrategy,
+    outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+    sliceStrategy: AUTO_SLICE_STRATEGY,
+    targetSegmentCount: source.targetSegmentCount || targetSegmentCountValue(),
     moneyVisuals: source.moneyVisuals,
     subtitleWorkflow: source.subtitleWorkflow,
     voiceoverStyle: source.voiceoverStyle,
@@ -1013,9 +1172,10 @@ function currentDraft() {
     languages: [value(els.language) || "en-US"],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
-    outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
-    sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
-    moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+    outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+    sliceStrategy: AUTO_SLICE_STRATEGY,
+    targetSegmentCount: targetSegmentCountValue(),
+    moneyVisuals: active.moneyVisuals || DEFAULT_MONEY_VISUALS,
     subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
@@ -1025,7 +1185,7 @@ function currentDraft() {
     variantPrompt: value(els.variantPrompt),
     customPrompt: value(els.customPrompt),
     negativePrompt: value(els.negativePrompt),
-    defaultDurationSec: Number(value(els.duration) || 15),
+    defaultDurationSec: compatibleDurationSecValue(),
     defaultOutputRatio: value(els.outputRatio) || "9:16",
     seedanceModel: selectedSeedanceModel(),
     llmConfig: {
@@ -1060,19 +1220,199 @@ function renderAssetReviewState() {
       slot.append(fileList);
     }
     const keys = branchAssetEntryKeys(branch, assetKey);
-    const selectedFiles = assetInputFiles(input, assetKey).map((file) => file.name);
-    const names = keys.length ? keys.map((key) => branch.assetFileNames[key]).filter(Boolean) : selectedFiles;
+    const storedItems = keys
+      .map((key) => ({ key, name: branch.assetFileNames[key] }))
+      .filter((item) => item.name);
+    const names = storedItems.map((item) => item.name);
+    const pendingCount = storedItems.filter((item) => getPendingAssetFile(branch.branchId, item.key) && !branch.assetStorageKeys?.[item.key]).length;
     const failed = keys
       .map((key) => branch.assetReviews?.[key])
       .filter((review) => review?.status && !isAssetReviewApproved(review.status));
     const countLabel = names.length ? `${names.length} 个文件` : "未选择";
-    const stateLabel = failed.length ? "有审核风险" : (keys.length ? "已记录" : (names.length ? "待上传" : ""));
+    const stateLabel = failed.length
+      ? "有审核风险"
+      : (keys.length
+        ? (pendingCount ? "已记录，待上传" : "已记录")
+        : "");
     status.textContent = stateLabel ? `${countLabel} · ${stateLabel}` : countLabel;
     fileList.innerHTML = names.length
-      ? names.map((name) => `<span class="wz-v2-asset-file">${escapeHtml(name)}</span>`).join("")
+      ? storedItems.map((item) => `
+          <span class="wz-v2-asset-file">
+            <span>${escapeHtml(item.name)}</span>
+            <button type="button" class="wz-v2-asset-remove" data-remove-asset-key="${escapeHtml(item.key)}" aria-label="删除 ${escapeHtml(item.name)}">×</button>
+          </span>
+        `).join("")
       : "";
     slot.dataset.hasAsset = names.length ? "1" : "0";
   }
+}
+
+function selectedProductLibraryId() {
+  return value(els.productLibrarySelect) || activeBranch().productInfoId || "";
+}
+
+function renderProductLibrarySelect() {
+  if (!els.productLibrarySelect) return;
+  const items = state.productLibraryItems || [];
+  if (state.productLibraryLoading) {
+    els.productLibrarySelect.innerHTML = `<option value="">加载产品库中...</option>`;
+    els.productLibrarySelect.disabled = true;
+    if (els.applyProductLibraryBtn) els.applyProductLibraryBtn.disabled = true;
+    return;
+  }
+  els.productLibrarySelect.disabled = false;
+  els.productLibrarySelect.innerHTML = [
+    `<option value="">选择本地产品库</option>`,
+    ...items.map((item) => {
+      const summary = item.assetSummary || {};
+      const label = `${item.productName || item.productId} · 图标${summary.iconCount || 0}/截图${summary.screenshotCount || 0}`;
+      return `<option value="${escapeHtml(item.productId)}">${escapeHtml(label)}</option>`;
+    })
+  ].join("");
+  const branchProductId = activeBranch().productInfoId || "";
+  if (branchProductId && items.some((item) => item.productId === branchProductId)) {
+    els.productLibrarySelect.value = branchProductId;
+  }
+  if (els.applyProductLibraryBtn) els.applyProductLibraryBtn.disabled = !selectedProductLibraryId();
+}
+
+function productLibraryDetailHtml(product = null) {
+  if (!product) return "选择产品后，会自动带出可用图片、描述和卖点。";
+  const assets = Array.isArray(product.assets) ? product.assets : [];
+  const description = product.description || "暂无描述";
+  const sellingPoints = Array.isArray(product.coreSellingPoints) ? product.coreSellingPoints : [];
+  const imageAssets = assets.filter((asset) => asset.assetKey === "productIcon" || asset.assetKey === "productScreenshot").slice(0, 8);
+  const preview = imageAssets.length
+    ? `<div class="wz-product-library-assets">${imageAssets.map((asset) => `
+        <figure>
+          <img src="${escapeHtml(asset.previewUrl)}" alt="${escapeHtml(asset.fileName)}" loading="lazy" />
+          <figcaption>${escapeHtml(asset.assetKey === "productIcon" ? "Logo" : asset.fileName)}</figcaption>
+        </figure>
+      `).join("")}</div>`
+    : `<div class="wz-muted">暂无可用图片</div>`;
+  return `
+    <div class="wz-product-library-card">
+      <div class="wz-product-library-title">
+        <strong>${escapeHtml(product.productName || product.productId || "未命名产品")}</strong>
+        ${product.sourceUrl ? `<small>${escapeHtml(product.sourceUrl)}</small>` : ""}
+      </div>
+      <p>${escapeHtml(description)}</p>
+      <div class="wz-product-library-points">
+        ${sellingPoints.length ? sellingPoints.map((point) => `<span>${escapeHtml(point)}</span>`).join("") : "<span>暂无核心卖点</span>"}
+      </div>
+      ${preview}
+    </div>
+  `;
+}
+
+function renderProductLibraryDetail(product = null) {
+  if (!els.productLibraryDetail) return;
+  els.productLibraryDetail.classList.toggle("empty-line", !product);
+  els.productLibraryDetail.innerHTML = productLibraryDetailHtml(product);
+}
+
+async function loadProductLibrary() {
+  if (!els.productLibrarySelect) return;
+  state.productLibraryLoading = true;
+  renderProductLibrarySelect();
+  try {
+    const data = await api("/api/wangzhuan/product-info");
+    state.productLibraryItems = data.items || [];
+  } finally {
+    state.productLibraryLoading = false;
+    renderProductLibrarySelect();
+    await showSelectedProductLibraryDetail();
+  }
+}
+
+async function getProductLibraryDetail(productId) {
+  if (!productId) return null;
+  if (state.productLibraryDetails.has(productId)) return state.productLibraryDetails.get(productId);
+  const data = await api(`/api/wangzhuan/product-info/${encodeURIComponent(productId)}`);
+  const product = data.product || null;
+  if (product) state.productLibraryDetails.set(productId, product);
+  return product;
+}
+
+async function showSelectedProductLibraryDetail() {
+  const productId = selectedProductLibraryId();
+  if (!productId) {
+    renderProductLibraryDetail(null);
+    if (els.applyProductLibraryBtn) els.applyProductLibraryBtn.disabled = true;
+    return;
+  }
+  if (els.applyProductLibraryBtn) els.applyProductLibraryBtn.disabled = false;
+  const product = await getProductLibraryDetail(productId);
+  renderProductLibraryDetail(product);
+}
+
+function appendProductPromptContext(product = {}) {
+  const lines = [
+    `产品信息：${product.productName || ""}`.trim(),
+    product.description ? `产品描述：${product.description}` : "",
+    Array.isArray(product.coreSellingPoints) && product.coreSellingPoints.length
+      ? `核心卖点：${product.coreSellingPoints.join("；")}`
+      : ""
+  ].filter(Boolean);
+  if (!lines.length) return;
+  const marker = "[产品库信息]";
+  const existing = value(els.customPrompt);
+  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withoutOldProductBlock = existing.replace(new RegExp(`\\n?${escapedMarker}[\\s\\S]*?(?=\\n\\[[^\\n]+\\]|$)`, "g"), "").trim();
+  els.customPrompt.value = [withoutOldProductBlock, `${marker}\n${lines.join("\n")}`].filter(Boolean).join("\n\n");
+}
+
+function applyProductAssetToBranch(assetKey, asset = {}) {
+  updateBranchAsset(assetKey, {
+    fileName: asset.fileName,
+    storageUrl: asset.storageUrl || asset.previewUrl,
+    previewUrl: asset.previewUrl,
+    storageKey: asset.storageKey,
+    storedPath: asset.storedPath,
+    review: {}
+  });
+}
+
+function applyProductLibraryAssets(product = {}) {
+  const assets = Array.isArray(product.assets) ? product.assets : [];
+  const grouped = {
+    productIcon: assets.filter((asset) => asset.assetKey === "productIcon").slice(0, MULTI_ASSET_LIMITS.productIcon),
+    productScreenshot: assets.filter((asset) => asset.assetKey === "productScreenshot").slice(0, MULTI_ASSET_LIMITS.productScreenshot),
+    productRecording: assets.filter((asset) => asset.assetKey === "productRecording").slice(0, MULTI_ASSET_LIMITS.productRecording)
+  };
+  for (const [baseKey, items] of Object.entries(grouped)) {
+    if (!items.length) continue;
+    pruneBranchAssetsForInput(baseKey, items.map((_, index) => assetEntryKey(baseKey, index)));
+    for (const [index, asset] of items.entries()) {
+      applyProductAssetToBranch(assetEntryKey(baseKey, index), asset);
+    }
+  }
+}
+
+async function applySelectedProductLibrary() {
+  const productId = selectedProductLibraryId();
+  if (!productId) return;
+  const product = await getProductLibraryDetail(productId);
+  if (!product) return;
+  const branch = activeBranch();
+  branch.productInfoId = product.productId || productId;
+  branch.productBrief = product.productBrief || {
+    productName: product.productName || "",
+    description: product.description || "",
+    coreSellingPoints: product.coreSellingPoints || []
+  };
+  branch.productDescription = product.description || "";
+  branch.coreSellingPoints = product.coreSellingPoints || [];
+  els.productName.value = product.productName || "";
+  els.productLink.value = product.sourceUrl || "";
+  applyProductLibraryAssets(product);
+  appendProductPromptContext(product);
+  saveActiveBranchFromForm();
+  loadBranchToForm(activeBranch());
+  renderProductLibraryDetail(product);
+  renderAssetReviewState();
+  markPlanMaybeStale();
+  log(`已应用产品库：${product.productName || productId}`);
 }
 
 function isAssetReviewApproved(status = "") {
@@ -1083,18 +1423,58 @@ function planListValue(value) {
   return Array.isArray(value) ? value.join("\n") : String(value || "");
 }
 
+function planJsonListValue(value) {
+  return JSON.stringify(Array.isArray(value) ? value : [], null, 2);
+}
+
 function sliceDiversityValue(value = {}) {
   return JSON.stringify(value && typeof value === "object" && !Array.isArray(value) ? value : {}, null, 2);
 }
 
+function escapeAttribute(value = "") {
+  return escapeHtml(String(value || "")).replace(/"/g, "&quot;");
+}
+
+function renderCodexPromptTestResult() {
+  const result = state.codexPromptTestResult;
+  if (!result) return "";
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const checks = Array.isArray(result.complianceChecks) ? result.complianceChecks : [];
+  const approvedKeys = Array.isArray(result.approvedAssetKeysUsed) ? result.approvedAssetKeysUsed : [];
+  const meta = [
+    result.mode ? `模式：${result.mode}` : "",
+    Number.isFinite(Number(result.approvedAssetCount)) ? `审核通过素材：${result.approvedAssetCount}` : "",
+    Number.isFinite(Number(result.referencedAssetCount)) ? `引用素材总数：${result.referencedAssetCount}` : ""
+  ].filter(Boolean).join(" · ");
+  return `
+    <section class="wz-v2-plan-editor wz-v2-plan-editor-test" data-test-prompt="codex">
+      <h3>测试版 Seedance Prompt</h3>
+      ${meta ? `<div class="wz-muted">${escapeHtml(meta)}</div>` : ""}
+      <label>标题 <input value="${escapeAttribute(result.title || "")}" readonly /></label>
+      <label>Seedance Prompt <textarea class="wz-json-box compact" readonly>${escapeHtml(result.prompt || "")}</textarea></label>
+      <label>Negative Prompt <textarea class="wz-json-box compact" readonly>${escapeHtml(result.negativePrompt || "")}</textarea></label>
+      <label>生成说明 <textarea class="wz-json-box compact" readonly>${escapeHtml(result.reasoningSummary || "")}</textarea></label>
+      <label>合规检查 <textarea class="wz-json-box compact" readonly>${escapeHtml(checks.join("\n"))}</textarea></label>
+      <label>Warnings <textarea class="wz-json-box compact" readonly>${escapeHtml(warnings.join("\n"))}</textarea></label>
+      <label>已引用素材 Key <textarea class="wz-json-box compact" readonly>${escapeHtml(approvedKeys.join("\n"))}</textarea></label>
+    </section>
+  `;
+}
+
 function renderPlanEditors(plans = []) {
+  const testBlock = renderCodexPromptTestResult();
   if (!plans.length) {
+    if (testBlock) {
+      els.planBox.className = "wz-list";
+      els.planBox.innerHTML = testBlock;
+      return;
+    }
     els.planBox.className = "wz-list empty-line";
     els.planBox.textContent = "尚未生成 Seedance prompt";
     return;
   }
   els.planBox.className = "wz-list";
-  els.planBox.innerHTML = plans.map((plan, index) => `
+  els.planBox.innerHTML = `${testBlock}${plans.map((plan, index) => `
     <section class="wz-v2-plan-editor" data-plan-id="${plan.planId || ""}">
       <h3>Prompt ${index + 1}${plan.branchLabel ? ` · ${plan.branchLabel}` : ""}</h3>
       <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${escapeHtml(plan.hook || "")}</textarea></label>
@@ -1107,8 +1487,10 @@ function renderPlanEditors(plans = []) {
       <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
       <label>切片角色 <input data-plan-field="segmentRole" value="${escapeHtml(plan.segmentRole || "")}" placeholder="hook_slice / proof_slice / withdrawal_slice" /></label>
       <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="10" max="15" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
-      <label>输出模板模式 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="three_slice_net_earning" /></label>
-      <label>网赚视觉元素 <textarea data-plan-field="moneyVisuals" class="wz-json-box compact">${escapeHtml(planListValue(plan.moneyVisuals))}</textarea></label>
+      <label>Story Segment <input data-plan-field="storySegmentIndex" type="number" min="1" value="${escapeHtml(plan.storySegmentIndex || "")}" /></label>
+      <label>Seedance Slice <input data-plan-field="seedanceSliceIndex" type="number" min="1" value="${escapeHtml(plan.seedanceSliceIndex || "")}" /></label>
+      <label>拆解决定模板 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="reference_fission" readonly /></label>
+      <label>转化特效机会 <textarea data-plan-field="conversionEffectOpportunities" class="wz-json-box compact">${escapeHtml(planJsonListValue(plan.conversionEffectOpportunities))}</textarea></label>
       <label>提现展示 <textarea data-plan-field="withdrawalVisual" class="wz-json-box compact">${escapeHtml(plan.withdrawalVisual || "")}</textarea></label>
       <label>字幕后处理 <select data-plan-field="postSubtitleRequired">
         <option value="true"${planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>需要后处理字幕</option>
@@ -1119,7 +1501,7 @@ function renderPlanEditors(plans = []) {
       <label>切片差异 JSON <textarea data-plan-field="sliceDiversity" class="wz-json-box compact">${escapeHtml(sliceDiversityValue(plan.sliceDiversity))}</textarea></label>
       <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${escapeHtml(plan.negativePrompt || "")}</textarea></label>
     </section>
-  `).join("");
+  `).join("")}`;
 }
 
 function hasGeneratedSeedancePlan(batch = state.batchDetail?.batch || state.batchDetail || {}) {
@@ -1189,6 +1571,18 @@ function parsePlanJsonObject(value, fallback = {}) {
   }
 }
 
+function parsePlanJsonList(value, fallback) {
+  if (value === undefined) return fallback;
+  const text = String(value || "").trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return splitLines(text);
+  }
+}
+
 function collectEditablePlans() {
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const plans = Array.isArray(batch.plans) ? batch.plans : [];
@@ -1203,10 +1597,14 @@ function collectEditablePlans() {
       const text = fieldValue(field);
       return text === undefined ? undefined : splitLines(text);
     };
+    const readJsonList = (field) => parsePlanJsonList(fieldValue(field), undefined);
     const subtitles = readList("subtitles");
     const moneyVisuals = readList("moneyVisuals");
+    const conversionEffectOpportunities = readJsonList("conversionEffectOpportunities");
     const subtitleScript = readList("subtitleScript");
     const sliceDurationSecText = read("sliceDurationSec");
+    const storySegmentIndexText = read("storySegmentIndex");
+    const seedanceSliceIndexText = read("seedanceSliceIndex");
     const subtitleWorkflow = plan.subtitleWorkflow && typeof plan.subtitleWorkflow === "object" && !Array.isArray(plan.subtitleWorkflow)
       ? plan.subtitleWorkflow
       : {};
@@ -1223,8 +1621,12 @@ function collectEditablePlans() {
       seedancePrompt: read("seedancePrompt") ?? plan.seedancePrompt,
       segmentRole: read("segmentRole") ?? plan.segmentRole,
       sliceDurationSec: sliceDurationSecText === undefined ? plan.sliceDurationSec : Number(sliceDurationSecText),
+      storySegmentIndex: storySegmentIndexText === undefined ? plan.storySegmentIndex : Number(storySegmentIndexText),
+      seedanceSliceIndex: seedanceSliceIndexText === undefined ? plan.seedanceSliceIndex : Number(seedanceSliceIndexText),
+      mandatoryMoneyVisualCarrier: parsePlanBoolean(read("mandatoryMoneyVisualCarrier"), Boolean(plan.mandatoryMoneyVisualCarrier)),
       outputTemplateMode: read("outputTemplateMode") ?? plan.outputTemplateMode,
       moneyVisuals: moneyVisuals ?? plan.moneyVisuals,
+      conversionEffectOpportunities: conversionEffectOpportunities ?? plan.conversionEffectOpportunities,
       withdrawalVisual: read("withdrawalVisual") ?? plan.withdrawalVisual,
       subtitleWorkflow: {
         ...subtitleWorkflow,
@@ -1246,10 +1648,12 @@ async function uploadReferenceVideo() {
   renderVideoPreview(localUrl);
   els.referenceUploadStatus.textContent = "正在上传并检查参考视频...";
   try {
+    const fileHash = await fileSha256Hex(file);
     const form = new FormData();
     form.append("file", file, file.name);
     form.append("fileName", file.name);
     form.append("mimeType", file.type || "application/octet-stream");
+    form.append("fileHash", fileHash);
     const data = await api("/api/wangzhuan/reference-videos/check", {
       method: "POST",
       headers: {},
@@ -1264,6 +1668,12 @@ async function uploadReferenceVideo() {
     els.draftDecompositionBtn.disabled = false;
     renderTasks();
     log("参考视频上传完成");
+    startDecompositionJob().catch((error) => {
+      els.decompositionStatus.hidden = false;
+      els.decompositionStatus.textContent = `自动启动拆解失败：${error.message}`;
+      log(`自动启动拆解失败：${error.message}`);
+      renderTasks();
+    });
   } catch (error) {
     els.referenceUploadStatus.textContent = error.message || "参考视频上传失败";
     log(`参考视频上传失败：${error.message}`);
@@ -1305,12 +1715,7 @@ function bindReferenceDropUpload() {
 }
 
 function validateAssetInputLimit(input, assetKey) {
-  const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
-  if ((input?.files?.length || 0) <= limit) return true;
-  showError({ message: `${input.closest(".wz-asset-slot")?.textContent?.trim() || assetKey} 最多上传 ${limit} 个文件` }, "素材数量超限");
-  input.value = "";
-  renderAssetReviewState();
-  return false;
+  return validateImageOnlyEndingAsset(input, assetKey) && validateAssetAppendLimit(input, assetKey);
 }
 
 function renderDecompositionForm(decomposition = {}, { preserveUserInput = false } = {}) {
@@ -1428,9 +1833,10 @@ function planSignatureInput() {
     languages: [language],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
-    outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
-    sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
-    moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+    outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+    sliceStrategy: AUTO_SLICE_STRATEGY,
+    targetSegmentCount: targetSegmentCountValue(),
+    moneyVisuals: active.moneyVisuals || DEFAULT_MONEY_VISUALS,
     subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
     voiceoverStyle: value(els.voiceoverStyle),
     promiseLevel: value(els.promiseLevel),
@@ -1463,7 +1869,8 @@ function estimateRequest() {
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
     currencySymbol: currencyValue(),
-    durationSec: Number(value(els.duration) || 15),
+    durationSec: compatibleDurationSecValue(),
+    targetSegmentCount: targetSegmentCountValue(),
     variantCount: variantCountValue(),
     requestedConcurrency: Number(value(els.requestedConcurrency) || 1),
     outputRatio: value(els.outputRatio),
@@ -1482,9 +1889,10 @@ function estimateRequest() {
         languages: [language],
         materialDirection: effectiveMaterialDirection(),
         materialDirectionCustom: value(els.materialDirectionCustom),
-        outputTemplateMode: active.outputTemplateMode || value(els.outputTemplateMode),
-        sliceStrategy: active.sliceStrategy || value(els.sliceStrategy),
-        moneyVisuals: active.moneyVisuals || selectedValues(els.moneyVisuals),
+        outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+        sliceStrategy: AUTO_SLICE_STRATEGY,
+        targetSegmentCount: targetSegmentCountValue(),
+        moneyVisuals: active.moneyVisuals || DEFAULT_MONEY_VISUALS,
         subtitleWorkflow: active.subtitleWorkflow || value(els.subtitleWorkflow),
         voiceoverStyle: value(els.voiceoverStyle),
         promiseLevel: value(els.promiseLevel),
@@ -1495,7 +1903,7 @@ function estimateRequest() {
         variantPrompt: value(els.variantPrompt),
         customPrompt: value(els.customPrompt),
         negativePrompt: value(els.negativePrompt),
-        defaultDurationSec: Number(value(els.duration) || 15),
+        defaultDurationSec: compatibleDurationSecValue(),
         defaultOutputRatio: value(els.outputRatio) || "9:16",
         seedanceModel: selectedSeedanceModel(),
         ...disclaimerFields,
@@ -1561,14 +1969,15 @@ function applyTemplate(template) {
     language: branch.language || draft.language || draft.languages?.[0] || "en-US",
     languages: branch.languages || draft.languages || [branch.language || "en-US"],
     defaultDurationSec: branch.defaultDurationSec || draft.defaultDurationSec || 15,
+    targetSegmentCount: branch.targetSegmentCount || draft.targetSegmentCount || FOLLOW_DECOMPOSITION_SEGMENT_COUNT,
     defaultOutputRatio: branch.defaultOutputRatio || draft.defaultOutputRatio || "9:16",
     promiseLevel: branch.promiseLevel || draft.promiseLevel || "stable",
     truthRules: branch.truthRules || draft.truthRules || {},
     materialDirection: branch.materialDirection || draft.materialDirection || "other",
     materialDirectionCustom: branch.materialDirectionCustom || draft.materialDirectionCustom || "跟随竞品",
-    outputTemplateMode: branch.outputTemplateMode || draft.outputTemplateMode || "three_slice_net_earning",
-    sliceStrategy: branch.sliceStrategy || draft.sliceStrategy || "auto_10_15s_multi_slice",
-    moneyVisuals: branch.moneyVisuals || draft.moneyVisuals || ["coin_burst", "cash_rain", "reward_number_growth", "withdrawal_success"],
+    outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
+    sliceStrategy: AUTO_SLICE_STRATEGY,
+    moneyVisuals: branch.moneyVisuals || draft.moneyVisuals || DEFAULT_MONEY_VISUALS,
     subtitleWorkflow: branch.subtitleWorkflow || draft.subtitleWorkflow || "post_process",
     voiceoverStyle: branch.voiceoverStyle || draft.voiceoverStyle || "遵循竞品",
     variantPrompt: branch.variantPrompt || draft.variantPrompt || "",
@@ -1585,7 +1994,7 @@ function applyTemplate(template) {
   state.activeBranchIndex = 0;
   activeBranch();
   loadBranchToForm(state.branchDraft);
-  els.duration.value = String(draft.defaultDurationSec || 15);
+  els.duration.value = String(draft.targetSegmentCount || FOLLOW_DECOMPOSITION_SEGMENT_COUNT);
   els.outputRatio.value = draft.defaultOutputRatio || "9:16";
   if ($("#wzModelSelect")) $("#wzModelSelect").value = draft.seedanceModel || selectedSeedanceModel();
   syncSeedanceModel();
@@ -1658,14 +2067,17 @@ function renderTasks() {
   const planUpstreamLocked = hasGeneratedSeedancePlan(batch);
   setPlanUpstreamLocked(planUpstreamLocked);
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
+  const codexTestRunning = ["queued", "running"].includes(state.codexPromptTestJob?.status);
   const planBlockedByRewrite = !state.rewriteConfirmed;
   const planBlockedByDecomposition = !decompositionReady;
   const planDisabled = planRetryable
     ? false
-    : (planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition);
+    : (planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
   els.planBatchBtn.disabled = planDisabled;
   if (planRetryable) {
     els.planBatchBtn.title = "后台任务可能仍在运行，可重试查询 prompt 结果";
+  } else if (codexTestRunning) {
+    els.planBatchBtn.title = "测试版 Seedance prompt 正在生成，请等待完成后再走正式生成";
   } else if (state.stalePlanPreview) {
     els.planBatchBtn.title = "Seedance prompt 已失效，请重新生成";
   } else if (planUpstreamLocked) {
@@ -1678,6 +2090,21 @@ function renderTasks() {
     els.planBatchBtn.title = "视频拆解进行中；拆解完成或手动填写脚本拆解后，可直接生成 Seedance prompt";
   } else {
     els.planBatchBtn.title = "";
+  }
+  if (els.codexPromptTestBtn) {
+    els.codexPromptTestBtn.disabled = codexTestRunning || !state.referenceVideo?.referenceVideoId || !value(els.productName) || !decompositionReady;
+    els.codexPromptTestBtn.textContent = codexTestRunning ? "测试版 Seedance 生成中..." : "测试生成 Seedance Prompt";
+    if (codexTestRunning) {
+      els.codexPromptTestBtn.title = state.codexPromptTestJob?.message || "测试版 Seedance prompt 任务进行中";
+    } else if (!state.referenceVideo?.referenceVideoId) {
+      els.codexPromptTestBtn.title = "请先上传参考视频";
+    } else if (!value(els.productName)) {
+      els.codexPromptTestBtn.title = "请先填写产品名";
+    } else if (!decompositionReady) {
+      els.codexPromptTestBtn.title = "请先完成 AI 拆解或手动填写脚本拆解";
+    } else {
+      els.codexPromptTestBtn.title = "测试入口，不会替换正式 Seedance prompt 流程";
+    }
   }
   els.confirmPlanBtn.disabled = state.confirmPlanSubmitting || !plans.length || state.stalePlanPreview;
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
@@ -1792,6 +2219,7 @@ function failBackgroundJob(type, message, data = {}) {
   if (type === "decomposition") {
     state.decompositionJob = job;
     els.draftDecompositionBtn.disabled = false;
+    els.decompositionStatus.hidden = false;
     els.decompositionStatus.textContent = `AI 拆解失败：${job.error.message}`;
   } else {
     state.planJob = job;
@@ -1864,6 +2292,7 @@ function markBackgroundJobPollFailure(type, message, data = {}) {
   if (type === "decomposition") {
     state.decompositionJob = job;
     els.draftDecompositionBtn.disabled = false;
+    els.decompositionStatus.hidden = false;
     els.decompositionStatus.textContent = recoverableMessage;
   } else {
     state.planJob = job;
@@ -1873,31 +2302,27 @@ function markBackgroundJobPollFailure(type, message, data = {}) {
   renderTasks();
 }
 
-function markBackgroundJobTimeout(type, message, data = {}) {
+function markBackgroundJobSlow(type, message, data = {}) {
+  // 软超时降级提示：轮询仍在后台继续，不标记为可恢复/需重试，避免误导用户手动干预。
+  const existing = type === "decomposition" ? state.decompositionJob : state.planJob;
   const job = {
-    id: data.jobId || "",
+    id: data.jobId || existing?.id || "",
     type,
     status: "running",
     progress: type === "decomposition" ? 30 : 90,
-    message: message || "后台任务仍在运行",
-    error: {
-      code: data.code || "job_poll_timeout",
-      message: message || "后台任务仍在运行",
-      recoverable: true,
-      data
-    },
+    message: message || "后台任务仍在运行，正在继续等待结果…",
+    error: null,
     result: null,
     events: []
   };
   if (type === "decomposition") {
     state.decompositionJob = job;
-    els.draftDecompositionBtn.disabled = false;
-    els.decompositionStatus.textContent = message || "AI 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。";
+    els.decompositionStatus.hidden = false;
+    els.decompositionStatus.textContent = message || "AI 拆解耗时较长，后台仍在运行，正在继续等待结果…";
   } else {
     state.planJob = job;
-    els.planBatchBtn.disabled = false;
   }
-  log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}仍在后台运行：${message}`);
+  log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}耗时较长，仍在后台运行：${message}`);
   renderTasks();
 }
 
@@ -1919,13 +2344,14 @@ function retryBackgroundJobPoll(type) {
     const model = job.model || selectedDecompositionModel();
     job.message = "正在重新查询拆解结果";
     job.error = null;
+    els.decompositionStatus.hidden = false;
     els.decompositionStatus.textContent = "正在重新查询拆解结果";
     renderTasks();
     pollJob("decomposition", job.id, {
       timeoutMs: decompositionJobTimeoutWindowMs(model),
       timeoutLabel: isGeminiDecompositionModel(model)
-        ? "Gemini 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。"
-        : `任务超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`
+        ? "Gemini 拆解耗时较长，后台仍在运行，正在继续等待结果…"
+        : `任务已超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒，后台仍在运行，正在继续等待结果…`
     });
     return true;
   }
@@ -1955,6 +2381,7 @@ async function restoreBackgroundJobFromRequest(restoreRequest) {
       },
       events: []
     };
+    els.decompositionStatus.hidden = false;
     els.decompositionStatus.textContent = "正在重新查询拆解结果";
     renderTasks();
     retryBackgroundJobPoll("decomposition");
@@ -2005,16 +2432,15 @@ async function uploadSeedanceAssetsForReview() {
     const branch = activeBranch();
     for (const [assetKey, selector] of assetInputs) {
       const input = $(selector);
-      const files = assetInputFiles(input, assetKey);
-      if (!files.length) continue;
-      const limit = MULTI_ASSET_LIMITS[assetKey] || 1;
-      if ((input?.files?.length || 0) > limit) {
-        showError({ message: `${input.closest(".wz-asset-slot")?.textContent?.trim() || assetKey} 最多上传 ${limit} 个文件` }, "素材上传失败");
-        continue;
-      }
-      for (const [index, file] of files.entries()) {
-        const entryKey = assetEntryKey(assetKey, index);
-        if (branch.assetFileNames?.[entryKey] === file.name && branch.assetStorageKeys?.[entryKey]) continue;
+      const keys = branchAssetEntryKeys(branch, assetKey);
+      const uploadedKeys = [];
+      for (const entryKey of keys) {
+        if (branch.assetStorageKeys?.[entryKey]) {
+          clearPendingAssetFile(branch.branchId, entryKey);
+          continue;
+        }
+        const file = getPendingAssetFile(branch.branchId, entryKey);
+        if (!file) continue;
         const content = await fileToDataUrl(file);
         const data = await api("/api/wangzhuan/product-assets/upload", {
           method: "POST",
@@ -2028,17 +2454,13 @@ async function uploadSeedanceAssetsForReview() {
         });
         const asset = data.asset || {};
         updateBranchAsset(entryKey, asset);
+        clearPendingAssetFile(branch.branchId, entryKey);
+        uploadedKeys.push(entryKey);
         log(`${entryKey} 已上传并完成审核状态记录`);
       }
-      pruneBranchAssetsForInput(assetKey, files.map((_, index) => assetEntryKey(assetKey, index)));
-      const firstKey = assetEntryKey(assetKey, 0);
-      input.dataset.uploadedFileName = branch.assetFileNames?.[firstKey] || "";
-      input.dataset.storageUrl = branch.assetUrls?.[firstKey] || "";
-      input.dataset.storageKey = branch.assetStorageKeys?.[firstKey] || "";
-      input.dataset.storedPath = branch.assetStoredPaths?.[firstKey] || "";
-      input.dataset.assetId = branch.assetReviews?.[firstKey]?.assetId || "";
-      input.dataset.reviewStatus = branch.assetReviews?.[firstKey]?.status || "";
-      input.dataset.reviewReason = branch.assetReviews?.[firstKey]?.reviewReason || "";
+      const lastKey = uploadedKeys.at(-1) || keys.at(-1) || "";
+      syncAssetInputDataset(input, branch, lastKey);
+      if (input) input.value = "";
       renderAssetReviewState();
     }
     state.stalePlanPreview = Boolean(state.draftSignature && state.batchDetail);
@@ -2214,18 +2636,22 @@ async function confirmSeedanceAssetReviews() {
 async function startDecompositionJob() {
   if (retryBackgroundJobPoll("decomposition")) return;
   if (!state.referenceVideo?.referenceVideoId) return;
+  if (["queued", "running"].includes(state.decompositionJob?.status)) return;
   const model = selectedDecompositionModel();
   const timeoutMs = decompositionTimeoutMs(model);
   const maxRetries = decompositionMaxRetries(model);
   state.decompositionEditedFields.clear();
   els.draftDecompositionBtn.disabled = true;
-  els.decompositionStatus.textContent = isGeminiDecompositionModel(model)
-    ? "AI 拆解已进入后台任务。Gemini 视频拆解可能持续数分钟，请继续填写第 3 步。"
-    : "AI 拆解已进入后台任务，继续填写第 3 步。";
+  els.decompositionStatus.hidden = true;
+  els.decompositionStatus.textContent = "";
   const job = await api("/api/wangzhuan/reference-videos/decomposition-jobs", {
     method: "POST",
     body: JSON.stringify({
       referenceVideoId: state.referenceVideo.referenceVideoId,
+      fileHash: state.referenceVideo.fileHash || "",
+      language: value(els.language),
+      targetRegion: value(els.targetRegion),
+      targetRegions: [value(els.targetRegion)].filter(Boolean),
       knowledgeNotes: value($("#wzKnowledgeNotes")),
       llmConfig: {
         provider: value($("#wzLlmProvider")),
@@ -2246,8 +2672,8 @@ async function startDecompositionJob() {
   pollJob("decomposition", job.decompositionJobId, {
     timeoutMs: decompositionJobTimeoutWindowMs(model),
     timeoutLabel: isGeminiDecompositionModel(model)
-      ? "Gemini 拆解耗时较长，后台仍在运行，可稍后刷新继续查看。"
-      : `任务超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`
+      ? "Gemini 拆解耗时较长，后台仍在运行，正在继续等待结果…"
+      : `任务已超过 ${Math.round(decompositionJobTimeoutWindowMs(model) / 1000)} 秒，后台仍在运行，正在继续等待结果…`
   });
 }
 
@@ -2282,43 +2708,138 @@ async function startPlanJob() {
   pollJob("plan", job.planJobId);
 }
 
+async function startCodexPromptTestJob() {
+  clearError();
+  if (!state.referenceVideo?.referenceVideoId) {
+    showError({ message: "请先上传参考视频" }, "测试版 Seedance prompt 提交失败");
+    return;
+  }
+  if (!value(els.productName)) {
+    showError({ message: "请先填写产品名" }, "测试版 Seedance prompt 提交失败");
+    return;
+  }
+  if (!currentDecomposition()) {
+    showError({ message: "请先完成 AI 拆解或手动填写脚本拆解" }, "测试版 Seedance prompt 提交失败");
+    return;
+  }
+  if (["queued", "running"].includes(state.codexPromptTestJob?.status)) return;
+  await uploadSeedanceAssetsForReview();
+  const draft = await saveDraftBatch("codex_prompt_test");
+  const batchId = draft?.batch?.batchId || currentBatchId();
+  if (!batchId) {
+    throw new WangzhuanApiError({
+      code: "batch_not_found",
+      message: "当前批次不存在，无法发起测试版 Seedance prompt 生成"
+    }, 404);
+  }
+  const body = {
+    requestId: `wzv2-codex-test-${Date.now()}`,
+    productLink: value(els.codexTestStoreLink) || value(els.productLink)
+  };
+  const job = await api(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/auto-seedance-prompt-jobs`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+  state.codexPromptTestJob = job;
+  log("测试版 Seedance prompt 任务已提交");
+  renderTasks();
+  pollCodexPromptTestJob(batchId, job.autoSeedancePromptJobId);
+}
+
+async function pollCodexPromptTestJob(batchId, jobId) {
+  const path = `/api/wangzhuan/batches/${encodeURIComponent(batchId)}/auto-seedance-prompt-jobs/${encodeURIComponent(jobId)}`;
+  const timer = setInterval(async () => {
+    try {
+      const job = await api(path);
+      state.codexPromptTestJob = job;
+      if (job.status === "succeeded") {
+        clearInterval(timer);
+        state.codexPromptTestResult = {
+          ...(job.promptDraft || job.result?.promptDraft || {}),
+          mode: job.result?.mode || "",
+          approvedAssetCount: job.result?.approvedAssetCount,
+          referencedAssetCount: job.result?.referencedAssetCount
+        };
+        renderPlanEditors(Array.isArray((state.batchDetail?.batch || state.batchDetail || {}).plans) ? (state.batchDetail?.batch || state.batchDetail || {}).plans : []);
+        log("测试版 Seedance prompt 完成");
+      } else if (job.status === "failed") {
+        clearInterval(timer);
+        state.codexPromptTestResult = null;
+        log(`测试版 Seedance prompt 失败：${job.error?.message || "未知错误"}`);
+      }
+      renderTasks();
+    } catch (error) {
+      clearInterval(timer);
+      state.codexPromptTestJob = {
+        id: jobId,
+        status: "failed",
+        message: error.message || "请求失败",
+        error: {
+          code: error.code || "job_poll_failed",
+          message: error.message || "请求失败"
+        }
+      };
+      state.codexPromptTestResult = null;
+      log(`测试版 Seedance prompt 查询失败：${error.message}`);
+      renderTasks();
+    }
+  }, POLL_INTERVAL_MS);
+}
+
 async function pollJob(type, jobId, options = {}) {
   const path = type === "decomposition"
     ? `/api/wangzhuan/reference-videos/decomposition-jobs/${encodeURIComponent(jobId)}`
     : `/api/wangzhuan/batches/plan-jobs/${encodeURIComponent(jobId)}`;
   const startedAt = Date.now();
-  const maxWaitMs = type === "decomposition" ? (options.timeoutMs || decompositionJobTimeoutWindowMs()) : 0;
-  const timer = setInterval(async () => {
-    if (maxWaitMs && Date.now() - startedAt > maxWaitMs) {
-      clearInterval(timer);
-      markBackgroundJobTimeout(type, options.timeoutLabel || `任务超过 ${Math.round(maxWaitMs / 1000)} 秒仍未返回，后台可能仍在运行，请稍后刷新或重新提交拆解`, {
-        code: "job_poll_timeout",
-        jobId
-      });
-      return;
+  const softTimeoutMs = type === "decomposition" ? (options.timeoutMs || decompositionJobTimeoutWindowMs()) : 0;
+  let stopped = false;
+  let slowNoticeShown = false;
+  let timer = null;
+
+  const stop = () => {
+    stopped = true;
+    if (timer) window.clearTimeout(timer);
+  };
+  const schedule = (delay) => {
+    if (stopped) return;
+    timer = window.setTimeout(tick, delay);
+  };
+
+  async function tick() {
+    if (stopped) return;
+    // 软超时：过窗后不放弃，只在首次跨过时给一次降级提示，然后降频继续轮询。
+    const overSoftWindow = Boolean(softTimeoutMs) && Date.now() - startedAt > softTimeoutMs;
+    if (overSoftWindow && !slowNoticeShown) {
+      slowNoticeShown = true;
+      markBackgroundJobSlow(type, options.timeoutLabel || `任务已超过 ${Math.round(softTimeoutMs / 1000)} 秒，后台仍在运行，正在继续等待结果…`, { jobId });
     }
     try {
       const job = await api(path);
       if (type === "decomposition") state.decompositionJob = job;
       if (type === "plan") state.planJob = job;
       if (job.status === "succeeded") {
-        clearInterval(timer);
+        stop();
         if (type === "decomposition") {
           state.decompositionDraft = job.decomposition || {};
           renderDecompositionForm(state.decompositionDraft, { preserveUserInput: true });
           els.draftDecompositionBtn.disabled = hasGeneratedSeedancePlan();
+          els.decompositionStatus.hidden = false;
           els.decompositionStatus.textContent = state.decompositionEditedFields.size
             ? "AI 结果可用，已回填未手动编辑字段，后续估算会直接读取当前表单；如需调整，可重新拆解。"
             : "AI 结果可用，已回填到页面，后续估算会直接读取当前表单；如需调整，可重新拆解。";
+          if (job.result?.draft?.source === "cache") {
+            els.decompositionStatus.textContent = "命中拆解缓存，已快速回填到页面；如需调整，可重新拆解。";
+          }
         } else {
           state.batchDetail = job.batch;
           state.draftSignature = job.draftSignature;
           renderPlanEditors(job.plans || []);
         }
         log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}完成`);
+        return;
       }
       if (job.status === "failed") {
-        clearInterval(timer);
+        stop();
         if (type === "plan") setPlanUpstreamLocked(false);
         failBackgroundJob(type, job.error?.message || "未知错误", {
           ...(job.error?.data || {}),
@@ -2328,14 +2849,17 @@ async function pollJob(type, jobId, options = {}) {
         return;
       }
       renderTasks();
+      schedule(overSoftWindow ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     } catch (error) {
-      clearInterval(timer);
+      stop();
       markBackgroundJobPollFailure(type, error.message, {
         code: error.code || "job_poll_failed",
         jobId
       });
     }
-  }, POLL_INTERVAL_MS);
+  }
+
+  schedule(POLL_INTERVAL_MS);
 }
 
 async function loadBatchDetail(batchId) {
@@ -2470,6 +2994,8 @@ function startNewTask() {
   resetDecompositionDraft({ clearForm: true });
   state.estimate = null;
   state.planJob = null;
+  state.codexPromptTestJob = null;
+  state.codexPromptTestResult = null;
   state.batchDetail = null;
   state.rewriteConfirmed = false;
   state.activeBranchIndex = 0;
@@ -2484,6 +3010,7 @@ function startNewTask() {
   els.referenceBox.textContent = "未上传参考视频";
   els.referenceUploadStatus.textContent = "选中文件后自动上传、检查和预览。";
   els.draftDecompositionBtn.disabled = true;
+  els.decompositionStatus.hidden = false;
   els.decompositionStatus.textContent = "上传参考视频后可启动后台拆解。";
   els.estimateBox.textContent = "估算结果：待估算。";
   renderPlanEditors([]);
@@ -2593,6 +3120,7 @@ els.truthFields?.addEventListener("input", markPlanMaybeStale);
 els.truthFields?.addEventListener("change", markPlanMaybeStale);
 $("#wzDisclaimerOverlayFile")?.addEventListener("change", () => uploadDisclaimerOverlayAsset().catch((error) => showError(error, "贴片上传失败")));
 els.planBatchBtn?.addEventListener("click", () => startPlanJob().catch((error) => showError(error, "prompt 任务提交失败")));
+els.codexPromptTestBtn?.addEventListener("click", () => startCodexPromptTestJob().catch((error) => showError(error, "测试版 Seedance prompt 提交失败")));
 els.confirmPlanBtn?.addEventListener("click", () => confirmPlanAndGenerate().catch((error) => showError(error, "确认 prompt 失败")));
 els.stopBatchBtn?.addEventListener("click", () => stopBatch().catch((error) => showError(error, "停止失败")));
 els.runQcBtn?.addEventListener("click", () => runVideoQc().catch((error) => showError(error, "视频质检失败")));
@@ -2600,12 +3128,24 @@ els.saveDraftBtn?.addEventListener("click", () => saveDraftBatch().catch((error)
 els.uploadSeedanceAssetsBtn?.addEventListener("click", () => uploadSeedanceAssetsForReview().catch((error) => showError(error, "Seedance 素材上传失败")));
 els.loadOlderLogsBtn?.addEventListener("click", loadOlderLogs);
 els.refreshRecentBtn?.addEventListener("click", () => loadRecentResults(1).catch((error) => showError(error, "最近结果加载失败")));
+els.productLibrarySelect?.addEventListener("change", () => {
+  showSelectedProductLibraryDetail().catch((error) => showError(error, "产品库详情加载失败"));
+});
+els.applyProductLibraryBtn?.addEventListener("click", () => {
+  applySelectedProductLibrary().catch((error) => showError(error, "应用产品库失败"));
+});
 for (const [assetKey, selector] of assetInputs) {
-  $(selector)?.addEventListener("change", (event) => {
+  const input = $(selector);
+  input?.addEventListener("change", (event) => {
     if (!validateAssetInputLimit(event.target, assetKey)) return;
-    const files = assetInputFiles(event.target, assetKey);
-    pruneBranchAssetsForInput(assetKey, files.map((_, index) => assetEntryKey(assetKey, index)));
-    renderAssetReviewState();
+    commitSelectedAssetFiles(event.target, assetKey);
+  });
+  input?.closest(".wz-asset-slot")?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-remove-asset-key]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    removeBranchAssetEntry(button.dataset.removeAssetKey || "");
   });
 }
 els.recentResults?.addEventListener("click", (event) => {
@@ -2685,11 +3225,14 @@ renderTasks();
 renderLogs();
 renderRecentResults();
 renderTemplates();
+renderProductLibrarySelect();
+renderProductLibraryDetail(null);
 loadAuth()
   .then(async (authenticated) => {
     if (!authenticated) return null;
     await loadTemplates();
     await Promise.all([
+      loadProductLibrary(),
       loadRecentResults(1),
       restoreWorkbenchFromUrl()
     ]);

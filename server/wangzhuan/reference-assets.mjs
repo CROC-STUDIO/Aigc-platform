@@ -2,16 +2,19 @@ export const REFERENCE_ASSET_ORDER = Object.freeze([
   "productIcon",
   "productScreenshot",
   "productRecording",
-  "endingAsset",
   "personAsset",
   "rewardElement"
 ]);
 
 export const REFERENCE_VIDEO_ASSET_KEYS = new Set([
   "productRecording",
-  "endingAsset",
-  "endingAssetInline",
   "personAsset"
+]);
+
+const NON_SEEDANCE_REFERENCE_ASSET_KEYS = new Set([
+  "ctaAsset",
+  "endingAsset",
+  "endingAssetInline"
 ]);
 
 export const MAX_SEEDANCE_REFERENCE_ASSETS = 9;
@@ -20,9 +23,9 @@ const ASSET_KEY_LABELS = Object.freeze({
   productIcon: "产品 Logo",
   productScreenshot: "产品截图",
   productRecording: "产品录屏",
-  ctaAsset: "CTA 素材",
-  endingAsset: "结尾素材",
-  endingAssetInline: "结尾素材",
+  ctaAsset: "CTA 图",
+  endingAsset: "Ending 图",
+  endingAssetInline: "Ending 图",
   personAsset: "人物素材",
   rewardElement: "奖励元素"
 });
@@ -51,6 +54,7 @@ export function orderedReferenceAssets(assetUrls = {}) {
   }
   for (const [key, rawUrl] of Object.entries(urls)) {
     if (REFERENCE_ASSET_ORDER.includes(key)) continue;
+    if (NON_SEEDANCE_REFERENCE_ASSET_KEYS.has(key)) continue;
     const url = cleanString(rawUrl);
     if (!url || seen.has(url)) continue;
     seen.add(url);

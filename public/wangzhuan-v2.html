@@ -139,12 +139,23 @@
                   <label>选择模板 <select id="wzTemplateSelect"></select></label>
                   <label>模板名 <input id="wzDisplayName" type="text" placeholder="例如：产品名_地区_版本" /></label>
                   <label>产品名 <input id="wzProductName" type="text" placeholder="填写我方产品名" /></label>
-                  <input id="wzProductLink" type="hidden" value="" />
-                  <button id="wzCreateTemplateBtn" class="mini ghost" type="button">保存模板</button>
-                  <button id="wzDeleteTemplateBtn" class="mini ghost" type="button" disabled>删除模板</button>
-                </div>
-                <div id="wzStoreCandidates" class="wz-list empty-line" hidden></div>
-                <div class="wz-inline-form">
+                  <label>产品链接 <input id="wzProductLink" type="url" placeholder="https://example.com/app" /></label>
+	                  <button id="wzCreateTemplateBtn" class="mini ghost" type="button">保存模板</button>
+	                  <button id="wzDeleteTemplateBtn" class="mini ghost" type="button" disabled>删除模板</button>
+	                </div>
+	                <div class="wz-product-library">
+	                  <div class="wz-inline-form">
+	                    <label>产品库
+	                      <select id="wzProductLibrarySelect">
+	                        <option value="">加载产品库中...</option>
+	                      </select>
+	                    </label>
+	                    <button id="wzApplyProductLibraryBtn" class="mini ghost" type="button" disabled>应用产品信息和图片</button>
+	                  </div>
+	                  <div id="wzProductLibraryDetail" class="wz-product-library-detail empty-line">选择产品后，会自动带出可用图片、描述和卖点。</div>
+	                </div>
+	                <div id="wzStoreCandidates" class="wz-list empty-line" hidden></div>
+	                <div class="wz-inline-form">
                   <label>免责声明贴片模板
                     <select id="wzDisclaimerPreset">
                       <option value="auto" selected>按语言自动选择</option>
@@ -176,8 +187,8 @@
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">产品录屏（最多 2 个）</span><input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" multiple /></label>
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">人物</span><input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">奖励元素</span><input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">CTA 素材</span><input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">Ending 素材</span><input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">CTA 图（仅图片，拼接到末尾）</span><input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">Ending 图（仅图片，拼接到末尾）</span><input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
                 </div>
               </section>
 
@@ -238,32 +249,6 @@
                     </select>
                   </label>
                   <label id="wzMaterialDirectionCustomWrap">其他素材方向 <input id="wzMaterialDirectionCustom" type="text" value="跟随竞品" /></label>
-                  <label>出量模板
-                    <select id="wzOutputTemplateMode">
-                      <option value="reference_fission">参考视频裂变</option>
-                      <option value="three_slice_net_earning" selected>三段式拼接</option>
-                      <option value="short_drama_earning_highlight">短剧高光 + 赚钱安利</option>
-                    </select>
-                  </label>
-                  <label>切片策略
-                    <select id="wzSliceStrategy">
-                      <option value="fixed_15s">固定 15s 单段</option>
-                      <option value="two_15s">2 段拼接</option>
-                      <option value="auto_10_15s_multi_slice" selected>自动 10-15s 多段</option>
-                      <option value="three_slice">3 段拼接</option>
-                    </select>
-                  </label>
-                  <label>网赚视觉元素
-                    <select id="wzMoneyVisuals" multiple size="6">
-                      <option value="cash">真钞</option>
-                      <option value="coin_burst" selected>金币爆发</option>
-                      <option value="cash_rain" selected>现金雨</option>
-                      <option value="reward_number_growth" selected>收益数字增长</option>
-                      <option value="withdrawal_success" selected>提现成功</option>
-                      <option value="arrival_animation">到账动画</option>
-                      <option value="withdrawal_record">提现记录截图</option>
-                    </select>
-                  </label>
                   <label>字幕方案
                     <select id="wzSubtitleWorkflow">
                       <option value="post_process" selected>原视频无字幕，后处理贴字幕</option>
@@ -304,6 +289,12 @@
                 </details>
                 <details class="wz-details wz-seedance-prompt-supplement">
                   <summary>Seedance prompt 提示补充</summary>
+                  <div class="wz-inline-form">
+                    <label>商店页面链接
+                      <input id="wzCodexTestStoreLink" type="url" placeholder="https://play.google.com/store/apps/details?id=..." />
+                    </label>
+                    <button id="wzCodexPromptTestBtn" class="mini ghost" type="button">测试生成 Seedance Prompt</button>
+                  </div>
                   <label class="wz-field-label">脚本裂变规则补充
                     <textarea id="wzVariantPrompt" class="wz-json-box compact" spellcheck="false" placeholder="例如：变体 2 用快递员替代外卖员；变体 3 用超市收银员。"></textarea>
                   </label>
@@ -331,10 +322,14 @@
                   <option value="dreamina-seedance-2-0-mini-260615">dreamina-seedance-2-0-mini-260615</option>
                 </select>
               </label>
-              <label>输出时长
+              <label>目标段数
                 <select id="wzDuration">
-                  <option value="15">15s</option>
-                  <option value="30">30s</option>
+                  <option value="follow_decomposition" selected>跟随拆解视频</option>
+                  <option value="1">1 段</option>
+                  <option value="2">2 段</option>
+                  <option value="3">3 段</option>
+                  <option value="4">4 段</option>
+                  <option value="5">5 段</option>
                 </select>
               </label>
               <label>尺寸

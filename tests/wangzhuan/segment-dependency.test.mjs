@@ -122,20 +122,60 @@ test("30s auto multi-slice request stays on legacy two-segment continuity gating
   assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[1]), false);
 });
 
-test("non-30s three-slice generation does not use continuity gating", () => {
+test("non-30s slices in different story segments do not use continuity gating", () => {
   const batch = {
     estimate: {
       durationSec: 36,
       request: { sliceStrategy: "three_slice" }
     },
     tasks: [
-      task({ generationTaskId: "gen_36_1", segmentIndex: 1 }),
-      task({ generationTaskId: "gen_36_2", segmentIndex: 2 }),
-      task({ generationTaskId: "gen_36_3", segmentIndex: 3 })
+      task({ generationTaskId: "gen_36_1", segmentIndex: 1, storySegmentIndex: 1, seedanceSliceIndex: 1 }),
+      task({ generationTaskId: "gen_36_2", segmentIndex: 2, storySegmentIndex: 2, seedanceSliceIndex: 1 }),
+      task({ generationTaskId: "gen_36_3", segmentIndex: 3, storySegmentIndex: 3, seedanceSliceIndex: 1 })
     ]
   };
 
   assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[0]), true);
   assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[1]), true);
   assert.equal(isGenerationTaskSubmitReady(batch, batch.tasks[2]), true);
+});
+
+test("non-30s slices from same story segment require previous tail-frame continuity", () => {
+  const firstSlice = task({
+    generationTaskId: "gen_story_1",
+    segmentIndex: 1,
+    storySegmentIndex: 1,
+    seedanceSliceIndex: 1,
+    status: "downloaded",
+    outputPath: "批处理记录/segments/gen_story_1.mp4"
+  });
+  const secondSlice = task({
+    generationTaskId: "gen_story_2",
+    segmentIndex: 2,
+    storySegmentIndex: 1,
+    seedanceSliceIndex: 2,
+    status: "pending"
+  });
+  const batch = {
+    estimate: {
+      durationSec: 26,
+      request: { sliceStrategy: "story_beat_split_8_15s" }
+    },
+    tasks: [firstSlice, secondSlice]
+  };
+
+  assert.equal(isGenerationTaskSubmitReady(batch, secondSlice), false);
+
+  const reviewedSecondSlice = {
+    ...secondSlice,
+    continuityReference: {
+      storedPath: "批处理记录/continuity/gen_story_1_last_frame.jpg",
+      review: { assetId: "asset_tail_frame", status: "approved" }
+    }
+  };
+
+  assert.equal(isGenerationTaskSubmitReady({
+    ...batch,
+    tasks: [firstSlice, reviewedSecondSlice]
+  }, reviewedSecondSlice), true);
 });

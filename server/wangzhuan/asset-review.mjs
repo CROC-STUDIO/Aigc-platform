@@ -16,7 +16,7 @@ const ASSET_KEY_TO_SLOT = Object.freeze({
 });
 
 export function assetKeyToAssetType(assetKey) {
-  const videoKeys = new Set(["productRecording", "endingAsset", "endingAssetInline"]);
+  const videoKeys = new Set(["productRecording"]);
   return videoKeys.has(assetKey) ? "video_asset" : "image_asset";
 }
 
@@ -122,11 +122,22 @@ export async function reviewSeedanceAsset(context = {}, asset = {}) {
     : await loadAssetBuffer(context, asset);
   const form = new FormData();
   form.append("file", new Blob([buffer], { type: asset.mimeType || "application/octet-stream" }), asset.fileName || "asset");
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form
+    });
+  } catch (error) {
+    return {
+      assetId: "",
+      status: "pending",
+      assetType: assetTypeFromMime(asset.mimeType),
+      contentUrl: asset.storageUrl || "",
+      reviewReason: `素材审核服务请求失败，已先保存素材：${String(error?.message || error || "").slice(0, 160)}`
+    };
+  }
   const text = await response.text();
   let payload = {};
   try {
@@ -222,11 +233,30 @@ async function bufferFromReadable(body) {
   return Buffer.concat(chunks);
 }
 
+function isMissingStorageObjectError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  const code = String(error?.code || error?.name || "").toLowerCase();
+  return (
+    code === "nosuchkey"
+    || code === "notfound"
+    || code === "nosuchobject"
+    || message.includes("specified key does not exist")
+    || message.includes("no such key")
+    || message.includes("object does not exist")
+  );
+}
+
 async function loadAssetBuffer(context, asset = {}) {
   if (Buffer.isBuffer(asset.buffer) && asset.buffer.length) return asset.buffer;
   if (asset.storageKey) {
-    const object = await openWangzhuanObjectStream(context, asset.storageKey);
-    if (object?.body) return bufferFromReadable(object.body);
+    try {
+      const object = await openWangzhuanObjectStream(context, asset.storageKey);
+      if (object?.body) return bufferFromReadable(object.body);
+    } catch (error) {
+      if (!asset.storedPath || !isMissingStorageObjectError(error)) {
+        throw error;
+      }
+    }
   }
   if (asset.storedPath) {
     return readFile(resolve(context.userProjectRoot, String(asset.storedPath).replace(/^[\\/]+/, "")));
@@ -272,6 +302,7 @@ export function countReferencedAssets(branch = {}) {
   ]);
   let count = 0;
   for (const key of keys) {
+    if (!REFERENCE_ASSET_ORDER.includes(key)) continue;
     if (cleanString(branch.assetFileNames?.[key]) || cleanString(branch.assetUrls?.[key])) count += 1;
   }
   return count;

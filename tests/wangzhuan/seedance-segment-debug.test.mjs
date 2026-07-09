@@ -187,6 +187,35 @@ test("splitStorySegmentIntoSlices splits 16s story segment into two 8s slices", 
   ]);
 });
 
+test("splitStorySegmentIntoSlices uses narrative split hints instead of equal duration", () => {
+  assert.deepEqual(splitStorySegmentIntoSlices({
+    storySegmentIndex: 2,
+    startSec: 14,
+    endSec: 40,
+    durationSec: 26,
+    sliceSplitHints: [
+      { splitSec: 26, reason: "host claim changes into app UI proof" }
+    ]
+  }), [
+    {
+      storySegmentIndex: 2,
+      seedanceSliceIndex: 1,
+      startSec: 14,
+      endSec: 26,
+      durationSec: 12,
+      sliceSplitReason: "host claim changes into app UI proof"
+    },
+    {
+      storySegmentIndex: 2,
+      seedanceSliceIndex: 2,
+      startSec: 26,
+      endSec: 40,
+      durationSec: 14,
+      sliceSplitReason: "host claim changes into app UI proof"
+    }
+  ]);
+});
+
 test("buildSeedanceSlices preserves seven dimensions and subtitle workflow", () => {
   const slices = buildSeedanceSlices([
     {
@@ -239,6 +268,44 @@ test("buildSeedanceSlices uses proof role for the second slice when total is two
   ]);
 
   assert.deepEqual(slices.map((slice) => slice.segmentRole), ["hook_slice", "proof_slice"]);
+  assert.deepEqual(slices.map((slice) => slice.moneyEffects), [[], []]);
+});
+
+test("buildSeedanceSlices derives money effects only from observed replicated signals", () => {
+  const slices = buildSeedanceSlices([
+    {
+      storySegmentIndex: 1,
+      startSec: 0,
+      endSec: 8,
+      durationSec: 8,
+      scene: "bus stop",
+      subject: "commuter holding phone",
+      action: "checks drama reward task",
+      camera: "handheld close-up",
+      lighting: "natural daylight",
+      style: "UGC short-drama ad",
+      quality: "realistic 720p vertical video",
+      conversionSignals: {
+        withdrawalSuccess: { present: false, shouldReplicate: false },
+        earningsNumber: { present: true, timestampSec: 2, evidence: "counter rises", roleInVideo: "result proof", shouldReplicate: true },
+        emotionalVoiceover: { present: true, timestampSec: 1, evidence: "excited host", roleInVideo: "urgency", shouldReplicate: true },
+        cashCoinFeedback: { present: false, shouldReplicate: false },
+        fastRewardCue: { present: false, shouldReplicate: false }
+      },
+      voiceoverObserved: {
+        present: true,
+        emotion: "excited",
+        pace: "fast",
+        energy: "high",
+        evidence: "host speaks quickly",
+        transcript: ["Watch this"]
+      }
+    }
+  ]);
+
+  assert.deepEqual(slices[0].moneyEffects, ["reward_number_growth"]);
+  assert.equal(slices[0].conversionSignals.earningsNumber.shouldReplicate, true);
+  assert.equal(slices[0].voiceoverObserved.pace, "fast");
 });
 
 test("renderSeedancePromptsMarkdown includes duration, dimensions, prompts, and subtitle script", () => {
@@ -355,7 +422,7 @@ test("normalizeStorySegments chains missing timing from the prior normalized seg
   assert.equal(segments[1].endSec, 16);
 });
 
-test("buildSegmentAnalysisMessages encodes segment and money-effect rules", () => {
+test("buildSegmentAnalysisMessages encodes segment and observed conversion signal rules", () => {
   const messages = buildSegmentAnalysisMessages({
     videoPath: "/tmp/ref.mp4",
     durationSec: 16,
@@ -376,10 +443,17 @@ test("buildSegmentAnalysisMessages encodes segment and money-effect rules", () =
   });
   assert.match(text, /frame 1 at 0.25s/);
   assert.match(text, /scene, subject, action, camera, lighting, style, quality/);
-  assert.match(text, /Scene cuts are hints, not authoritative boundaries/);
-  assert.match(text, /reward_number_growth/);
+  assert.match(text, /first understand the whole video end-to-end/);
+  assert.match(text, /split by real narrative story beats only/);
+  assert.match(text, /Do not create a new story segment only because the video cuts to app UI/);
+  assert.match(text, /timelineItems/);
+  assert.match(text, /Scene cuts are technical hints only/);
+  assert.match(text, /conversionSignals/);
+  assert.match(text, /withdrawalSuccess/);
+  assert.match(text, /emotionalVoiceover/);
+  assert.match(text, /Do not mark a signal present just because it would be useful for ads/);
   assert.match(text, /no burned subtitles/i);
-  assert.match(text, /Do not invent exact payout amounts/);
+  assert.match(text, /Do not invent or copy exact payout amounts/);
 });
 
 test("runSeedanceSegmentDebugCli writes outputs using injected analysis dependencies", async () => {
@@ -671,6 +745,13 @@ test("seedance segment debug module imports existing reference video frame utili
   assert.match(source, /function defaultFrameTimestamps[\s\S]*?buildSceneAwareFrameTimestamps/);
   assert.match(source, /async function defaultDetectScenes[\s\S]*?detectReferenceVideoScenes/);
   assert.match(source, /async function defaultExtractFrames[\s\S]*?extractReferenceFrames/);
+});
+
+test("seedance segment debug resolves LLM config through runtime Skylink defaults", async () => {
+  const source = await readFile("server/wangzhuan/seedance-segment-debug.mjs", "utf8");
+  assert.match(source, /loadRuntimeConfig/);
+  assert.match(source, /resolveLlmConfig/);
+  assert.doesNotMatch(source, /https:\/\/api\\.openai\\.com\/v1/);
 });
 
 test("runSeedanceSegmentDebugCli writes raw LLM output when JSON parsing fails", async () => {

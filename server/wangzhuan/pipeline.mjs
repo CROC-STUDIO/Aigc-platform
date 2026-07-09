@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { normalizeBranchDrafts, normalizeStoredBranchDrafts } from "./branches.mjs";
 import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
+import { buildSeedanceSlicesFromAnalysis, normalizeFissionAnalysis } from "./fission-analysis.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
 import {
@@ -34,6 +35,7 @@ import {
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "./plan-preview.mjs";
+import { repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
@@ -41,6 +43,32 @@ const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
 const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc", "preview_required"]);
 const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "skipped", "stopped"]);
 const SLICE_ROLES = ["hook_slice", "proof_slice", "withdrawal_slice", "cta_slice"];
+const FISSION_SLICE_METADATA_FIELDS = [
+  "storySegmentIndex",
+  "seedanceSliceIndex",
+  "startSec",
+  "endSec",
+  "sliceSplitReason",
+  "conversionSignals",
+  "conversionEffectOpportunities",
+  "voiceoverObserved",
+  "variableLayers",
+  "timelineItems",
+  "coreHook",
+  "explosivePoint",
+  "scene",
+  "subject",
+  "action",
+  "camera",
+  "lighting",
+  "style",
+  "quality",
+  "subtitleWorkflow",
+  "targetSegmentMerge",
+  "targetSegmentSplit",
+  "mergedSourceSegments",
+  "sourceSegmentIndex"
+];
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -153,6 +181,19 @@ function preferredSliceCount(duration, sliceStrategy) {
   return 1;
 }
 
+function normalizeTargetSegmentCount(value) {
+  if (value === "follow_decomposition" || value === "auto" || value == null || value === "") return null;
+  const count = Number(value);
+  return Number.isInteger(count) && count >= 1 && count <= 5 ? count : null;
+}
+
+function resolveTargetSegmentCount(batch = {}) {
+  return normalizeTargetSegmentCount(
+    batch.estimate?.request?.targetSegmentCount
+      ?? batch.templateSnapshot?.draft?.targetSegmentCount
+  );
+}
+
 function feasibleSliceCount(duration, preferredCount) {
   const maxFeasible = Math.max(1, Math.floor(duration / 10));
   const minFeasible = Math.max(1, Math.ceil(duration / 15));
@@ -183,15 +224,148 @@ export function buildSlicePlan({ durationSec = 15, sliceStrategy = "fixed_15s" }
   return slices;
 }
 
-export function planSegmentMultiplier(batch = {}) {
-  return buildSlicePlan({
-    durationSec: Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15),
+function normalizeSliceIndexes(slices = []) {
+  return slices.map((slice, index) => ({
+    ...slice,
+    segmentIndex: index + 1,
+    segmentRole: slice.segmentRole || SLICE_ROLES[index] || "proof_slice"
+  }));
+}
+
+function mergeAdjacentSlices(left = {}, right = {}, index = 0) {
+  const startSec = Number(left.startSec || 0);
+  const endSec = Number(right.endSec ?? right.startSec ?? startSec);
+  const durationSec = Math.max(1, Math.round((endSec - startSec) * 100) / 100);
+  return {
+    ...left,
+    startSec,
+    endSec,
+    durationSec,
+    sliceDurationSec: durationSec,
+    segmentRole: left.segmentRole || SLICE_ROLES[index] || "proof_slice",
+    targetSegmentMerge: true,
+    mergedSourceSegments: [
+      ...(Array.isArray(left.mergedSourceSegments) ? left.mergedSourceSegments : [left.segmentIndex || index + 1]),
+      ...(Array.isArray(right.mergedSourceSegments) ? right.mergedSourceSegments : [right.segmentIndex || index + 2])
+    ],
+    conversionEffectOpportunities: [
+      ...(Array.isArray(left.conversionEffectOpportunities) ? left.conversionEffectOpportunities : []),
+      ...(Array.isArray(right.conversionEffectOpportunities) ? right.conversionEffectOpportunities : [])
+    ]
+  };
+}
+
+function splitOneSlice(slice = {}, index = 0) {
+  const startSec = Number(slice.startSec || 0);
+  const endSec = Number(slice.endSec ?? startSec + Number(slice.durationSec || 1));
+  const durationSec = Math.max(1, Math.round((endSec - startSec) * 100) / 100);
+  const firstDuration = Math.max(1, Math.floor(durationSec / 2));
+  const splitSec = Math.round((startSec + firstDuration) * 100) / 100;
+  const first = {
+    ...slice,
+    startSec,
+    endSec: splitSec,
+    durationSec: Math.max(1, Math.round((splitSec - startSec) * 100) / 100),
+    sliceDurationSec: Math.max(1, Math.round((splitSec - startSec) * 100) / 100),
+    targetSegmentSplit: true,
+    sourceSegmentIndex: slice.segmentIndex || index + 1
+  };
+  const second = {
+    ...slice,
+    startSec: splitSec,
+    endSec,
+    durationSec: Math.max(1, Math.round((endSec - splitSec) * 100) / 100),
+    sliceDurationSec: Math.max(1, Math.round((endSec - splitSec) * 100) / 100),
+    targetSegmentSplit: true,
+    sourceSegmentIndex: slice.segmentIndex || index + 1
+  };
+  return [first, second];
+}
+
+export function adjustSlicePlanToTargetCount(slices = [], targetSegmentCount = null) {
+  const targetCount = normalizeTargetSegmentCount(targetSegmentCount);
+  if (!targetCount || !Array.isArray(slices) || slices.length === 0 || slices.length === targetCount) {
+    return normalizeSliceIndexes(slices);
+  }
+  let nextSlices = normalizeSliceIndexes(slices);
+  while (nextSlices.length > targetCount) {
+    let mergeIndex = 0;
+    let smallestDuration = Infinity;
+    for (let index = 0; index < nextSlices.length - 1; index += 1) {
+      const combined = Number(nextSlices[index]?.durationSec || 0) + Number(nextSlices[index + 1]?.durationSec || 0);
+      if (combined < smallestDuration) {
+        smallestDuration = combined;
+        mergeIndex = index;
+      }
+    }
+    nextSlices.splice(mergeIndex, 2, mergeAdjacentSlices(nextSlices[mergeIndex], nextSlices[mergeIndex + 1], mergeIndex));
+    nextSlices = normalizeSliceIndexes(nextSlices);
+  }
+  while (nextSlices.length < targetCount) {
+    let splitIndex = 0;
+    let longestDuration = -1;
+    for (let index = 0; index < nextSlices.length; index += 1) {
+      const duration = Number(nextSlices[index]?.durationSec || 0);
+      if (duration > longestDuration) {
+        longestDuration = duration;
+        splitIndex = index;
+      }
+    }
+    nextSlices.splice(splitIndex, 1, ...splitOneSlice(nextSlices[splitIndex], splitIndex));
+    nextSlices = normalizeSliceIndexes(nextSlices);
+  }
+  return normalizeSliceIndexes(nextSlices);
+}
+
+function hasFissionAnalysisSource(decomposition = {}) {
+  return Array.isArray(decomposition?.seedanceSlices) && decomposition.seedanceSlices.length > 0
+    || Array.isArray(decomposition?.storySegments) && decomposition.storySegments.length > 0;
+}
+
+function pickSliceMetadata(slice = {}) {
+  return Object.fromEntries(
+    FISSION_SLICE_METADATA_FIELDS
+      .filter((field) => slice[field] !== undefined)
+      .map((field) => [field, slice[field]])
+  );
+}
+
+export function buildSlicePlanFromDecomposition(batch = {}) {
+  const durationSec = Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15);
+  const decomposition = batch.decomposition || {};
+  const targetSegmentCount = resolveTargetSegmentCount(batch);
+  if (hasFissionAnalysisSource(decomposition)) {
+    const fissionAnalysis = normalizeFissionAnalysis(decomposition, { durationSec });
+    const slices = buildSeedanceSlicesFromAnalysis(fissionAnalysis, { durationSec });
+    if (slices.length > 0) {
+      const slicePlan = slices.map((slice, index) => ({
+        ...pickSliceMetadata(slice),
+        segmentIndex: index + 1,
+        startSec: slice.startSec,
+        endSec: slice.endSec,
+        durationSec: slice.durationSec,
+        sliceDurationSec: slice.sliceDurationSec || slice.durationSec,
+        segmentRole: slice.segmentRole || SLICE_ROLES[index] || "proof_slice"
+      }));
+      return adjustSlicePlanToTargetCount(slicePlan, targetSegmentCount);
+    }
+  }
+
+  const fallbackPlan = buildSlicePlan({
+    durationSec,
     sliceStrategy: resolveSliceStrategy(batch)
-  }).length;
+  });
+  return adjustSlicePlanToTargetCount(fallbackPlan, targetSegmentCount);
+}
+
+export function planSegmentMultiplier(batch = {}) {
+  return buildSlicePlanFromDecomposition(batch).length;
 }
 
 function usesThirtySecondContinuityPlan(batch = {}) {
-  return Number(batch.estimate?.durationSec) === 30 && planSegmentMultiplier(batch) === 2;
+  return !hasFissionAnalysisSource(batch.decomposition || {})
+    && Number(batch.estimate?.durationSec) === 30
+    && planSegmentMultiplier(batch) === 2;
 }
 
 function promptAssetLines(assetUrls = {}) {
@@ -199,11 +373,21 @@ function promptAssetLines(assetUrls = {}) {
     ["productIcon", "Product icon"],
     ["productScreenshot", "Product screenshot"],
     ["productRecording", "Product recording"],
-    ["endingAsset", "Ending asset"],
     ["personAsset", "Person asset"],
-    ["rewardElement", "Reward element"]
+    ["rewardElement", "Reward element"],
+    ["ctaAsset", "CTA image for final tail only"],
+    ["endingAsset", "Ending image for final tail only"]
   ];
   return labels.map(([key, label]) => assetUrls[key] ? `${label} URL: ${assetUrls[key]}` : "");
+}
+
+function finalTailAssetGuide(assetUrls = {}, script = {}) {
+  const hasTailImage = assetUrls.ctaAsset || assetUrls.endingAsset;
+  if (!hasTailImage) return "";
+  const isFinalSlice = script.isFinalSeedanceSlice || script.segmentRole === "cta_slice";
+  return isFinalSlice
+    ? "CTA/Ending image rule: ctaAsset and endingAsset are still-image references only for the very end of the final Seedance slice; use them as visual style/layout references for the closing tail, do not introduce them in earlier beats, and do not animate them as separate mid-video scenes."
+    : "CTA/Ending image rule: ctaAsset and endingAsset are reserved for the final stitched tail and must not appear in this Seedance slice.";
 }
 
 function buildPrompt(batch, script, kind) {
@@ -242,6 +426,7 @@ function buildPrompt(batch, script, kind) {
     `Script body: ${script.body}`,
     `CTA: ${script.cta}`,
     `Ending: ${script.ending}`,
+    finalTailAssetGuide(assetUrls, script),
     branch.variantPrompt ? `Variant instructions: ${branch.variantPrompt}` : "",
     formatProtagonistFissionGuide(decomposition, script.branchVariantIndex || script.variantIndex || 1, branch.variantPrompt),
     branch.customPrompt ? `Additional user prompt: ${branch.customPrompt}` : "",
@@ -426,15 +611,41 @@ function taskSegmentKey(task = {}) {
   ].join(":");
 }
 
-function previousSegmentDownloaded(tasks = [], task = {}) {
+function hasFissionSliceOrder(task = {}) {
+  return Number.isFinite(Number(task.storySegmentIndex))
+    && Number.isFinite(Number(task.seedanceSliceIndex))
+    && Number(task.seedanceSliceIndex) > 0;
+}
+
+export function taskNeedsContinuityReference(batch = {}, task = {}) {
   const segmentIndex = Number(task.segmentIndex || 1);
-  if (segmentIndex <= 1) return true;
-  return tasks.some((candidate) => {
+  if (segmentIndex <= 1) return false;
+  if (hasFissionSliceOrder(task)) {
+    return Number(task.seedanceSliceIndex || 1) > 1;
+  }
+  return usesThirtySecondContinuityPlan(batch);
+}
+
+export function findContinuitySourceTask(tasks = [], task = {}) {
+  if (hasFissionSliceOrder(task)) {
+    const storySegmentIndex = Number(task.storySegmentIndex);
+    const seedanceSliceIndex = Number(task.seedanceSliceIndex);
+    return tasks.find((candidate) => {
+      return taskSegmentKey(candidate) === taskSegmentKey(task)
+        && Number(candidate.storySegmentIndex || 0) === storySegmentIndex
+        && Number(candidate.seedanceSliceIndex || 0) === seedanceSliceIndex - 1
+        && candidate.status === "downloaded"
+        && Boolean(candidate.outputPath);
+    }) || null;
+  }
+  const segmentIndex = Number(task.segmentIndex || 1);
+  if (segmentIndex <= 1) return null;
+  return tasks.find((candidate) => {
     return taskSegmentKey(candidate) === taskSegmentKey(task)
       && Number(candidate.segmentIndex || 1) === segmentIndex - 1
       && candidate.status === "downloaded"
       && Boolean(candidate.outputPath);
-  });
+  }) || null;
 }
 
 function isApprovedContinuityReference(reference = {}) {
@@ -444,9 +655,8 @@ function isApprovedContinuityReference(reference = {}) {
 
 export function isGenerationTaskSubmitReady(batch = {}, task = {}) {
   if (task.status !== "pending") return false;
-  if (!usesThirtySecondContinuityPlan(batch)) return true;
-  if (!previousSegmentDownloaded(Array.isArray(batch.tasks) ? batch.tasks : [], task)) return false;
-  if (Number(task.segmentIndex || 1) <= 1) return true;
+  if (!taskNeedsContinuityReference(batch, task)) return true;
+  if (!findContinuitySourceTask(Array.isArray(batch.tasks) ? batch.tasks : [], task)) return false;
   return isApprovedContinuityReference(task.continuityReference);
 }
 
@@ -650,13 +860,11 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   }
 
   const useLlmPlans = Boolean(options.useLlmPlans);
+  const generatePlan = context.generateSeedancePlanForTest || generateSeedancePlan;
   const scripts = [];
   const tasks = [];
   const plans = [];
-  const slicePlan = buildSlicePlan({
-    durationSec: Number(batch.estimate?.durationSec || batch.templateSnapshot?.draft?.defaultDurationSec || 15),
-    sliceStrategy: resolveSliceStrategy(batch)
-  });
+  const slicePlan = buildSlicePlanFromDecomposition(batch);
   const segmentMultiplier = slicePlan.length;
   const useThirtySecondContinuityPlan = usesThirtySecondContinuityPlan(batch);
   const branchDrafts = normalizeBranchDrafts(batch.templateSnapshot?.draft, batch.estimate?.request?.branches);
@@ -728,7 +936,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               branchVariantIndex,
               segmentIndex
             });
-            planPayload = await generateSeedancePlan(context, {
+            planPayload = await generatePlan(context, {
               batch,
               branch,
               decomposition: batch.decomposition,
@@ -736,7 +944,12 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               branchVariantIndex,
               segmentIndex,
               segmentRole: slice.segmentRole,
-              sliceDurationSec: slice.durationSec,
+              sliceDurationSec: slice.sliceDurationSec || slice.durationSec,
+              currentSlice: slice,
+              totalSegmentCount: segmentMultiplier,
+              isFinalSeedanceSlice: segmentIndex === segmentMultiplier,
+              mandatoryMoneyVisualCarrier: segmentIndex === 1,
+              conversionEffectOpportunities: slice.conversionEffectOpportunities || [],
               knowledgeNotes: options.knowledgeNotes,
               llmConfig: options.llmConfig || {}
             });
@@ -753,7 +966,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           complianceNotes = planPayload.complianceNotes;
           mediaRefs = planPayload.mediaRefs;
           const segmentRole = planPayload.segmentRole || slice.segmentRole;
-          const sliceDurationSec = slice.durationSec;
+          const sliceDurationSec = slice.sliceDurationSec || slice.durationSec;
           planPayload = {
             ...planPayload,
             segmentRole,
@@ -764,6 +977,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           const withdrawalVisual = planPayload.withdrawalVisual;
           const subtitleWorkflow = planPayload.subtitleWorkflow;
           const sliceDiversity = planPayload.sliceDiversity;
+          const conversionEffectOpportunities = planPayload.conversionEffectOpportunities;
           planRecord = buildGenerationPlanRecord({
             batch,
             branch,
@@ -786,11 +1000,13 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               complianceNotes,
               segmentRole,
               sliceDurationSec,
+              ...pickSliceMetadata(slice),
               outputTemplateMode,
               moneyVisuals,
               withdrawalVisual,
               subtitleWorkflow,
-              sliceDiversity
+              sliceDiversity,
+              conversionEffectOpportunities
             }
           });
           plans.push(planRecord);
@@ -806,8 +1022,10 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           variantIndex: sequence,
           segmentIndex,
           durationSec: slice.durationSec,
+          isFinalSeedanceSlice: segmentIndex === segmentMultiplier,
           segmentRole: planRecord?.segmentRole || slice.segmentRole,
-          sliceDurationSec: planRecord?.sliceDurationSec || slice.durationSec,
+          sliceDurationSec: planRecord?.sliceDurationSec || slice.sliceDurationSec || slice.durationSec,
+          ...pickSliceMetadata(slice),
           hook,
           body,
           cta,
@@ -829,7 +1047,8 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
             moneyVisuals: planRecord.moneyVisuals,
             withdrawalVisual: planRecord.withdrawalVisual,
             subtitleWorkflow: planRecord.subtitleWorkflow,
-            sliceDiversity: planRecord.sliceDiversity
+            sliceDiversity: planRecord.sliceDiversity,
+            conversionEffectOpportunities: planRecord.conversionEffectOpportunities || slice.conversionEffectOpportunities
           } : {}),
           promptPath: userRelative(context, promptTarget),
           scriptPath: userRelative(context, scriptTarget)
@@ -857,10 +1076,17 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           segmentIndex,
           durationSec: slice.durationSec,
           segmentRole: planRecord?.segmentRole || slice.segmentRole,
-          sliceDurationSec: planRecord?.sliceDurationSec || slice.durationSec,
+          sliceDurationSec: planRecord?.sliceDurationSec || slice.sliceDurationSec || slice.durationSec,
+          ...pickSliceMetadata(slice),
           status: useLlmPlans ? "pending_preview" : "pending",
           modelImage: MODEL_IMAGE,
           modelVideo: resolveSeedanceModel(batch),
+          ...(planRecord ? {
+            moneyVisuals: planRecord.moneyVisuals,
+            conversionEffectOpportunities: planRecord.conversionEffectOpportunities || slice.conversionEffectOpportunities,
+            subtitleWorkflow: planRecord.subtitleWorkflow,
+            sliceDiversity: planRecord.sliceDiversity
+          } : {}),
           promptPath: script.promptPath,
           remoteUrlStored: false,
           attempts: 0
@@ -1203,6 +1429,23 @@ function editablePlanById(request = {}) {
   return map;
 }
 
+function planRepairContextForConfirm(batch = {}, branch = {}, plan = {}) {
+  const draft = batch.templateSnapshot?.draft || {};
+  const targetLanguage = branch.languages?.[0] || branch.language || draft.languages?.[0] || draft.language;
+  const targetRegion = branch.regions?.[0] || draft.regions?.[0] || batch.estimate?.request?.targetRegions?.[0];
+  return {
+    targetLanguage,
+    targetRegion,
+    currencySymbol: branch.currencySymbol || draft.currencySymbol || batch.estimate?.request?.currencySymbol,
+    sourceSlice: plan.sourceSlice || plan,
+    sliceDurationSec: plan.sliceDurationSec,
+    mandatoryMoneyVisualCarrier: Boolean(plan.mandatoryMoneyVisualCarrier || plan.segmentIndex === 1 || plan.sequence === 1),
+    conversionEffectOpportunities: plan.conversionEffectOpportunities || [],
+    subtitleWorkflow: plan.subtitleWorkflow,
+    truthRules: branch.truthRules || draft.truthRules || {}
+  };
+}
+
 export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPlanIds, request = {}) {
   const edits = editablePlanById(request);
   const now = new Date().toISOString();
@@ -1213,11 +1456,17 @@ export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPl
     const isConfirmed = confirmedPlanIds.has(plan.planId);
     const editedPlan = edits.get(plan.planId);
     const branch = (Array.isArray(batch.branchDrafts) ? batch.branchDrafts : []).find((item) => item.branchId === plan.branchId);
-    const payload = validateSeedancePlan(isConfirmed && editedPlan ? { ...plan, ...editedPlan } : plan, {
+    const candidatePlan = isConfirmed && editedPlan ? { ...plan, ...editedPlan } : plan;
+    const repairedPlan = isConfirmed
+      ? repairFormalPlanContract(candidatePlan, planRepairContextForConfirm(batch, branch || {}, candidatePlan))
+      : candidatePlan;
+    const payload = validateSeedancePlan(repairedPlan, {
       branch: branch || {},
       branchId: plan.branchId,
       branchVariantIndex: plan.branchVariantIndex,
-      segmentIndex: plan.segmentIndex
+      segmentIndex: plan.segmentIndex,
+      sliceDurationSec: plan.sliceDurationSec,
+      subtitleWorkflow: plan.subtitleWorkflow
     });
     nextPlans.push({
       ...plan,
@@ -1255,7 +1504,8 @@ export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPl
       moneyVisuals: plan.moneyVisuals,
       withdrawalVisual: plan.withdrawalVisual,
       subtitleWorkflow: plan.subtitleWorkflow,
-      sliceDiversity: plan.sliceDiversity
+      sliceDiversity: plan.sliceDiversity,
+      conversionEffectOpportunities: plan.conversionEffectOpportunities
     };
     nextScripts.push(nextScript);
     if (script.scriptPath) {

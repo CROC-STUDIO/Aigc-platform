@@ -1,3 +1,5 @@
+import { FISSION_ANALYSIS_PROMPT_REQUIREMENTS } from "./fission-analysis.mjs";
+
 export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   scene: "视频主要场景：写清空间、时间段、人物所在环境、App 页面状态与关键可见元素；若视频可拆成多段，注明各段场景是否变化",
   subject: "画面主体：必须写具体人物——职业/身份（如外卖员、宝妈、上班族、退休大爷）、性别、年龄段、人种/肤色或外观、服装、姿态、手持物；无真人时明确主体是什么（仅手机 UI、仅手部等）",
@@ -20,7 +22,16 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   effectReference: "Seedance 特效参考：转场、金币/余额反馈、弹窗、强调动画、音效/节奏点",
   doNotCopyElements: "不得复刻：竞品品牌、logo、水印、UI 细节、原字幕/口播文案、人物身份或独有包装",
   rewardFeedback: "可选，奖励反馈：金币、余额、进度、到账感、弹窗或按钮反馈如何出现",
-  cta: "可选，行动号召结构：出现时机、位置、按钮/字幕/口播表达方式"
+  cta: "可选，行动号召结构：出现时机、位置、按钮/字幕/口播表达方式",
+  sourceVideoProfile: "裂变分析：整条参考视频的素材类型、主角/场景、产品露出方式、主要转化承诺与节奏概览",
+  wholeVideoConversion: "裂变分析：整条视频的转化策略、核心转化语气、信任建立方式、奖励/提现证明和 CTA 承接",
+  wholeVideoSummary: "裂变分析：先理解整条视频后给出的完整故事线摘要，不要直接按 UI/特效碎片拆段",
+  storySegments: "裂变分析：按真实叙事 beat 拆分；每段必须包含 scene/subject/action/camera/lighting/style/quality 七维以及 coreHook、explosivePoint、segmentPurpose、timelineItems、conversionSignals、conversionEffectOpportunities、sliceSplitHints",
+  timelineItems: "裂变分析：App UI、reward animation、cash/coin、subtitle/title、withdrawal、CTA overlay 等时间轴事件；除非改变叙事 beat，否则放在这里而不是新 storySegment",
+  conversionSignals: "裂变分析：视频中真实观察到的提现成功、收益数字、情绪口播、现金金币反馈、快速奖励线索等转化信号",
+  conversionEffectOpportunities: "裂变分析：可裂变放大的特效/反馈机会，与已观察到的 conversionSignals 分开记录",
+  sliceSplitHints: "裂变分析：Seedance 8-15s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现",
+  seedanceSlices: "裂变分析：可选的 Seedance 子段；字幕不烧录，字幕文本进入 subtitleWorkflow.subtitleScript 或 subtitles 供后处理"
 });
 
 export const DECOMPOSITION_ANTI_GENERALIZATION_PHRASES = Object.freeze([
@@ -45,7 +56,39 @@ export const DECOMPOSITION_SYSTEM_PROMPT = [
   "有真人时必须推断或合理补全人物职业/身份，并写入 subject；有口播时必须按时间段细化 voiceover，并把关键口播功能同步写入 action。"
 ].join("\n");
 
-export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt) {
+export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt) {
+  const notes = String(request.knowledgeNotes || "").trim();
+  const requiredHint = Object.fromEntries(
+    ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"]
+      .map((field) => [field, DECOMPOSITION_JSON_SCHEMA_HINT[field]])
+  );
+  return [
+    "上次拆解输出不完整或不是合法 JSON。请重新生成，只返回一个合法 JSON 对象。",
+    "",
+    "【输出格式 — 强制 JSON】",
+    "1. 只返回一个 JSON 对象，根层级直接是字段。",
+    "2. 禁止 markdown、代码围栏、注释、解释性文字。",
+    "3. 必须包含且仅优先保证这 8 个字段：scene, subject, action, camera, lighting, style, quality, hook。",
+    "4. 若能判断，可额外附带简短 storySegments（每段含 scene/subject/action/camera/lighting/style/quality）。",
+    "",
+    "参考视频信息：",
+    videoProbePrompt(probe),
+    "",
+    "字段说明：",
+    JSON.stringify(requiredHint, null, 2),
+    "",
+    notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
+    "",
+    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
+    "",
+    "只返回 JSON 对象。"
+  ].join("\n");
+}
+
+export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt, options = {}) {
+  if (options?.compact) {
+    return buildCompactDecompositionUserPrompt(probe, request, llmConfig, videoProbePrompt);
+  }
   const notes = String(request.knowledgeNotes || "").trim();
   const durationHint = probe.durationSec
     ? `参考视频时长 ${probe.durationSec}s，action 至少按 2-4 个时间段拆分，每段标注起止秒数。`
@@ -69,6 +112,15 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "【反泛化 — 禁止写法】",
     `以下写法视为不合格，必须改写成可见细节：${DECOMPOSITION_ANTI_GENERALIZATION_PHRASES.join("、")}。`,
     "不要写“展示产品优势”“吸引用户下载”这类空话；要写成谁、在什么场景、做什么动作、看到什么 UI/奖励反馈、口播/字幕承担什么转化功能。",
+    "",
+    "【Fission analysis requirements】",
+    "First understand whole video, then split: first understand whole video, then split by real narrative beats.",
+    "App UI/reward animation/cash/coin/subtitle/title/withdrawal/CTA overlay should be timelineItems unless narrative beat changes.",
+    "Do not create a new story segment only because an app UI, reward animation, cash/coin effect, subtitle card, title card, withdrawal visual, or CTA overlay appears; keep these in timelineItems unless they change the narrative beat.",
+    "Keep old fields scene/subject/action/camera/lighting/style/quality/hook for compatibility.",
+    "If output storySegments, each segment includes seven dimensions: scene, subject, action, camera, lighting, style, quality.",
+    "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
+    ...FISSION_ANALYSIS_PROMPT_REQUIREMENTS.map((requirement, index) => `${index + 1}. ${requirement}`),
     "",
     "参考视频信息：",
     videoProbePrompt(probe),

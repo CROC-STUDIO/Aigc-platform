@@ -124,3 +124,93 @@ test("confirmed plan edits persist output-template fields to plans and scripts",
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("confirm plan repair normalizes edited preview plan before pending tasks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-confirm-plan-repair-"));
+  try {
+    const batch = {
+      batchId: "wzb_20260708000000_abcd",
+      templateSnapshot: {
+        draft: {
+          language: "zh-CN",
+          regions: ["CN"],
+          currencySymbol: "¥"
+        }
+      },
+      branchDrafts: [
+        {
+          branchId: "branch_1",
+          language: "zh-CN",
+          languages: ["zh-CN"],
+          regions: ["CN"],
+          currencySymbol: "¥",
+          truthRules: {}
+        }
+      ],
+      scripts: [
+        {
+          scriptId: "script_1",
+          planId: "plan_1",
+          branchId: "branch_1",
+          scriptPath: "scripts/script_1.json",
+          promptPath: "prompts/script_1.txt"
+        }
+      ],
+      tasks: [
+        {
+          scriptId: "script_1",
+          generationTaskId: "task_1"
+        }
+      ]
+    };
+    const plans = [
+      {
+        planId: "plan_1",
+        branchId: "branch_1",
+        segmentIndex: 1,
+        hook: "Hook",
+        body: "Body",
+        voiceover: "Voiceover",
+        subtitles: ["领取奖励"],
+        cta: "",
+        ending: "",
+        imagePrompt: "Phone proof.",
+        seedancePrompt: "UGC phone shot with $50 payout captions.",
+        negativePrompt: "No watermark.",
+        mediaRefs: {},
+        complianceNotes: [],
+        segmentRole: "hook_slice",
+        sliceDurationSec: 12,
+        moneyVisuals: [],
+        subtitleWorkflow: { postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: [] }
+      }
+    ];
+    const request = {
+      plans: [
+        {
+          ...plans[0],
+          seedancePrompt: "Edited UGC phone shot with $50 payout captions.",
+          moneyVisuals: []
+        }
+      ]
+    };
+
+    const { nextPlans, nextScripts } = await applyConfirmedPlanEdits(
+      { userProjectRoot: root },
+      batch,
+      plans,
+      new Set(["plan_1"]),
+      request
+    );
+
+    assert.doesNotMatch(nextPlans[0].seedancePrompt, /\$50/);
+    assert.match(nextPlans[0].seedancePrompt, /¥/);
+    assert.match(nextPlans[0].seedancePrompt, /no burned subtitles/i);
+    assert.ok(nextPlans[0].moneyVisuals.length > 0);
+    assert.equal(nextPlans[0].subtitleWorkflow.burnedInSubtitles, false);
+    assert.deepEqual(nextPlans[0].subtitleWorkflow.subtitleScript, ["领取奖励"]);
+    assert.deepEqual(nextScripts[0].moneyVisuals, nextPlans[0].moneyVisuals);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

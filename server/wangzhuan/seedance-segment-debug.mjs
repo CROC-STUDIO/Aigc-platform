@@ -4,6 +4,8 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { loadRuntimeConfig } from "../runtime-config.mjs";
+import { resolveLlmConfig } from "./llm-config.mjs";
 import {
   buildSceneAwareFrameTimestamps,
   callOpenAiCompatibleLlm,
@@ -24,11 +26,12 @@ const SEVEN_DIMENSIONS = Object.freeze([
   "quality"
 ]);
 
-const DEFAULT_MONEY_EFFECTS = Object.freeze([
-  "reward_number_growth",
-  "coin_burst",
-  "cash_rain",
-  "withdrawal_success"
+const CONVERSION_SIGNAL_KEYS = Object.freeze([
+  "withdrawalSuccess",
+  "earningsNumber",
+  "emotionalVoiceover",
+  "cashCoinFeedback",
+  "fastRewardCue"
 ]);
 
 const EXACT_MONEY_CLAIM_REGEX = /(?:R\$|[$€£¥]|\b(?:USD|BRL|MXN)\b)\s*\d(?:[\d.,]*\d)?|\d(?:[\d.,]*\d)?\s*(?:R\$|[$€£¥]|\b(?:USD|BRL|MXN)\b)/iu;
@@ -138,22 +141,25 @@ export function splitStorySegmentIntoSlices(segment = {}, options = {}) {
     }];
   }
 
-  const firstDuration = Math.max(minSliceSec, Math.min(maxSliceSec, Math.round(durationSec / 2)));
-  const firstEndSec = roundSec(startSec + firstDuration);
+  const [splitHint] = validSliceSplitHints({ ...segment, startSec, endSec }, minSliceSec, maxSliceSec);
+  const firstEndSec = splitHint?.splitSec
+    || roundSec(startSec + Math.max(minSliceSec, Math.min(maxSliceSec, Math.round(durationSec / 2))));
   return [
     {
       storySegmentIndex,
       seedanceSliceIndex: 1,
       startSec,
       endSec: firstEndSec,
-      durationSec: roundSec(firstEndSec - startSec)
+      durationSec: roundSec(firstEndSec - startSec),
+      ...(splitHint?.reason ? { sliceSplitReason: splitHint.reason } : {})
     },
     {
       storySegmentIndex,
       seedanceSliceIndex: 2,
       startSec: firstEndSec,
       endSec,
-      durationSec: roundSec(endSec - firstEndSec)
+      durationSec: roundSec(endSec - firstEndSec),
+      ...(splitHint?.reason ? { sliceSplitReason: splitHint.reason } : {})
     }
   ];
 }
@@ -162,6 +168,116 @@ function normalizeStringList(value) {
   if (Array.isArray(value)) return value.map((item) => cleanString(item)).filter(Boolean);
   const text = cleanString(value);
   return text ? [text] : [];
+}
+
+function normalizeBoolean(value) {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function normalizeConversionSignals(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const result = {};
+  for (const key of CONVERSION_SIGNAL_KEYS) {
+    const signal = source[key] && typeof source[key] === "object" ? source[key] : {};
+    result[key] = {
+      present: normalizeBoolean(signal.present),
+      timestampSec: Number.isFinite(Number(signal.timestampSec)) ? roundSec(signal.timestampSec) : null,
+      evidence: cleanString(signal.evidence),
+      roleInVideo: cleanString(signal.roleInVideo),
+      shouldReplicate: normalizeBoolean(signal.shouldReplicate)
+    };
+  }
+  return result;
+}
+
+function signalMoneyEffects(conversionSignals = {}) {
+  const effects = [];
+  if (conversionSignals.earningsNumber?.present && conversionSignals.earningsNumber?.shouldReplicate) {
+    effects.push("reward_number_growth");
+  }
+  if (conversionSignals.cashCoinFeedback?.present && conversionSignals.cashCoinFeedback?.shouldReplicate) {
+    effects.push("coin_burst", "cash_rain");
+  }
+  if (conversionSignals.withdrawalSuccess?.present && conversionSignals.withdrawalSuccess?.shouldReplicate) {
+    effects.push("withdrawal_success");
+  }
+  if (conversionSignals.fastRewardCue?.present && conversionSignals.fastRewardCue?.shouldReplicate) {
+    effects.push("fast_reward_cue");
+  }
+  return [...new Set(effects)];
+}
+
+function normalizeVoiceoverObserved(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    present: normalizeBoolean(source.present),
+    emotion: cleanString(source.emotion),
+    pace: cleanString(source.pace),
+    energy: cleanString(source.energy),
+    evidence: cleanString(source.evidence),
+    transcript: normalizeStringList(source.transcript)
+  };
+}
+
+function normalizeVariableLayers(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    lockedElements: normalizeStringList(source.lockedElements),
+    primaryVariables: normalizeStringList(source.primaryVariables),
+    secondaryVariables: normalizeStringList(source.secondaryVariables),
+    weakVariables: normalizeStringList(source.weakVariables)
+  };
+}
+
+function normalizeTimelineItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    startSec: Number.isFinite(Number(item?.startSec)) ? roundSec(item.startSec) : null,
+    endSec: Number.isFinite(Number(item?.endSec)) ? roundSec(item.endSec) : null,
+    type: cleanString(item?.type),
+    content: cleanString(item?.content),
+    conversionSignal: cleanString(item?.conversionSignal)
+  })).filter((item) => item.type || item.content || item.conversionSignal);
+}
+
+function normalizeConversionEffectOpportunities(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    effect: cleanString(item?.effect || item),
+    placement: cleanString(item?.placement),
+    reason: cleanString(item?.reason),
+    observedInSource: normalizeBoolean(item?.observedInSource),
+    targetLanguageRequired: normalizeBoolean(item?.targetLanguageRequired ?? true),
+    useExactAmount: normalizeBoolean(item?.useExactAmount)
+  })).filter((item) => item.effect || item.placement || item.reason);
+}
+
+function normalizeSliceSplitHints(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((hint) => {
+      const splitSec = roundSec(typeof hint === "number" ? hint : hint?.splitSec);
+      return {
+        splitSec,
+        reason: cleanString(hint?.reason)
+      };
+    })
+    .filter((hint) => hint.splitSec > 0);
+}
+
+function validSliceSplitHints(segment = {}, minSliceSec, maxSliceSec) {
+  const startSec = roundSec(segment.startSec);
+  const endSec = roundSec(segment.endSec || (startSec + numberOrFallback(segment.durationSec, 0)));
+  return normalizeSliceSplitHints(segment.sliceSplitHints)
+    .filter((hint) => {
+      const firstDuration = roundSec(hint.splitSec - startSec);
+      const secondDuration = roundSec(endSec - hint.splitSec);
+      return firstDuration >= minSliceSec
+        && firstDuration <= maxSliceSec
+        && secondDuration >= minSliceSec
+        && secondDuration <= maxSliceSec;
+    })
+    .sort((left, right) => left.splitSec - right.splitSec);
 }
 
 function hasTruthRules(truthRules = {}) {
@@ -205,15 +321,28 @@ export function buildSeedanceSlices(storySegments = [], options = {}) {
   const rawSlices = [];
   for (const segment of storySegments) {
     const timingSlices = splitStorySegmentIntoSlices(segment, options);
+    const conversionSignals = normalizeConversionSignals(segment.conversionSignals || segment.observedConversionSignals);
+    const moneyEffects = normalizeStringList(segment.moneyEffects).length
+      ? normalizeStringList(segment.moneyEffects)
+      : signalMoneyEffects(conversionSignals);
     for (const timing of timingSlices) {
       rawSlices.push({
         ...timing,
         ...copySevenDimensions(segment),
         coreHook: cleanString(segment.coreHook),
         explosivePoint: cleanString(segment.explosivePoint),
-        moneyEffects: normalizeStringList(segment.moneyEffects).length
-          ? normalizeStringList(segment.moneyEffects)
-          : [...DEFAULT_MONEY_EFFECTS],
+        segmentPurpose: cleanString(segment.segmentPurpose),
+        segmentConversionStyle: cleanString(segment.segmentConversionStyle),
+        segmentRhythm: cleanString(segment.segmentRhythm),
+        segmentStructureSkeleton: cleanString(segment.segmentStructureSkeleton),
+        conversionSignals,
+        timelineItems: normalizeTimelineItems(segment.timelineItems),
+        conversionEffectOpportunities: normalizeConversionEffectOpportunities(segment.conversionEffectOpportunities),
+        voiceoverObserved: normalizeVoiceoverObserved(segment.voiceoverObserved),
+        variableLayers: normalizeVariableLayers(segment.variableLayers),
+        replicatedSellingPoints: normalizeStringList(segment.replicatedSellingPoints),
+        optionalEnhancementSuggestions: normalizeStringList(segment.optionalEnhancementSuggestions),
+        moneyEffects,
         imagePrompt: cleanString(segment.imagePrompt),
         seedancePrompt: cleanString(segment.seedancePrompt),
         negativePrompt: cleanString(segment.negativePrompt) || "No competitor logo, no watermark, no burned subtitles, no invented exact payout amount.",
@@ -281,7 +410,19 @@ export function normalizeStorySegments(value, context = {}) {
       ...copySevenDimensions(segment),
       coreHook: cleanString(segment.coreHook || segment.hook),
       explosivePoint: cleanString(segment.explosivePoint || segment.burstPoint || segment.baoDian),
+      segmentPurpose: cleanString(segment.segmentPurpose),
+      segmentConversionStyle: cleanString(segment.segmentConversionStyle),
+      segmentRhythm: cleanString(segment.segmentRhythm),
+      segmentStructureSkeleton: cleanString(segment.segmentStructureSkeleton),
+      conversionSignals: normalizeConversionSignals(segment.conversionSignals || segment.observedConversionSignals),
+      timelineItems: normalizeTimelineItems(segment.timelineItems),
+      conversionEffectOpportunities: normalizeConversionEffectOpportunities(segment.conversionEffectOpportunities),
+      voiceoverObserved: normalizeVoiceoverObserved(segment.voiceoverObserved),
+      variableLayers: normalizeVariableLayers(segment.variableLayers),
+      replicatedSellingPoints: normalizeStringList(segment.replicatedSellingPoints),
+      optionalEnhancementSuggestions: normalizeStringList(segment.optionalEnhancementSuggestions),
       moneyEffects: normalizeStringList(segment.moneyEffects),
+      sliceSplitHints: normalizeSliceSplitHints(segment.sliceSplitHints),
       imagePrompt: cleanString(segment.imagePrompt),
       seedancePrompt: cleanString(segment.seedancePrompt),
       negativePrompt: cleanString(segment.negativePrompt),
@@ -302,22 +443,39 @@ export function buildSegmentAnalysisMessages(input = {}) {
   const sceneCuts = (input.sceneCutsSec || []).join(", ") || "none";
   const truthRules = input.truthRules && Object.keys(input.truthRules).length ? JSON.stringify(input.truthRules) : "{}";
   const userText = [
-    "Analyze the reference video into narrative story segments for Seedance ad generation.",
+    "Analyze the reference video for Seedance ad generation in two passes: first understand the whole video end-to-end, then split it into narrative story segments.",
     `Source video: ${input.videoPath || ""}`,
     `Duration: ${input.durationSec || 0}s`,
     `Language: ${input.language || "pt-BR"}`,
     `Region: ${input.region || "BR"}`,
-    `Product: ${input.productName || "Product"}`,
     `Currency: ${input.currencySymbol || ""}`,
+    `Hard target-language/region/currency rule: all voiceover, CTA, subtitle scripts, and any minimal visible UI text for generated outputs must use ${input.language || "pt-BR"} for region ${input.region || "BR"}. If a page, overlay, balance, withdrawal screen, reward counter, payout UI, or cash/coin visual can imply money, it must use the target currency symbol ${input.currencySymbol || "provided by the target region"} only. Do not mix languages or currencies.`,
+    `Local identity rule: people, faces, clothing, scenes, camera behavior, phone UI habits, and voice identity should be locally plausible for ${input.region || "BR"} and ${input.language || "pt-BR"}.`,
+    `Product: ${input.productName || "Product"}`,
     `Scene cut hints, for reference only: ${sceneCuts}`,
     "Extracted frames:",
     frameLines,
-    "Required for every story segment: scene, subject, action, camera, lighting, style, quality, coreHook, explosivePoint, moneyEffects.",
-    "The LLM chooses the story segment count. Scene cuts are hints, not authoritative boundaries.",
-    "For wangzhuan effects, include visual motifs such as reward_number_growth, coin_burst, cash_rain, withdrawal_success, arrival_animation, withdrawal_record, real_cash_sound_cue when they fit.",
-    "Do not invent exact payout amounts, thresholds, arrival speeds, or guaranteed earnings unless truthRules explicitly allow them.",
+    "First pass requirement: produce sourceVideoProfile and wholeVideoConversion before segmenting. Explain the complete story arc, core conversion tone, main persuasion path, global rhythm, product role, product/app inserts, money/effect inserts, emotional voiceover, and ending CTA.",
+    "Second pass requirement: split by real narrative story beats only. Do not create a new story segment only because the video cuts to app UI, reward animation, coin/cash effects, withdrawal visual, title card, subtitle card, or CTA overlay.",
+    "App screens, UI inserts, reward animations, sound cues, cash/coin effects, and CTA overlays must be recorded as elements inside the surrounding story segment unless they change the underlying narrative beat.",
+    "For each story segment, include second-level timelineItems that cover the segment from startSec to endSec with concrete visible content and labels such as drama_action, app_ui, withdrawal_success, earnings_number, cash_coin_feedback, fast_reward_cue, emotional_voiceover, sound_cue, subtitle_overlay, cta.",
+    "For each story segment, include segmentPurpose, segmentConversionStyle, segmentRhythm, segmentStructureSkeleton, and variableLayers. variableLayers must include lockedElements, primaryVariables, secondaryVariables, weakVariables.",
+    "If a story segment is longer than the maximum Seedance slice duration, include sliceSplitHints with exact splitSec values at natural internal story transitions, such as host claim -> UI proof, UI proof -> CTA, or setup -> payoff. Do not split long story segments by equal duration unless no narrative transition exists.",
+    "Required for every story segment: scene, subject, action, camera, lighting, style, quality, coreHook, explosivePoint, segmentPurpose, segmentConversionStyle, segmentRhythm, segmentStructureSkeleton, conversionSignals, conversionEffectOpportunities, voiceoverObserved, variableLayers, timelineItems.",
+    "The LLM chooses the story segment count from the full story arc. Scene cuts are technical hints only, not authoritative boundaries, and should not over-segment app/effect inserts.",
+    "Observed conversion signal rule: identify whether the reference video truly contains withdrawalSuccess, earningsNumber, emotionalVoiceover, cashCoinFeedback, and fastRewardCue. Do not mark a signal present just because it would be useful for ads.",
+    "For every conversion signal, output present, timestampSec, evidence, roleInVideo, and shouldReplicate. shouldReplicate=true only when the signal is visible/audible or strongly implied in the reference video and is structurally important.",
+    "For wangzhuan effects, record observed visual motifs such as top_balance_growth, reward_number_growth, continuous_earnings_rise, coin_burst, cash_rain, withdrawal_success, arrival_animation, withdrawal_record, real_cash_sound_cue when observed in the reference video.",
+    "Also output conversionEffectOpportunities for later fission enhancement. These are allowed placement suggestions for top withdrawal/balance growth, real-cash sound cue, full-screen coin/cash rain, or continuous reward number increase. Keep this separate from observed conversionSignals so source analysis is not polluted.",
+    "Opening hook rule: identify whether the first segment can support a stronger fission opening. If yes, mark conversionEffectOpportunities for the first 1-2 seconds: strong drama conflict/twist hook, top withdrawal/reward balance rapidly growing, cash/coin rain, real-cash sound cue, and continuous earnings growth.",
+    "Slice diversity rule: output variableLayers so later Seedance slices can vary person, scene, clothing, camera setup, and voice identity. Adjacent slices should not look like the same person in the same location unless the source story explicitly requires continuity.",
+    "voiceoverObserved must describe whether the reference has voiceover/talking, its emotion, pace, energy, evidence, and transcript snippets. Do not invent missing voiceover.",
+    "Fission rule: this analysis is for fission, not one-to-one imitation. Preserve the whole-video core conversion tone and segment skeleton, but expose controlled variables for later product replacement and Seedance prompt generation.",
+    "Seedance prompt generation rule inside this analysis: seedancePrompt should preserve the reference segment's conversion style, rhythm, structure skeleton, observed conversion signals, and product/app proof structure. Do not force withdrawal, earnings, cash/coin, or emotional voiceover into a segment where the reference segment does not contain or strongly imply it; put enhancement ideas in conversionEffectOpportunities.",
+    "Subtitle rule: output subtitleScript/subtitles as short post-process subtitle lines in the target language. Seedance prompt must say no burned subtitles, no dense captions, no large text blocks; any visible text must be minimal UI microcopy only.",
+    "Do not invent or copy exact payout amounts, thresholds, arrival speeds, or guaranteed earnings unless truthRules explicitly allow them. Even when the source frame visibly contains a concrete amount, describe it generically as 'a visible earnings/withdrawal amount' and do not output the exact number.",
     `truthRules: ${truthRules}`,
-    "Return strict JSON only: {\"storySegments\":[{\"storySegmentIndex\":1,\"startSec\":0,\"endSec\":12,\"durationSec\":12,\"scene\":\"...\",\"subject\":\"...\",\"action\":\"...\",\"camera\":\"...\",\"lighting\":\"...\",\"style\":\"...\",\"quality\":\"...\",\"coreHook\":\"...\",\"explosivePoint\":\"...\",\"moneyEffects\":[\"reward_number_growth\"],\"imagePrompt\":\"...\",\"seedancePrompt\":\"... no burned subtitles ...\",\"negativePrompt\":\"...\",\"subtitles\":[\"...\"]}]}"
+    "Return strict JSON only: {\"sourceVideoProfile\":{\"durationSec\":0,\"language\":\"...\",\"region\":\"...\",\"currencySymbol\":\"...\",\"productType\":\"...\",\"personaSummary\":\"...\",\"sceneCount\":3,\"ctaType\":\"...\"},\"wholeVideoConversion\":{\"coreConversionTone\":\"...\",\"mainPersuasionPath\":\"...\",\"globalRhythm\":\"...\",\"mainSellingLogic\":\"...\",\"productRoleInVideo\":\"...\",\"referenceVideoStructureSummary\":\"...\"},\"wholeVideoSummary\":{\"storyArc\":\"...\",\"mainCharacters\":[\"...\"],\"productAppInserts\":[\"...\"],\"moneyEffectInserts\":[\"...\"],\"voiceoverSummary\":\"...\",\"endingCta\":\"...\",\"suggestedNarrativeSegmentCount\":3},\"storySegments\":[{\"storySegmentIndex\":1,\"startSec\":0,\"endSec\":12,\"durationSec\":12,\"segmentPurpose\":\"...\",\"segmentConversionStyle\":\"...\",\"segmentRhythm\":\"...\",\"segmentStructureSkeleton\":\"...\",\"scene\":\"...\",\"subject\":\"...\",\"action\":\"...\",\"camera\":\"...\",\"lighting\":\"...\",\"style\":\"...\",\"quality\":\"...\",\"coreHook\":\"...\",\"explosivePoint\":\"...\",\"conversionSignals\":{\"withdrawalSuccess\":{\"present\":false,\"timestampSec\":null,\"evidence\":\"\",\"roleInVideo\":\"\",\"shouldReplicate\":false},\"earningsNumber\":{\"present\":true,\"timestampSec\":2.5,\"evidence\":\"reward counter grows on screen\",\"roleInVideo\":\"opens with result feeling\",\"shouldReplicate\":true},\"emotionalVoiceover\":{\"present\":true,\"timestampSec\":1,\"evidence\":\"host speaks fast and excited\",\"roleInVideo\":\"creates urgency\",\"shouldReplicate\":true},\"cashCoinFeedback\":{\"present\":false,\"timestampSec\":null,\"evidence\":\"\",\"roleInVideo\":\"\",\"shouldReplicate\":false},\"fastRewardCue\":{\"present\":true,\"timestampSec\":4,\"evidence\":\"quick reward feedback after app action\",\"roleInVideo\":\"low barrier proof\",\"shouldReplicate\":true}},\"conversionEffectOpportunities\":[{\"effect\":\"top_balance_growth\",\"placement\":\"top overlay during app proof\",\"reason\":\"source shows reward proof beat\",\"observedInSource\":true,\"targetLanguageRequired\":true,\"useExactAmount\":false}],\"voiceoverObserved\":{\"present\":true,\"emotion\":\"excited\",\"pace\":\"fast\",\"energy\":\"high\",\"evidence\":\"host speaks directly to camera\",\"transcript\":[\"...\"]},\"variableLayers\":{\"lockedElements\":[\"proof timing\"],\"primaryVariables\":[\"persona\"],\"secondaryVariables\":[\"scene\"],\"weakVariables\":[\"button color\"]},\"replicatedSellingPoints\":[\"earnings feedback because observed\"],\"optionalEnhancementSuggestions\":[\"withdrawal success UI could be tested, but not observed here\"],\"moneyEffects\":[\"reward_number_growth\"],\"timelineItems\":[{\"startSec\":0,\"endSec\":3,\"type\":\"emotional_voiceover\",\"content\":\"...\",\"conversionSignal\":\"emotionalVoiceover\"}],\"sliceSplitHints\":[{\"splitSec\":20,\"reason\":\"host claim changes into app UI proof\"}],\"imagePrompt\":\"...\",\"seedancePrompt\":\"... no burned subtitles, no dense captions ...\",\"negativePrompt\":\"...\",\"subtitles\":[\"...\"]}]}"
   ].join("\n");
 
   const userContent = [
@@ -333,7 +491,7 @@ export function buildSegmentAnalysisMessages(input = {}) {
   return [
     {
       role: "system",
-      content: "You are a Seedance wangzhuan video analyst. Preserve the source video's narrative structure, but redesign people, scene, clothing, props, and money visuals for safe original ad generation."
+      content: "You are a Seedance wangzhuan reference-video fission analyst. First understand the complete source video story and conversion tone, then segment only by narrative story beats. Faithfully identify observed conversion signals, segment rhythm, segment skeleton, and variable layers before generating prompts. Preserve the source video's conversion baseline while preparing controlled fission variants."
     },
     {
       role: "user",
@@ -435,20 +593,32 @@ async function defaultExtractFrames(videoPath, probe, options = {}) {
   return extractReferenceFrames(createReferenceContext(options), videoPath, timestampsSec);
 }
 
-function resolveLlmConfigFromEnv(options = {}) {
-  return {
-    provider: cleanString(options.provider) || cleanString(process.env.WANGZHUAN_LLM_PROVIDER) || "skylink",
-    model: cleanString(options.model) || cleanString(process.env.WANGZHUAN_LLM_MODEL) || "gpt-5.4",
-    endpoint: cleanString(options.endpoint) || cleanString(process.env.WANGZHUAN_LLM_ENDPOINT) || cleanString(process.env.OPENAI_BASE_URL) || "https://api.openai.com/v1",
-    apiKey: cleanString(options.apiKey) || cleanString(process.env.WANGZHUAN_LLM_API_KEY) || cleanString(process.env.OPENAI_API_KEY),
-    apiKeyEnv: cleanString(options.apiKeyEnv) || "WANGZHUAN_LLM_API_KEY",
-    temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.2,
-    timeoutMs: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 300000
-  };
+async function loadDebugRuntimeConfig(options = {}) {
+  if (options.runtimeConfig && typeof options.runtimeConfig === "object") return options.runtimeConfig;
+  const cwd = options.cwd || process.cwd();
+  const { config } = await loadRuntimeConfig({
+    runtimePath: options.configPath || process.env.AIGC_CONFIG_PATH || resolve(cwd, "config.json"),
+    defaultPath: options.defaultConfigPath || resolve(cwd, "config.default.json")
+  });
+  return config;
+}
+
+async function resolveDebugLlmConfig(options = {}) {
+  const config = await loadDebugRuntimeConfig(options);
+  return resolveLlmConfig(config, {
+    ...(options.llmConfig && typeof options.llmConfig === "object" ? options.llmConfig : {}),
+    ...(cleanString(options.provider) ? { provider: cleanString(options.provider) } : {}),
+    ...(cleanString(options.model) ? { model: cleanString(options.model) } : {}),
+    ...(cleanString(options.endpoint) ? { endpoint: cleanString(options.endpoint) } : {}),
+    ...(cleanString(options.apiKey) ? { apiKey: cleanString(options.apiKey) } : {}),
+    ...(cleanString(options.apiKeyEnv) ? { apiKeyEnv: cleanString(options.apiKeyEnv) } : {}),
+    ...(Number.isFinite(Number(options.temperature)) ? { temperature: Number(options.temperature) } : {}),
+    ...(Number.isFinite(Number(options.timeoutMs)) ? { timeoutMs: Number(options.timeoutMs) } : {})
+  });
 }
 
 async function defaultCallLlm(messages, options = {}) {
-  const llmConfig = resolveLlmConfigFromEnv(options.llmConfig || {});
+  const llmConfig = await resolveDebugLlmConfig(options);
   return callOpenAiCompatibleLlm(llmConfig, messages);
 }
 
@@ -520,6 +690,12 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
       ratio: probe.ratio || "",
       sceneCutsSec: sceneCutList
     },
+    sourceVideoProfile: parsed?.sourceVideoProfile || {},
+    wholeVideoConversion: parsed?.wholeVideoConversion || {},
+    wholeVideoSummary: parsed?.wholeVideoSummary || {},
+    fissionStrategy: parsed?.fissionStrategy || {},
+    candidateVariables: parsed?.candidateVariables || {},
+    versionGenerationRules: parsed?.versionGenerationRules || [],
     storySegments
   };
   const plan = {

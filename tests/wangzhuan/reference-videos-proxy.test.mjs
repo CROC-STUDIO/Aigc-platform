@@ -16,6 +16,37 @@ function dataUrl(bytes) {
   return `data:video/mp4;base64,${Buffer.alloc(bytes, 1).toString("base64")}`;
 }
 
+function validDecompositionJson(overrides = {}) {
+  return JSON.stringify({
+    scene: "office",
+    subject: "phone",
+    action: "tap",
+    camera: "close-up",
+    lighting: "bright",
+    style: "realistic",
+    quality: "high",
+    hook: "earn rewards",
+    ...overrides
+  });
+}
+
+function probeFixture(referenceVideoId, videoRelativePath, overrides = {}) {
+  return {
+    referenceVideoId,
+    fileName: "reference.mp4",
+    mimeType: "video/mp4",
+    status: "pass",
+    storedPath: videoRelativePath,
+    storageKey: "uploads/reference/decomposition-proxy.mp4",
+    storageUrl: "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4",
+    durationSec: 30,
+    width: 480,
+    height: 854,
+    fps: 15,
+    ...overrides
+  };
+}
+
 test("large reference videos use compressed proxy for S3 and decomposition", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-proxy-"));
   const calls = [];
@@ -285,6 +316,9 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
 
     const result = await draftReferenceVideoDecomposition(context, {
       referenceVideoId: "ref_20260630_055",
+      fileHash: "same-video-hash",
+      language: "zh-CN",
+      targetRegion: "CN",
       llmConfig: {
         provider: "skylink",
         endpoint: "https://skylink-gateway.com/api/v1",
@@ -297,6 +331,25 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
     assert.equal(calls.length, 1);
     assert.deepEqual(frameRequests[0], [0.25, 0.27, 0.53, 2.6, 3.8, 6.8, 8, 10.2, 10.6, 10.75]);
     assert.equal(result.decomposition.scene, "office");
+
+    const cached = await draftReferenceVideoDecomposition(context, {
+      referenceVideoId: "ref_20260630_055",
+      fileHash: "same-video-hash",
+      language: "zh-CN",
+      targetRegion: "CN",
+      llmConfig: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "gpt-5.5",
+        apiKey: "test-key",
+        maxRetries: 0
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(cached.draft.source, "cache");
+    assert.equal(cached.decomposition.scene, "office");
+    assert.equal(cached.warnings[0].code, "decomposition_cache_hit");
   } finally {
     globalThis.fetch = originalFetch;
     await rm(root, { recursive: true, force: true });
@@ -577,6 +630,134 @@ test("streaming decomposition dumps both llm request and llm response artifacts"
     assert.equal(responseDump.response.mode, "chat.completions.stream");
   } finally {
     globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("decomposition retries invalid_json with compact prompt and succeeds", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-invalid-json-retry-"));
+  const retryEvents = [];
+  let calls = 0;
+  try {
+    const videoRelativePath = "批处理记录/网赚管线/reference-videos/ref_20260709_001/decomposition-proxy.mp4";
+    const videoPath = join(root, videoRelativePath);
+    await mkdir(join(root, "批处理记录/网赚管线/reference-videos/ref_20260709_001"), { recursive: true });
+    await writeFile(videoPath, Buffer.from("video bytes"));
+    const context = {
+      userProjectRoot: root,
+      sharedProjectRoot: root,
+      config: {},
+      extractReferenceFrames: async () => [],
+      recordTelemetryEvent: async () => {},
+      loadReferenceVideoProbe: async () => probeFixture("ref_20260709_001", videoRelativePath),
+      callWangzhuanLlm: async ({ messages }) => {
+        calls += 1;
+        const prompt = messages
+          .flatMap((message) => Array.isArray(message.content) ? message.content : [{ type: "text", text: message.content }])
+          .filter((part) => part?.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        if (calls === 1) return "not-json{{{";
+        assert.match(prompt, /上次拆解输出不完整或不是合法 JSON/);
+        assert.match(prompt, /必须包含且仅优先保证这 8 个字段/);
+        return validDecompositionJson();
+      }
+    };
+
+    const result = await draftReferenceVideoDecomposition(context, {
+      referenceVideoId: "ref_20260709_001",
+      llmConfig: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "gpt-4o",
+        apiKey: "test-key",
+        maxRetries: 1
+      }
+    }, {
+      streamHandlers: {
+        onRetry: (event) => retryEvents.push(event)
+      }
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(result.decomposition.scene, "office");
+    assert.equal(retryEvents.length, 1);
+    assert.equal(retryEvents[0].attempt, 1);
+    assert.equal(retryEvents[0].reason, "invalid_json");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("decomposition falls back to frames-only when file_data payload fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-frames-only-"));
+  const fallbackEvents = [];
+  const calls = [];
+  try {
+    const videoRelativePath = "批处理记录/网赚管线/reference-videos/ref_20260709_002/decomposition-proxy.mp4";
+    const videoPath = join(root, videoRelativePath);
+    await mkdir(join(root, "批处理记录/网赚管线/reference-videos/ref_20260709_002"), { recursive: true });
+    await writeFile(videoPath, Buffer.from("video bytes"));
+    const context = {
+      userProjectRoot: root,
+      sharedProjectRoot: root,
+      config: {},
+      extractReferenceFrames: async () => ([
+        { dataUrl: "data:image/jpeg;base64,aaa", timestampSec: 1 }
+      ]),
+      recordTelemetryEvent: async () => {},
+      loadReferenceVideoProbe: async () => probeFixture("ref_20260709_002", videoRelativePath, {
+        storageUrl: "",
+        storageKey: ""
+      }),
+      callWangzhuanLlm: async ({ referenceVideo, messages }) => {
+        const hasFilePart = messages.some((message) => Array.isArray(message.content)
+          && message.content.some((part) => part?.type === "file"));
+        calls.push({
+          hasFileDataUrl: Boolean(referenceVideo.fileDataUrl),
+          hasFilePart,
+          frameCount: referenceVideo.frameCount
+        });
+        if (calls.length === 1) {
+          throw new WangzhuanError("model_failed", "模型拆解请求失败", {
+            inputMode: "file_data",
+            upstreamMessage: "file_data payload too large",
+            reason: "request_failed"
+          });
+        }
+        return validDecompositionJson({ scene: "frames-only-office" });
+      }
+    };
+
+    const result = await draftReferenceVideoDecomposition(context, {
+      referenceVideoId: "ref_20260709_002",
+      llmConfig: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "gpt-4o",
+        apiKey: "test-key",
+        maxRetries: 0
+      }
+    }, {
+      streamHandlers: {
+        onFallback: (event) => fallbackEvents.push(event)
+      }
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].hasFileDataUrl, true);
+    assert.equal(calls[0].hasFilePart, true);
+    assert.equal(calls[1].hasFileDataUrl, false);
+    assert.equal(calls[1].hasFilePart, false);
+    assert.equal(calls[1].frameCount, 1);
+    assert.equal(result.decomposition.scene, "frames-only-office");
+    assert.equal(result.warnings.at(-1).code, "reference_video_frames_only_fallback");
+    assert.deepEqual(fallbackEvents[0], {
+      from: "file_data",
+      to: "frames_only",
+      reason: "file_data payload too large"
+    });
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

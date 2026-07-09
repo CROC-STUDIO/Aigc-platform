@@ -2,6 +2,7 @@ import { hasAnyStrongTruthRule } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makePlanId } from "./ids.mjs";
 import { llmUsesGeminiNativeApi, resolveLlmConfig } from "./llm-config.mjs";
+import { repairFormalPlanContract } from "./plan-repair.mjs";
 import {
   buildReferenceAssetSlotGuide,
   formatReferenceAssetSlotGuide
@@ -57,6 +58,7 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
     productIcon: "URL or empty",
     productScreenshot: "URL or empty",
     productRecording: "URL or empty",
+    ctaAsset: "URL or empty; image-only final stitched tail reference, not a normal Seedance reference slot",
     endingAsset: "URL or empty",
     personAsset: "URL or empty",
     rewardElement: "URL or empty"
@@ -426,6 +428,49 @@ function sanitizePlanAssetReferences(plan = {}, branch = {}) {
   };
 }
 
+function storySegmentForSlice(decomposition = {}, currentSlice = {}) {
+  const storySegmentIndex = Number(currentSlice?.storySegmentIndex || 0);
+  if (!storySegmentIndex || !Array.isArray(decomposition?.storySegments)) return null;
+  return decomposition.storySegments.find((segment) => Number(segment?.storySegmentIndex || 0) === storySegmentIndex) || null;
+}
+
+function buildRepairContext(input = {}) {
+  const localeContext = resolvePlanLocaleContext(input.batch || {}, input.branch || {});
+  const validationContext = resolveSeedancePlanValidationContext(input);
+  return {
+    targetLanguage: localeContext.primaryLanguage,
+    targetRegion: localeContext.primaryRegion,
+    currencySymbol: localeContext.currencySymbol,
+    currencyName: "",
+    sourceSlice: input.currentSlice,
+    sliceDurationSec: input.sliceDurationSec,
+    mandatoryMoneyVisualCarrier: Boolean(input.mandatoryMoneyVisualCarrier || input.segmentIndex === 1),
+    moneyVisuals: validationContext.moneyVisuals,
+    conversionEffectOpportunities: input.currentSlice?.conversionEffectOpportunities || input.conversionEffectOpportunities || [],
+    isFinalSeedanceSlice: Boolean(input.isFinalSeedanceSlice),
+    totalSegmentCount: Number(input.totalSegmentCount || 0) || undefined,
+    subtitleWorkflow: validationContext.subtitleWorkflow,
+    truthRules: input.branch?.truthRules || input.batch?.templateSnapshot?.draft?.truthRules || {},
+    characterDiversity: input.currentSlice?.variableLayers
+      ? JSON.stringify({ variableLayers: input.currentSlice.variableLayers })
+      : ""
+  };
+}
+
+function normalizeTargetSegmentCount(value) {
+  if (value === "follow_decomposition" || value === "auto" || value == null || value === "") return "";
+  const count = Number(value);
+  return Number.isInteger(count) && count >= 1 && count <= 5 ? count : "";
+}
+
+function resolveTargetSegmentCount(batch = {}, branch = {}) {
+  return normalizeTargetSegmentCount(
+    branch.targetSegmentCount
+      ?? batch.estimate?.request?.targetSegmentCount
+      ?? batch.templateSnapshot?.draft?.targetSegmentCount
+  );
+}
+
 export function validateSeedancePlan(plan = {}, context = {}) {
   const contextSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(
     context.subtitleWorkflow,
@@ -471,6 +516,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       productIcon: cleanString(plan.mediaRefs?.productIcon),
       productScreenshot: cleanString(plan.mediaRefs?.productScreenshot),
       productRecording: cleanString(plan.mediaRefs?.productRecording),
+      ctaAsset: cleanString(plan.mediaRefs?.ctaAsset),
       endingAsset: cleanString(plan.mediaRefs?.endingAsset),
       personAsset: cleanString(plan.mediaRefs?.personAsset),
       rewardElement: cleanString(plan.mediaRefs?.rewardElement)
@@ -498,14 +544,25 @@ export function buildSeedancePlanMessages({
   branchVariantIndex,
   segmentIndex,
   sliceDurationSec,
+  currentSlice,
+  mandatoryMoneyVisualCarrier = false,
+  isFinalSeedanceSlice = false,
+  totalSegmentCount,
   knowledgeNotes = ""
 }) {
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
   const localeContext = resolvePlanLocaleContext(batch, branch);
-  const outputTemplateMode = normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode);
-  const sliceStrategy = resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
+  const decompositionDriven = Array.isArray(decomposition?.seedanceSlices) && decomposition.seedanceSlices.length > 0
+    || Array.isArray(decomposition?.storySegments) && decomposition.storySegments.length > 0;
+  const outputTemplateMode = decompositionDriven
+    ? "reference_fission"
+    : normalizeOutputTemplateMode(branch.outputTemplateMode, draft.outputTemplateMode);
+  const sliceStrategy = decompositionDriven
+    ? "decomposition_story_auto_8_15s"
+    : resolveCleanString(branch.sliceStrategy, draft.sliceStrategy, "fixed_15s");
   const currentSliceDurationSec = normalizeSliceDuration(sliceDurationSec ?? branch.sliceDurationSec ?? draft.sliceDurationSec ?? 15);
+  const targetSegmentCount = resolveTargetSegmentCount(batch, branch);
   const moneyVisuals = resolveStringList(branch.moneyVisuals, draft.moneyVisuals);
   const subtitleWorkflow = resolveNormalizedSubtitleWorkflow(
     branch.subtitleWorkflow,
@@ -521,6 +578,20 @@ export function buildSeedancePlanMessages({
     branch.variantPrompt
   );
   const requiredDisclaimers = [...new Set((channelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
+  const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
+  const fissionSliceContext = {
+    mandatoryMoneyVisualCarrier: Boolean(mandatoryMoneyVisualCarrier),
+    isFinalSeedanceSlice: Boolean(isFinalSeedanceSlice),
+    totalSegmentCount: Number(totalSegmentCount || 0) || null,
+    currentSlice: currentSlice || null,
+    wholeVideoConversion: decomposition?.wholeVideoConversion,
+    targetSegmentCount: targetSegmentCount || "follow_decomposition",
+    currentStorySegment,
+    timelineItems: currentStorySegment?.timelineItems || currentSlice?.timelineItems || [],
+    conversionSignals: currentStorySegment?.conversionSignals || currentSlice?.conversionSignals || {},
+    conversionEffectOpportunities: currentStorySegment?.conversionEffectOpportunities || currentSlice?.conversionEffectOpportunities || [],
+    variableLayers: currentStorySegment?.variableLayers || currentSlice?.variableLayers || {}
+  };
   const promptText = [
     "你要复用参考视频的结构、节奏、镜头功能和转化逻辑。",
     "你必须重构参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达。",
@@ -536,6 +607,11 @@ export function buildSeedancePlanMessages({
     "",
     "参考视频拆解：",
     JSON.stringify(decomposition || {}, null, 2),
+    "",
+    "当前裂变切片上下文：",
+    JSON.stringify(fissionSliceContext, null, 2),
+    "",
+    "最终视频强网赚视觉规则：每条最终拼接视频至少一个切片必须包含可见的真钞、金币、现金雨、金币爆发、满屏撒钱或满屏撒金币之一。mandatoryMoneyVisualCarrier=true 的切片负责承载该 final-video high-attraction 要求；其他切片不要强塞额外满屏现金/金币效果。",
     "",
     protagonistGuideText,
     "",
@@ -553,10 +629,12 @@ export function buildSeedancePlanMessages({
       regions: localeContext.regions,
       currencySymbol: localeContext.currencySymbol,
       targetChannel: localeContext.targetChannel,
-      targetChannels: branch.targetChannels || (localeContext.targetChannel ? [localeContext.targetChannel] : []),
-      outputRatio: localeContext.outputRatio,
-      outputTemplateMode,
-      sliceStrategy,
+	      targetChannels: branch.targetChannels || (localeContext.targetChannel ? [localeContext.targetChannel] : []),
+	      outputRatio: localeContext.outputRatio,
+	      decompositionDriven,
+	      outputTemplateMode,
+	      sliceStrategy: targetSegmentCount ? `user_selected_${targetSegmentCount}_segments` : sliceStrategy,
+      targetSegmentCount: targetSegmentCount || "follow_decomposition",
       sliceDurationSec: currentSliceDurationSec,
       moneyVisuals,
       subtitleWorkflow,
@@ -577,6 +655,15 @@ export function buildSeedancePlanMessages({
     referenceSlotGuide.length
       ? "输出要求：imagePrompt 与 seedancePrompt 必须明确使用上述 图片n/视频n 指代已上传素材，并说明参考该素材的主体、构图、UI、动作、运镜或特效；mediaRefs 填写对应 URL。"
       : "输出要求：未上传参考素材时，imagePrompt 与 seedancePrompt 不要使用 图片n/视频n 指代。",
+    assetUrls.ctaAsset || assetUrls.endingAsset
+      ? [
+          "CTA 图 / Ending 图引用规则：",
+          "1. ctaAsset 与 endingAsset 是仅图片尾图素材，不属于普通 Seedance 参考素材 slot，不使用 图片n/视频n 编号，不参与非最终切片生成。",
+          "2. isFinalSeedanceSlice=false 时，seedancePrompt、imagePrompt、hook、body、voiceover、subtitles 均不得引用 ctaAsset 或 endingAsset，也不要提前生成 CTA/Ending 卡片。",
+          "3. isFinalSeedanceSlice=true 时，只能在最后一个 Seedance 切片末尾把 ctaAsset/endingAsset 作为 closing tail 的视觉风格、版式和产品承接参考；实际 CTA 图视频片段和 Ending 图视频片段会在 Seedance 视频之后由 ffmpeg 拼接。",
+          "4. mediaRefs.ctaAsset 与 mediaRefs.endingAsset 可填写对应 URL，便于审核和尾图拼接追踪；不得把它们描述为可动视频素材。"
+        ].join("\n")
+      : "",
     "",
     "渠道规则：",
     JSON.stringify(channelRules.rules || [], null, 2),
@@ -584,6 +671,8 @@ export function buildSeedancePlanMessages({
     "",
     `变体编号 branchVariantIndex=${branchVariantIndex}`,
     `分段编号 segmentIndex=${segmentIndex}`,
+    `是否最终 Seedance 切片 isFinalSeedanceSlice=${Boolean(isFinalSeedanceSlice)}`,
+    totalSegmentCount ? `Seedance 切片总数 totalSegmentCount=${totalSegmentCount}` : "",
     `输出时长 durationSec=${currentSliceDurationSec}`,
     `当前切片时长 sliceDurationSec=${currentSliceDurationSec}s`,
     notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
@@ -592,13 +681,15 @@ export function buildSeedancePlanMessages({
     JSON.stringify(SEEDANCE_PLAN_SCHEMA_HINT, null, 2),
     "",
     "网赚出量模板规则：",
-    "1. outputTemplateMode=three_slice_net_earning 时，优先采用三段式或多段式拼接结构；每个切片建议10-15秒，后端可按模型能力拆成 Seedance 片段。",
-    "2. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
-    "3. 每个切片都要围绕“网赚安利 + 提现展示”展开，形式以单人或双人口播推荐 + 产品界面展示为主，减少大段屏幕文字。",
-    "4. outputTemplateMode=short_drama_earning_highlight 时，开头先给短剧高光或冲突钩子，中后段切换至赚钱安利链路，重点展示产品剧源、产品界面、看短剧得奖励的链路，结尾强化提现能力。",
-    "5. moneyVisuals 可使用真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录，也可扩展为满屏撒钱/撒金币或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。",
-    "6. withdrawalVisual 必须说明提现展示方式，例如 Pix/Nubank 选项、银行卡到账动画、提现记录截图或本地支付方式；具体金额、门槛和到账时间只能来自 truthRules。",
-    "7. Seedance 原视频不得烧录字幕、不得生成长字幕或密集画面文字；字幕内容写入 subtitleWorkflow.subtitleScript，供 Pixel Tech 或后处理贴字幕。",
+	    "1. 出量模板由参考视频拆解决定：优先复用 wholeVideoConversion、storySegments、当前 currentSlice 的转化基调、段落转化风格、节奏、结构骨架、转化信号和变量分层；不要因为前端枚举值强行改成固定三段式或短剧高光模板。",
+	    "2. 切片策略由参考视频剧情段落决定：按 storySegments/seedanceSlices 的 startSec、endSec、sliceDurationSec 生成当前切片；只有同一剧情段过长时才按剧情节点拆成 8-15s 相邻 Seedance 切片。",
+	    "3. 如果 targetSegmentCount 是 1-5 的数字，必须在不改变参考视频核心转化基调的前提下，将参考视频剧情段落合并或拆分成用户选择的目标段数；每个 Seedance prompt 只写当前 currentSlice 对应的那一段，不要继续按原始拆解段数生成。",
+	    "4. 如果 targetSegmentCount=follow_decomposition，则完全跟随拆解出的 seedanceSlices/storySegments 数量和顺序。",
+	    "5. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
+	    "6. 每个切片是否出现 Hook、承接、说服、转化、短剧高光、UI 强反馈或提现包装，主要依据参考视频拆解中该段是否存在对应结构，不得为了模板强制补齐不存在的段落。",
+    "7. moneyVisuals 可使用真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录，也可扩展为满屏撒钱/撒金币或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。",
+    "8. withdrawalVisual 必须说明提现展示方式，例如 Pix/Nubank 选项、银行卡到账动画、提现记录截图或本地支付方式；具体金额、门槛和到账时间只能来自 truthRules。",
+    "9. Seedance 原视频不得烧录字幕、不得生成长字幕或密集画面文字；字幕内容写入 subtitleWorkflow.subtitleScript，供 Pixel Tech 或后处理贴字幕。",
     "",
     "Seedance prompt 补充要求：",
     "1. seedancePrompt 必须按镜头拆分，每个镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",
@@ -614,6 +705,7 @@ export function buildSeedancePlanMessages({
     "11. ending 和 CTA 默认不生成；除非 channelRules、branch.customPrompt 或 truthRules 明确要求，否则 cta/ending 必须为空，不要为了凑结构强行添加。",
     "12. 奖励数字与收益承诺约束：只有 truthRules 明确给出的金额、积分点数、奖励数值、门槛、到账条件才能出现在用户可见文案或 UI 描述中；未提供时不要写任何具体金额、点数增长、余额增长、提现档位、到账时间或保证性收益。",
     "13. 承诺强度按 promiseLevel 控制：非 strong_commitment 分支只能使用弱承诺（任务、积分、进度、奖励反馈、按规则可查看/申请/兑换），禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；strong_commitment 分支可以表达强承诺，但必须逐项来自 truthRules，不得扩写或增强。",
+    "14. CTA 图 / Ending 图只允许出现在最终切片末尾的承接说明中；不要在非最终切片引用，不要让 Seedance 提前生成完整尾卡，因为最终视频会把上传图片转成视频片段后用 ffmpeg 拼到最后。",
     "",
     "只返回 JSON 对象。"
   ].filter(Boolean).join("\n");
@@ -715,9 +807,11 @@ export async function generateSeedancePlan(context, input = {}) {
     ...context,
     currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
   }, messages, llmConfig);
+  const validationContext = resolveSeedancePlanValidationContext(input);
+  const repaired = repairFormalPlanContract(parseLlmJsonContent(content), buildRepairContext(input));
   const parsed = validateSeedancePlan(
-    parseLlmJsonContent(content),
-    resolveSeedancePlanValidationContext(input)
+    repaired,
+    validationContext
   );
   return parsed;
 }
@@ -748,10 +842,17 @@ export async function generateThirtySecondSeedancePlans(context, input = {}) {
   return [1, 2].map((segmentIndex) => {
     const segment = segments.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
       || segments[segmentIndex - 1];
-    return validateSeedancePlan(segment, resolveSeedancePlanValidationContext({
+    const segmentInput = {
       ...input,
-      segmentIndex
-    }));
+      segmentIndex,
+      totalSegmentCount: 2,
+      isFinalSeedanceSlice: segmentIndex === 2,
+      mandatoryMoneyVisualCarrier: segmentIndex === 1
+    };
+    return validateSeedancePlan(
+      repairFormalPlanContract(segment, buildRepairContext(segmentInput)),
+      resolveSeedancePlanValidationContext(segmentInput)
+    );
   });
 }
 

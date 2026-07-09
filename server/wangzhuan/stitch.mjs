@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { WangzhuanError } from "./http.mjs";
@@ -20,11 +20,12 @@ import {
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 
-const SEGMENT_REQUIRED_TASK_STATUSES = new Set(["waiting_upstream", "downloaded", "succeeded"]);
+const STITCH_READY_TASK_STATUSES = new Set(["downloaded", "succeeded"]);
 const FAILED_TASK_STATUSES = new Set(["failed", "skipped", "stopped"]);
 const execFileAsync = promisify(execFile);
 const DEFAULT_STITCH_TIMEOUT_MS = 120000;
 const DEFAULT_OVERLAY_TIMEOUT_MS = 120000;
+const DEFAULT_TAIL_IMAGE_DURATION_SEC = 2;
 const DISCLAIMER_TEMPLATE_IMAGES = Object.freeze({
   en: "public/assets/wangzhuan/disclaimers/en.png",
   pt: "public/assets/wangzhuan/disclaimers/pt.png",
@@ -46,6 +47,12 @@ function toConcatListPath(filePath) {
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
+}
+
+function telemetryRecorder(context) {
+  return typeof context.recordTelemetryEvent === "function"
+    ? context.recordTelemetryEvent
+    : (eventName, payload, options) => recordTelemetryEvent(context, eventName, payload, options);
 }
 
 function validateBatchId(batchId) {
@@ -344,7 +351,16 @@ function groupTasksByVariant(batch) {
   return [...groups.values()]
     .map((group) => ({
       ...group,
-      entries: group.entries.sort((left, right) => left.script.segmentIndex - right.script.segmentIndex)
+      entries: group.entries.sort((left, right) => {
+        const segmentSort = Number(left.script.segmentIndex || left.task.segmentIndex || 0) - Number(right.script.segmentIndex || right.task.segmentIndex || 0);
+        if (segmentSort) return segmentSort;
+        const storySort = Number(left.script.storySegmentIndex || left.task.storySegmentIndex || 0) - Number(right.script.storySegmentIndex || right.task.storySegmentIndex || 0);
+        if (storySort) return storySort;
+        const sliceSort = Number(left.script.seedanceSliceIndex || left.task.seedanceSliceIndex || 0) - Number(right.script.seedanceSliceIndex || right.task.seedanceSliceIndex || 0);
+        if (sliceSort) return sliceSort;
+        const startSort = Number(left.script.startSec ?? left.task.startSec ?? 0) - Number(right.script.startSec ?? right.task.startSec ?? 0);
+        return startSort || String(left.task.generationTaskId || "").localeCompare(String(right.task.generationTaskId || ""));
+      })
     }))
     .sort((left, right) => {
       const branchSort = String(left.branchId).localeCompare(String(right.branchId));
@@ -352,12 +368,16 @@ function groupTasksByVariant(batch) {
     });
 }
 
+export function hasMultiSliceStitchGroups(batch = {}) {
+  return groupTasksByVariant(batch).some((group) => group.entries.length > 1 || groupHasTailImageAssets(group));
+}
+
 function segmentOutputPath(context, batchId, outputId) {
   return join(batchDir(context, batchId), "segments", `${outputId}.mp4`);
 }
 
 function stitchedOutputPath(context, batchId, outputId) {
-  return join(batchDir(context, batchId), "stitched", `${outputId}_30s.mp4`);
+  return join(batchDir(context, batchId), "stitched", `${outputId}.mp4`);
 }
 
 function stitchReportPath(context, batchId, outputId) {
@@ -451,18 +471,32 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
   return outputs;
 }
 
-function hasTwoSubmittedSegments(group) {
-  return group.entries.length === 2 && group.entries.every(({ task }) => {
-    return task.seedanceTaskId && SEGMENT_REQUIRED_TASK_STATUSES.has(task.status);
+function groupHasTailImageAssets(group = {}) {
+  const branch = group.entries?.[group.entries.length - 1]?.script?.branchDraft || group.entries?.[0]?.script?.branchDraft || {};
+  return Boolean(
+    cleanString(branch.assetStoredPaths?.ctaAsset || branch.assetRelativePaths?.ctaAsset)
+    || cleanString(branch.assetStoredPaths?.endingAsset || branch.assetRelativePaths?.endingAsset)
+  );
+}
+
+function hasCompleteSubmittedSegments(group) {
+  return (group.entries.length >= 2 || groupHasTailImageAssets(group)) && group.entries.every(({ task }) => {
+    return task.seedanceTaskId && STITCH_READY_TASK_STATUSES.has(task.status) && Boolean(task.outputPath);
   });
 }
 
-function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null }) {
+export function isBatchReadyForStitch(batch = {}) {
+  const groups = groupTasksByVariant(batch);
+  return groups.length > 0 && groups.every((group) => hasCompleteSubmittedSegments(group));
+}
+
+function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null, tailSegments = [] }) {
   return {
     schemaVersion: "stitch_report.v1",
     outputId,
     status,
     segmentOutputIds,
+    tailSegments,
     tool: {
       provider: preflight.provider,
       version: preflight.version,
@@ -504,7 +538,7 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
 
 async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
   if (!ffmpegAvailableSync()) {
-    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法拼接 30s 视频");
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法拼接视频");
   }
   for (const segmentPath of segmentPaths) {
     if (!existsSync(segmentPath)) {
@@ -517,33 +551,119 @@ async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAU
     const listBody = segmentPaths.map((segmentPath) => `file '${toConcatListPath(segmentPath)}'`).join("\n");
     await writeFile(listPath, listBody, "utf8");
     await mkdir(dirname(outputPath), { recursive: true });
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", listPath,
-      "-c", "copy",
-      outputPath
-    ], {
-      timeout: timeoutMs,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024
-    });
+    try {
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listPath,
+        "-c", "copy",
+        outputPath
+      ], {
+        timeout: timeoutMs,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
+      });
+    } catch (error) {
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listPath,
+        "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-an",
+        outputPath
+      ], {
+        timeout: timeoutMs,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
+      }).catch(() => {
+        throw error;
+      });
+    }
   } finally {
     await rm(listDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
+function resolveTailAssetPath(context, branch = {}, assetKey = "") {
+  const relativePath = cleanString(branch.assetStoredPaths?.[assetKey] || branch.assetRelativePaths?.[assetKey]);
+  if (!relativePath) return "";
+  return join(context.userProjectRoot, relativePath);
+}
+
+function isSupportedTailImage(filePath = "") {
+  return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(filePath).toLowerCase());
+}
+
+async function createTailImageVideo(context, batchId, outputId, assetKey, imagePath, sequence, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+  if (!ffmpegAvailableSync()) {
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法生成尾图视频片段");
+  }
+  if (!isSupportedTailImage(imagePath) || !existsSync(imagePath)) {
+    throw new WangzhuanError("missing_required_file", "尾图素材不存在或不是支持的图片格式", {
+      assetKey,
+      imagePath
+    });
+  }
+  const target = join(batchDir(context, batchId), "tails", `${outputId}_${String(sequence).padStart(2, "0")}_${assetKey}.mp4`);
+  await mkdir(dirname(target), { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-loop", "1",
+    "-i", imagePath,
+    "-t", String(DEFAULT_TAIL_IMAGE_DURATION_SEC),
+    "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-an",
+    target
+  ], {
+    timeout: timeoutMs,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return {
+    assetKey,
+    filePath: userRelative(context, target),
+    fullPath: target,
+    durationSec: DEFAULT_TAIL_IMAGE_DURATION_SEC
+  };
+}
+
+async function createTailImageVideos(context, batch, group, outputId) {
+  const branch = group.entries[group.entries.length - 1]?.script?.branchDraft || group.entries[0]?.script?.branchDraft || {};
+  const tailAssets = [
+    ["ctaAsset", resolveTailAssetPath(context, branch, "ctaAsset")],
+    ["endingAsset", resolveTailAssetPath(context, branch, "endingAsset")]
+  ].filter(([, imagePath]) => imagePath);
+  const videos = [];
+  for (const [assetKey, imagePath] of tailAssets) {
+    videos.push(await createTailImageVideo(context, batch.batchId, outputId, assetKey, imagePath, videos.length + 1));
+  }
+  return videos;
+}
+
 async function createSucceededStitchOutput(context, batch, group, segmentOutputs, preflight, sequenceState) {
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
+  const tailVideos = await createTailImageVideos(context, batch, group, outputId);
+  const tailDurationSec = tailVideos.reduce((sum, item) => sum + Number(item.durationSec || 0), 0);
+  const totalDurationSec = (segmentOutputs.reduce((sum, output) => sum + Number(output.durationSec || 0), 0) + tailDurationSec)
+    || group.entries.reduce((sum, entry) => sum + Number(entry.task.durationSec || entry.script.durationSec || 0), 0)
+    || Number(batch.estimate?.durationSec || 0);
   const displayFileName = buildOutputDisplayName({
     batch,
     script: group.entries[0]?.script,
     outputId,
-    durationSec: 30
+    durationSec: totalDurationSec
   });
-  const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
+  const segmentPaths = [
+    ...segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath)),
+    ...tailVideos.map((item) => item.fullPath)
+  ];
   try {
     await concatSegmentVideos(target, segmentPaths);
   } catch (error) {
@@ -566,7 +686,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
     segmentOutputIds: segmentOutputs.map((output) => output.outputId),
     preflight,
     status: "succeeded",
-    disclaimerOverlay
+    disclaimerOverlay,
+    tailSegments: tailVideos.map(({ assetKey, filePath, durationSec }) => ({ assetKey, filePath, durationSec }))
   });
   const reportPath = await writeReport(context, batch.batchId, report);
   return {
@@ -578,7 +699,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       branchLabel: group.branchLabel || "",
       branchVariantIndex: group.branchVariantIndex,
       generationTaskIds: group.entries.map((entry) => entry.task.generationTaskId),
-      durationSec: 30,
+      durationSec: totalDurationSec,
+      tailSegments: tailVideos.map(({ assetKey, filePath, durationSec }) => ({ assetKey, filePath, durationSec })),
       kind: "stitched_video",
       filePath,
       displayFileName,
@@ -664,15 +786,12 @@ export async function finalizeSegmentBatch(context, batchId) {
 export async function stitchBatchSegments(context, batchId, options = {}) {
   const preflight = preflightStitcher(context);
   if (preflight.status === "unsupported") {
-    throw new WangzhuanError("stitcher_unavailable", "30s 拼接能力不可用", { batchId });
+    throw new WangzhuanError("stitcher_unavailable", "拼接能力不可用", { batchId });
   }
 
   const batch = await readBatch(context, batchId);
-  if (batch.estimate?.durationSec !== 30) {
-    throw new WangzhuanError("no_segments", "没有可用于拼接的分段视频", { batchId, durationSec: batch.estimate?.durationSec });
-  }
   const groups = groupTasksByVariant(batch);
-  if (!groups.length || groups.some((group) => !hasTwoSubmittedSegments(group))) {
+  if (!groups.length || !isBatchReadyForStitch(batch)) {
     throw new WangzhuanError("no_segments", "没有可用于拼接的分段视频", { batchId });
   }
 
@@ -738,8 +857,9 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
     stitchReports
   }, nextStatus === "qc" ? "stitch_completed" : "stitch_progress");
   await writeTaskMaps(context, saved);
+  const recordEvent = telemetryRecorder(context);
   for (const report of stitchReports.slice(-groups.length)) {
-    await recordTelemetryEvent(context, "stitch_completed", {
+    await recordEvent("stitch_completed", {
       batchId,
       outputId: report.outputId,
       status: report.status,

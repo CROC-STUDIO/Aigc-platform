@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isRetryableLlmError,
   llmUsesGeminiCompat,
   llmUsesGeminiNativeApi,
   llmUsesSkylinkGeminiChatBridge
 } from "../../server/wangzhuan/llm-config.mjs";
+import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
 import { callLlmStreaming } from "../../server/wangzhuan/llm-stream.mjs";
 
 const skylinkGemini = {
@@ -25,6 +27,15 @@ const googleGemini = {
   timeoutMs: 30000,
   apiKey: "test-key"
 };
+
+test("isRetryableLlmError covers timeout, 429, invalid_json and schema_invalid", () => {
+  assert.equal(isRetryableLlmError(new WangzhuanError("model_failed", "timeout", { reason: "timeout" })), true);
+  assert.equal(isRetryableLlmError(new WangzhuanError("model_failed", "rate limited", { status: 429 })), true);
+  assert.equal(isRetryableLlmError(new WangzhuanError("model_failed", "bad json", { reason: "invalid_json" })), true);
+  assert.equal(isRetryableLlmError(new WangzhuanError("schema_invalid", "incomplete", { missingFields: ["hook"] })), true);
+  assert.equal(isRetryableLlmError(new WangzhuanError("model_failed", "bad request", { status: 400 })), false);
+  assert.equal(isRetryableLlmError(new WangzhuanError("validation_error", "bad input")), false);
+});
 
 test("llmUsesGeminiCompat matches gemini model names and providers", () => {
   assert.equal(llmUsesGeminiCompat(skylinkGemini), true);

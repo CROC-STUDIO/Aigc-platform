@@ -15,16 +15,21 @@ const PLAN_SIGNATURE_FIELDS = Object.freeze([
   "targetRegions",
   "language",
   "languages",
+  "regions",
+  "currencySymbol",
   "materialDirection",
   "materialDirectionCustom",
   "outputTemplateMode",
   "sliceStrategy",
+  "targetSegmentCount",
   "moneyVisuals",
   "subtitleWorkflow",
+  "storySegments",
+  "seedanceSlices",
+  "conversionEffectOpportunities",
   "branches",
   "voiceoverStyle",
   "promiseLevel",
-  "currencySymbol",
   "cta",
   "ending",
   "variantPrompt",
@@ -124,7 +129,13 @@ function clampProgress(value, ceiling = 99) {
 }
 
 export function createBackgroundJob(type, runner, options = {}) {
-  const idPrefix = type === "seedance_plan" ? "planjob" : "decompjob";
+  const idPrefix = {
+    decomposition: "decompjob",
+    seedance_plan: "planjob",
+    codex_seedance_prompt: "codexpromptjob",
+    auto_seedance_prompt: "autopromptjob",
+    output_expansion: "expandjob"
+  }[type] || "bgjob";
   const context = options.context || null;
   const job = {
     id: `${idPrefix}_${Date.now()}_${randomBytes(4).toString("hex")}`,

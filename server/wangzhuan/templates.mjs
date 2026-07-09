@@ -78,6 +78,19 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function normalizeLegacyDefaultDurationSec(value) {
+  const durationSec = Number(value);
+  return durationSec === 30 ? 30 : 15;
+}
+
+function normalizeTemplateDraftForSave(draft) {
+  if (!draft || typeof draft !== "object") return draft;
+  return {
+    ...draft,
+    defaultDurationSec: normalizeLegacyDefaultDurationSec(draft.defaultDurationSec)
+  };
+}
+
 export function validateTemplateDraft(draft) {
   const missingFields = [];
   if (!draft || typeof draft !== "object") {
@@ -163,7 +176,8 @@ export async function saveTemplate(context, request = {}) {
   if (!TEMPLATE_SAVE_MODES.includes(request.mode)) {
     throw new WangzhuanError("validation_error", "模板保存模式不支持", { field: "mode" });
   }
-  validateTemplateDraft(request.draft);
+  const normalizedDraft = normalizeTemplateDraftForSave(request.draft);
+  validateTemplateDraft(normalizedDraft);
 
   const store = await loadTemplateStore(context);
   const now = new Date().toISOString();
@@ -196,7 +210,7 @@ export async function saveTemplate(context, request = {}) {
     versionNumber,
     status: "active",
     isDefault,
-    draft: clone(request.draft),
+    draft: clone(normalizedDraft),
     createdBy: currentUserId(context),
     createdAt: now,
     updatedAt: now

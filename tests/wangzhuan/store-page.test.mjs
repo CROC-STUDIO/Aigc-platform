@@ -32,7 +32,17 @@ test("App Store inspect uses Apple Lookup and normalizes metadata candidates", a
           ],
           ipadScreenshotUrls: ["https://is1-ssl.mzstatic.com/image/ipad1.png"],
           previewUrl: "https://video-ssl.itunes.apple.com/preview.m4v",
-          trackContentRating: "12+"
+          trackContentRating: "12+",
+          trackId: 1234567890,
+          bundleId: "com.rellmate.drama",
+          trackViewUrl: "https://apps.apple.com/us/app/reelmate-drama-chat/id1234567890",
+          averageUserRating: 4.7,
+          userRatingCount: 3456,
+          languageCodesISO2A: ["EN", "PT"],
+          version: "1.2.3",
+          currentVersionReleaseDate: "2026-07-01T00:00:00Z",
+          minimumOsVersion: "15.0",
+          fileSizeBytes: "123456789"
         }]
       });
     }
@@ -53,6 +63,24 @@ test("App Store inspect uses Apple Lookup and normalizes metadata candidates", a
   assert.equal(result.candidates.videoPreviews.length, 1);
   assert.ok(result.candidates.visibleTexts.includes("ReelMate: Drama & Chat"));
   assert.ok(result.candidates.coreSellingPoints.includes("Watch addictive short dramas."));
+  assert.equal(result.metadata.appId, "1234567890");
+  assert.equal(result.metadata.bundleId, "com.rellmate.drama");
+  assert.equal(result.metadata.storeUrl, "https://apps.apple.com/us/app/reelmate-drama-chat/id1234567890");
+  assert.equal(result.metadata.contentRating, "12+");
+  assert.deepEqual(result.metadata.sourceLanguages, ["EN", "PT"]);
+  assert.equal(result.metadata.rating, 4.7);
+  assert.equal(result.metadata.ratingCount, 3456);
+  assert.equal(result.metadata.version, "1.2.3");
+  assert.equal(result.metadata.minimumOsVersion, "15.0");
+  assert.equal(result.metadata.fileSizeBytes, "123456789");
+  assert.equal(result.productBrief.productName, "ReelMate: Drama & Chat");
+  assert.equal(result.productBrief.contentRating, "12+");
+  assert.ok(result.productBrief.mustShow.includes("产品 logo/icon"));
+  assert.ok(result.productBrief.mustShow.includes("产品截图中的真实 UI、页面布局和功能入口"));
+  assert.equal(result.productBrief.assetSlots.productIcon, "https://is1-ssl.mzstatic.com/image/icon.png");
+  assert.equal(result.productBrief.assetSlots.productScreenshots.length, 3);
+  assert.equal(result.productBrief.assetSlots.productRecording, "https://video-ssl.itunes.apple.com/preview.m4v");
+  assert.match(result.productBrief.mustAvoid.join("\n"), /不要编造商店页未提供的价格/);
 
   assert.equal(calls.length, 1);
   const lookupUrl = new URL(calls[0].url);
@@ -107,6 +135,8 @@ test("Google Play inspect fetches store HTML and normalizes app metadata candida
             "name": "ReelMate: Drama & Chat",
             "author": { "name": "Rellmate Studio" },
             "applicationCategory": "Entertainment",
+            "contentRating": "Teen",
+            "aggregateRating": { "ratingValue": "4.6", "ratingCount": "98765" },
             "description": "Watch addictive short dramas. Chat with story characters after dramatic twists.",
             "image": "https://play-lh.googleusercontent.com/icon=w240-h480",
             "screenshot": [
@@ -150,6 +180,16 @@ test("Google Play inspect fetches store HTML and normalizes app metadata candida
   assert.equal(result.candidates.videoPreviews.length, 1);
   assert.ok(result.candidates.visibleTexts.includes("ReelMate: Drama & Chat"));
   assert.ok(result.candidates.coreSellingPoints.includes("Watch addictive short dramas."));
+  assert.equal(result.metadata.appId, "com.rellmate.drama.shortvideo");
+  assert.equal(result.metadata.storeUrl, "https://play.google.com/store/apps/details?id=com.rellmate.drama.shortvideo&hl=pt_BR&gl=BR");
+  assert.equal(result.metadata.contentRating, "Teen");
+  assert.equal(result.metadata.rating, 4.6);
+  assert.equal(result.metadata.ratingCount, 98765);
+  assert.equal(result.productBrief.productName, "ReelMate: Drama & Chat");
+  assert.equal(result.productBrief.category, "Entertainment");
+  assert.equal(result.productBrief.assetSlots.productIcon, "https://play-lh.googleusercontent.com/icon=w240-h480");
+  assert.equal(result.productBrief.assetSlots.productScreenshots.length, 3);
+  assert.equal(result.productBrief.assetSlots.productRecording, "https://www.youtube.com/watch?v=abc123XYZ_-");
 
   assert.equal(calls.length, 1);
   const pageUrl = new URL(calls[0].url);
