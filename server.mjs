@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from "node:fs";
-import { access, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createReadStream, createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { access, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { networkInterfaces } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
@@ -47,10 +47,12 @@ let authStore;
 let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
-const MODEL = "codex-gpt-image-2";
+const MODEL = "gpt-image-2";
+let appVersionCache = "";
 const IMAGE_MODEL_OPTIONS = {
-  "codex-gpt-image-2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
-  "codex-gpt-image2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "codex-gpt-image-2": { model: "gpt-image-2", label: "gpt-image-2" },
+  "codex-gpt-image2": { model: "gpt-image-2", label: "gpt-image-2" },
+  "gpt-image-2": { model: "gpt-image-2", label: "gpt-image-2" },
   "ByteDance-Seedream-5-0-lite": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" },
   "doubao-seedream-5-0-260128": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" }
 };
@@ -126,6 +128,18 @@ function clearCookie(name) {
 async function loadUsers() {
   authStore = createAuthStore({ usersPath: USERS_PATH });
   await authStore.init();
+}
+
+async function appVersion() {
+  if (appVersionCache) return appVersionCache;
+  const hash = createHash("sha256");
+  for (const file of ["package.json", "server.mjs", "public/app.js", "public/index.html", "public/styles.css"]) {
+    const fullPath = join(__dirname, file);
+    hash.update(file);
+    hash.update(await readFile(fullPath).catch(() => Buffer.from("missing")));
+  }
+  appVersionCache = String(process.env.AIGC_APP_VERSION || hash.digest("hex").slice(0, 12));
+  return appVersionCache;
 }
 
 async function userFromRequest(req) {
@@ -274,7 +288,14 @@ async function requireUserApiKeyForModel(model, label = "模型") {
 function taiEnvForApiKey(apiKey) {
   const clean = String(apiKey || "").trim();
   if (!clean) return {};
+  const taiHome = join(process.env.TEMP || process.env.TMP || __dirname, "aigc-platform-tai", sanitizeSegment(currentUserId(), "user"));
+  mkdirSync(taiHome, { recursive: true });
+  const endpoint = String(process.env.SKYLINK_ENDPOINT || process.env.TAI_ENDPOINT || "https://skylink-gateway.com/api/v1").trim();
   return {
+    USERPROFILE: taiHome,
+    HOME: taiHome,
+    SKYLINK_ENDPOINT: endpoint,
+    SKYLINK_API_KEY: clean,
     OPENAI_API_KEY: clean,
     OPENAI_KEY: clean,
     REVERSE_PROMPT_API_KEY: clean,
@@ -350,6 +371,17 @@ function taiEntryPath() {
   const found = candidates.find((item) => existsSync(item));
   if (!found) throw new Error("Tai CLI not found. Please install it with: npm install -g tai-ai, or set TAI_ENTRY to tai.min.js");
   return found;
+}
+
+function toolPath(name) {
+  const exe = process.platform === "win32" ? `${name}.exe` : name;
+  const candidates = [
+    process.env[`${name.toUpperCase()}_PATH`],
+    join(__dirname, "tools", "ffmpeg", "bin", exe),
+    join(homedir(), "Documents", "Codex", "2026-05-19", "seedance-ad-video-seedance", "tools", "ffmpeg-8.1.1-essentials_build", "bin", exe),
+    name
+  ].filter(Boolean);
+  return candidates.find((item) => item === name || existsSync(item)) || name;
 }
 
 function dirs() {
@@ -580,7 +612,7 @@ function chineseVideoSpecialRequirement(fileName, analysis = null) {
     : [
         `来源：本段默认要求根据本次上传视频 ${fileName} 生成，不是按竞品素材文件夹编号套模板。`,
         "视频反推：请观察当前视频的广告类型、镜头远近、主体入场方向、UI/文字层级、动作节奏、道具互动、情绪变化和转场时机，并把这些抽象关系写入我方生成要求。只有当前视频明确是战斗/塔防玩法时，才反推攻击因果、升级链路或敌我方向。",
-        "首帧要求：先用视频中最能代表广告布局的一帧作为 codex-gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
+        "首帧要求：先用视频中最能代表广告布局的一帧作为 gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
         "替换规则：竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都必须改成我方原创风格；我方角色或素材要替换原参考中的对应主体位置，不能在原主体旁边额外新增。非战斗素材不要强行加入怪物、攻击、技能、升级卡或塔防元素。"
       ].join("\n");
   return `${frameText}\n视频节奏：生成视频时继续参考本视频的前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮记忆点和结尾停留，但只保留抽象节奏、镜头语言和广告关系，不复制竞品具体元素。只有当前视频明确是战斗玩法时，才加入攻击反馈或升级节奏；否则保持非战斗广告类型。`;
@@ -596,7 +628,7 @@ function specialRequirementJson({ type, fileName, analysis = null, videoPrompt =
   const seedancePrompt = ai?.seedance2_video_prompt || (isVideo
     ? [
         `参考当前竞品视频 ${fileName} 的反推结构制作 Seedance 2.0 视频，但只保留抽象镜头语言、节奏和广告关系。`,
-        "先根据 codex-gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
+        "先根据 gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
         "如果当前视频明确是战斗/塔防玩法，才保留敌我方向、单位位置、升级链路和攻击因果；如果不是战斗视频，必须保持原参考的非战斗类型，不要加入怪物进攻、武器、技能、血条、伤害数字、升级卡或战斗UI。",
         "所有竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都要替换成我方原创风格；我方角色/怪物/Logo必须替换原参考里的对应主体位置，不能与原主体同时存在。"
       ].join("\n")
@@ -741,7 +773,7 @@ async function reversePromptWithVisionModel(imagePath, { type = "image", fileNam
     "台词语种必须保留：除非用户明确要求翻译或改语种，新视频不能改变原视频台词语种。例如原版是英文，新视频也必须是英文；原版是中文，新视频也必须是中文。",
     "如果不是战斗素材，要明确 non_combat_guard，禁止强行加入敌人、怪物进攻、攻击、武器、技能、血条、伤害数字、升级卡、战斗UI。",
     "如果是视频封面，请根据封面和上传视频语境写 seedance2_video_prompt：用于 Seedance 2.0 生成15秒竖屏视频，描述前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮和结尾停留，只保留抽象节奏，不复制竞品IP。",
-    "image2_prompt_guidance 必须用于 codex-gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
+    "image2_prompt_guidance 必须用于 gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
     "JSON字段：material_type, visual_summary, composition, subjects, expressions, scene, props, text_logo_ui, dialogue, camera, color_lighting, ad_mechanic, is_combat_reference, non_combat_guard, infringement_avoidance, image2_prompt_guidance, seedance2_video_prompt, user_edit_tip。dialogue格式为 { has_dialogue, language, original_lines, preserve_language, instruction }。"
   ].join("\n");
   const inputText = `${instruction}\n当前素材类型：${type}\n文件名：${fileName}\n尺寸：${width || "unknown"}x${height || "unknown"}，${orientationLabel || "未知比例"}`;
@@ -913,6 +945,7 @@ async function readImageDimensions(imagePath) {
 }
 
 const remoteImageCache = new Map();
+const remoteVideoCache = new Map();
 
 function addLog(type, message, data = {}) {
   const runState = getRunState();
@@ -936,6 +969,37 @@ function summarizeErrorText(text) {
     .slice(0, 700);
 }
 
+function isImageModelAccessError(text = "") {
+  const value = String(text || "");
+  return /401|403|unauthorized|forbidden|invalid api key|token invalidated|auth_chat_requirements|permission denied|permission_required|not authorized|access denied/i.test(value) ||
+    /model[^\\n]*(not support|unsupported|not available|not enabled|not found|forbidden|unauthorized|permission)/i.test(value) ||
+    /(not support|unsupported)[^\\n]*model/i.test(value);
+}
+
+function taiDiagnosticText(error) {
+  const stdout = String(error?.stdout ?? "");
+  const stderr = String(error?.stderr ?? "");
+  const message = String(error?.message ?? "");
+  const diagnosticMessage = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^\[error\]/i.test(line) || /HTTP\s+\d{3}|RequestId|quota|insufficient|unauthorized|forbidden|permission|token invalidated|auth_chat_requirements|access denied|try again later|failed|timeout|Too many requests|429/i.test(line))
+    .join("\n");
+  return `${stdout}\n${stderr}\n${diagnosticMessage}`.trim();
+}
+
+function isImageQuotaError(text = "") {
+  const value = String(text || "");
+  return /no available codex image quota/i.test(value) ||
+    /quota[^\\n]*(exceeded|used up|unavailable|not available|insufficient|empty|limit)/i.test(value) ||
+    /(insufficient|not enough)[^\\n]*(credit|balance|quota)/i.test(value) ||
+    /balance[^\\n]*(insufficient|not enough|too low|unavailable)/i.test(value);
+}
+
+function isBytePlusAssetUploadRejected(text = "") {
+  return /Asset upload rejected|CreateAsset HTTP 400|BytePlus Asset API/i.test(String(text || ""));
+}
+
 function sleepWithStop(ms) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -949,9 +1013,11 @@ function sleepWithStop(ms) {
   });
 }
 
-function execTai(args) {
+function execTai(args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = execFile("node", [taiEntryPath(), ...args], { cwd: dirs().outputDir, maxBuffer: 1024 * 1024 * 20, windowsHide: true }, (error, stdout, stderr) => {
+    const childEnv = { ...process.env, ...(options.env || {}) };
+    for (const key of options.unsetEnv || []) delete childEnv[key];
+    const child = execFile("node", [taiEntryPath(), ...args], { cwd: dirs().outputDir, env: childEnv, maxBuffer: 1024 * 1024 * 20, windowsHide: true }, (error, stdout, stderr) => {
       activeChildren().delete(child);
       const raw = `${stdout ?? ""}\n${stderr ?? ""}`;
       const succeededBeforeCrash = /Status:\s*succeeded/i.test(raw) && /\[1\]\s*\S+/i.test(raw);
@@ -960,6 +1026,22 @@ function execTai(args) {
         resolve({ stdout, stderr });
         return;
       }
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+    activeChildren().add(child);
+  });
+}
+
+function execTool(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, { cwd: options.cwd || dirs().outputDir, maxBuffer: 1024 * 1024 * 20, windowsHide: true }, (error, stdout, stderr) => {
+      activeChildren().delete(child);
       if (error) {
         error.stdout = stdout;
         error.stderr = stderr;
@@ -996,7 +1078,7 @@ async function listOutputFiles(dir) {
     if (!type) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
+    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -1016,6 +1098,8 @@ async function listVideoFiles(dir) {
 
 function inferBatchFromOutputName(name) {
   const stem = parse(name).name;
+  const timeBatch = stem.match(/^(\d{8}_\d{4,6}|\d{12,14})(?:_|$)/);
+  if (timeBatch) return timeBatch[1];
   const markers = ["_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
   const indexes = markers.map((marker) => stem.indexOf(marker)).filter((index) => index > 0);
   if (!indexes.length) return "ungrouped";
@@ -1117,21 +1201,17 @@ function competitorSettingsPath(folder) {
 }
 
 async function readCompetitorSettings(folder) {
-  const fallback = { roleCount: 1, monsterCount: 0, useLogo: false, imageSize: DEFAULT_OUTPUT_SIZE, videoSize: DEFAULT_OUTPUT_SIZE, outputSize: DEFAULT_OUTPUT_SIZE };
+  const fallback = { roleCount: 1, monsterCount: 0, useLogo: false, visualStyleMode: "2D" };
   const target = competitorSettingsPath(folder);
   if (!existsSync(target)) return fallback;
   try {
     const data = JSON.parse(await readFile(target, "utf8"));
-    const legacySize = normalizeStoredOutputSize(data.outputSize ?? fallback.outputSize);
-    const imageSize = normalizeStoredOutputSize(data.imageSize ?? legacySize);
-    const videoSize = normalizeStoredOutputSize(data.videoSize ?? legacySize);
+    const visualStyleMode = String(data.visualStyleMode || data.styleMode || fallback.visualStyleMode).toUpperCase() === "3D" ? "3D" : "2D";
     return {
       roleCount: Math.max(0, Math.min(8, Number(data.roleCount ?? fallback.roleCount))),
       monsterCount: Math.max(0, Math.min(8, Number(data.monsterCount ?? fallback.monsterCount))),
       useLogo: Boolean(data.useLogo ?? fallback.useLogo),
-      imageSize,
-      videoSize,
-      outputSize: imageSize
+      visualStyleMode
     };
   } catch {
     return fallback;
@@ -1146,9 +1226,7 @@ async function saveCompetitorSettings(body = {}) {
   const roleCount = Math.max(0, Math.min(8, Number(body.roleCount ?? existing.roleCount)));
   const monsterCount = Math.max(0, Math.min(8, Number(body.monsterCount ?? existing.monsterCount)));
   const useLogo = Boolean(body.useLogo ?? existing.useLogo);
-  const imageSize = normalizeOutputSize(body.imageSize ?? body.outputSize ?? existing.imageSize ?? existing.outputSize);
-  const videoSize = normalizeOutputSize(body.videoSize ?? existing.videoSize ?? imageSize);
-  const outputSize = imageSize;
+  const visualStyleMode = String(body.visualStyleMode ?? existing.visualStyleMode ?? "2D").toUpperCase() === "3D" ? "3D" : "2D";
   const specialRequirement = String(body.specialRequirement ?? body.text ?? "");
   const specialRequirementPath = safeInsideProject(join(dir, "\u7528\u6237\u7279\u6b8a\u8981\u6c42.txt"));
   await writeFile(specialRequirementPath, specialRequirement, "utf8");
@@ -1158,8 +1236,8 @@ async function saveCompetitorSettings(body = {}) {
     await writeFile(videoPromptPath, jsonVideoPrompt, "utf8");
   }
   const settingsPath = competitorSettingsPath(folder);
-  await writeFile(settingsPath, JSON.stringify({ roleCount, monsterCount, useLogo, imageSize, videoSize, outputSize }, null, 2), "utf8");
-  return { ok: true, folder, roleCount, monsterCount, useLogo, imageSize, videoSize, outputSize, specialRequirementPath, settingsPath };
+  await writeFile(settingsPath, JSON.stringify({ roleCount, monsterCount, useLogo, visualStyleMode }, null, 2), "utf8");
+  return { ok: true, folder, roleCount, monsterCount, useLogo, visualStyleMode, specialRequirementPath, settingsPath };
 }
 
 async function selectedOutputsForBatches(body = {}) {
@@ -1321,14 +1399,18 @@ async function loadMaterials() {
     const specialRequirementPath = join(dir, "\u7528\u6237\u7279\u6b8a\u8981\u6c42.txt");
     const specialRequirement = await readTextIfExists(specialRequirementPath, "");
     const settings = await readCompetitorSettings(folder);
-    const defaultOutputSize = DEFAULT_OUTPUT_SIZE;
-    const imageSize = settings.imageSize || settings.outputSize || defaultOutputSize || layout.size;
-    const videoSize = settings.videoSize || imageSize;
+    const defaultOutputSize = layout.size || DEFAULT_OUTPUT_SIZE;
+    const imageSize = defaultOutputSize;
+    const videoSize = defaultOutputSize;
     const outputSize = imageSize;
+    const referenceVideoPath = videos[0]?.path || "";
+    const referenceVideoDuration = referenceVideoPath ? await readVideoDurationSeconds(referenceVideoPath) : 0;
     const videoPromptPath = join(dir, "视频反推提示词.txt");
     const videoPrompt = await readTextIfExists(videoPromptPath, "");
+    const imagePromptPath = join(dir, "图片反推提示词.txt");
+    const imagePrompt = await readTextIfExists(imagePromptPath, "");
     const displayName = await readCompetitorDisplayName(folder);
-    competitors.push({ name: folder, displayName, path: dir, images, videos, layout, defaultOutputSize, imageSize, videoSize, outputSize, roleCount: settings.roleCount, monsterCount: settings.monsterCount, useLogo: settings.useLogo, specialRequirement, specialRequirementPath, videoPrompt, videoPromptPath });
+    competitors.push({ name: folder, displayName, path: dir, images, videos, layout, defaultOutputSize, imageSize, videoSize, outputSize, referenceVideoPath, referenceVideoDuration, roleCount: settings.roleCount, monsterCount: settings.monsterCount, useLogo: settings.useLogo, visualStyleMode: settings.visualStyleMode || "2D", specialRequirement, specialRequirementPath, imagePrompt, imagePromptPath, videoPrompt, videoPromptPath });
   }
 
   const outputs = await listOutputFiles(dirs().outputDir);
@@ -1392,6 +1474,21 @@ function layoutWithOutputSize(layout, outputSize = "") {
   };
 }
 
+function imageSizeForModel(outputSize = "", imageModel = MODEL) {
+  const normalized = normalizeOutputSize(outputSize) || DEFAULT_OUTPUT_SIZE;
+  const [width, height] = normalized.split("x").map(Number);
+  const tall = height > width * 1.08;
+  const wide = width > height * 1.08;
+  if (String(imageModel || "") === "doubao-seedream-5-0-260128") {
+    if (tall) return "1440x2560";
+    if (wide) return "2560x1440";
+    return "1920x1920";
+  }
+  if (tall) return "1024x1536";
+  if (wide) return "1536x1024";
+  return "1024x1024";
+}
+
 function ratioFromOutputSize(outputSize = "") {
   const normalized = normalizeOutputSize(outputSize);
   const [width, height] = normalized.split("x").map(Number);
@@ -1414,6 +1511,125 @@ function videoSizeInstruction(outputSize = "") {
   return `目标视频尺寸：${normalized}，画幅比例按 ${ratio} 构图。`;
 }
 
+async function readVideoDurationSeconds(videoPath = "") {
+  if (!videoPath || !existsSync(videoPath)) return 0;
+  try {
+    const ffprobe = toolPath("ffprobe");
+    const { stdout } = await execTool(ffprobe, [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      videoPath
+    ]);
+    const seconds = Number.parseFloat(String(stdout || "").trim());
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  } catch (error) {
+    addLog("warn", `VIDEO_DURATION_READ_FAILED ${basename(videoPath)} ${summarizeErrorText(`${error.stderr ?? ""}\n${error.message ?? ""}`)}`);
+    return 0;
+  }
+}
+
+async function readVideoMetadata(videoPath = "") {
+  if (!videoPath || !existsSync(videoPath)) return null;
+  try {
+    const ffprobe = toolPath("ffprobe");
+    const { stdout } = await execTool(ffprobe, [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,duration",
+      "-of", "json",
+      videoPath
+    ]);
+    const stream = JSON.parse(stdout || "{}")?.streams?.[0] || {};
+    const width = Number(stream.width) || 0;
+    const height = Number(stream.height) || 0;
+    const duration = Number.parseFloat(stream.duration || "0") || 0;
+    return width && height ? { width, height, duration, pixelCount: width * height } : null;
+  } catch (error) {
+    addLog("warn", `VIDEO_METADATA_READ_FAILED ${basename(videoPath)} ${summarizeErrorText(`${error.stderr ?? ""}\n${error.message ?? ""}`)}`);
+    return null;
+  }
+}
+
+function isSeedanceCompatibleVideo(metadata) {
+  return Boolean(metadata?.width && metadata?.height && metadata.pixelCount >= 409600 && (!metadata.duration || (metadata.duration >= 1.8 && metadata.duration <= 15.2)));
+}
+
+function isVideoCodecCompatible(metadata) {
+  return Boolean(metadata?.width && metadata?.height);
+}
+
+async function seedanceSafeVideoReference(videoPath = "", workDir = dirs().recordDir) {
+  if (!videoPath || !existsSync(videoPath)) return "";
+  const metadata = await readVideoMetadata(videoPath);
+  if (isSeedanceCompatibleVideo(metadata) && existsSync(videoPath)) return videoPath;
+  await mkdir(workDir, { recursive: true });
+  const target = join(workDir, `${parse(videoPath).name}_seedance_ref_1024.mp4`);
+  const ffmpeg = toolPath("ffmpeg");
+  const sourceWidth = metadata?.width || 576;
+  const sourceHeight = metadata?.height || 1024;
+  const scale = sourceWidth >= sourceHeight ? Math.max(1, 1024 / sourceWidth) : Math.max(1, 1024 / sourceHeight);
+  const width = Math.max(2, Math.round((sourceWidth * scale) / 2) * 2);
+  const height = Math.max(2, Math.round((sourceHeight * scale) / 2) * 2);
+  await execTool(ffmpeg, [
+    "-y",
+    "-i", videoPath,
+    ...(metadata?.duration && metadata.duration > 15.2 ? ["-t", "15"] : []),
+    "-vf", `scale=${width}:${height}`,
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-preset", "veryfast",
+    "-crf", "20",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    target
+  ]);
+  const nextMetadata = await readVideoMetadata(target);
+  addLog("video-ref-normalized", `REFERENCE_VIDEO_NORMALIZED ${basename(videoPath)} ${metadata?.width || "?"}x${metadata?.height || "?"} ${metadata?.duration ? `${metadata.duration.toFixed(1)}s` : "?s"} -> ${nextMetadata?.width || "?"}x${nextMetadata?.height || "?"} ${nextMetadata?.duration ? `${nextMetadata.duration.toFixed(1)}s` : "?s"}`, { source: videoPath, output: target });
+  return target;
+}
+
+function normalizeSeedanceDuration(seconds = 15) {
+  const rounded = Math.round(Number(seconds) || 15);
+  return Math.max(4, Math.min(15, rounded));
+}
+
+function seedanceSegmentDurations(totalSeconds = 15) {
+  const total = Math.max(4, Math.round(Number(totalSeconds) || 15));
+  if (total <= 15) return [normalizeSeedanceDuration(total)];
+  const segments = [];
+  let remaining = total;
+  while (remaining > 0) {
+    if (remaining <= 15) {
+      segments.push(normalizeSeedanceDuration(remaining));
+      break;
+    }
+    if (remaining < 19) {
+      const first = Math.ceil(remaining / 2);
+      segments.push(normalizeSeedanceDuration(first));
+      remaining -= first;
+    } else {
+      segments.push(15);
+      remaining -= 15;
+    }
+  }
+  return segments;
+}
+
+async function concatVideos(segmentPaths, outputPath) {
+  if (segmentPaths.length === 1) {
+    await copyFile(segmentPaths[0], outputPath);
+    return;
+  }
+  const ffmpeg = toolPath("ffmpeg");
+  if (!existsSync(ffmpeg) && ffmpeg !== "ffmpeg") throw new Error("未找到 ffmpeg，无法拼接超过 15 秒的分段视频");
+  const listPath = join(dirname(outputPath), `${parse(outputPath).name}_concat.txt`);
+  const content = segmentPaths.map((item) => `file '${String(item).replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n");
+  await writeFile(listPath, content, "utf8");
+  await execTool(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outputPath], { cwd: dirname(outputPath) });
+}
+
 function resolveVideoModel(value = "") {
   return VIDEO_MODEL_OPTIONS[String(value || "").trim()] || VIDEO_MODEL_OPTIONS["dreamina-seedance-2-0-mini"];
 }
@@ -1425,12 +1641,18 @@ function layoutLockBlock(competitor) {
 
 function videoReferenceBlock(competitor) {
   if (!competitor.videos?.length && !competitor.videoPrompt) return "";
+  if (competitor.referenceVideoPath || competitor.videos?.length) {
+    const actionLine = isCombatReference(competitor)
+      ? "If and only if the current uploaded reference video visibly contains gameplay or battle, preserve its abstract gameplay layout and camera rhythm."
+      : "The current uploaded reference video should be treated as a direct storyboard and pacing reference, not as text keywords. Preserve only its shot rhythm, subject placement, emotional beats, camera distance, prop interaction, product/logo placement, editing cadence, and ending hold.";
+    return `\nVideo reference guidance: ${actionLine} Do not infer or add battle, enemy, monster wave, attack, weapon, skill release, upgrade card, HP bar, damage number, tower-defense lane, or victory battle settlement unless these elements are clearly visible in the current uploaded reference video. Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n`;
+  }
   const actionLine = isCombatReference(competitor)
     ? "When the current reference is clearly gameplay/battle, preserve its gameplay layout, camera angle, unit direction, UI rhythm, upgrade timing, attack causality, and ad pacing."
     : "When the current reference is not clearly gameplay/battle, preserve its non-combat creative structure: scene type, camera rhythm, emotional beats, character interaction, props, product/logo placement, editing cadence, and ad pacing. Do not introduce battles, enemies, monsters, weapons, towers, attack effects, upgrade cards, HP bars, or combat UI unless they are visibly present in the current reference.";
   const jsonVideoPrompt = specialRequirementForVideoPrompt(competitor.specialRequirement);
   const mergedVideoPrompt = [jsonVideoPrompt, competitor.videoPrompt].filter(Boolean).join("\n");
-  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the codex-gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
+  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
 }
 
 function isCombatReference(competitor = {}) {
@@ -1508,6 +1730,24 @@ function noCrossReferenceBlock() {
   return `\nNo cross-reference contamination: use only the currently selected competitor reference image for pose, scene elements, emotional acting, props, UI frame, and background logic. Do not borrow any specific pose, prop, background, hazard, framing device, or character state from other competitor folders, previous references, or previous generations. Only include a specific visual element when it is visibly present in the current reference or explicitly requested by the user.\n`;
 }
 
+function visualStyleModeBlock(mode = "2D") {
+  return String(mode || "2D").toUpperCase() === "3D"
+    ? "\nVisual style mode: 3D. Render the ad as polished 3D game CG / stylized 3D animation, with dimensional characters, volumetric lighting, physically plausible materials, depth, soft shadows, and cinematic camera feel. Keep the competitor reference's layout and ad rhythm, but convert all user-owned characters, props, UI, and scene elements into a consistent original 3D game style.\n"
+    : "\nVisual style mode: 2D. Render the ad as crisp 2D mobile game illustration / cartoon ad art, with clean shapes, expressive linework, flat-to-soft shaded color, readable UI, and no photorealistic 3D render look. Keep the competitor reference's layout and ad rhythm, but convert all user-owned characters, props, UI, and scene elements into a consistent original 2D game art style.\n";
+}
+
+function visualStyleFinalRule(mode = "2D") {
+  return String(mode || "2D").toUpperCase() === "3D"
+    ? "Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. Use polished stylized 3D game CG: modeled dimensional forms, readable silhouettes, material response, soft shadows, depth, cinematic lighting, and clean advertising composition. Do not render as flat 2D line art, thick-outline cartoon illustration, sticker art, or hand-drawn poster style."
+    : "Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. Use crisp 2D mobile game cartoon advertising art: clean shapes, expressive linework, smooth gradients, readable bold text when needed, no grain, no photorealism.";
+}
+
+function videoVisualStyleRule(mode = "2D") {
+  return String(mode || "2D").toUpperCase() === "3D"
+    ? "视觉风格规则：必须保持风格化3D游戏CG/国漫动画质感，角色和场景有清晰立体体积、材质反光、空间阴影、景深和电影光影；不要做成平面2D线稿、厚描边卡通插画、贴纸感或手绘海报。不要写实真人，但必须是3D动画/游戏CG。"
+    : "视觉风格规则：必须保持2D移动游戏广告插画/卡通动画质感，线条干净、色块清晰、表情夸张；不要做成写实3D渲染。";
+}
+
 function sanitizeRequirementText(text) {
   return String(text)
     .replaceAll("战斗", "能力展示")
@@ -1540,13 +1780,14 @@ ${referenceTypeGuardBlock(competitor)}
 If the competitor reference is a calm lifestyle, comedy, tea-drinking, meme, pet, creature, social, or cute scene, preserve that scene type and mood. Do not force RPG stats, battle attributes, skill icons, weapon showcase, combat UI, progress bars, or hero-unlocked layouts unless those elements are clearly present in the competitor reference image.
 ${originalityBlock()}
 ${noCrossReferenceBlock()}
+${visualStyleModeBlock(competitor.visualStyleMode)}
 
 Expression and acting lock: match the current reference character's emotional performance as closely as possible. Preserve scared, worried, crying, shocked, embarrassed, calm, smug, happy, or tired expressions when present. Copy only visible emotional signals from the current reference, such as eye shape, eyebrow angle, tears, sweat drops, blush, open mouth shape, clenched mouth, head tilt, shoulder posture, and body pose. Do not invent extra character states or danger elements that are not visible in the current reference.
 
 Place the user-owned character naturally into the same kind of scene shown by the reference. Preserve the character identity exactly: ${role.traits}. Use readable short text only when the reference has text or the user special request asks for text replacement.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor logo, copied text unless specifically requested as replacement text, copied character, watermark, gore, injury, horror, or proprietary UI. High-saturation mobile game cartoon style, crisp shapes, smooth gradients, readable bold text when needed, no grain, no photorealism.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
 }
 
 function trioPrompt(roles, competitor, groupName) {
@@ -1561,11 +1802,12 @@ ${unitScaleLockBlock(competitor)}
 ${referenceTypeGuardBlock(competitor)}
 ${originalityBlock()}
 ${noCrossReferenceBlock()}
+${visualStyleModeBlock(competitor.visualStyleMode)}
 
 Expression and acting lock: match the current reference character's emotional performance as closely as possible, including scared, crying, shocked, calm, happy, or smug expressions. Preserve only visible emotional signals from the current reference, such as eye shape, eyebrow angle, tears, sweat drops, mouth shape, head tilt, and body pose. Do not invent extra character states or danger elements that are not visible in the current reference.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Keep the image all-ages and promotional while preserving the reference mood. Do not include competitor characters, copied logo, copied text unless specifically requested as replacement text, watermark, proprietary mascot, gore, injury, or horror. High-saturation mobile game cartoon style, thick outlines, crisp silhouettes, smooth gradients, no grain.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
 }
 
 function repeatSuffix(index, repeatCount) {
@@ -1587,14 +1829,16 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
     const roleCount = Math.max(0, Math.min(8, Number(setting.roleCount ?? 1)));
     const monsterCount = Math.max(0, Math.min(8, Number(setting.monsterCount ?? 0)));
     const useLogo = Boolean(setting.useLogo);
-    const imageSize = normalizeOutputSize(setting.imageSize ?? setting.outputSize ?? competitor.imageSize ?? competitor.outputSize ?? "");
-    const videoSize = normalizeOutputSize(setting.videoSize ?? competitor.videoSize ?? imageSize);
+    const visualStyleMode = String(setting.visualStyleMode ?? competitor.visualStyleMode ?? "2D").toUpperCase() === "3D" ? "3D" : "2D";
+    const requestedImageSize = normalizeOutputSize(competitor.imageSize ?? competitor.outputSize ?? competitor.layout?.size ?? DEFAULT_OUTPUT_SIZE);
+    const imageSize = imageSizeForModel(requestedImageSize, resolvedImageModel.model);
+    const videoSize = normalizeOutputSize(competitor.videoSize ?? requestedImageSize ?? imageSize);
     const jobLogos = useLogo ? chosenLogos : [];
     if (useLogo && !jobLogos.length) {
       addLog("warn", `${competitor.name} requires logo but no logo selected`, { competitor: competitor.name });
       continue;
     }
-    const promptCompetitor = { ...competitor, layout: layoutWithOutputSize(competitor.layout, imageSize), imageSize, videoSize, outputSize: imageSize, requirement: globalRequirement ?? "", specialRequirement: setting.specialRequirement ?? "", videoPrompt: competitor.videoPrompt ?? "", videos: competitor.videos ?? [] };
+    const promptCompetitor = { ...competitor, layout: layoutWithOutputSize(competitor.layout, imageSize), imageSize, videoSize, outputSize: imageSize, visualStyleMode, requirement: [globalRequirement, competitor.imagePrompt].filter(Boolean).join("\n"), specialRequirement: setting.specialRequirement ?? "", videoPrompt: competitor.videoPrompt ?? "", videos: competitor.videos ?? [] };
     const requiresCombo = roleCount !== 1 || monsterCount > 0;
 
     if (requiresCombo) {
@@ -1626,6 +1870,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             videoModelLabel: resolvedVideoModel.label,
             size: (promptCompetitor.layout ?? layoutFromDimensions()).size,
             videoSize,
+            referenceVideoPath: competitor.referenceVideoPath || "",
+            referenceVideoDuration: competitor.referenceVideoDuration || 0,
             prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
             images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
@@ -1653,6 +1899,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           videoModelLabel: resolvedVideoModel.label,
           size: layout.size,
           videoSize,
+          referenceVideoPath: competitor.referenceVideoPath || "",
+          referenceVideoDuration: competitor.referenceVideoDuration || 0,
           prompt: singleRolePrompt(role, promptCompetitor, jobLogos),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
           images: [role.sourcePath, ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
@@ -1685,9 +1933,9 @@ async function runTaiJob(job, promptDir, logPath) {
 }
 
 async function runImageStage(job, promptDir, logPath) {
-  const imageModel = job.imageModel || MODEL;
-  const imageModelLabel = job.imageModelLabel || imageModel;
-  const apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
+  let imageModel = job.imageModel || MODEL;
+  let imageModelLabel = job.imageModelLabel || imageModel;
+  let apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 
@@ -1697,26 +1945,42 @@ async function runImageStage(job, promptDir, logPath) {
     const runState = getRunState();
     if (runState.stopRequested) throw new Error("Batch stopped by user");
     try {
+      args[4] = imageModel;
       const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
       stdout = result.stdout;
       stderr = result.stderr;
       break;
     } catch (error) {
       const combined = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`;
-      const retryable = combined.includes("429") ||
-        combined.includes("Too many requests") ||
-        combined.includes("image_poll_timeout") ||
-        combined.includes("fetch failed") ||
+      const diagnostic = taiDiagnosticText(error);
+      const quotaError = isImageQuotaError(diagnostic);
+      const accessError = isImageModelAccessError(diagnostic);
+      const chatImageGenericFailure = /The image generation request failed\. Please try again later/i.test(diagnostic) && /^gpt-image-2$/i.test(imageModel);
+      const retryable = /429|Too many requests|image_poll_timeout|fetch failed|try again later|temporarily unavailable|timeout/i.test(diagnostic) ||
         combined.includes("Unexpected token '<'") ||
         combined.includes("<!DOCTYPE") ||
         error.code === 3221226505;
+      await writeFile(
+        logPath.replace(/\.jsonl$/i, "_errors.log"),
+        `[${new Date().toISOString()}] ${job.name} attempt=${attempt} model=${imageModel}\n${combined}\n\n`,
+        { flag: "a" }
+      ).catch(() => {});
+      addLog("error", `ERROR_REASON ${job.name}: ${summarizeErrorText(combined)}`, { job: job.name });
       if (retryable && attempt < 12) {
+        if (chatImageGenericFailure && attempt >= 2) {
+          throw new Error(`ChatGPT 图像池连续返回临时失败，当前不是素材或尺寸问题。通常是该账号的 ChatGPT/Codex 图像 token 已失效、需要重新认证，或网关侧暂时不可用。请点击右上角头像更新可用 API Key，或先切换到 ByteDance-Seedream-5-0-lite。${summarizeErrorText(diagnostic)}`);
+        }
         const waitMs = 30000;
         addLog("retry", `RETRY ${job.name} attempt=${attempt} wait=${waitMs / 1000}s ${summarizeErrorText(combined)}`, { job: job.name });
         await sleepWithStop(waitMs);
         continue;
       }
-      addLog("error", `ERROR_REASON ${job.name}: ${summarizeErrorText(combined)}`, { job: job.name });
+      if (quotaError) {
+        throw new Error(`当前账号的 ${imageModelLabel} 生图额度不可用或已用完。图片+视频模式必须先生成图片首帧，所以视频阶段还没开始。请切换到 ByteDance-Seedream-5-0-lite，或更换有 gpt-image-2 额度的 API Key。${summarizeErrorText(combined)}`);
+      }
+      if (accessError) {
+        throw new Error(`当前账号 API Key 不支持或无权使用模型 ${imageModelLabel}。请点击右上角头像更换 API Key，或选择该 Key 支持的模型。${summarizeErrorText(combined)}`);
+      }
       throw error;
     }
   }
@@ -1744,31 +2008,72 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   if (runState.stopRequested) throw new Error("Batch stopped by user");
   const videoModel = job.videoModel || SEEDANCE_MODEL;
   const apiKey = await requireUserApiKeyForModel(videoModel, job.videoModelLabel || videoModel);
-  const args = [
-    "aigc", "seedance",
-    "--mode", "image_to_video",
-    "--model", videoModel,
-    "--image", job.output,
-    "--duration", "15",
-    "--ratio", ratioFromOutputSize(job.videoSize),
-    "--resolution", "720p",
-    job.videoPrompt
-  ];
-  addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}]`, { job: job.name, model: videoModel });
-  const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
-  const raw = `${stdout}\n${stderr}`.trim();
-  const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, job.name) : parseSeedanceVideoUrl(raw);
-  if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
-  await downloadBinary(videoUrl, job.videoOutput);
-  const storage = await syncProjectAssetToObjectStorage(job.videoOutput, "generated_video");
-  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskId, prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: videoUrl };
+  const targetDuration = job.referenceVideoDuration > 0 ? Math.round(job.referenceVideoDuration) : 15;
+  const segmentDurations = seedanceSegmentDurations(targetDuration);
+  const ratio = ratioFromOutputSize(job.videoSize);
+  const segmentPaths = [];
+  const taskIds = [];
+  const remoteUrls = [];
+  const normalizedVideoRefs = [];
+  addLog("video-start", `VIDEO_START ${job.name} [${job.videoModelLabel || SEEDANCE_MODEL_LABEL}] duration=${targetDuration}s segments=${segmentDurations.join("+")}`, { job: job.name, model: videoModel });
+  for (let index = 0; index < segmentDurations.length; index += 1) {
+    if (getRunState().stopRequested) throw new Error("Batch stopped by user");
+    const segmentDuration = segmentDurations[index];
+    const segmentName = segmentDurations.length > 1 ? `${job.name}_part${index + 1}` : job.name;
+    const segmentPath = segmentDurations.length > 1
+      ? join(dirname(job.videoOutput), `${parse(job.videoOutput).name}_part${index + 1}.mp4`)
+      : job.videoOutput;
+    const referenceVideoForSeedance = index === 0 && job.referenceVideoPath && existsSync(job.referenceVideoPath)
+      ? await seedanceSafeVideoReference(job.referenceVideoPath, promptDir)
+      : "";
+    if (referenceVideoForSeedance) normalizedVideoRefs.push(referenceVideoForSeedance);
+    const hasReferenceVideo = Boolean(referenceVideoForSeedance);
+    const firstSegmentPrompt = `${job.videoPrompt}\nMatch the uploaded reference ad video duration and shot rhythm as closely as possible. This is segment ${index + 1}/${segmentDurations.length}; keep the first segment as the opening hook and do not end abruptly unless more segments follow.`;
+    const sourceVideoForExtend = index > 0 ? await seedanceSafeVideoReference(segmentPaths[index - 1], promptDir) : "";
+    const args = index === 0
+      ? [
+          "aigc", "seedance",
+          "--mode", hasReferenceVideo ? "omni_reference" : "image_to_video",
+          "--model", videoModel,
+          "--image", job.output,
+          ...(hasReferenceVideo ? ["--video", referenceVideoForSeedance] : []),
+          "--duration", String(segmentDuration),
+          "--ratio", ratio,
+          "--resolution", "720p",
+          firstSegmentPrompt
+        ]
+      : [
+          "aigc", "seedance",
+          "--mode", "video_extend",
+          "--model", videoModel,
+          "--source-video", sourceVideoForExtend,
+          "--duration", String(segmentDuration),
+          "--ratio", ratio,
+          "--resolution", "720p",
+          `${job.videoPrompt}\nContinue from the previous generated segment. This is segment ${index + 1}/${segmentDurations.length}; preserve motion continuity, character identity, camera direction, dialogue language, and ad rhythm. End naturally only on the final segment.`
+        ];
+    addLog("video-segment", `VIDEO_SEGMENT ${segmentName} duration=${segmentDuration}s${hasReferenceVideo ? " reference_video=on" : ""}`, { job: job.name, segment: index + 1, referenceVideo: hasReferenceVideo });
+    const { stdout, stderr } = await execTai(args, { env: taiEnvForApiKey(apiKey) });
+    const raw = `${stdout}\n${stderr}`.trim();
+    const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
+    const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, segmentName, segmentPath) : parseSeedanceVideoUrl(raw);
+    if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
+    if (!taskId) await downloadVerifiedVideo(videoUrl, segmentPath, segmentName);
+    segmentPaths.push(segmentPath);
+    taskIds.push(taskId);
+    remoteUrls.push(videoUrl);
+  }
+  if (segmentPaths.length > 1) {
+    await concatVideos(segmentPaths, job.videoOutput);
+  }
+  const storage = null;
+  const record = { time: new Date().toISOString(), name: job.name, model: videoModel, model_label: job.videoModelLabel || SEEDANCE_MODEL_LABEL, task_id: taskIds.filter(Boolean).join(","), prompt_path: join(promptDir, `seedance_${job.name}.txt`), image: job.output, output: job.videoOutput, remote_url: remoteUrls[remoteUrls.length - 1] || "", reference_video: job.referenceVideoPath || "", seedance_reference_video: normalizedVideoRefs[0] || "", reference_video_duration: job.referenceVideoDuration || 0, target_duration: targetDuration, segment_durations: segmentDurations };
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
   }
   await writeFile(logPath, `${JSON.stringify(record)}\n`, { flag: "a" });
-  return { videoTaskId: taskId };
+  return { videoTaskId: taskIds.filter(Boolean).join(",") };
 }
 
 async function generateComicVideo(body = {}) {
@@ -1847,14 +2152,14 @@ function parseSeedanceVideoUrl(raw) {
     if (!value || typeof value !== "object") return "";
     const isOutputPath = /(output|result|generated|generation|video|download|play|preview)/i.test(path) &&
       !/(input|source|reference|asset|upload|origin|prompt)/i.test(path);
-    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "preview_url", "previewUrl", "url"];
+    const keys = ["video_url", "videoUrl", "output_url", "outputUrl", "result_url", "resultUrl", "download_url", "downloadUrl", "play_url", "playUrl", "url"];
     for (const key of keys) {
       const nextPath = path ? `${path}.${key}` : key;
       const keyLooksLikeOutput = /(output|result|generated|generation|video|download|play|preview)/i.test(nextPath) &&
         !/(input|source|reference|asset|upload|origin|prompt)/i.test(nextPath);
       if (typeof value[key] === "string" && (isOutputPath || keyLooksLikeOutput) && isLikelyVideoUrl(value[key])) return cleanUrl(value[key]);
     }
-    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "preview", "download"]) {
+    for (const key of ["data", "result", "output", "video", "videos", "generated", "generation", "download"]) {
       const found = fromObject(value[key], path ? `${path}.${key}` : key);
       if (found) return found;
     }
@@ -1885,7 +2190,7 @@ function parseSeedanceVideoUrl(raw) {
   return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
 }
 
-async function pollSeedanceVideoUrl(taskId, jobName) {
+async function pollSeedanceVideoUrl(taskId, jobName, targetPath = "") {
   if (!taskId) return "";
   for (let attempt = 1; attempt <= 60; attempt += 1) {
     const runState = getRunState();
@@ -1897,7 +2202,15 @@ async function pollSeedanceVideoUrl(taskId, jobName) {
     }));
     const raw = `${stdout}\n${stderr}`.trim();
     const videoUrl = parseSeedanceVideoUrl(raw);
-    if (videoUrl) return videoUrl;
+    if (videoUrl) {
+      if (!targetPath) return videoUrl;
+      try {
+        await downloadVerifiedVideo(videoUrl, targetPath, jobName);
+        return videoUrl;
+      } catch (error) {
+        addLog("warn", `VIDEO_URL_NOT_READY ${jobName} ${summarizeErrorText(error.message)}`, { job: jobName, url: videoUrl });
+      }
+    }
     if (/failed|rejected|error/i.test(raw)) throw new Error(`Seedance failed for ${jobName}: ${summarizeErrorText(raw)}`);
     if (attempt === 1 || attempt % 2 === 0) addLog("video-wait", `VIDEO_WAIT ${jobName} task=${taskId} attempt=${attempt}`, { job: jobName });
   }
@@ -2095,6 +2408,7 @@ ${logoInstructionBlock(logos)}
 ${referenceTypeGuardBlock(competitor)}
 ${originalityBlock()}
 ${noCrossReferenceBlock()}
+${visualStyleModeBlock(competitor.visualStyleMode)}
 
 Expression and acting lock: match the current reference character's emotional performance as closely as possible. Preserve scared, worried, crying, shocked, embarrassed, calm, smug, happy, or tired expressions when present. Copy only visible emotional signals from the current reference, such as eye shape, eyebrow angle, tears, sweat drops, blush, open mouth shape, clenched mouth, head tilt, shoulder posture, and body pose. Do not invent extra character states or danger elements that are not visible in the current reference.
 
@@ -2104,19 +2418,52 @@ ${monsterLines}
 Group label: ${groupName}. Add short readable English UI text only when the reference has text or the user special request asks for text replacement. Keep the image all-ages, polished, and promotional while preserving the reference mood.
 ${requirementBlock(competitor.requirement)}
 ${specialRequirementBlock(competitor.specialRequirement)}
-Do not include competitor characters, copied logo, copied text unless specifically requested as replacement text, watermark, proprietary mascot, gore, injury, or horror. High-saturation mobile game cartoon style, thick outlines, crisp silhouettes, smooth gradients, no grain.`;
+${visualStyleFinalRule(competitor.visualStyleMode)}`;
+}
+
+async function downloadVerifiedVideo(videoUrl, targetPath, jobName) {
+  await downloadBinary(videoUrl, targetPath);
+  const metadata = await readVideoMetadata(targetPath);
+  if (!isVideoCodecCompatible(metadata)) {
+    await rm(targetPath, { force: true }).catch(() => {});
+    throw new Error(`Seedance returned a non-video asset for ${jobName}: ${videoUrl}`);
+  }
+  return metadata;
 }
 
 function seedanceAdVideoPrompt({ roles, monsters, competitor, groupName }) {
+  if (competitor.referenceVideoPath || competitor.videos?.length) {
+    return seedanceDirectReferenceVideoPrompt({ roles, monsters, competitor, groupName });
+  }
   const combat = isCombatReference(competitor);
   return combat
     ? seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName })
     : seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName });
 }
 
+function seedanceDirectReferenceVideoPrompt({ roles, monsters, competitor, groupName }) {
+  const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
+  const monsterText = monsters.length ? `附加生物/宠物素材保持：${monsters.map((monster, index) => `素材${index + 1}${monster.traits}`).join("；")}。` : "";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
+  const layout = competitor.layout ?? layoutFromDimensions();
+  const aspectText = layout.orientation === "wide" ? "如果参考视频是横版，只参考其镜头节奏和主体关系；输出比例按当前任务自动适配，但不要改变主体相对位置。" : layout.orientation === "tall" ? "保持参考视频的竖屏广告节奏、镜头距离和主体比例。" : "保持参考视频的核心版式关系、镜头距离和主体比例。";
+  const dialoguePrompt = dialogueInstructionBlock(parseSpecialRequirementJson(competitor.specialRequirement)?.reverse_analysis?.dialogue);
+  return `请直接参考已上传的竞品视频素材来生成视频：参考它的分镜节奏、镜头运动、主体位置、动作时机、表情变化、道具互动、转场和结尾停留方式；参考上一阶段生成的效果图作为我方画面、角色身份和美术风格来源。${styleText}${aspectText}
+
+必须把参考视频里的竞品角色/主体替换为我方生成图中的角色和资产，不能让竞品原角色与我方角色同时存在。${roleText}。${monsterText}
+
+只保留参考视频的抽象节奏和镜头结构，不复制竞品logo、品牌名、字幕、UI文字、角色形象、具体场景皮肤、专有道具或水印。不要根据历史模板自行添加参考视频里没有的内容；如果参考视频没有打怪、战斗、攻击、怪物波次、升级卡、HP血条、伤害数字、技能释放或胜利结算，就绝对不要生成这些元素。
+
+音频规则：如果参考视频有人声或台词，保持原语种和台词节奏；如果没有明显台词，只生成自然环境音、动作/道具音效或轻量口播，不要强行添加背景音乐。
+${dialoguePrompt}
+
+当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
+}
+
 function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) {
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const extraAssets = monsters.length ? `如使用附加生物/宠物素材，只把它作为当前参考中对应宠物、伙伴、装饰角色或互动对象的替换参考，不要改成怪物敌人：${monsters.map((monster, index) => `素材${index + 1}${monster.traits}`).join("；")}。` : "";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
   const layout = competitor.layout ?? layoutFromDimensions();
   const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，视频如需改编为竖屏9:16，也必须保留核心主体相对位置、镜头距离、文字/Logo层级和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏、镜头距离和主体比例。" : "参考图接近方图，视频可以改编为竖屏9:16，但必须保留核心版式关系和主体比例。";
@@ -2125,7 +2472,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推当前竞品视频的非战斗广告结构：前3秒钩子、镜头推进方式、角色互动、表情变化、道具使用、场景转场、产品/Logo露出和结尾停留方式。只保留抽象节奏和布局关系，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
 
 当前参考素材未明确表现战斗/塔防/怪物进攻玩法，因此本视频必须按当前参考的实际类型生成：可以是生活化、休闲、搞笑、经营、换装、合成、剧情、解谜、宠物互动、社交展示或产品广告演绎。不要强行加入战斗、敌人、怪物进攻、攻击、武器、技能释放、塔防道路、升级卡、A/S/SS卡牌、HP血条、伤害数字、Boss或战斗UI。必须保留效果图中的我方角色身份、构图、镜头角度、UI/文字层级、道具功能、场景情绪和主体比例。${roleText}。${extraAssets}
 
@@ -2134,7 +2481,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
 7-11秒：加强广告节奏，展示角色表情、道具变化、场景反馈、Logo或产品信息层级。若参考中有文字区域，只保留位置和层级，文字按用户特殊提示词替换或使用简短原创英文；不要生成乱码。
 11-15秒：形成结尾记忆点，保持参考的结尾停留逻辑，例如角色满意/震惊/开心/无奈定格，产品Logo露出，场景成果展示，或轻微镜头拉远展示完整构图。不能突然切入怪物、攻击、爆炸、升级或胜利战斗结算。
 
-视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
+视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
 音频总规则：必须生成音频轨道，包含自然环境音、动作/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
 ${dialoguePrompt}
 
@@ -2144,6 +2491,7 @@ ${dialoguePrompt}
 function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const roleText = roles.map((role, index) => `角色${index + 1}保持：${role.traits}`).join("；");
   const monsterText = monsters.length ? `怪物素材保持：${monsters.map((monster, index) => `怪物${index + 1}${monster.traits}`).join("；")}。` : "";
+  const styleText = videoVisualStyleRule(competitor.visualStyleMode);
   const layout = competitor.layout ?? layoutFromDimensions();
   const targetVideoSize = videoSizeInstruction(competitor.videoSize);
   const aspectText = layout.orientation === "wide" ? "参考图是横版广告构图，但视频请改编为竖屏9:16，并保留核心主体相对位置和广告节奏。" : layout.orientation === "tall" ? "保持参考图的竖屏广告节奏。" : "参考图接近方图，视频请改编为竖屏9:16，保留核心版式关系。";
@@ -2152,7 +2500,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推竞品视频的玩法结构、单位位置、镜头节奏、波次推进、升级链路和攻击因果，再套用到我方效果图。只能保留抽象玩法布局和广告节奏，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤、建筑造型、冰雪门楼、火把、地图装饰或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
 
 必须保留效果图中的我方角色身份、地图布局、镜头角度、UI层级、敌我方向和主体比例。若参考视频是纵向塔防局内画面，英雄/防线必须保持在下方或底部格子，怪物必须保持在上方路径或从上方入口推进，攻击从下方英雄/防线朝上方怪物发出。保持原始镜头缩放、完整游戏屏幕、格子密度、道路宽度和UI边距，不能把场地、格子、敌人、英雄整体放大，不能裁切成近景。英雄必须保持小型局内单位比例，约等于参考视频里原英雄的屏幕占比，不能变成中心大插画、角色特写或前景展示；怪物也按参考视频怪物的相对尺寸和路径关系出现。必须用我方角色替换原卡皮/原英雄，原竞品单位必须消失，不能出现“原卡皮+我方角色”同时存在。我方角色必须站在原卡皮/原玩家单位所在同一个格子中心、同一条路线、同一层级。所有单位都必须在原版对应格子、路径或站位范围内运动，不能站出格子外或遮挡底部UI。不能改成左右对峙、横向决斗、海报展示或角色怪物并排站位。${roleText}。${monsterText}
 
@@ -2161,7 +2509,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
 7-11秒：出现S阶升级和更高生命值目标，怪物数量逐步增加但保持从同一入口/同一路径进入，战场连续不跳切。角色外观或武器出现轻微强化，仍保持原身份。
 11-15秒：出现SS阶终极升级，释放大范围但因果清晰的终结技能：蓄力、发射、覆盖目标、敌人反应、奖励回流，最后胜利定格。
 
-视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。保持高饱和Q版移动游戏广告质感，清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
+视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
 音频总规则：必须生成音频轨道，包含自然环境音、攻击/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
 ${dialoguePrompt}
 
@@ -2432,6 +2780,52 @@ async function deleteSharedMaterial(body = {}) {
   return { ok: true, kind, name };
 }
 
+function sharedMaterialTargetDir(kind) {
+  return kind === "monster" ? dirs().monsterDir
+    : kind === "logo" ? dirs().logoDir
+      : kind === "role" ? dirs().roleDir
+        : kind === "referenceVideo" ? dirs().referenceVideoDir
+          : "";
+}
+
+function sharedMaterialAssetKind(kind) {
+  return kind === "referenceVideo" ? "reference_video"
+    : kind === "monster" ? "monster_image"
+      : kind === "logo" ? "product_logo"
+        : "role_image";
+}
+
+async function renameSharedMaterial(body = {}) {
+  requireAdmin();
+  const runState = getRunState();
+  if (runState.running) throw new Error("正在生成中，不能重命名素材，请先停止或等待完成");
+  const kind = String(body.kind ?? "");
+  const oldName = sanitizeFileName(body.name ?? "");
+  const rawNewName = String(body.newName ?? "").trim();
+  const targetDir = sharedMaterialTargetDir(kind);
+  if (!targetDir) throw new Error("只能重命名角色图、怪物图、产品 Logo 或参考视频素材");
+  if (!oldName) throw new Error("缺少要重命名的素材名称");
+  if (!rawNewName) throw new Error("请输入新名称");
+  const oldPath = safeInsideProject(join(targetDir, oldName));
+  if (!existsSync(oldPath)) throw new Error("素材不存在或已被删除");
+  const ext = extname(oldName).toLowerCase();
+  if (kind === "referenceVideo" ? !VIDEO_EXTS.has(ext) : !IMAGE_EXTS.has(ext)) throw new Error(kind === "referenceVideo" ? "只能重命名视频素材" : "只能重命名图片素材");
+  const desiredName = rawNewName.toLowerCase().endsWith(ext) ? rawNewName : `${rawNewName}${ext}`;
+  const newName = sanitizeFileName(desiredName);
+  if (!newName || newName === oldName) return { ok: true, kind, name: oldName, newName: oldName };
+  const newPath = safeInsideProject(join(targetDir, newName));
+  if (existsSync(newPath)) throw new Error("同名素材已存在，请换一个名称");
+  await removeProjectAssetFromObjectStorage(oldPath);
+  await rename(oldPath, newPath);
+  if (kind !== "referenceVideo") {
+    const oldUpscaled = join(dirs().upscaledDir, oldName);
+    const newUpscaled = join(dirs().upscaledDir, newName);
+    if (existsSync(oldUpscaled) && !existsSync(newUpscaled)) await rename(oldUpscaled, newUpscaled);
+  }
+  const storage = await syncProjectAssetToObjectStorage(newPath, sharedMaterialAssetKind(kind));
+  return { ok: true, kind, name: oldName, newName, path: newPath, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
+}
+
 async function uploadCompetitor(req) {
   const runState = getRunState();
   if (runState.running) throw new Error("Batch is running; cannot replace competitor material now");
@@ -2475,21 +2869,26 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
     }
     if (analysis) analysis.dialogue = transcriptToDialogue(transcript);
     else analysis = { dialogue: transcriptToDialogue(transcript) };
-    const specialRequirement = specialRequirementJson({ type: "video", fileName, analysis });
-    const videoPrompt = specialRequirementForVideoPrompt(specialRequirement) || defaultVideoReversePrompt(fileName);
+    const reverseRequirement = specialRequirementJson({ type: "video", fileName, analysis });
+    const videoPrompt = specialRequirementForVideoPrompt(reverseRequirement) || defaultVideoReversePrompt(fileName);
+    const specialRequirement = "";
     await writeFile(videoPromptPath, videoPrompt, "utf8");
     await writeFile(specialRequirementPath, specialRequirement, "utf8");
     return { ok: true, path: target, name: fileName, coverPath, videoPromptPath, videoPrompt, specialRequirementPath, specialRequirement, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
   }
   const analysis = await analyzeUploadedCompetitorImage(target);
   const specialRequirementPath = safeInsideProject(join(dir, "\u7528\u6237\u7279\u6b8a\u8981\u6c42.txt"));
-  const specialRequirement = specialRequirementJson({ type: "image", fileName, analysis });
+  const imagePromptPath = safeInsideProject(join(dir, "图片反推提示词.txt"));
+  const reverseRequirement = specialRequirementJson({ type: "image", fileName, analysis });
+  const imagePrompt = specialRequirementForImagePrompt(reverseRequirement);
+  const specialRequirement = "";
+  await writeFile(imagePromptPath, imagePrompt, "utf8");
   await writeFile(specialRequirementPath, specialRequirement, "utf8");
-  return { ok: true, path: target, name: fileName, specialRequirementPath, specialRequirement, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
+  return { ok: true, path: target, name: fileName, imagePromptPath, imagePrompt, specialRequirementPath, specialRequirement, ...(storage ? { storageKey: storage.storageKey, storageUrl: storage.storageUrl, url: storage.storageUrl } : {}) };
 }
 
 function defaultVideoReversePrompt(fileName) {
-  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 codex-gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
+  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
 }
 
 async function transcribeVideoDialogue(videoPath) {
@@ -2586,12 +2985,37 @@ async function searchGuangdada(body) {
       if (list.length < basePayload.page_size || itemMap.size >= topN) break;
     }
   }
-  const items = Array.from(itemMap.values())
+  const items = await hydrateGuangdadaVideoUrls(Array.from(itemMap.values()))
+    .then((hydrated) => hydrated
     .sort((a, b) => b.popularity - a.popularity || normalizeUnixMs(b.timestamp) - normalizeUnixMs(a.timestamp))
-    .slice(0, topN);
+    .slice(0, topN));
   const result = { ok: true, cached: false, query: lastPayload, minPopularity, materialType, startDate: body.startDate || "", endDate: body.endDate || "", scannedPagesPerChunk: maxPagesPerChunk, total, count: items.length, items };
   await writeGuangdadaCache(cacheKey, result);
   return result;
+}
+
+async function hydrateGuangdadaVideoUrls(items) {
+  const hydrated = [];
+  for (const item of items) {
+    if (item.isVideoMaterial && !item.videoUrl && item.adKey) {
+      try {
+        const detailUrls = await guangdadaDetailUrls(item);
+        const videoUrl = detailUrls.videos[0] || "";
+        if (videoUrl) {
+          hydrated.push({
+            ...item,
+            videoUrl,
+            proxyVideoUrl: `/api/guangdada/video?url=${encodeURIComponent(videoUrl)}`
+          });
+          continue;
+        }
+      } catch {
+        // Keep the list result usable even when a detail request fails.
+      }
+    }
+    hydrated.push(item);
+  }
+  return hydrated;
 }
 
 function guangdadaCacheKey(value) {
@@ -2608,7 +3032,12 @@ async function readGuangdadaCache(cacheKey) {
       await rm(cachePath, { force: true }).catch(() => {});
       return null;
     }
-    return data.result || null;
+    const result = data.result || null;
+    if (result?.items?.some((item) => item?.isVideoMaterial && !item?.videoUrl && item?.adKey)) {
+      result.items = await hydrateGuangdadaVideoUrls(result.items);
+      await writeGuangdadaCache(cacheKey, result).catch(() => {});
+    }
+    return result;
   } catch {
     await rm(cachePath, { force: true }).catch(() => {});
     return null;
@@ -2972,18 +3401,14 @@ async function downloadRemoteImage(imageUrl, fileName = "guangdada.jpg") {
 
 async function downloadRemoteBinary(url) {
   const candidates = [
-    url,
-    `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(url)}`
+    { url, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8" } },
+    { url, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8", Referer: "" } },
+    { url: `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(url)}`, headers: { "User-Agent": "Mozilla/5.0", Accept: "video/mp4,video/*,*/*;q=0.8" } }
   ];
   let lastError = null;
   for (const candidate of candidates) {
     try {
-      const res = await fetch(candidate, {
-        headers: {
-          Referer: "http://120.27.200.123:3000/guangdada",
-          "User-Agent": "Mozilla/5.0"
-        }
-      });
+      const res = await fetch(candidate.url, { headers: candidate.headers });
       const buffer = Buffer.from(await res.arrayBuffer());
       const contentType = res.headers.get("content-type") || "";
       if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`);
@@ -3059,43 +3484,44 @@ async function proxyGuangdadaVideo(req, res, url) {
   const videoUrl = String(url.searchParams.get("url") ?? "").trim();
   if (!/^https?:\/\//i.test(videoUrl)) throw new Error("缺少有效的视频链接");
   assertAllowedGuangdadaMediaUrl(videoUrl);
-  const candidates = [
-    videoUrl,
-    `http://120.27.200.123:3000/api/proxy-media?url=${encodeURIComponent(videoUrl)}`
-  ];
-  let lastError = null;
-  for (const candidate of candidates) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    const headers = {
-      Referer: "http://120.27.200.123:3000/guangdada",
-      "User-Agent": "Mozilla/5.0"
-    };
-    if (req.headers.range) headers.Range = req.headers.range;
-    try {
-      const upstream = await fetch(candidate, { signal: controller.signal, headers }).finally(() => clearTimeout(timeout));
-      if (!upstream.ok && upstream.status !== 206) {
-        lastError = new Error(`视频预览加载失败 HTTP ${upstream.status}`);
-        continue;
-      }
-      const responseHeaders = {
-        "Content-Type": upstream.headers.get("content-type") || "video/mp4",
-        "Accept-Ranges": upstream.headers.get("accept-ranges") || "bytes",
-        "Cache-Control": "public, max-age=300"
-      };
-      for (const key of ["content-length", "content-range"]) {
-        const value = upstream.headers.get(key);
-        if (value) responseHeaders[key.replace(/\b\w/g, (char) => char.toUpperCase())] = value;
-      }
-      res.writeHead(upstream.status === 206 ? 206 : 200, responseHeaders);
-      if (!upstream.body) return res.end();
-      return Readable.fromWeb(upstream.body).pipe(res);
-    } catch (error) {
-      clearTimeout(timeout);
-      lastError = error;
+  const cacheKey = videoUrl;
+  let cached = remoteVideoCache.get(cacheKey);
+  if (!cached || Date.now() - cached.time > 20 * 60 * 1000) {
+    const buffer = await downloadRemoteBinary(videoUrl);
+    const head = buffer.toString("ascii", 0, Math.min(buffer.length, 64)).toLowerCase();
+    const contentType = head.includes("webm") ? "video/webm" : "video/mp4";
+    cached = { time: Date.now(), buffer, contentType };
+    remoteVideoCache.set(cacheKey, cached);
+    if (remoteVideoCache.size > 40) {
+      const firstKey = remoteVideoCache.keys().next().value;
+      remoteVideoCache.delete(firstKey);
     }
   }
-  throw lastError || new Error("视频预览加载失败");
+  const total = cached.buffer.length;
+  const range = String(req.headers.range || "");
+  if (range) {
+    const match = range.match(/bytes=(\d*)-(\d*)/);
+    const startByte = match?.[1] ? Number(match[1]) : 0;
+    const endByte = match?.[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+    if (Number.isFinite(startByte) && Number.isFinite(endByte) && startByte <= endByte && startByte < total) {
+      res.writeHead(206, {
+        "Content-Type": cached.contentType,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=300",
+        "Content-Range": `bytes ${startByte}-${endByte}/${total}`,
+        "Content-Length": endByte - startByte + 1
+      });
+      res.end(cached.buffer.subarray(startByte, endByte + 1));
+      return;
+    }
+  }
+  res.writeHead(200, {
+    "Content-Type": cached.contentType,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "public, max-age=300",
+    "Content-Length": total
+  });
+  res.end(cached.buffer);
 }
 
 function assertAllowedGuangdadaMediaUrl(value) {
@@ -3323,6 +3749,9 @@ async function serveStatic(req, res, pathname) {
 async function handleRequest(req, res) {
   try {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "GET" && url.pathname === "/api/version") {
+      return sendJson(res, { version: await appVersion() });
+    }
     if (req.method === "GET" && url.pathname === "/api/auth") {
       const user = await userFromRequest(req);
       return sendJson(res, user ? { authenticated: true, user: publicUser(user) } : { authenticated: false });
@@ -3380,6 +3809,7 @@ async function handleRequest(req, res) {
     if (req.method === "POST" && url.pathname === "/api/start") return sendJson(res, await startBatch(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/stop") return sendJson(res, await stopBatch());
     if (req.method === "POST" && url.pathname === "/api/upload-role") return sendJson(res, await uploadRole(req));
+    if (req.method === "POST" && url.pathname === "/api/materials/rename") return sendJson(res, await renameSharedMaterial(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/materials/delete") return sendJson(res, await deleteSharedMaterial(await readJson(req)));
     if (req.method === "POST" && url.pathname === "/api/upload-competitor") return sendJson(res, await uploadCompetitor(req));
     if (req.method === "POST" && url.pathname === "/api/competitors/create") return sendJson(res, await createCompetitorFolder(await readJson(req)));
@@ -3433,7 +3863,7 @@ async function handleRequest(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
-  const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
+  const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout" || url.pathname === "/api/version";
   const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
   const isPublicAsset = url.pathname.startsWith("/api/public/assets/");
   const isPublicGuangdadaPreview = req.method === "GET" && (url.pathname === "/api/guangdada/image" || url.pathname === "/api/guangdada/video");

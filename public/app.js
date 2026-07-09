@@ -13,19 +13,15 @@ const state = {
   uploadingCompetitors: new Set(),
   guangdadaItems: [],
   guangdadaTargetFolder: "",
-  pollTimer: null
+  pollTimer: null,
+  appVersion: "",
+  versionUpdateHandled: false
 };
 
 const GUANGDADA_DISABLED = false;
 const GUANGDADA_SEARCH_COOLDOWN_MS = 60 * 1000;
 let guangdadaSearchCooldownUntil = 0;
 let guangdadaSearchCooldownTimer = null;
-const DEFAULT_OUTPUT_SIZE = "1024x1024";
-function splitSizeParts(value, fallback = DEFAULT_OUTPUT_SIZE) {
-  const normalized = normalizeOutputSizeInput(value) || normalizeOutputSizeInput(fallback) || DEFAULT_OUTPUT_SIZE;
-  const [width, height] = normalized.split("x").map(Number);
-  return { width, height, size: `${width}x${height}` };
-}
 const COMPETITOR_UPLOAD_TEXT = "更换素材中";
 
 const els = {
@@ -152,6 +148,38 @@ async function api(path, options = {}) {
   }
   if (!res.ok || data.error) throw new Error(friendlyError(data.error || "请求失败"));
   return data;
+}
+
+async function checkAppVersion(initial = false) {
+  if (state.versionUpdateHandled) return;
+  try {
+    const res = await fetch(`/api/version?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const version = String(data.version || "").trim();
+    if (!version) return;
+    if (initial || !state.appVersion) {
+      state.appVersion = version;
+      return;
+    }
+    if (version !== state.appVersion) {
+      state.versionUpdateHandled = true;
+      alert("检测到系统已更新，请重新登录后继续使用。");
+      try {
+        await fetch("/api/logout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        });
+      } catch {}
+      state.materials = null;
+      state.user = null;
+      showLogin("系统已更新，请重新登录");
+      window.location.href = "/";
+    }
+  } catch {
+    // Version polling is best-effort; normal workflows should not be interrupted by network jitter.
+  }
 }
 
 function showLogin(message = "") {
@@ -464,16 +492,11 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
         roleCount: item.roleCount ?? 1,
         monsterCount: item.monsterCount ?? 0,
         useLogo: Boolean(item.useLogo),
-        imageSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
-        videoSize: item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
-        outputSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE,
+        visualStyleMode: item.visualStyleMode || "2D",
         specialRequirement: item.specialRequirement || ""
       };
     } else if (item.specialRequirement && !state.competitorSettings[item.name].specialRequirement) {
       state.competitorSettings[item.name].specialRequirement = item.specialRequirement;
-      if (!state.competitorSettings[item.name].imageSize) state.competitorSettings[item.name].imageSize = item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
-      if (!state.competitorSettings[item.name].videoSize) state.competitorSettings[item.name].videoSize = item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE;
-      if (!state.competitorSettings[item.name].outputSize) state.competitorSettings[item.name].outputSize = state.competitorSettings[item.name].imageSize;
     }
   }
 
@@ -579,19 +602,28 @@ function resetProjectState() {
 function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
   for (const item of items) {
-    const canDelete = Boolean(state.user?.isAdmin && ["role", "monster", "logo"].includes(kind));
+    const canManage = ["role", "monster", "logo"].includes(kind);
+    const canAdminManage = Boolean(state.user?.isAdmin && canManage);
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
     card.innerHTML = `
       <input type="checkbox" ${selected.has(item.name) ? "checked" : ""} />
-      ${canDelete ? '<button class="delete-material" type="button" title="删除素材" aria-label="删除素材">×</button>' : ""}
+      ${canManage ? `
+        <button class="material-settings" type="button" title="素材设置" aria-label="素材设置">⚙</button>
+        <div class="material-menu" hidden>
+          ${canAdminManage ? '<button class="rename-material" type="button">重命名</button>' : ""}
+          ${canAdminManage ? '<button class="delete-material danger" type="button">删除</button>' : ""}
+        </div>
+      ` : ""}
       <img src="${item.url}" alt="${escapeHtml(item.title || item.name)}" />
       <b>${escapeHtml(item.title || item.name)}</b>
-      <button class="replace-role" type="button">替换</button>
     `;
-    const checkbox = card.querySelector("input");
-    const replaceBtn = card.querySelector(".replace-role");
+    const checkbox = card.querySelector('input[type="checkbox"]');
+    const settingsBtn = card.querySelector(".material-settings");
+    const menu = card.querySelector(".material-menu");
+    const renameBtn = card.querySelector(".rename-material");
     const deleteBtn = card.querySelector(".delete-material");
+
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) selected.add(item.name);
       else selected.delete(item.name);
@@ -599,9 +631,47 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
       toggle.checked = items.length > 0 && selected.size === items.length;
       updateTaskPreview();
     });
+
+    settingsBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelectorAll(".material-menu").forEach((itemMenu) => {
+        if (itemMenu !== menu) itemMenu.hidden = true;
+      });
+      if (menu) menu.hidden = !menu.hidden;
+    });
+
+    menu?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    renameBtn?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu) menu.hidden = true;
+      const ext = item.name.includes(".") ? `.${item.name.split(".").pop()}` : "";
+      const currentBase = ext ? item.name.slice(0, -ext.length) : item.name;
+      const nextName = prompt("请输入新的素材名称", item.title || currentBase);
+      if (nextName == null) return;
+      const cleanName = nextName.trim();
+      if (!cleanName) return alert("素材名称不能为空");
+      renameBtn.disabled = true;
+      try {
+        await api("/api/materials/rename", { method: "POST", body: JSON.stringify({ kind, name: item.name, newName: cleanName }) });
+        selected.delete(item.name);
+        await loadMaterials();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        renameBtn.disabled = false;
+      }
+    });
+
     deleteBtn?.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (menu) menu.hidden = true;
       const label = kind === "monster" ? "怪物图" : kind === "logo" ? "产品 Logo" : "角色图";
       if (!confirm(`确定删除这个${label}吗？\n${item.name}`)) return;
       deleteBtn.disabled = true;
@@ -615,20 +685,11 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
         deleteBtn.disabled = false;
       }
     });
-    replaceBtn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      pickImageAndUpload({
-        endpoint: "/api/upload-role",
-        payload: { kind, mode: "replace", targetName: item.name },
-        successText: kind === "monster" ? "怪物图已替换" : "角色图已替换"
-      });
-    });
+
     grid.append(card);
   }
   toggle.checked = items.length > 0 && selected.size === items.length;
 }
-
 function renderCompetitors() {
   els.competitorList.innerHTML = "";
   for (const item of state.materials.competitors) {
@@ -639,9 +700,7 @@ function renderCompetitors() {
       : firstImage
         ? `<img src="${firstImage.url}" alt="${escapeHtml(item.name)}" />`
         : '<div class="empty-thumb">暂无素材</div>';
-    const setting = state.competitorSettings[item.name] || { roleCount: item.roleCount ?? 1, monsterCount: item.monsterCount ?? 0, useLogo: Boolean(item.useLogo), imageSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, videoSize: item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, outputSize: item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE, specialRequirement: item.specialRequirement || "" };
-    const imageSizeParts = splitSizeParts(setting.imageSize || setting.outputSize, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE);
-    const videoSizeParts = splitSizeParts(setting.videoSize || setting.imageSize || setting.outputSize, imageSizeParts.size);
+    const setting = state.competitorSettings[item.name] || { roleCount: item.roleCount ?? 1, monsterCount: item.monsterCount ?? 0, useLogo: Boolean(item.useLogo), visualStyleMode: item.visualStyleMode || "2D", specialRequirement: item.specialRequirement || "" };
     const block = document.createElement("article");
     block.className = "competitor";
     block.dataset.folder = item.name;
@@ -661,12 +720,11 @@ function renderCompetitors() {
             <label class="count-field">角色 <input class="role-count" type="number" min="0" max="8" value="${setting.roleCount}" /></label>
             <label class="count-field">怪物 <input class="monster-count" type="number" min="0" max="8" value="${setting.monsterCount}" /></label>
             <label class="count-field logo-field">Logo <input class="logo-enabled" type="checkbox" ${setting.useLogo ? "checked" : ""} /></label>
-            <label class="count-field split-size-field">图片尺寸 <input class="image-width" type="number" min="256" max="4096" step="1" value="${imageSizeParts.width}" /><span>×</span><input class="image-height" type="number" min="256" max="4096" step="1" value="${imageSizeParts.height}" /></label>
-            <label class="count-field split-size-field">视频尺寸 <input class="video-width" type="number" min="256" max="4096" step="1" value="${videoSizeParts.width}" /><span>×</span><input class="video-height" type="number" min="256" max="4096" step="1" value="${videoSizeParts.height}" /></label>
+            <label class="count-field style-field">风格 <select class="visual-style-mode"><option value="2D" ${setting.visualStyleMode !== "3D" ? "selected" : ""}>2D</option><option value="3D" ${setting.visualStyleMode === "3D" ? "selected" : ""}>3D</option></select></label>
             <button class="replace-competitor mini ghost" type="button">更换素材</button>
           </div>
         <label class="field-label">特殊提示词</label>
-        <textarea class="special-requirement" spellcheck="false" placeholder="上传竞品素材后会自动生成 JSON 反推提示词；可直接修改 image2_prompt_guidance、seedance2_video_prompt 或 user_overrides">${escapeHtml(setting.specialRequirement || "")}</textarea>
+        <textarea class="special-requirement" spellcheck="false" placeholder="可选：填写额外要求，例如替换文字、强调表情、限制场景或补充台词；留空则默认参考竞品素材。">${escapeHtml(setting.specialRequirement || "")}</textarea>
       </div>
     `;
     const uploadMask = document.createElement("div");
@@ -679,10 +737,7 @@ function renderCompetitors() {
     const roleCountInput = block.querySelector(".role-count");
     const monsterCountInput = block.querySelector(".monster-count");
     const logoEnabledInput = block.querySelector(".logo-enabled");
-    const imageWidthInput = block.querySelector(".image-width");
-    const imageHeightInput = block.querySelector(".image-height");
-    const videoWidthInput = block.querySelector(".video-width");
-    const videoHeightInput = block.querySelector(".video-height");
+    const visualStyleModeInput = block.querySelector(".visual-style-mode");
     const replaceBtn = block.querySelector(".replace-competitor");
     const autosaveStatus = block.querySelector(".autosave-status");
     block.addEventListener("click", (event) => {
@@ -712,9 +767,7 @@ function renderCompetitors() {
         roleCount: clampNumber(roleCountInput.value, 0, 8),
         monsterCount: clampNumber(monsterCountInput.value, 0, 8),
         useLogo: logoEnabledInput.checked,
-        imageSize: sizeFromInputs(imageWidthInput, imageHeightInput, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
-        videoSize: sizeFromInputs(videoWidthInput, videoHeightInput, item.videoSize || item.imageSize || item.outputSize || item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
-        outputSize: sizeFromInputs(imageWidthInput, imageHeightInput, item.defaultOutputSize || DEFAULT_OUTPUT_SIZE),
+        visualStyleMode: visualStyleModeInput.value === "3D" ? "3D" : "2D",
         specialRequirement: specialRequirement.value
       };
       updateTaskPreview();
@@ -737,21 +790,14 @@ function renderCompetitors() {
     roleCountInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     monsterCountInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     logoEnabledInput.addEventListener("change", () => { updateSetting(); autoSaveSetting(); });
-    for (const sizeInput of [imageWidthInput, imageHeightInput, videoWidthInput, videoHeightInput]) {
-      sizeInput.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
-      sizeInput.addEventListener("blur", () => {
-        sizeInput.value = clampNumber(sizeInput.value, 256, 4096);
-        updateSetting();
-        autoSaveSetting();
-      });
-    }
+    visualStyleModeInput.addEventListener("change", () => { updateSetting(); autoSaveSetting(); });
     specialRequirement.addEventListener("input", () => { updateSetting(); autoSaveSetting(); });
     replaceBtn.addEventListener("click", async () => {
       if (state.materials?.runState?.running) return alert("当前正在生成中，不能更换竞品素材。请先停止任务，或等待生成完成后再操作。");
       await pickImageAndUpload({
         endpoint: "/api/upload-competitor",
         payload: { folder: item.name, allowVideo: true },
-        successText: `${item.name} 素材已更换，特殊提示词已自动更新`,
+        successText: `${item.name} 素材已更换`,
         statusElement: autosaveStatus
       });
     });
@@ -841,7 +887,8 @@ function renderGuangdadaItems(items) {
     const card = document.createElement("article");
     card.className = "guangdada-card";
     const videoPreviewUrl = item.proxyVideoUrl || item.videoUrl || "";
-    const preview = item.isVideoMaterial && (item.proxyVideoUrl || item.videoUrl)
+    const canPreviewVideo = Boolean(item.isVideoMaterial && videoPreviewUrl && isLikelyVideoPreviewUrl(videoPreviewUrl));
+    const preview = canPreviewVideo
       ? `<div class="video-preview-wrap">
           <video src="${escapeHtml(videoPreviewUrl)}" poster="${escapeHtml(item.proxyUrl || "")}" muted controls preload="metadata" playsinline></video>
           <button class="video-play-btn" type="button">播放</button>
@@ -862,24 +909,29 @@ function renderGuangdadaItems(items) {
     const button = card.querySelector(".guangdada-import button");
     const playButton = card.querySelector(".video-play-btn");
     const video = card.querySelector("video");
+    const image = card.querySelector("img");
     const folderSelect = card.querySelector(".guangdada-card-target");
     if (playButton && video) {
-      playButton.addEventListener("click", async (event) => {
+      playButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        try {
-          video.muted = false;
-          video.controls = true;
-          await video.play();
-          playButton.textContent = "播放中";
-          setTimeout(() => (playButton.textContent = "播放"), 1200);
-        } catch {
-          window.open(videoPreviewUrl, "_blank", "noopener,noreferrer");
-        }
+        openGuangdadaVideoPreview(videoPreviewUrl, item.title || "video");
+      });
+      video.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openGuangdadaVideoPreview(videoPreviewUrl, item.title || "video");
       });
       video.addEventListener("error", () => {
         playButton.textContent = "打开预览";
-        playButton.title = "视频源限制了内嵌播放，点击在新窗口打开预览";
+        playButton.title = "点击在当前页面预览视频";
+      });
+    }
+    if (image) {
+      image.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openGuangdadaImagePreview(item.proxyUrl || item.imageUrl || "", item.title || "image");
       });
     }
     const isRunning = Boolean(state.materials?.runState?.running);
@@ -900,7 +952,7 @@ function renderGuangdadaItems(items) {
         });
         await loadMaterials({ forceRefreshCompetitorSettings: true });
         renderGuangdadaItems(state.guangdadaItems);
-        showToast("素材已导入，特殊提示词 JSON 已刷新");
+        showToast("素材已导入，特殊提示词保持为空");
         button.textContent = "已导入";
       } catch (error) {
         alert(error.message);
@@ -912,6 +964,13 @@ function renderGuangdadaItems(items) {
     });
     els.guangdadaGrid.append(card);
   }
+}
+
+function isLikelyVideoPreviewUrl(url = "") {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  if (/\/api\/guangdada\/video\?/i.test(value)) return true;
+  return /\.(mp4|mov|webm|m4v|m3u8)(?:[?#].*)?$/i.test(value);
 }
 
 function renderRunState(runState) {
@@ -933,6 +992,111 @@ function renderRunState(runState) {
     div.textContent = `${formatTime(line.time)}  ${formatLogLine(line)}`;
     els.logList.append(div);
   }
+}
+
+function openGuangdadaVideoPreview(src, title = "video") {
+  if (!src) return alert("暂无可预览的视频链接");
+  let modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "guangdadaVideoPreviewModal";
+    modal.className = "media-preview-modal";
+    modal.innerHTML = `
+      <div class="media-preview-dialog">
+        <div class="media-preview-head">
+          <strong></strong>
+          <button type="button" class="media-preview-close" aria-label="关闭">×</button>
+        </div>
+        <div class="media-preview-status"></div>
+        <img class="media-preview-image" alt="" />
+        <video controls autoplay playsinline></video>
+      </div>
+    `;
+    document.body.append(modal);
+    modal.querySelector(".media-preview-close").addEventListener("click", closeGuangdadaVideoPreview);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closeGuangdadaVideoPreview();
+    });
+  }
+  modal.querySelector("strong").textContent = title;
+  const status = modal.querySelector(".media-preview-status");
+  const image = modal.querySelector(".media-preview-image");
+  const video = modal.querySelector("video");
+  if (image) {
+    image.hidden = true;
+    image.removeAttribute("src");
+  }
+  video.hidden = false;
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  if (status) status.textContent = "视频加载中...";
+  video.onloadedmetadata = () => {
+    if (status) status.textContent = "";
+  };
+  video.oncanplay = () => {
+    if (status) status.textContent = "";
+  };
+  video.onerror = () => {
+    if (status) status.textContent = "视频预览失败：当前素材没有可播放的视频源，或远程视频链接已失效。";
+  };
+  video.src = src;
+  video.muted = false;
+  modal.classList.add("show");
+  video.play().catch(() => {});
+}
+
+function openGuangdadaImagePreview(src, title = "image") {
+  if (!src) return alert("暂无可预览的图片链接");
+  let modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "guangdadaVideoPreviewModal";
+    modal.className = "media-preview-modal";
+    modal.innerHTML = `
+      <div class="media-preview-dialog">
+        <div class="media-preview-head">
+          <strong></strong>
+          <button type="button" class="media-preview-close" aria-label="关闭">×</button>
+        </div>
+        <div class="media-preview-status"></div>
+        <img class="media-preview-image" alt="" />
+        <video controls autoplay playsinline></video>
+      </div>
+    `;
+    document.body.append(modal);
+    modal.querySelector(".media-preview-close").addEventListener("click", closeGuangdadaVideoPreview);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closeGuangdadaVideoPreview();
+    });
+  }
+  modal.querySelector("strong").textContent = title;
+  const status = modal.querySelector(".media-preview-status");
+  const video = modal.querySelector("video");
+  const image = modal.querySelector(".media-preview-image");
+  video?.pause();
+  if (video) {
+    video.hidden = true;
+    video.removeAttribute("src");
+    video.load();
+  }
+  if (status) status.textContent = "";
+  if (image) {
+    image.hidden = false;
+    image.alt = title;
+    image.src = src;
+  }
+  modal.classList.add("show");
+}
+
+function closeGuangdadaVideoPreview() {
+  const modal = document.querySelector("#guangdadaVideoPreviewModal");
+  if (!modal) return;
+  const video = modal.querySelector("video");
+  video?.pause();
+  const image = modal.querySelector(".media-preview-image");
+  if (image) image.removeAttribute("src");
+  modal.classList.remove("show");
 }
 
 function updateStartButtonState(isRunning = Boolean(state.materials?.runState?.running)) {
@@ -989,7 +1153,8 @@ function formatLogLine(line) {
   if (line.type === "start") {
     const repeat = line.message?.match(/repeat=(\d+)/)?.[1] || "1";
     const suffix = repeat !== "1" ? `，每组生成 ${repeat} 次` : "";
-    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 codex-gpt-image-2${suffix}`;
+    const model = line.message?.match(/model=([^ ]+)/)?.[1] || "gpt-image-2";
+    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 ${model}${suffix}`;
   }
   if (line.type === "job-start") return `${worker}开始 ${job}`;
   if (line.type === "video-start") return `${worker}开始视频 ${job}`;
@@ -1094,21 +1259,6 @@ function clampNumber(value, min, max) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return min;
   return Math.max(min, Math.min(max, Math.floor(number)));
-}
-
-function normalizeOutputSizeInput(value) {
-  const match = String(value || "").trim().toLowerCase().match(/^(\d{3,4})\s*[x×*]\s*(\d{3,4})$/);
-  if (!match) return "";
-  const width = Math.max(256, Math.min(4096, Number(match[1])));
-  const height = Math.max(256, Math.min(4096, Number(match[2])));
-  return `${width}x${height}`;
-}
-
-function sizeFromInputs(widthInput, heightInput, fallback = DEFAULT_OUTPUT_SIZE) {
-  const fallbackParts = splitSizeParts(fallback);
-  const width = clampNumber(widthInput?.value || fallbackParts.width, 256, 4096);
-  const height = clampNumber(heightInput?.value || fallbackParts.height, 256, 4096);
-  return `${width}x${height}`;
 }
 
 function formatDateInput(date) {
@@ -1237,11 +1387,10 @@ async function uploadPickedFile({ file, endpoint, payload = {}, successText, qui
     const result = await api(endpoint, { method: "POST", body: JSON.stringify({ ...payload, name: file.name, content, ...(cover || {}) }) });
     await loadMaterials({ forceRefreshCompetitorSettings: isCompetitorUpload });
     if (statusElement) {
-      const usedFallback = isCompetitorUpload && String(result.specialRequirement || "").includes('"reverse_model": "local_fallback"');
-      statusElement.textContent = usedFallback ? "??????????????????? fallback" : "????????";
+      statusElement.textContent = isCompetitorUpload ? "素材已更新" : "上传完成";
     }
-    if (isCompetitorUpload) showToast("????? JSON ???");
-    if (!quiet) alert(isCompetitorUpload ? successText + "\n??????????????? JSON?" : successText);
+    if (isCompetitorUpload) showToast("素材已更新，特殊提示词保持为空");
+    if (!quiet) alert(isCompetitorUpload ? successText + "\n特殊提示词已清空，可按需自行填写。" : successText);
     return true;
   } finally {
     if (isCompetitorUpload) setCompetitorUploading(payload.folder, false);
@@ -1319,7 +1468,7 @@ function bindCompetitorDrop(block, item) {
         file,
         endpoint: "/api/upload-competitor",
         payload: { folder: item.name, allowVideo: true },
-        successText: `${item.name} 素材已导入，特殊提示词已自动更新`,
+        successText: `${item.name} 素材已导入`,
         quiet: true,
         statusElement
       });
@@ -1330,6 +1479,9 @@ function bindCompetitorDrop(block, item) {
 }
 
 els.batchTag.value = defaultBatchTag();
+if (els.imageModelSelect && !els.imageModelSelect.value) {
+  els.imageModelSelect.value = "gpt-image-2";
+}
 updateStartButtonState(false);
 els.guangdadaMinPopularity.value = "100000";
 els.guangdadaTopN.value = "3";
@@ -1743,6 +1895,12 @@ els.loginPassword?.addEventListener("keydown", (event) => {
 els.loginUsername?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") els.loginPassword?.focus();
 });
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".material-settings") || event.target.closest?.(".material-menu")) return;
+  document.querySelectorAll(".material-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
+});
 els.logoutBtn?.addEventListener("click", async () => {
   try {
     await api("/api/logout", { method: "POST", body: "{}" });
@@ -1791,6 +1949,9 @@ els.adminUsersList?.addEventListener("click", handleAdminUsersListClick);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeChangelog();
 });
+
+checkAppVersion(true);
+setInterval(() => checkAppVersion(false), 60 * 1000);
 
 checkAuth().then((authenticated) => {
   if (authenticated) return loadMaterials();
