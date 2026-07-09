@@ -5,7 +5,7 @@ import { access, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
@@ -41,7 +41,6 @@ const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
-const CODEX_TAI_HOME = process.env.AIGC_CODEX_TAI_HOME ? resolveAppPath(process.env.AIGC_CODEX_TAI_HOME) : join(tmpdir(), "aigc-platform-codex-tai-home");
 let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolveAppPath(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
 let savedProjects = [];
 let authStore;
@@ -285,57 +284,13 @@ function taiEnvForApiKey(apiKey) {
   };
 }
 
-function isCodexImagePoolModel(model) {
-  return String(model || "").trim() === "codex-gpt-image-2";
-}
-
-function codexConfigPath() {
-  return join(homedir(), ".codex", "config.toml");
-}
-
-function hasCodexTaiConfig() {
-  return existsSync(codexConfigPath());
-}
-
-const TAI_AUTH_ENV_KEYS = [
-  "OPENAI_API_KEY",
-  "OPENAI_KEY",
-  "REVERSE_PROMPT_API_KEY",
-  "TAI_API_KEY",
-  "TAI_TOKEN"
-];
-
-async function codexTaiEnv() {
-  const source = codexConfigPath();
-  if (!existsSync(source)) {
-    const error = new Error("当前机器未找到 Codex 配置文件，无法使用 codex-gpt-image-2 订阅池。请先配置 C:\\Users\\Touka\\.codex\\config.toml，或切换到个人 API Key 支持的生图模型。");
-    error.status = 400;
-    throw error;
-  }
-  const targetDir = join(CODEX_TAI_HOME, ".codex");
-  await mkdir(targetDir, { recursive: true });
-  await copyFile(source, join(targetDir, "config.toml"));
-  return {
-    USERPROFILE: CODEX_TAI_HOME,
-    HOME: CODEX_TAI_HOME
-  };
-}
-
 async function checkModelAccess(body = {}) {
   const imageModel = String(body.imageModel || "").trim();
   const videoModel = String(body.videoModel || "").trim();
   const outputMode = body.outputMode === "video" ? "video" : "image";
   if (imageModel) {
     const info = resolveImageModel(imageModel);
-    if (isCodexImagePoolModel(info.model)) {
-      if (hasCodexTaiConfig()) {
-        await codexTaiEnv();
-      } else {
-        await requireUserApiKeyForModel("gpt-image-2", "codex-gpt-image-2（服务器兼容模式，实际调用 gpt-image-2）");
-      }
-    } else {
-      await requireUserApiKeyForModel(info.model, info.label);
-    }
+    await requireUserApiKeyForModel(info.model, info.label);
   }
   if (outputMode === "video") {
     const info = resolveVideoModel(videoModel || "dreamina-seedance-2-0-mini");
@@ -1933,16 +1888,8 @@ async function runTaiJob(job, promptDir, logPath) {
 async function runImageStage(job, promptDir, logPath) {
   let imageModel = job.imageModel || MODEL;
   let imageModelLabel = job.imageModelLabel || imageModel;
-  let usesCodexPool = isCodexImagePoolModel(imageModel);
+  let apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
   let didFallbackToGptImage = false;
-  if (usesCodexPool && !hasCodexTaiConfig()) {
-    didFallbackToGptImage = true;
-    imageModel = "gpt-image-2";
-    imageModelLabel = "gpt-image-2";
-    usesCodexPool = false;
-    addLog("fallback", `FALLBACK ${job.name}: codex-gpt-image-2 subscription config not found on this server, using gpt-image-2 with current user's API Key`, { job: job.name, from: "codex-gpt-image-2", to: "gpt-image-2" });
-  }
-  let apiKey = usesCodexPool ? "" : await requireUserApiKeyForModel(imageModel, imageModelLabel);
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 
@@ -1953,9 +1900,7 @@ async function runImageStage(job, promptDir, logPath) {
     if (runState.stopRequested) throw new Error("Batch stopped by user");
     try {
       args[4] = imageModel;
-      const result = usesCodexPool
-        ? await execTai(args, { env: await codexTaiEnv(), unsetEnv: TAI_AUTH_ENV_KEYS })
-        : await execTai(args, { env: taiEnvForApiKey(apiKey) });
+      const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
       stdout = result.stdout;
       stderr = result.stderr;
       break;
@@ -1970,11 +1915,10 @@ async function runImageStage(job, promptDir, logPath) {
         combined.includes("<!DOCTYPE") ||
         error.code === 3221226505;
       addLog("error", `ERROR_REASON ${job.name}: ${summarizeErrorText(combined)}`, { job: job.name });
-      if (quotaError && usesCodexPool && !didFallbackToGptImage) {
+      if (quotaError && imageModel === "codex-gpt-image-2" && !didFallbackToGptImage) {
         didFallbackToGptImage = true;
         imageModel = "gpt-image-2";
         imageModelLabel = "gpt-image-2";
-        usesCodexPool = false;
         apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
         addLog("fallback", `FALLBACK ${job.name}: codex-gpt-image-2 quota unavailable, retrying with gpt-image-2`, { job: job.name, from: "codex-gpt-image-2", to: "gpt-image-2" });
         continue;
