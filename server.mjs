@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from "node:fs";
+import { constants as fsConstants, createReadStream, createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { access, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,10 +47,11 @@ let authStore;
 let appConfig = {};
 const requestScope = new AsyncLocalStorage();
 const PUBLIC_DIR = join(__dirname, "public");
-const MODEL = "codex-gpt-image-2";
+const MODEL = "gpt-image-2";
+let appVersionCache = "";
 const IMAGE_MODEL_OPTIONS = {
-  "codex-gpt-image-2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
-  "codex-gpt-image2": { model: "codex-gpt-image-2", label: "codex-gpt-image-2" },
+  "codex-gpt-image-2": { model: "gpt-image-2", label: "gpt-image-2" },
+  "codex-gpt-image2": { model: "gpt-image-2", label: "gpt-image-2" },
   "gpt-image-2": { model: "gpt-image-2", label: "gpt-image-2" },
   "ByteDance-Seedream-5-0-lite": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" },
   "doubao-seedream-5-0-260128": { model: "doubao-seedream-5-0-260128", label: "ByteDance-Seedream-5-0-lite" }
@@ -127,6 +128,18 @@ function clearCookie(name) {
 async function loadUsers() {
   authStore = createAuthStore({ usersPath: USERS_PATH });
   await authStore.init();
+}
+
+async function appVersion() {
+  if (appVersionCache) return appVersionCache;
+  const hash = createHash("sha256");
+  for (const file of ["package.json", "server.mjs", "public/app.js", "public/index.html", "public/styles.css"]) {
+    const fullPath = join(__dirname, file);
+    hash.update(file);
+    hash.update(await readFile(fullPath).catch(() => Buffer.from("missing")));
+  }
+  appVersionCache = String(process.env.AIGC_APP_VERSION || hash.digest("hex").slice(0, 12));
+  return appVersionCache;
 }
 
 async function userFromRequest(req) {
@@ -275,7 +288,14 @@ async function requireUserApiKeyForModel(model, label = "模型") {
 function taiEnvForApiKey(apiKey) {
   const clean = String(apiKey || "").trim();
   if (!clean) return {};
+  const taiHome = join(process.env.TEMP || process.env.TMP || __dirname, "aigc-platform-tai", sanitizeSegment(currentUserId(), "user"));
+  mkdirSync(taiHome, { recursive: true });
+  const endpoint = String(process.env.SKYLINK_ENDPOINT || process.env.TAI_ENDPOINT || "https://skylink-gateway.com/api/v1").trim();
   return {
+    USERPROFILE: taiHome,
+    HOME: taiHome,
+    SKYLINK_ENDPOINT: endpoint,
+    SKYLINK_API_KEY: clean,
     OPENAI_API_KEY: clean,
     OPENAI_KEY: clean,
     REVERSE_PROMPT_API_KEY: clean,
@@ -592,7 +612,7 @@ function chineseVideoSpecialRequirement(fileName, analysis = null) {
     : [
         `来源：本段默认要求根据本次上传视频 ${fileName} 生成，不是按竞品素材文件夹编号套模板。`,
         "视频反推：请观察当前视频的广告类型、镜头远近、主体入场方向、UI/文字层级、动作节奏、道具互动、情绪变化和转场时机，并把这些抽象关系写入我方生成要求。只有当前视频明确是战斗/塔防玩法时，才反推攻击因果、升级链路或敌我方向。",
-        "首帧要求：先用视频中最能代表广告布局的一帧作为 codex-gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
+        "首帧要求：先用视频中最能代表广告布局的一帧作为 gpt-image-2 效果图参考，保留画面比例、主体位置、主体比例、道具/按钮/文字区域和镜头距离；不要套用其他竞品图或历史生成图的构图。",
         "替换规则：竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都必须改成我方原创风格；我方角色或素材要替换原参考中的对应主体位置，不能在原主体旁边额外新增。非战斗素材不要强行加入怪物、攻击、技能、升级卡或塔防元素。"
       ].join("\n");
   return `${frameText}\n视频节奏：生成视频时继续参考本视频的前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮记忆点和结尾停留，但只保留抽象节奏、镜头语言和广告关系，不复制竞品具体元素。只有当前视频明确是战斗玩法时，才加入攻击反馈或升级节奏；否则保持非战斗广告类型。`;
@@ -608,7 +628,7 @@ function specialRequirementJson({ type, fileName, analysis = null, videoPrompt =
   const seedancePrompt = ai?.seedance2_video_prompt || (isVideo
     ? [
         `参考当前竞品视频 ${fileName} 的反推结构制作 Seedance 2.0 视频，但只保留抽象镜头语言、节奏和广告关系。`,
-        "先根据 codex-gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
+        "先根据 gpt-image-2 生成的我方效果图作为首帧/主体设定，再延续当前视频的前3秒钩子、镜头推进、主体运动方向、表情变化、道具互动、产品/Logo露出和结尾停留。",
         "如果当前视频明确是战斗/塔防玩法，才保留敌我方向、单位位置、升级链路和攻击因果；如果不是战斗视频，必须保持原参考的非战斗类型，不要加入怪物进攻、武器、技能、血条、伤害数字、升级卡或战斗UI。",
         "所有竞品角色、logo、品牌名、UI文字、具体场景皮肤、建筑造型、专有道具和装饰细节都要替换成我方原创风格；我方角色/怪物/Logo必须替换原参考里的对应主体位置，不能与原主体同时存在。"
       ].join("\n")
@@ -753,7 +773,7 @@ async function reversePromptWithVisionModel(imagePath, { type = "image", fileNam
     "台词语种必须保留：除非用户明确要求翻译或改语种，新视频不能改变原视频台词语种。例如原版是英文，新视频也必须是英文；原版是中文，新视频也必须是中文。",
     "如果不是战斗素材，要明确 non_combat_guard，禁止强行加入敌人、怪物进攻、攻击、武器、技能、血条、伤害数字、升级卡、战斗UI。",
     "如果是视频封面，请根据封面和上传视频语境写 seedance2_video_prompt：用于 Seedance 2.0 生成15秒竖屏视频，描述前3秒钩子、镜头推进、主体运动、表情/道具反馈、高潮和结尾停留，只保留抽象节奏，不复制竞品IP。",
-    "image2_prompt_guidance 必须用于 codex-gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
+    "image2_prompt_guidance 必须用于 gpt-image-2 图生图：要求替换成我方角色/怪物/Logo，保留参考的抽象构图、主体位置、比例、表情和广告层级，但场景、道具、UI和具体元素原创化。",
     "JSON字段：material_type, visual_summary, composition, subjects, expressions, scene, props, text_logo_ui, dialogue, camera, color_lighting, ad_mechanic, is_combat_reference, non_combat_guard, infringement_avoidance, image2_prompt_guidance, seedance2_video_prompt, user_edit_tip。dialogue格式为 { has_dialogue, language, original_lines, preserve_language, instruction }。"
   ].join("\n");
   const inputText = `${instruction}\n当前素材类型：${type}\n文件名：${fileName}\n尺寸：${width || "unknown"}x${height || "unknown"}，${orientationLabel || "未知比例"}`;
@@ -947,6 +967,33 @@ function summarizeErrorText(text) {
     .slice(-4)
     .join(" | ")
     .slice(0, 700);
+}
+
+function isImageModelAccessError(text = "") {
+  const value = String(text || "");
+  return /401|403|unauthorized|forbidden|invalid api key|token invalidated|auth_chat_requirements|permission denied|permission_required|not authorized|access denied/i.test(value) ||
+    /model[^\\n]*(not support|unsupported|not available|not enabled|not found|forbidden|unauthorized|permission)/i.test(value) ||
+    /(not support|unsupported)[^\\n]*model/i.test(value);
+}
+
+function taiDiagnosticText(error) {
+  const stdout = String(error?.stdout ?? "");
+  const stderr = String(error?.stderr ?? "");
+  const message = String(error?.message ?? "");
+  const diagnosticMessage = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^\[error\]/i.test(line) || /HTTP\s+\d{3}|RequestId|quota|insufficient|unauthorized|forbidden|permission|token invalidated|auth_chat_requirements|access denied|try again later|failed|timeout|Too many requests|429/i.test(line))
+    .join("\n");
+  return `${stdout}\n${stderr}\n${diagnosticMessage}`.trim();
+}
+
+function isImageQuotaError(text = "") {
+  const value = String(text || "");
+  return /no available codex image quota/i.test(value) ||
+    /quota[^\\n]*(exceeded|used up|unavailable|not available|insufficient|empty|limit)/i.test(value) ||
+    /(insufficient|not enough)[^\\n]*(credit|balance|quota)/i.test(value) ||
+    /balance[^\\n]*(insufficient|not enough|too low|unavailable)/i.test(value);
 }
 
 function isBytePlusAssetUploadRejected(text = "") {
@@ -1605,7 +1652,7 @@ function videoReferenceBlock(competitor) {
     : "When the current reference is not clearly gameplay/battle, preserve its non-combat creative structure: scene type, camera rhythm, emotional beats, character interaction, props, product/logo placement, editing cadence, and ad pacing. Do not introduce battles, enemies, monsters, weapons, towers, attack effects, upgrade cards, HP bars, or combat UI unless they are visibly present in the current reference.";
   const jsonVideoPrompt = specialRequirementForVideoPrompt(competitor.specialRequirement);
   const mergedVideoPrompt = [jsonVideoPrompt, competitor.videoPrompt].filter(Boolean).join("\n");
-  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the codex-gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
+  return `\nVideo reference guidance: first reverse-infer the competitor video structure, then use that structure to create the gpt-image-2 setup frame. ${actionLine} Do not copy competitor characters, logos, exact UI text, brand names, proprietary scene skins, props, building shapes, decorations, or concrete visual details.\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 1800)}\n`;
 }
 
 function isCombatReference(competitor = {}) {
@@ -1889,7 +1936,6 @@ async function runImageStage(job, promptDir, logPath) {
   let imageModel = job.imageModel || MODEL;
   let imageModelLabel = job.imageModelLabel || imageModel;
   let apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
-  let didFallbackToGptImage = false;
   const args = ["aigc", "image", job.prompt, "--model", imageModel, "--size", job.size, "-n", "1"];
   for (const image of job.images) args.push("--image", image);
 
@@ -1906,33 +1952,33 @@ async function runImageStage(job, promptDir, logPath) {
       break;
     } catch (error) {
       const combined = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`;
-      const quotaError = /no available codex image quota|quota|insufficient.*credit|balance/i.test(combined);
-      const retryable = combined.includes("429") ||
-        combined.includes("Too many requests") ||
-        combined.includes("image_poll_timeout") ||
-        combined.includes("fetch failed") ||
+      const diagnostic = taiDiagnosticText(error);
+      const quotaError = isImageQuotaError(diagnostic);
+      const accessError = isImageModelAccessError(diagnostic);
+      const chatImageGenericFailure = /The image generation request failed\. Please try again later/i.test(diagnostic) && /^gpt-image-2$/i.test(imageModel);
+      const retryable = /429|Too many requests|image_poll_timeout|fetch failed|try again later|temporarily unavailable|timeout/i.test(diagnostic) ||
         combined.includes("Unexpected token '<'") ||
         combined.includes("<!DOCTYPE") ||
         error.code === 3221226505;
+      await writeFile(
+        logPath.replace(/\.jsonl$/i, "_errors.log"),
+        `[${new Date().toISOString()}] ${job.name} attempt=${attempt} model=${imageModel}\n${combined}\n\n`,
+        { flag: "a" }
+      ).catch(() => {});
       addLog("error", `ERROR_REASON ${job.name}: ${summarizeErrorText(combined)}`, { job: job.name });
-      if (quotaError && imageModel === "codex-gpt-image-2" && !didFallbackToGptImage) {
-        didFallbackToGptImage = true;
-        imageModel = "gpt-image-2";
-        imageModelLabel = "gpt-image-2";
-        apiKey = await requireUserApiKeyForModel(imageModel, imageModelLabel);
-        addLog("fallback", `FALLBACK ${job.name}: codex-gpt-image-2 quota unavailable, retrying with gpt-image-2`, { job: job.name, from: "codex-gpt-image-2", to: "gpt-image-2" });
-        continue;
-      }
       if (retryable && attempt < 12) {
+        if (chatImageGenericFailure && attempt >= 2) {
+          throw new Error(`ChatGPT 图像池连续返回临时失败，当前不是素材或尺寸问题。通常是该账号的 ChatGPT/Codex 图像 token 已失效、需要重新认证，或网关侧暂时不可用。请点击右上角头像更新可用 API Key，或先切换到 ByteDance-Seedream-5-0-lite。${summarizeErrorText(diagnostic)}`);
+        }
         const waitMs = 30000;
         addLog("retry", `RETRY ${job.name} attempt=${attempt} wait=${waitMs / 1000}s ${summarizeErrorText(combined)}`, { job: job.name });
         await sleepWithStop(waitMs);
         continue;
       }
       if (quotaError) {
-        throw new Error(`当前账号的 ${imageModelLabel} 生图额度不可用或已用完。图片+视频模式必须先生成图片首帧，所以视频阶段还没开始。请切换到 ByteDance-Seedream-5-0-lite，或更换有 codex-gpt-image-2 额度的 API Key。${summarizeErrorText(combined)}`);
+        throw new Error(`当前账号的 ${imageModelLabel} 生图额度不可用或已用完。图片+视频模式必须先生成图片首帧，所以视频阶段还没开始。请切换到 ByteDance-Seedream-5-0-lite，或更换有 gpt-image-2 额度的 API Key。${summarizeErrorText(combined)}`);
       }
-      if (/401|403|unauthorized|forbidden|invalid api key|api key|permission|not support|unsupported|model/i.test(combined)) {
+      if (accessError) {
         throw new Error(`当前账号 API Key 不支持或无权使用模型 ${imageModelLabel}。请点击右上角头像更换 API Key，或选择该 Key 支持的模型。${summarizeErrorText(combined)}`);
       }
       throw error;
@@ -1949,7 +1995,6 @@ async function runImageStage(job, promptDir, logPath) {
   await downloadImage(imageUrl, job.output);
   const storage = await syncProjectAssetToObjectStorage(job.output, "generated_image");
   const record = { time: new Date().toISOString(), name: job.name, model: model || imageModel, model_label: imageModelLabel, task_id: taskId, prompt_path: join(promptDir, `prompt_${job.name}.txt`), output: job.output, remote_url: imageUrl };
-  if (didFallbackToGptImage) record.fallback_from = "codex-gpt-image-2";
   if (storage) {
     record.storage_key = storage.storageKey;
     record.storage_url = storage.storageUrl;
@@ -2427,7 +2472,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推当前竞品视频的非战斗广告结构：前3秒钩子、镜头推进方式、角色互动、表情变化、道具使用、场景转场、产品/Logo露出和结尾停留方式。只保留抽象节奏和布局关系，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 gpt-image-2 生成的效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
 
 当前参考素材未明确表现战斗/塔防/怪物进攻玩法，因此本视频必须按当前参考的实际类型生成：可以是生活化、休闲、搞笑、经营、换装、合成、剧情、解谜、宠物互动、社交展示或产品广告演绎。不要强行加入战斗、敌人、怪物进攻、攻击、武器、技能释放、塔防道路、升级卡、A/S/SS卡牌、HP血条、伤害数字、Boss或战斗UI。必须保留效果图中的我方角色身份、构图、镜头角度、UI/文字层级、道具功能、场景情绪和主体比例。${roleText}。${extraAssets}
 
@@ -2455,7 +2500,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
   const videoReference = mergedVideoPrompt
     ? `\n\n竞品视频JSON反推参考：\n${sanitizeRequirementText(mergedVideoPrompt).slice(0, 2200)}\n\n请先反推竞品视频的玩法结构、单位位置、镜头节奏、波次推进、升级链路和攻击因果，再套用到我方效果图。只能保留抽象玩法布局和广告节奏，不能复制竞品角色、logo、UI文字、品牌名、具体场景皮肤、建筑造型、冰雪门楼、火把、地图装饰或专有道具。`
     : "";
-  return `参考上一阶段由 codex-gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
+  return `参考上一阶段由 gpt-image-2 生成的局内效果图，制作15秒 Seedance 2.0 手游广告视频。${styleText}${targetVideoSize}${aspectText}${videoReference}
 
 必须保留效果图中的我方角色身份、地图布局、镜头角度、UI层级、敌我方向和主体比例。若参考视频是纵向塔防局内画面，英雄/防线必须保持在下方或底部格子，怪物必须保持在上方路径或从上方入口推进，攻击从下方英雄/防线朝上方怪物发出。保持原始镜头缩放、完整游戏屏幕、格子密度、道路宽度和UI边距，不能把场地、格子、敌人、英雄整体放大，不能裁切成近景。英雄必须保持小型局内单位比例，约等于参考视频里原英雄的屏幕占比，不能变成中心大插画、角色特写或前景展示；怪物也按参考视频怪物的相对尺寸和路径关系出现。必须用我方角色替换原卡皮/原英雄，原竞品单位必须消失，不能出现“原卡皮+我方角色”同时存在。我方角色必须站在原卡皮/原玩家单位所在同一个格子中心、同一条路线、同一层级。所有单位都必须在原版对应格子、路径或站位范围内运动，不能站出格子外或遮挡底部UI。不能改成左右对峙、横向决斗、海报展示或角色怪物并排站位。${roleText}。${monsterText}
 
@@ -2843,7 +2888,7 @@ async function replaceCompetitorMaterial({ folder, name, buffer, coverImageBuffe
 }
 
 function defaultVideoReversePrompt(fileName) {
-  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 codex-gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
+  return `请把当前上传的竞品视频 ${fileName} 当作视频节奏参考，而不是IP复制对象。生成视频时先反推并参考它的广告结构：前3秒钩子、镜头推进方式、主体入场方向、角色互动、道具使用、UI或文案出现时机、情绪变化、高潮记忆点、结尾停留方式。只保留抽象节奏、镜头语言、动作强弱关系和转化节拍，不复制竞品角色、logo、UI文字、品牌名、具体场景、专有道具或画面细节。只有当前视频明确是战斗/塔防玩法时，才参考攻击因果、升级节奏、怪物进攻或战斗UI；否则必须保持当前视频的非战斗广告类型，不要强行加入怪物、攻击、技能、升级卡或塔防元素。请结合上一阶段 gpt-image-2 生成的我方效果图，重写成我方角色与素材的原创15秒竖屏9:16 Seedance视频。`;
 }
 
 async function transcribeVideoDialogue(videoPath) {
@@ -3704,6 +3749,9 @@ async function serveStatic(req, res, pathname) {
 async function handleRequest(req, res) {
   try {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "GET" && url.pathname === "/api/version") {
+      return sendJson(res, { version: await appVersion() });
+    }
     if (req.method === "GET" && url.pathname === "/api/auth") {
       const user = await userFromRequest(req);
       return sendJson(res, user ? { authenticated: true, user: publicUser(user) } : { authenticated: false });
@@ -3815,7 +3863,7 @@ async function handleRequest(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
-  const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout";
+  const isPublicAuth = url.pathname === "/api/auth" || url.pathname === "/api/login" || url.pathname === "/api/logout" || url.pathname === "/api/version";
   const isWangzhuanApi = url.pathname.startsWith("/api/wangzhuan/");
   const isPublicAsset = url.pathname.startsWith("/api/public/assets/");
   const isPublicGuangdadaPreview = req.method === "GET" && (url.pathname === "/api/guangdada/image" || url.pathname === "/api/guangdada/video");

@@ -13,7 +13,9 @@ const state = {
   uploadingCompetitors: new Set(),
   guangdadaItems: [],
   guangdadaTargetFolder: "",
-  pollTimer: null
+  pollTimer: null,
+  appVersion: "",
+  versionUpdateHandled: false
 };
 
 const GUANGDADA_DISABLED = false;
@@ -146,6 +148,38 @@ async function api(path, options = {}) {
   }
   if (!res.ok || data.error) throw new Error(friendlyError(data.error || "请求失败"));
   return data;
+}
+
+async function checkAppVersion(initial = false) {
+  if (state.versionUpdateHandled) return;
+  try {
+    const res = await fetch(`/api/version?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const version = String(data.version || "").trim();
+    if (!version) return;
+    if (initial || !state.appVersion) {
+      state.appVersion = version;
+      return;
+    }
+    if (version !== state.appVersion) {
+      state.versionUpdateHandled = true;
+      alert("检测到系统已更新，请重新登录后继续使用。");
+      try {
+        await fetch("/api/logout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        });
+      } catch {}
+      state.materials = null;
+      state.user = null;
+      showLogin("系统已更新，请重新登录");
+      window.location.href = "/";
+    }
+  } catch {
+    // Version polling is best-effort; normal workflows should not be interrupted by network jitter.
+  }
 }
 
 function showLogin(message = "") {
@@ -1119,7 +1153,8 @@ function formatLogLine(line) {
   if (line.type === "start") {
     const repeat = line.message?.match(/repeat=(\d+)/)?.[1] || "1";
     const suffix = repeat !== "1" ? `，每组生成 ${repeat} 次` : "";
-    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 codex-gpt-image-2${suffix}`;
+    const model = line.message?.match(/model=([^ ]+)/)?.[1] || "gpt-image-2";
+    return line.message?.includes("mode=video") ? `开始批处理，先生成图片再生成 Seedance 视频${suffix}` : `开始批处理，并发生成，模型 ${model}${suffix}`;
   }
   if (line.type === "job-start") return `${worker}开始 ${job}`;
   if (line.type === "video-start") return `${worker}开始视频 ${job}`;
@@ -1445,7 +1480,7 @@ function bindCompetitorDrop(block, item) {
 
 els.batchTag.value = defaultBatchTag();
 if (els.imageModelSelect && !els.imageModelSelect.value) {
-  els.imageModelSelect.value = "ByteDance-Seedream-5-0-lite";
+  els.imageModelSelect.value = "gpt-image-2";
 }
 updateStartButtonState(false);
 els.guangdadaMinPopularity.value = "100000";
@@ -1914,6 +1949,9 @@ els.adminUsersList?.addEventListener("click", handleAdminUsersListClick);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeChangelog();
 });
+
+checkAppVersion(true);
+setInterval(() => checkAppVersion(false), 60 * 1000);
 
 checkAuth().then((authenticated) => {
   if (authenticated) return loadMaterials();
