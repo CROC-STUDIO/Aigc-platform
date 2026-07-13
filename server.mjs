@@ -401,7 +401,7 @@ function dirs() {
     recordDir,
     guangdadaCacheDir: join(recordDir, "guangdada_cache"),
     globalRequirementPath: join(recordDir, "\u901a\u7528\u63d0\u793a\u8bcd.txt"),
-    competitorNameLibraryPath: join(recordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
+    competitorNameLibraryPath: join(sharedRecordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
     upscaledDir: join(sharedRecordDir, "upscaled_refs_20260608_b")
   };
 }
@@ -1137,14 +1137,16 @@ async function writeCompetitorDisplayName(folder, displayName) {
 }
 
 async function loadCompetitorNameLibrary() {
-  await mkdir(dirs().recordDir, { recursive: true });
+  await mkdir(dirname(dirs().competitorNameLibraryPath), { recursive: true });
   let names = [];
-  if (existsSync(dirs().competitorNameLibraryPath)) {
+  const libraryPaths = await competitorNameLibraryPaths();
+  for (const libraryPath of libraryPaths) {
+    if (!existsSync(libraryPath)) continue;
     try {
-      const data = JSON.parse(await readFile(dirs().competitorNameLibraryPath, "utf8"));
-      names = Array.isArray(data.names) ? data.names : Array.isArray(data) ? data : [];
+      const data = JSON.parse(await readFile(libraryPath, "utf8"));
+      names.push(...(Array.isArray(data.names) ? data.names : Array.isArray(data) ? data : []));
     } catch {
-      names = [];
+      // Ignore malformed legacy libraries and keep any valid names already loaded.
     }
   }
   const legacyFolders = await competitorFolders().catch(() => []);
@@ -1152,14 +1154,30 @@ async function loadCompetitorNameLibrary() {
     const displayName = await readCompetitorDisplayName(folder).catch(() => folder);
     if (displayName && displayName !== folder) names.push(displayName);
   }
-  return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
+  const clean = [...new Set(names.map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
+  if (clean.length) await saveCompetitorNameLibrary(clean).catch(() => {});
+  return clean;
 }
 
 async function saveCompetitorNameLibrary(names) {
-  await mkdir(dirs().recordDir, { recursive: true });
+  await mkdir(dirname(dirs().competitorNameLibraryPath), { recursive: true });
   const clean = [...new Set((names ?? []).map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
   await writeFile(dirs().competitorNameLibraryPath, JSON.stringify({ names: clean }, null, 2), "utf8");
   return clean;
+}
+
+async function competitorNameLibraryPaths() {
+  const paths = [dirs().competitorNameLibraryPath];
+  const userDataRoot = join(currentBaseProjectRoot(), "\u7528\u6237\u6570\u636e");
+  if (existsSync(userDataRoot)) {
+    const projectFolder = sanitizeSegment(basename(resolve(currentBaseProjectRoot())));
+    const users = await readdir(userDataRoot, { withFileTypes: true }).catch(() => []);
+    for (const user of users) {
+      if (!user.isDirectory()) continue;
+      paths.push(join(userDataRoot, user.name, projectFolder, "\u6279\u5904\u7406\u8bb0\u5f55", "\u7ade\u54c1\u540d\u79f0\u5e93.json"));
+    }
+  }
+  return [...new Set(paths.map((item) => resolve(item)))];
 }
 
 async function createCompetitorFolder(body = {}) {

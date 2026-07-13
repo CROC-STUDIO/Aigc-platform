@@ -582,6 +582,14 @@ function renderGuangdadaCompetitorSelect() {
   createOption.value = "__create__";
   createOption.textContent = "+ 新增竞品名称";
   els.guangdadaKeyword.append(createOption);
+  updateGuangdadaDeleteButton();
+}
+
+function updateGuangdadaDeleteButton() {
+  if (!els.guangdadaDeleteFolderBtn || !els.guangdadaKeyword) return;
+  const value = els.guangdadaKeyword.value;
+  els.guangdadaDeleteFolderBtn.disabled = !value || value === "__create__";
+  els.guangdadaDeleteFolderBtn.title = els.guangdadaDeleteFolderBtn.disabled ? "请先选择要删除的竞品名称" : `删除 ${value}`;
 }
 
 function resetProjectState() {
@@ -1799,9 +1807,11 @@ els.outputModeSelect?.addEventListener("change", () => {
 els.guangdadaKeyword.addEventListener("change", async () => {
   const selectedOption = els.guangdadaKeyword.options[els.guangdadaKeyword.selectedIndex];
   if (els.guangdadaKeyword.value === "__create__") {
+    updateGuangdadaDeleteButton();
     openCompetitorNameModal();
     return;
   }
+  updateGuangdadaDeleteButton();
   if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
 });
 
@@ -1823,12 +1833,17 @@ els.guangdadaDeleteFolderBtn.addEventListener("click", async () => {
   els.guangdadaDeleteFolderBtn.disabled = true;
   try {
     await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
+    state.guangdadaItems = [];
     await loadMaterials();
+    els.guangdadaKeyword.value = "";
+    updateGuangdadaDeleteButton();
+    els.guangdadaStatus.textContent = `已删除 ${displayName}`;
+    els.guangdadaGrid.innerHTML = `<div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div>`;
     if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
   } catch (error) {
     alert(error.message);
   } finally {
-    els.guangdadaDeleteFolderBtn.disabled = false;
+    updateGuangdadaDeleteButton();
   }
 });
 
