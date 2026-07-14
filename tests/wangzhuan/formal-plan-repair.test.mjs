@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import {
   repairFormalPlanContract,
   repairSeedancePromptContract
-} from "../../tmp/seedance-segment-debug/dramagold_40155_formal_plan/formal-plan-repair.mjs";
+} from "../../server/wangzhuan/plan-repair.mjs";
 
 const execFileAsync = promisify(execFile);
 
