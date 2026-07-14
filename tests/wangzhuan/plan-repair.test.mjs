@@ -21,11 +21,20 @@ test("repairSeedancePromptContract locks language region currency subtitle and c
   });
 
   assert.match(prompt, /targetLanguage=id-ID/);
+  assert.match(prompt, /visible scene text/);
+  assert.match(prompt, /voiceover, spoken dialogue/);
+  assert.match(prompt, /use id-ID only/);
+  assert.match(prompt, /Do not show Chinese/);
   assert.match(prompt, /targetRegion=ID/);
   assert.match(prompt, /Rp/);
   assert.doesNotMatch(prompt, /\$50/);
   assert.match(prompt, /no burned subtitles/i);
+  assert.match(prompt, /no dense text blocks/i);
+  assert.match(prompt, /avoid AI-generated gibberish text/i);
+  assert.match(prompt, /do not generate disclaimer/i);
   assert.match(prompt, /Mandatory wangzhuan visual carrier repair/);
+  assert.match(prompt, /Voiceover performance repair/);
+  assert.match(prompt, /high-energy, fast-paced, emotionally expressive/);
 });
 
 test("repairFormalPlanContract injects mandatory visuals only on carrier slice", () => {
@@ -46,8 +55,11 @@ test("repairFormalPlanContract injects mandatory visuals only on carrier slice",
   });
 
   assert.equal(carrier.sliceDurationSec, 12);
+  assert.equal(carrier.cta, "继续");
+  assert.equal(carrier.ending, "继续按步骤体验");
   assert.ok(MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS.some((item) => carrier.moneyVisuals.includes(item)));
   assert.match(carrier.seedancePrompt, /Mandatory wangzhuan visual carrier repair/);
+  assert.match(carrier.seedancePrompt, /Voiceover performance repair/);
 
   const nonCarrier = repairFormalPlanContract({
     hook: "Hook",
@@ -65,7 +77,33 @@ test("repairFormalPlanContract injects mandatory visuals only on carrier slice",
   });
 
   assert.deepEqual(nonCarrier.moneyVisuals, []);
+  assert.equal(nonCarrier.cta, "继续");
+  assert.equal(nonCarrier.ending, "继续按步骤体验");
   assert.doesNotMatch(nonCarrier.seedancePrompt, /Mandatory wangzhuan visual carrier repair/);
+});
+
+test("repairFormalPlanContract front-loads opening hook energy", () => {
+  const repaired = repairFormalPlanContract({
+    hook: "打开手机",
+    body: "用户说明 app 怎么用",
+    seedancePrompt: "A person calmly walks and opens the phone.",
+    imagePrompt: "Person with phone.",
+    negativePrompt: "No watermark.",
+    subtitles: ["先打开看看"]
+  }, {
+    targetLanguage: "zh-CN",
+    targetRegion: "CN",
+    currencySymbol: "¥",
+    isOpeningSlice: true,
+    mandatoryMoneyVisualCarrier: true,
+    voiceoverPerformance: "情绪高昂、节奏很快、感染力强的真人口播",
+    openingHookRepair: "第一秒先看到金币爆发和奖励进度快速上涨，再切人物强反应"
+  });
+
+  assert.match(repaired.seedancePrompt, /Opening hook repair/);
+  assert.match(repaired.seedancePrompt, /第一秒先看到金币爆发/);
+  assert.match(repaired.seedancePrompt, /情绪高昂、节奏很快、感染力强/);
+  assert.ok(repaired.complianceNotes.some((item) => /opening slice must start with a high-impact hook/.test(item)));
 });
 
 test("repairFormalPlanContract keeps subtitles in subtitleWorkflow", () => {
@@ -87,4 +125,18 @@ test("repairFormalPlanContract keeps subtitles in subtitleWorkflow", () => {
   assert.equal(repaired.subtitleWorkflow.provider, "pixel_tech");
   assert.deepEqual(repaired.subtitleWorkflow.subtitleScript, ["领取奖励", "继续看剧"]);
   assert.match(repaired.seedancePrompt, /no burned subtitles/i);
+});
+
+test("repairFormalPlanContract clamps slice duration to 5-30 seconds", () => {
+  const basePlan = {
+    hook: "Hook",
+    body: "Body",
+    seedancePrompt: "Clean app proof shot.",
+    imagePrompt: "Phone close-up.",
+    negativePrompt: "No watermark."
+  };
+
+  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 4 }, {}).sliceDurationSec, 5);
+  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 7.2 }, {}).sliceDurationSec, 7.2);
+  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 31 }, {}).sliceDurationSec, 30);
 });

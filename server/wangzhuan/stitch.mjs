@@ -4,8 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { dirname, extname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
 import { makeOutputId } from "./ids.mjs";
@@ -19,17 +18,30 @@ import {
 } from "./mysql-facts.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { resolveBatchPostProcess } from "./postprocess.mjs";
+import { buildExpandedOutputName, expansionTimeoutMs, renderExpandedVideo } from "./output-expansion.mjs";
+import { writeVolcengineSubtitleArtifacts } from "./subtitles.mjs";
+import { resolveVolcengineAsrConfig, transcribeVolcengineAudio } from "./volcengine-asr.mjs";
 
-const STITCH_READY_TASK_STATUSES = new Set(["downloaded", "succeeded"]);
+const STITCH_READY_TASK_STATUSES = new Set(["downloaded", "succeeded", "qc"]);
 const FAILED_TASK_STATUSES = new Set(["failed", "skipped", "stopped"]);
 const execFileAsync = promisify(execFile);
 const DEFAULT_STITCH_TIMEOUT_MS = 120000;
-const DEFAULT_OVERLAY_TIMEOUT_MS = 120000;
-const DEFAULT_TAIL_IMAGE_DURATION_SEC = 2;
+const DEFAULT_OVERLAY_TIMEOUT_MS = 300000;
+const POST_PROCESS_MIN_TIMEOUT_MS = 300000;
+const POST_PROCESS_TIMEOUT_PER_SECOND_MS = 10000;
+const STITCH_IN_FLIGHT = new Map();
 const DISCLAIMER_TEMPLATE_IMAGES = Object.freeze({
   en: "public/assets/wangzhuan/disclaimers/en.png",
   pt: "public/assets/wangzhuan/disclaimers/pt.png",
-  zh: "public/assets/wangzhuan/disclaimers/zh.png"
+  zh: "public/assets/wangzhuan/disclaimers/zh.png",
+  ar: "public/assets/wangzhuan/disclaimers/ar.png",
+  es: "public/assets/wangzhuan/disclaimers/es.png",
+  fr: "public/assets/wangzhuan/disclaimers/fr.png",
+  de: "public/assets/wangzhuan/disclaimers/de.png",
+  id: "public/assets/wangzhuan/disclaimers/id.png",
+  th: "public/assets/wangzhuan/disclaimers/th.png",
+  vi: "public/assets/wangzhuan/disclaimers/vi.png"
 });
 
 function ffmpegAvailableSync() {
@@ -75,6 +87,12 @@ function safeErrorMessage(error) {
   return raw.replace(/[A-Za-z]:[\\/][^\s]+/g, "[path]").replace(/\/[^\s]+/g, "[path]");
 }
 
+function postProcessTimeoutMs(durationSec) {
+  const duration = Number(durationSec);
+  if (!Number.isFinite(duration) || duration <= 0) return DEFAULT_OVERLAY_TIMEOUT_MS;
+  return Math.max(POST_PROCESS_MIN_TIMEOUT_MS, Math.ceil(duration * POST_PROCESS_TIMEOUT_PER_SECOND_MS));
+}
+
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -108,12 +126,168 @@ async function probeVideoWidth(filePath) {
   }
 }
 
+async function probeVideoDuration(filePath) {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      filePath
+    ], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024
+    });
+    const duration = Number(String(stdout || "").trim());
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function probeHasAudio(filePath) {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=index",
+      "-of", "csv=p=0",
+      filePath
+    ], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024
+    });
+    return Boolean(String(stdout || "").trim());
+  } catch {
+    return false;
+  }
+}
+
+async function probeVideoStreamHealth(filePath) {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=codec_name,profile,pix_fmt,width,height",
+      "-show_entries", "format=duration,size",
+      "-of", "json",
+      filePath
+    ], {
+      encoding: "utf8",
+      timeout: 15000,
+      windowsHide: true,
+      maxBuffer: 2 * 1024 * 1024
+    });
+    const parsed = JSON.parse(String(stdout || "{}"));
+    const stream = Array.isArray(parsed.streams) ? parsed.streams[0] || {} : {};
+    const format = parsed.format || {};
+    return {
+      codecName: cleanString(stream.codec_name),
+      profile: cleanString(stream.profile),
+      pixFmt: cleanString(stream.pix_fmt),
+      width: Number(stream.width || 0),
+      height: Number(stream.height || 0),
+      durationSec: Number(format.duration || 0),
+      size: Number(format.size || 0)
+    };
+  } catch {
+    return {
+      codecName: "",
+      profile: "",
+      pixFmt: "",
+      width: 0,
+      height: 0,
+      durationSec: 0,
+      size: 0
+    };
+  }
+}
+
+function isCorruptDecodeLog(text = "") {
+  return /Invalid NAL|Error splitting the input|Decoding error|Could not find codec parameters|not enough frames to estimate rate|Invalid data found when processing input/i
+    .test(String(text || ""));
+}
+
+async function assertDecodableVideo(filePath, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+  if (!existsSync(filePath)) {
+    throw new WangzhuanError("stitch_failed", "拼接输出文件不存在", { filePath });
+  }
+  const health = await probeVideoStreamHealth(filePath);
+  if (!health.codecName || !health.profile || health.profile === "unknown" || !health.pixFmt || health.pixFmt === "unknown") {
+    throw new WangzhuanError("stitch_failed", "拼接输出视频流元数据异常，疑似损坏", {
+      codecName: health.codecName,
+      profile: health.profile,
+      pixFmt: health.pixFmt
+    });
+  }
+  if (!(health.width > 0) || !(health.height > 0) || !(health.durationSec > 0) || !(health.size > 1024)) {
+    throw new WangzhuanError("stitch_failed", "拼接输出视频时长或尺寸异常", {
+      width: health.width,
+      height: health.height,
+      durationSec: health.durationSec,
+      size: health.size
+    });
+  }
+  let stderr = "";
+  try {
+    const result = await execFileAsync("ffmpeg", [
+      "-nostdin",
+      "-v", "error",
+      "-i", filePath,
+      "-f", "null",
+      "-"
+    ], {
+      encoding: "utf8",
+      timeout: timeoutMs,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    stderr = String(result?.stderr || "");
+  } catch (error) {
+    stderr = `${error?.stderr || ""}\n${error?.message || ""}`;
+    if (!isCorruptDecodeLog(stderr)) {
+      throw new WangzhuanError("stitch_failed", "拼接输出解码校验失败", {
+        detail: safeErrorMessage(error)
+      });
+    }
+  }
+  if (isCorruptDecodeLog(stderr)) {
+    throw new WangzhuanError("stitch_failed", "拼接输出存在不可解码帧，已拒绝上传", {
+      profile: health.profile,
+      pixFmt: health.pixFmt,
+      durationSec: health.durationSec
+    });
+  }
+  return health;
+}
+
+async function replaceFileAtomically(sourcePath, targetPath) {
+  await mkdir(dirname(targetPath), { recursive: true });
+  try {
+    await rename(sourcePath, targetPath);
+  } catch (error) {
+    if (process.platform !== "win32" || !["EEXIST", "EPERM"].includes(error?.code)) throw error;
+    await rm(targetPath, { force: true });
+    await rename(sourcePath, targetPath);
+  }
+}
+
 function resolveTemplatePreset(language = "", preset = "auto") {
   const selected = cleanString(preset);
   if (selected && selected !== "auto" && DISCLAIMER_TEMPLATE_IMAGES[selected]) return selected;
   const normalized = cleanString(language).toLowerCase();
   if (normalized.startsWith("pt")) return "pt";
   if (normalized.startsWith("zh") || normalized.includes("chinese")) return "zh";
+  if (normalized.startsWith("ar")) return "ar";
+  if (normalized.startsWith("es")) return "es";
+  if (normalized.startsWith("fr")) return "fr";
+  if (normalized.startsWith("de")) return "de";
+  if (normalized.startsWith("id")) return "id";
+  if (normalized.startsWith("th")) return "th";
+  if (normalized.startsWith("vi")) return "vi";
   return "en";
 }
 
@@ -186,9 +360,12 @@ async function applyDisclaimerOverlay(context, sourcePath, targetPath, overlay, 
   const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 3));
   const horizontalMargin = Math.max(0, Number(overlay.horizontalMargin || 50));
   const canvasWidth = await probeVideoWidth(sourcePath);
+  const sourceDurationSec = await probeVideoDuration(sourcePath);
   const overlayWidth = Math.max(1, canvasWidth - horizontalMargin * 2);
   const xExpr = overlay.position === "bottom_left" ? String(horizontalMargin) : "(W-w)/2";
-  await execFileAsync("ffmpeg", [
+  const workDir = await mkdtemp(join(dirname(targetPath), ".wz-overlay-"));
+  const tempPath = join(workDir, "overlay.mp4");
+  const args = [
     "-y",
     "-i", sourcePath,
     "-loop", "1",
@@ -201,16 +378,84 @@ async function applyDisclaimerOverlay(context, sourcePath, targetPath, overlay, 
     "-preset", "veryfast",
     "-crf", "18",
     "-pix_fmt", "yuv420p",
-    "-c:a", "copy",
+    // Re-encode audio with the video pass. Copying AAC across filter/remux boundaries
+    // has produced undecodable H264/AAC payloads on older ffmpeg (Lavc59) builds.
+    "-c:a", "aac",
+    "-ar", "44100",
+    "-ac", "2",
     "-shortest",
+    ...(sourceDurationSec ? ["-t", String(sourceDurationSec)] : []),
     "-movflags", "+faststart",
-    targetPath
-  ], {
-    timeout: timeoutMs,
-    windowsHide: true,
-    maxBuffer: 10 * 1024 * 1024
-  });
+    tempPath
+  ];
+  try {
+    await execFileAsync("ffmpeg", args, {
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    await assertDecodableVideo(tempPath, { timeoutMs });
+    await replaceFileAtomically(tempPath, targetPath);
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
   return { applied: true, targetPath, imagePath };
+}
+
+async function applyVolcengineSubtitles(context, batch, outputId, sourcePath, { timeoutMs = DEFAULT_OVERLAY_TIMEOUT_MS } = {}) {
+  if (!ffmpegAvailableSync()) {
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法烧录字幕");
+  }
+  if (!existsSync(sourcePath)) {
+    throw new WangzhuanError("missing_required_file", "字幕处理所需的成片不存在", { sourcePath });
+  }
+  const outputDir = join(batchDir(context, batch.batchId), "postprocess-subtitles", outputId);
+  const audioPath = join(outputDir, "source.mp3");
+  await mkdir(outputDir, { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-y", "-i", sourcePath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", audioPath
+  ], { timeout: timeoutMs, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+  const audioStorage = await syncWangzhuanAsset(context, audioPath, "pipeline_subtitle_audio", { required: true });
+  const config = resolveVolcengineAsrConfig(context);
+  const asrResult = await transcribeVolcengineAudio({
+    audioUrl: audioStorage.storageUrl,
+    language: batch.request?.language || batch.estimate?.request?.language || "",
+    uid: `${currentUserId(context)}:${batch.batchId}`,
+    config: { ...config, timeoutMs: Math.max(config.timeoutMs, timeoutMs) }
+  });
+  const subtitleCanvas = await probeVideoStreamHealth(sourcePath);
+  const subtitleSettings = resolveBatchPostProcess(batch).subtitles;
+  const artifacts = await writeVolcengineSubtitleArtifacts(asrResult, outputDir, {
+    width: subtitleCanvas.width,
+    height: subtitleCanvas.height,
+    fontSize: subtitleSettings.fontSize,
+    centerY: subtitleSettings.centerY
+  });
+  const workDir = await mkdtemp(join(dirname(sourcePath), ".wz-subtitles-"));
+  const tempPath = join(workDir, "subtitled.mp4");
+  try {
+    await execFileAsync("ffmpeg", [
+      "-y", "-i", sourcePath,
+      "-vf", `ass=${artifacts.assPath.replace(/\\/g, "/").replace(/:/g, "\\:")}`,
+      "-map", "0:v:0", "-map", "0:a?",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-ar", "44100", "-ac", "2",
+      "-movflags", "+faststart", tempPath
+    ], { timeout: timeoutMs, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+    await assertDecodableVideo(tempPath, { timeoutMs });
+    await replaceFileAtomically(tempPath, sourcePath);
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+  return {
+    enabled: true,
+    status: "succeeded",
+    cueCount: artifacts.cueCount,
+    transcriptPath: userRelative(context, artifacts.transcriptPath),
+    srtPath: userRelative(context, artifacts.srtPath),
+    assPath: userRelative(context, artifacts.assPath)
+  };
 }
 
 async function readBatch(context, batchId) {
@@ -369,7 +614,9 @@ function groupTasksByVariant(batch) {
 }
 
 export function hasMultiSliceStitchGroups(batch = {}) {
-  return groupTasksByVariant(batch).some((group) => group.entries.length > 1 || groupHasTailImageAssets(group));
+  const postProcess = resolveBatchPostProcess(batch);
+  const requiresPostProcess = Boolean(postProcess.ending || postProcess.subtitles.enabled || postProcess.expansionSizes.length);
+  return groupTasksByVariant(batch).some((group) => group.entries.length > 1 || requiresPostProcess);
 }
 
 function segmentOutputPath(context, batchId, outputId) {
@@ -410,12 +657,26 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
   const outputs = [...existing];
   for (const group of groups) {
     for (const entry of group.entries) {
-      if (existingByTask.has(entry.task.generationTaskId)) continue;
+      const existingOutput = existingByTask.get(entry.task.generationTaskId);
+      if (existingOutput) {
+        const existingPath = join(context.userProjectRoot, existingOutput.filePath || "");
+        const media = await probeVideoStreamHealth(existingPath);
+        existingOutput.displayFileName = buildOutputDisplayName({
+          batch,
+          script: entry.script,
+          outputId: existingOutput.outputId,
+          width: media.width,
+          height: media.height
+        });
+        continue;
+      }
       if (FAILED_TASK_STATUSES.has(entry.task.status)) continue;
       const outputId = takeOutputId(batch, sequenceState);
       const target = segmentOutputPath(context, batch.batchId, outputId);
       const filePath = userRelative(context, target);
       const disclaimerOverlay = Number(batch.estimate?.durationSec) === 15
+        && group.entries.length === 1
+        && !hasMultiSliceStitchGroups(batch)
         ? resolveDisclaimerOverlay(batch, entry.script.branchDraft)
         : { applied: false, text: "" };
       const taskSource = entry.task.outputPath
@@ -425,10 +686,10 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         await mkdir(dirname(target), { recursive: true });
         await copyFile(taskSource, target);
         if (disclaimerOverlay.applied) {
-          const overlayTarget = `${target}.overlay.mp4`;
-          await applyDisclaimerOverlay(context, target, overlayTarget, disclaimerOverlay);
-          await rm(target, { force: true });
-          await rename(overlayTarget, target);
+          const durationSec = Number(entry.task.durationSec || entry.script.durationSec || batch.estimate?.durationSec || 0);
+          await applyDisclaimerOverlay(context, target, target, disclaimerOverlay, {
+            timeoutMs: postProcessTimeoutMs(durationSec)
+          });
         }
       } else {
         throw new WangzhuanError("missing_required_file", "分段视频文件缺失，无法生成分段产出", {
@@ -439,6 +700,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
       }
       const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video", { required: true });
       const durationSec = Number(entry.task.durationSec || entry.script.durationSec || batch.estimate?.durationSec || 15);
+      const media = await probeVideoStreamHealth(target);
       outputs.push({
         outputId,
         sourceType: "pipeline",
@@ -455,7 +717,8 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
           batch,
           script: entry.script,
           outputId,
-          durationSec
+          width: media.width,
+          height: media.height
         }),
         previewUrl: storage.storageUrl,
         storageKey: storage.storageKey,
@@ -471,26 +734,20 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
   return outputs;
 }
 
-function groupHasTailImageAssets(group = {}) {
-  const branch = group.entries?.[group.entries.length - 1]?.script?.branchDraft || group.entries?.[0]?.script?.branchDraft || {};
-  return Boolean(
-    cleanString(branch.assetStoredPaths?.ctaAsset || branch.assetRelativePaths?.ctaAsset)
-    || cleanString(branch.assetStoredPaths?.endingAsset || branch.assetRelativePaths?.endingAsset)
-  );
-}
-
-function hasCompleteSubmittedSegments(group) {
-  return (group.entries.length >= 2 || groupHasTailImageAssets(group)) && group.entries.every(({ task }) => {
+function hasCompleteSubmittedSegments(group, { requiresPostProcess = false } = {}) {
+  return (group.entries.length >= 2 || requiresPostProcess) && group.entries.every(({ task }) => {
     return task.seedanceTaskId && STITCH_READY_TASK_STATUSES.has(task.status) && Boolean(task.outputPath);
   });
 }
 
 export function isBatchReadyForStitch(batch = {}) {
   const groups = groupTasksByVariant(batch);
-  return groups.length > 0 && groups.every((group) => hasCompleteSubmittedSegments(group));
+  const postProcess = resolveBatchPostProcess(batch);
+  const requiresPostProcess = Boolean(postProcess.ending || postProcess.subtitles.enabled || postProcess.expansionSizes.length);
+  return groups.length > 0 && groups.every((group) => hasCompleteSubmittedSegments(group, { requiresPostProcess }));
 }
 
-function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null, tailSegments = [] }) {
+function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null, tailSegments = [], postProcessEnding = null, subtitlePostProcess = null }) {
   return {
     schemaVersion: "stitch_report.v1",
     outputId,
@@ -503,6 +760,8 @@ function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode 
       preflightStatus: preflight.status
     },
     disclaimerOverlay: disclaimerOverlay || { applied: false, text: "" },
+    postProcessEnding,
+    subtitlePostProcess,
     errorCode,
     errorMessage,
     createdAt: new Date().toISOString()
@@ -536,7 +795,10 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
   };
 }
 
-async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+async function concatSegmentVideos(outputPath, segmentPaths, {
+  timeoutMs = DEFAULT_STITCH_TIMEOUT_MS,
+  canvas = null
+} = {}) {
   if (!ffmpegAvailableSync()) {
     throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法拼接视频");
   }
@@ -545,139 +807,294 @@ async function concatSegmentVideos(outputPath, segmentPaths, { timeoutMs = DEFAU
       throw new WangzhuanError("missing_required_file", "拼接所需的分段视频不存在", { segmentPath });
     }
   }
-  const listDir = await mkdtemp(join(tmpdir(), "wz-stitch-list-"));
+  await mkdir(dirname(outputPath), { recursive: true });
+  const workDir = await mkdtemp(join(dirname(outputPath), ".wz-stitch-"));
+  const tempPath = join(workDir, "concat.mp4");
   try {
-    const listPath = join(listDir, "concat.txt");
+    const sourceHealth = canvas || await probeVideoStreamHealth(segmentPaths[0]);
+    const canvasWidth = Number(sourceHealth.width) > 0 ? Math.trunc(sourceHealth.width) : 720;
+    const canvasHeight = Number(sourceHealth.height) > 0 ? Math.trunc(sourceHealth.height) : 1280;
+    const listPath = join(workDir, "concat.txt");
     const listBody = segmentPaths.map((segmentPath) => `file '${toConcatListPath(segmentPath)}'`).join("\n");
     await writeFile(listPath, listBody, "utf8");
     await mkdir(dirname(outputPath), { recursive: true });
+
+    const runConcat = async (args) => {
+      await execFileAsync("ffmpeg", args, {
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
+      });
+    };
+
+    let copyError = null;
     try {
-      await execFileAsync("ffmpeg", [
+      await runConcat([
         "-y",
         "-f", "concat",
         "-safe", "0",
         "-i", listPath,
         "-c", "copy",
-        outputPath
-      ], {
-        timeout: timeoutMs,
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024
-      });
+        "-movflags", "+faststart",
+        tempPath
+      ]);
+      await assertDecodableVideo(tempPath, { timeoutMs });
     } catch (error) {
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listPath,
-        "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-an",
-        outputPath
-      ], {
-        timeout: timeoutMs,
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024
-      }).catch(() => {
-        throw error;
-      });
+      copyError = error;
+      await rm(tempPath, { force: true }).catch(() => {});
+      // Prefer a full re-encode when stream copy produces undecodable output
+      // (common with mixed audio presence / timestamp discontinuities).
+      try {
+        await runConcat([
+          "-y",
+          "-f", "concat",
+          "-safe", "0",
+          "-i", listPath,
+          "-vf", `scale=${canvasWidth}:${canvasHeight}:force_original_aspect_ratio=decrease,pad=${canvasWidth}:${canvasHeight}:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p`,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "18",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-ar", "44100",
+          "-ac", "2",
+          "-movflags", "+faststart",
+          tempPath
+        ]);
+        await assertDecodableVideo(tempPath, { timeoutMs });
+      } catch (reencodeError) {
+        throw reencodeError instanceof WangzhuanError
+          ? reencodeError
+          : (copyError instanceof WangzhuanError ? copyError : new WangzhuanError("stitch_failed", safeErrorMessage(copyError || reencodeError)));
+      }
     }
+    await replaceFileAtomically(tempPath, outputPath);
   } finally {
-    await rm(listDir, { recursive: true, force: true }).catch(() => {});
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-function resolveTailAssetPath(context, branch = {}, assetKey = "") {
-  const relativePath = cleanString(branch.assetStoredPaths?.[assetKey] || branch.assetRelativePaths?.[assetKey]);
-  if (!relativePath) return "";
-  return join(context.userProjectRoot, relativePath);
-}
-
-function isSupportedTailImage(filePath = "") {
-  return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(filePath).toLowerCase());
-}
-
-async function createTailImageVideo(context, batchId, outputId, assetKey, imagePath, sequence, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+async function createPostProcessEndingVideo(context, batchId, outputId, ending, canvas, {
+  timeoutMs = DEFAULT_STITCH_TIMEOUT_MS
+} = {}) {
   if (!ffmpegAvailableSync()) {
-    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法生成尾图视频片段");
+    throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法生成 Ending 视频片段");
   }
-  if (!isSupportedTailImage(imagePath) || !existsSync(imagePath)) {
-    throw new WangzhuanError("missing_required_file", "尾图素材不存在或不是支持的图片格式", {
-      assetKey,
-      imagePath
+  const sourcePath = resolveUserAssetPath(context, ending?.storedPath);
+  if (!sourcePath || !existsSync(sourcePath)) {
+    throw new WangzhuanError("missing_required_file", "后处理 Ending 文件不存在", {
+      storedPath: ending?.storedPath || ""
     });
   }
-  const target = join(batchDir(context, batchId), "tails", `${outputId}_${String(sequence).padStart(2, "0")}_${assetKey}.mp4`);
+  const width = Number(canvas?.width) > 0 ? Math.trunc(canvas.width) : 720;
+  const height = Number(canvas?.height) > 0 ? Math.trunc(canvas.height) : 1280;
+  const target = join(batchDir(context, batchId), "postprocess-ending", `${outputId}_ending.mp4`);
   await mkdir(dirname(target), { recursive: true });
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-loop", "1",
-    "-i", imagePath,
-    "-t", String(DEFAULT_TAIL_IMAGE_DURATION_SEC),
-    "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+  const filter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p`;
+  const isImage = ending?.mediaType === "image";
+  const sourceDurationSec = isImage ? 1 : await probeVideoDuration(sourcePath);
+  if (!(sourceDurationSec > 0)) {
+    throw new WangzhuanError("invalid_material", "后处理 Ending 视频时长无效", {
+      storedPath: ending?.storedPath || ""
+    });
+  }
+  const hasAudio = !isImage && await probeHasAudio(sourcePath);
+  const args = isImage
+    ? [
+        "-y", "-loop", "1", "-i", sourcePath,
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-t", "1", "-vf", filter, "-map", "0:v:0", "-map", "1:a:0"
+      ]
+    : hasAudio
+      ? [
+          "-y", "-i", sourcePath, "-t", String(sourceDurationSec), "-vf", filter,
+          "-map", "0:v:0", "-map", "0:a:0"
+        ]
+      : [
+          "-y", "-i", sourcePath,
+          "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+          "-t", String(sourceDurationSec), "-vf", filter, "-map", "0:v:0", "-map", "1:a:0"
+        ];
+  args.push(
     "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "18",
     "-pix_fmt", "yuv420p",
-    "-an",
+    "-c:a", "aac",
+    "-ar", "44100",
+    "-ac", "2",
+    "-shortest",
+    "-movflags", "+faststart",
     target
-  ], {
-    timeout: timeoutMs,
-    windowsHide: true,
-    maxBuffer: 10 * 1024 * 1024
-  });
-  return {
-    assetKey,
-    filePath: userRelative(context, target),
-    fullPath: target,
-    durationSec: DEFAULT_TAIL_IMAGE_DURATION_SEC
-  };
+  );
+  try {
+    await execFileAsync("ffmpeg", args, {
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const health = await assertDecodableVideo(target, { timeoutMs });
+    return {
+      filePath: userRelative(context, target),
+      fullPath: target,
+      durationSec: isImage ? 1 : health.durationSec,
+      mediaType: ending.mediaType,
+      sourceFileName: ending.fileName || ""
+    };
+  } catch (error) {
+    await rm(target, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
-async function createTailImageVideos(context, batch, group, outputId) {
-  const branch = group.entries[group.entries.length - 1]?.script?.branchDraft || group.entries[0]?.script?.branchDraft || {};
-  const tailAssets = [
-    ["ctaAsset", resolveTailAssetPath(context, branch, "ctaAsset")],
-    ["endingAsset", resolveTailAssetPath(context, branch, "endingAsset")]
-  ].filter(([, imagePath]) => imagePath);
-  const videos = [];
-  for (const [assetKey, imagePath] of tailAssets) {
-    videos.push(await createTailImageVideo(context, batch.batchId, outputId, assetKey, imagePath, videos.length + 1));
-  }
-  return videos;
+async function deriveExpandedOutputs(context, batch, originalOutput, sequenceState, {
+  sourceHealth = null,
+  concurrency = 2
+} = {}) {
+  const expansionSizes = resolveBatchPostProcess(batch).expansionSizes;
+  if (!expansionSizes.length) return { outputs: [], failures: [] };
+  const inputPath = join(context.userProjectRoot, originalOutput.filePath);
+  const health = sourceHealth || await probeVideoStreamHealth(inputPath);
+  const originalSizeKey = `${Math.trunc(health.width || 0)}x${Math.trunc(health.height || 0)}`;
+  const requests = expansionSizes.filter((item) => item.sizeKey !== originalSizeKey);
+  if (!requests.length) return { outputs: [], failures: [] };
+  const outputDir = join(batchDir(context, batch.batchId), "expanded", originalOutput.outputId);
+  const renderer = context.renderExpandedVideo || renderExpandedVideo;
+  const jobs = requests.map((request) => ({
+    request,
+    outputId: takeOutputId(batch, sequenceState)
+  }));
+  const outputs = [];
+  const failures = [];
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor++];
+      const { request, outputId } = job;
+      try {
+        const outputFileName = buildExpandedOutputName(
+          originalOutput.displayFileName || `${originalOutput.outputId}.mp4`,
+          request.targetWidth,
+          request.targetHeight
+        );
+        const rendered = await renderer({
+          inputPath,
+          targetWidth: request.targetWidth,
+          targetHeight: request.targetHeight,
+          outputDir,
+          outputFileName,
+          timeoutMs: expansionTimeoutMs(health.durationSec || originalOutput.durationSec)
+        });
+        const storage = await syncWangzhuanAsset(context, rendered.outputPath, "pipeline_expanded_video", { required: true });
+        outputs.push({
+          outputId,
+          sourceType: "pipeline",
+          batchId: batch.batchId,
+          kind: "expanded_video",
+          parentOutputId: originalOutput.outputId,
+          branchId: originalOutput.branchId || "",
+          branchLabel: originalOutput.branchLabel || "",
+          branchVariantIndex: originalOutput.branchVariantIndex,
+          generationTaskIds: [...(originalOutput.generationTaskIds || [])],
+          durationSec: Number(rendered.durationSec || health.durationSec || originalOutput.durationSec || 0),
+          targetWidth: request.targetWidth,
+          targetHeight: request.targetHeight,
+          sizeKey: request.sizeKey,
+          mode: request.mode,
+          filePath: userRelative(context, rendered.outputPath),
+          displayFileName: rendered.fileName,
+          previewUrl: storage.storageUrl,
+          storageKey: storage.storageKey,
+          storageUrl: storage.storageUrl,
+          qcStatus: "not_started",
+          downloadEligible: false,
+          visualPreviewRequired: false,
+          previewConfirmed: false
+        });
+      } catch (error) {
+        failures.push({
+          parentOutputId: originalOutput.outputId,
+          sizeKey: request.sizeKey,
+          targetWidth: request.targetWidth,
+          targetHeight: request.targetHeight,
+          code: error?.code || "output_expansion_failed",
+          message: safeErrorMessage(error)
+        });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), jobs.length) }, () => worker()));
+  outputs.sort((left, right) => left.sizeKey.localeCompare(right.sizeKey));
+  failures.sort((left, right) => left.sizeKey.localeCompare(right.sizeKey));
+  return { outputs, failures };
 }
 
 async function createSucceededStitchOutput(context, batch, group, segmentOutputs, preflight, sequenceState) {
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
-  const tailVideos = await createTailImageVideos(context, batch, group, outputId);
-  const tailDurationSec = tailVideos.reduce((sum, item) => sum + Number(item.durationSec || 0), 0);
-  const totalDurationSec = (segmentOutputs.reduce((sum, output) => sum + Number(output.durationSec || 0), 0) + tailDurationSec)
+  const postProcessEnding = resolveBatchPostProcess(batch).ending;
+  const subtitleSettings = resolveBatchPostProcess(batch).subtitles;
+  const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
+  const canvas = await probeVideoStreamHealth(segmentPaths[0]);
+  const endingSegment = postProcessEnding
+    ? await createPostProcessEndingVideo(context, batch.batchId, outputId, postProcessEnding, canvas)
+    : null;
+  const totalDurationSec = (segmentOutputs.reduce((sum, output) => sum + Number(output.durationSec || 0), 0)
+    + Number(endingSegment?.durationSec || 0))
     || group.entries.reduce((sum, entry) => sum + Number(entry.task.durationSec || entry.script.durationSec || 0), 0)
     || Number(batch.estimate?.durationSec || 0);
   const displayFileName = buildOutputDisplayName({
     batch,
     script: group.entries[0]?.script,
     outputId,
-    durationSec: totalDurationSec
+    width: canvas.width,
+    height: canvas.height
   });
-  const segmentPaths = [
-    ...segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath)),
-    ...tailVideos.map((item) => item.fullPath)
-  ];
+  if (endingSegment) segmentPaths.push(endingSegment.fullPath);
+  const disclaimerOverlay = resolveDisclaimerOverlay(batch, group.entries[0]?.script?.branchDraft);
+  let subtitlePostProcess = subtitleSettings.enabled ? { enabled: true, status: "pending" } : { enabled: false, status: "disabled" };
+  const postProcessFailures = [];
+  const timeoutMs = postProcessTimeoutMs(totalDurationSec);
   try {
-    await concatSegmentVideos(target, segmentPaths);
+    // Always concat first, then overlay in a second pass. The old single-pass
+    // concat+overlay+-c:a copy path produced undecodable outputs on Lavc59.
+    await concatSegmentVideos(target, segmentPaths, { canvas });
+    if (disclaimerOverlay.applied) {
+      const overlayImagePath = resolveDisclaimerOverlayImagePath(context, disclaimerOverlay);
+      if (!overlayImagePath) {
+        throw new WangzhuanError("missing_required_file", "免责声明贴片 PNG 不存在，请选择模板或上传 PNG", {
+          imageStoredPath: disclaimerOverlay.imageStoredPath || ""
+        });
+      }
+      await applyDisclaimerOverlay(context, target, target, disclaimerOverlay, { timeoutMs });
+    }
+    if (subtitleSettings.enabled) {
+      try {
+        subtitlePostProcess = await applyVolcengineSubtitles(context, batch, outputId, target, { timeoutMs });
+      } catch (error) {
+        subtitlePostProcess = {
+          enabled: true,
+          status: "failed",
+          errorCode: error?.code || "subtitle_postprocess_failed",
+          errorMessage: safeErrorMessage(error)
+        };
+        postProcessFailures.push({
+          parentOutputId: outputId,
+          kind: "subtitles",
+          code: subtitlePostProcess.errorCode,
+          message: subtitlePostProcess.errorMessage
+        });
+      }
+    }
+    await assertDecodableVideo(target, { timeoutMs });
   } catch (error) {
+    await rm(target, { force: true }).catch(() => {});
     throw error instanceof WangzhuanError ? error : new WangzhuanError("stitch_failed", safeErrorMessage(error), {
       batchId: batch.batchId,
       segmentOutputIds: segmentOutputs.map((output) => output.outputId)
     });
-  }
-  const disclaimerOverlay = resolveDisclaimerOverlay(batch, group.entries[0]?.script?.branchDraft);
-  if (disclaimerOverlay.applied) {
-    const overlayTarget = `${target}.overlay.mp4`;
-    await applyDisclaimerOverlay(context, target, overlayTarget, disclaimerOverlay);
-    await rm(target, { force: true });
-    await rename(overlayTarget, target);
   }
   const filePath = userRelative(context, target);
   const storage = await syncWangzhuanAsset(context, target, "pipeline_stitched_video", { required: true });
@@ -687,7 +1104,14 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
     preflight,
     status: "succeeded",
     disclaimerOverlay,
-    tailSegments: tailVideos.map(({ assetKey, filePath, durationSec }) => ({ assetKey, filePath, durationSec }))
+    tailSegments: [],
+    postProcessEnding: endingSegment ? {
+      filePath: endingSegment.filePath,
+      durationSec: endingSegment.durationSec,
+      mediaType: endingSegment.mediaType,
+      sourceFileName: endingSegment.sourceFileName
+    } : null,
+    subtitlePostProcess
   });
   const reportPath = await writeReport(context, batch.batchId, report);
   return {
@@ -700,7 +1124,14 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       branchVariantIndex: group.branchVariantIndex,
       generationTaskIds: group.entries.map((entry) => entry.task.generationTaskId),
       durationSec: totalDurationSec,
-      tailSegments: tailVideos.map(({ assetKey, filePath, durationSec }) => ({ assetKey, filePath, durationSec })),
+      tailSegments: [],
+      postProcessEnding: endingSegment ? {
+        filePath: endingSegment.filePath,
+        durationSec: endingSegment.durationSec,
+        mediaType: endingSegment.mediaType,
+        sourceFileName: endingSegment.sourceFileName
+      } : null,
+      subtitlePostProcess,
       kind: "stitched_video",
       filePath,
       displayFileName,
@@ -721,7 +1152,8 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       branchId: group.branchId || "",
       branchLabel: group.branchLabel || "",
       branchVariantIndex: group.branchVariantIndex
-    }
+    },
+    postProcessFailures
   };
 }
 
@@ -783,7 +1215,7 @@ export async function finalizeSegmentBatch(context, batchId) {
   return working;
 }
 
-export async function stitchBatchSegments(context, batchId, options = {}) {
+async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
   const preflight = preflightStitcher(context);
   if (preflight.status === "unsupported") {
     throw new WangzhuanError("stitcher_unavailable", "拼接能力不可用", { batchId });
@@ -797,15 +1229,45 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
 
   const withStitchingStatus = await writeBatch(context, { ...batch, status: "stitching" });
   const sequenceState = { next: nextOutputSequence(withStitchingStatus) };
-  const segmentOutputs = await materializeSegmentOutputs(context, withStitchingStatus, groups, sequenceState);
+  let segmentOutputs;
+  try {
+    segmentOutputs = await materializeSegmentOutputs(context, withStitchingStatus, groups, sequenceState);
+  } catch (error) {
+    const report = await createFailedReport(
+      context,
+      withStitchingStatus,
+      groups[0],
+      [],
+      preflight,
+      error,
+      sequenceState
+    );
+    const saved = await writeBatch(context, {
+      ...withStitchingStatus,
+      status: "partial_failed",
+      outputs: Array.isArray(batch.outputs) ? batch.outputs : [],
+      stitchReports: [...(Array.isArray(batch.stitchReports) ? batch.stitchReports : []), report]
+    }, "stitch_progress");
+    await writeTaskMaps(context, saved);
+    await telemetryRecorder(context)("stitch_completed", {
+      batchId,
+      outputId: report.outputId,
+      status: report.status,
+      errorCode: report.errorCode
+    });
+    return stitchResult(context, batchId, saved);
+  }
   const segmentByTask = new Map();
   for (const output of segmentOutputs) {
     for (const taskId of output.generationTaskIds || []) segmentByTask.set(taskId, output);
   }
 
   const existingNonSegmentOutputs = (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => output.kind !== "segment_video");
-  const nextOutputs = [...segmentOutputs, ...existingNonSegmentOutputs.filter((output) => output.kind !== "stitched_video")];
-  const stitchReports = Array.isArray(batch.stitchReports) ? [...batch.stitchReports] : [];
+  const nextOutputs = [...segmentOutputs, ...existingNonSegmentOutputs.filter((output) => !["stitched_video", "expanded_video"].includes(output.kind))];
+  const stitchReports = options.replaceDerivedOutputs
+    ? []
+    : Array.isArray(batch.stitchReports) ? [...batch.stitchReports] : [];
+  const postProcessFailures = [];
   let currentSucceededCount = 0;
   let currentFailedCount = 0;
 
@@ -825,17 +1287,40 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
       currentFailedCount += 1;
       continue;
     }
-    const stitched = await createSucceededStitchOutput(
-      context,
-      { ...withStitchingStatus, outputs: nextOutputs },
-      group,
-      groupSegments,
-      preflight,
-      sequenceState
-    );
-    nextOutputs.push(stitched.output);
-    stitchReports.push(stitched.report);
-    currentSucceededCount += 1;
+    try {
+      const stitched = await createSucceededStitchOutput(
+        context,
+        { ...withStitchingStatus, outputs: nextOutputs },
+        group,
+        groupSegments,
+        preflight,
+        sequenceState
+      );
+      nextOutputs.push(stitched.output);
+      postProcessFailures.push(...stitched.postProcessFailures);
+      const expanded = await deriveExpandedOutputs(
+        context,
+        { ...withStitchingStatus, outputs: nextOutputs },
+        stitched.output,
+        sequenceState
+      );
+      nextOutputs.push(...expanded.outputs);
+      postProcessFailures.push(...expanded.failures);
+      stitchReports.push(stitched.report);
+      currentSucceededCount += 1;
+    } catch (error) {
+      const report = await createFailedReport(
+        context,
+        { ...withStitchingStatus, outputs: nextOutputs },
+        group,
+        groupSegments,
+        preflight,
+        error,
+        sequenceState
+      );
+      stitchReports.push(report);
+      currentFailedCount += 1;
+    }
   }
 
   const hasStitched = currentSucceededCount > 0;
@@ -854,7 +1339,9 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
     status: nextStatus,
     tasks,
     outputs: nextOutputs,
-    stitchReports
+    stitchReports,
+    postProcessFailures,
+    replaceDerivedOutputs: options.replaceDerivedOutputs === true
   }, nextStatus === "qc" ? "stitch_completed" : "stitch_progress");
   await writeTaskMaps(context, saved);
   const recordEvent = telemetryRecorder(context);
@@ -866,6 +1353,10 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
       errorCode: report.errorCode || ""
     });
   }
+  return stitchResult(context, batchId, saved);
+}
+
+async function stitchResult(context, batchId, saved) {
   return {
     batch: saved,
     events: (await loadBatchDetailFromMysql(context, batchId))?.events || [],
@@ -876,6 +1367,23 @@ export async function stitchBatchSegments(context, batchId, options = {}) {
       missingFiles: []
     }
   };
+}
+
+function stitchSingleFlightKey(context, batchId) {
+  const scope = context.userProjectRoot || context.sharedProjectRoot || currentUserId(context);
+  return `${scope}:${batchId}`;
+}
+
+export function stitchBatchSegments(context, batchId, options = {}) {
+  const key = stitchSingleFlightKey(context, batchId);
+  const active = STITCH_IN_FLIGHT.get(key);
+  if (active) return active;
+  const task = stitchBatchSegmentsOnce(context, batchId, options);
+  const tracked = task.finally(() => {
+    if (STITCH_IN_FLIGHT.get(key) === tracked) STITCH_IN_FLIGHT.delete(key);
+  });
+  STITCH_IN_FLIGHT.set(key, tracked);
+  return tracked;
 }
 
 function hashPayload(value) {
@@ -891,10 +1399,15 @@ export async function retryStitch(context, batchId, request = {}) {
   const replay = await loadIdempotencyFactFromMysql(context, "retry_stitch", request.idempotencyKey, requestHash);
   if (replay) return replay;
   const batch = await readBatch(context, batchId);
-  if (batch.status !== "partial_failed") {
+  const hasPostProcessFailures = Array.isArray(batch.postProcessFailures) && batch.postProcessFailures.length > 0;
+  const canRetryCompletedPostProcess = batch.status === "qc" && hasPostProcessFailures;
+  if (!["partial_failed", "stitching"].includes(batch.status) && !canRetryCompletedPostProcess) {
     throw new WangzhuanError("invalid_state_transition", "当前状态不支持拼接重试", { batchId, status: batch.status });
   }
-  const result = await stitchBatchSegments(context, batchId);
+  if (canRetryCompletedPostProcess) {
+    await writeBatch(context, { ...batch, status: "partial_failed" }, "qc_partial_failed");
+  }
+  const result = await stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true });
   await recordIdempotencyFact(context, "retry_stitch", request.idempotencyKey, requestHash, {
     type: "batch",
     id: batchId,
@@ -905,7 +1418,14 @@ export async function retryStitch(context, batchId, request = {}) {
 
 export const __stitchTestHooks = {
   probeVideoWidth,
+  probeVideoStreamHealth,
+  assertDecodableVideo,
   resolveDisclaimerOverlay,
   resolveDisclaimerOverlayImagePath,
-  applyDisclaimerOverlay
+  postProcessTimeoutMs,
+  applyDisclaimerOverlay,
+  applyVolcengineSubtitles,
+  concatSegmentVideos,
+  createPostProcessEndingVideo,
+  deriveExpandedOutputs
 };

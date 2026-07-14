@@ -79,6 +79,12 @@ function json(value, fallback = {}) {
   return JSON.stringify(value ?? fallback);
 }
 
+function varcharValue(value, maxLength) {
+  const text = String(value || "");
+  if (!text) return null;
+  return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 1)) + "…" : text;
+}
+
 function parseJsonValue(value, fallback = null) {
   if (value === undefined || value === null || value === "") return structuredClone(fallback);
   if (Buffer.isBuffer(value)) return parseJsonValue(value.toString("utf8"), fallback);
@@ -185,6 +191,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "draft", "checking", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "checking", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "draft", "batch_draft_saved", null, 0],
+  ["workflow_run", "checking", "failed", "decomposition_failed", null, 1],
   ["workflow_run", "preview_required", "preview_required", "batch_draft_saved", null, 0],
   ["workflow_run", "checking", "queued", "batch_created", null, 0],
   ["workflow_run", "checking", "preview_required", "batch_created", null, 0],
@@ -263,6 +270,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "failed", "waiting_upstream", "batch_write", null, 0],
   ["workflow_task", "failed", "downloaded", "batch_write", null, 0],
   ["workflow_task", "pending", "failed", "downloaded_output", null, 1],
+  ["workflow_task", "waiting_upstream", "failed", "downloaded_output", null, 1],
   ["workflow_task", "failed", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "downloaded_output", null, 0],
   ["workflow_task", "waiting_upstream", "downloaded", "batch_write", null, 0],
@@ -1130,6 +1138,49 @@ export async function loadReferenceVideoProbeFromMysql(context, referenceVideoId
   }
 }
 
+export async function loadReferenceVideoProbeByHashFromMysql(context, fileHash) {
+  const pool = await getPool();
+  const normalizedHash = String(fileHash || "").trim();
+  if (!pool || !normalizedHash) return null;
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT
+        rv.reference_video_uid,
+        rv.status,
+        rv.duration_sec,
+        rv.width,
+        rv.height,
+        rv.ratio,
+        rv.can_extract_frame,
+        rv.issues_json,
+        rv.probe_json,
+        af.file_name,
+        af.mime_type,
+        af.size_bytes,
+        af.storage_relative_path,
+        af.storage_key,
+        af.storage_url
+      FROM reference_videos rv
+      JOIN asset_files af ON af.id = rv.asset_file_id
+      WHERE rv.project_id = ?
+        AND rv.user_id = ?
+        AND rv.status <> 'deleted'
+        AND JSON_UNQUOTE(JSON_EXTRACT(rv.probe_json, '$.fileHash')) = ?
+      ORDER BY rv.updated_at DESC, rv.id DESC
+      LIMIT 1`,
+      [facts.projectId, facts.userId, normalizedHash]
+    );
+    return rows[0] ? referenceVideoRowToProbe(rows[0]) : null;
+  } catch (error) {
+    console.warn(`[mysql-facts] failed to load reference video by hash: ${error.message}`);
+    return null;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function syncVideoDecompositionFact(context, decomposition) {
   const pool = await getPool();
   if (!pool || !decomposition?.referenceVideoId) return { skipped: true };
@@ -1197,6 +1248,7 @@ export async function loadVideoDecompositionFromMysql(context, referenceVideoId)
     return {
       ...decomposition,
       referenceVideoId,
+      status: rows[0].status || decomposition.status || "succeeded",
       schemaVersion: rows[0].schema_version || decomposition.schemaVersion || "video_decomposition.v1",
       missingFields: parseJsonValue(rows[0].missing_fields_json, decomposition.missingFields || [])
     };
@@ -1366,8 +1418,20 @@ function inlineTemplateSnapshotFromRequest(request = {}) {
 
 function hasUsableDecomposition(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  if (value.referenceVideoId) return true;
-  return Boolean(value.scene || value.hook || value.action || value.subject);
+  if (value.status === "failed") return false;
+  return Boolean(
+    value.scene
+      || value.hook
+      || value.action
+      || value.subject
+      || value.camera
+      || value.lighting
+      || value.style
+      || value.quality
+      || value.wholeVideoSummary
+      || (Array.isArray(value.storySegments) && value.storySegments.length)
+      || (Array.isArray(value.seedanceSlices) && value.seedanceSlices.length)
+  );
 }
 
 function pickUsableDecomposition(...candidates) {
@@ -1798,6 +1862,13 @@ function outputRowToOutput(row, taskIds = []) {
       : taskIds,
     durationSec: row.duration_sec === null || row.duration_sec === undefined ? probe.durationSec : Number(row.duration_sec),
     kind: row.output_kind,
+    fileName: probe.fileName || probe.displayFileName || undefined,
+    displayFileName: probe.displayFileName || probe.fileName || undefined,
+    parentOutputId: probe.parentOutputId || undefined,
+    sizeKey: probe.sizeKey || undefined,
+    targetWidth: probe.targetWidth === undefined ? undefined : Number(probe.targetWidth),
+    targetHeight: probe.targetHeight === undefined ? undefined : Number(probe.targetHeight),
+    mode: probe.mode || undefined,
     filePath,
     previewUrl: storageUrl || (filePath ? `/file?path=${encodeURIComponent(filePath)}` : ""),
     promptPath: promptPathValue ? relativePath(promptPathValue) : "",
@@ -1814,6 +1885,15 @@ function outputRowToOutput(row, taskIds = []) {
   if (promptStorageUrl) output.promptStorageUrl = promptStorageUrl;
   if (qcReportStorageKey) output.qcReportStorageKey = qcReportStorageKey;
   if (qcReportStorageUrl) output.qcReportStorageUrl = qcReportStorageUrl;
+  if (probe.subtitlePostProcess && typeof probe.subtitlePostProcess === "object") {
+    output.subtitlePostProcess = probe.subtitlePostProcess;
+  }
+  if (probe.postProcessEnding && typeof probe.postProcessEnding === "object") {
+    output.postProcessEnding = probe.postProcessEnding;
+  }
+  if (probe.disclaimerOverlay && typeof probe.disclaimerOverlay === "object") {
+    output.disclaimerOverlay = probe.disclaimerOverlay;
+  }
   if (probe.modelQcSummary && typeof probe.modelQcSummary === "object") output.modelQcSummary = probe.modelQcSummary;
   if (Array.isArray(probe.qcChecks) && probe.qcChecks.length) output.qcChecks = probe.qcChecks;
   const qcChecksFromReport = parseJsonValue(row.qc_checks_json ?? row.checks_json, []);
@@ -2206,6 +2286,7 @@ async function loadBatchByRunRow(conn, facts, run) {
     previewConfirmedAt: capability.previewConfirmedAt,
     previewConfirmedBy: capability.previewConfirmedBy,
     previewConfirmationNotes: capability.previewConfirmationNotes,
+    postProcessFailures: Array.isArray(capability.postProcessFailures) ? capability.postProcessFailures : [],
     scripts,
     tasks,
     outputs,
@@ -3148,11 +3229,10 @@ export async function loadWorkflowTasksFromMysql(context, query = {}) {
   if (!pool) return null;
   const conn = await pool.getConnection();
   try {
-    const facts = await ensureContextFacts(conn, context);
+    const userId = await ensureUser(conn, context);
     const pagination = normalizePagination(query);
-    const params = [facts.projectId, facts.userId];
+    const params = [userId];
     const filters = [
-      "wr.project_id = ?",
       "wr.user_id = ?",
       "wr.run_type IN ('pipeline', 'remix')"
     ];
@@ -3223,7 +3303,10 @@ function capabilitySnapshotForBatch(batch) {
     ...(Array.isArray(batch.plans) && batch.plans.length ? { plans: batch.plans } : {}),
     ...(batch.previewConfirmedAt ? { previewConfirmedAt: batch.previewConfirmedAt } : {}),
     ...(batch.previewConfirmedBy ? { previewConfirmedBy: batch.previewConfirmedBy } : {}),
-    ...(batch.previewConfirmationNotes ? { previewConfirmationNotes: batch.previewConfirmationNotes } : {})
+    ...(batch.previewConfirmationNotes ? { previewConfirmationNotes: batch.previewConfirmationNotes } : {}),
+    ...(Array.isArray(batch.postProcessFailures)
+      ? { postProcessFailures: batch.postProcessFailures }
+      : {})
   };
 }
 
@@ -3395,7 +3478,7 @@ async function syncGenerationScripts(conn, facts, batch, runId) {
       [
         script.scriptId,
         runId,
-        Number(script.variantIndex || 1),
+        Number(script.branchVariantIndex || script.variantIndex || 1),
         Number(script.segmentIndex || 1),
         Number(script.durationSec || 15),
         String(script.hook || "").slice(0, 65535),
@@ -3443,6 +3526,34 @@ async function syncWorkflowOutputs(conn, facts, batch, runId) {
     ...reportOutputs
   ];
   const seenOutputIds = new Set();
+  if (batch.replaceDerivedOutputs === true) {
+    const retainedDerivedIds = outputs
+      .filter((output) => ["stitched_video", "expanded_video"].includes(outputKind(output)))
+      .map((output) => output.outputId)
+      .filter(Boolean);
+    const placeholders = retainedDerivedIds.map(() => "?").join(", ");
+    const staleDerivedPredicate = `wo.run_id = ?
+      AND wo.output_kind IN ('stitched_video', 'expanded_video')
+      ${retainedDerivedIds.length ? `AND wo.output_uid NOT IN (${placeholders})` : ""}`;
+    const staleDerivedParams = [runId, ...retainedDerivedIds];
+    await conn.execute(
+      `DELETE sr FROM stitch_reports sr
+       INNER JOIN workflow_outputs wo ON wo.id = sr.output_id
+       WHERE ${staleDerivedPredicate}`,
+      staleDerivedParams
+    );
+    await conn.execute(
+      `DELETE qr FROM qc_reports qr
+       INNER JOIN workflow_outputs wo ON wo.id = qr.output_id
+       WHERE ${staleDerivedPredicate}`,
+      staleDerivedParams
+    );
+    await conn.execute(
+      `DELETE wo FROM workflow_outputs wo
+       WHERE ${staleDerivedPredicate}`,
+      staleDerivedParams
+    );
+  }
   for (const output of outputs) {
     if (!output?.outputId || !output?.filePath) continue;
     if (seenOutputIds.has(output.outputId)) continue;
@@ -3563,9 +3674,9 @@ async function syncStitchReports(conn, facts, batch, runId) {
         report.status || "succeeded",
         report.tool?.provider || report.stitchTool || null,
         json(report.segmentOutputIds || []),
-        report.commandSummary || null,
-        report.errorCode || null,
-        report.errorMessage || null,
+        varcharValue(report.commandSummary, 512),
+        varcharValue(report.errorCode, 80),
+        varcharValue(report.errorMessage, 512),
         mysqlDate(report.createdAt) || mysqlDate(new Date())
       ]
     );
@@ -3582,9 +3693,9 @@ async function syncSchedulerJobs(conn, batch, runId) {
         (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
       VALUES (?, 'task_retry', 'pending', ?, ?, ?, 0, ?, 0, 3, 'exponential', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
       ON DUPLICATE KEY UPDATE
-        status = VALUES(status),
         payload_json = VALUES(payload_json),
-        run_after = VALUES(run_after),
+        run_after = IF(status = 'running', run_after, VALUES(run_after)),
+        status = IF(status = 'running', status, VALUES(status)),
         updated_at = UTC_TIMESTAMP(3)`,
       [
         `job_retry_${uidValue}`,
@@ -3631,7 +3742,7 @@ async function syncUpstreamPollJob(conn, batch, runId) {
       `UPDATE scheduler_jobs
       SET status = 'canceled', updated_at = UTC_TIMESTAMP(3)
       WHERE job_uid = ?
-        AND status IN ('pending', 'running')`,
+        AND status = 'pending'`,
       [jobUid]
     );
     return;
@@ -3641,9 +3752,9 @@ async function syncUpstreamPollJob(conn, batch, runId) {
       (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
     VALUES (?, 'upstream_poll', 'pending', ?, NULL, ?, 10, UTC_TIMESTAMP(3), 0, 1000, 'fixed', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
     ON DUPLICATE KEY UPDATE
-      status = 'pending',
       payload_json = VALUES(payload_json),
-      run_after = UTC_TIMESTAMP(3),
+      run_after = IF(status = 'running', run_after, VALUES(run_after)),
+      status = IF(status = 'running', status, VALUES(status)),
       updated_at = UTC_TIMESTAMP(3)`,
     [jobUid, runId, json({ batchId: batch.batchId })]
   );
@@ -3702,13 +3813,12 @@ export async function claimSchedulerJob(options = {}) {
         )
         OR (
           sj.status = 'running'
-          AND sj.locked_by = ?
           AND sj.lock_expires_at <= UTC_TIMESTAMP(3)
         )
       ORDER BY sj.priority ASC, sj.run_after ASC, sj.id ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED`,
-      [workerId]
+      []
     );
     const row = rows[0];
     if (!row) {
@@ -3725,8 +3835,11 @@ export async function claimSchedulerJob(options = {}) {
           attempts = attempts + 1,
           updated_at = UTC_TIMESTAMP(3)
       WHERE id = ?
-        AND (status = 'pending' OR (status = 'running' AND locked_by = ?))`,
-      [workerId, lockSeconds, row.id, workerId]
+        AND (
+          status = 'pending'
+          OR (status = 'running' AND lock_expires_at <= UTC_TIMESTAMP(3))
+        )`,
+      [workerId, lockSeconds, row.id]
     );
     await conn.commit();
     return { ...parseSchedulerJob(row), status: "running", workerId, attempts: Number(row.attempts || 0) + 1 };
@@ -3746,7 +3859,7 @@ export async function completeSchedulerJob(job, options = {}) {
   try {
     await conn.beginTransaction();
     await assertAllowedStateTransition(conn, "scheduler_job", "running", "succeeded", "finish");
-    await conn.execute(
+    const [result] = await conn.execute(
       `UPDATE scheduler_jobs
       SET status = 'succeeded',
           locked_by = NULL,
@@ -3761,7 +3874,7 @@ export async function completeSchedulerJob(job, options = {}) {
       [job.id, workerId]
     );
     await conn.commit();
-    return { skipped: false };
+    return { skipped: Number.isFinite(Number(result?.affectedRows)) ? Number(result.affectedRows) === 0 : false };
   } catch (error) {
     await conn.rollback();
     throw error;
@@ -3778,7 +3891,7 @@ export async function rescheduleSchedulerJob(job, options = {}) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await conn.execute(
+    const [result] = await conn.execute(
       `UPDATE scheduler_jobs
       SET status = 'pending',
           run_after = ?,
@@ -3794,7 +3907,7 @@ export async function rescheduleSchedulerJob(job, options = {}) {
       [mysqlDate(new Date(Date.now() + delayMs)), job.id, workerId]
     );
     await conn.commit();
-    return { skipped: false };
+    return { skipped: Number.isFinite(Number(result?.affectedRows)) ? Number(result.affectedRows) === 0 : false };
   } catch (error) {
     await conn.rollback();
     throw error;
@@ -3818,7 +3931,7 @@ export async function failSchedulerJob(job, error, options = {}) {
   try {
     await conn.beginTransaction();
     await assertAllowedStateTransition(conn, "scheduler_job", "running", nextStatus, trigger);
-    await conn.execute(
+    const [result] = await conn.execute(
       `UPDATE scheduler_jobs
       SET status = ?,
           run_after = CASE WHEN ? = 'pending' THEN ? ELSE run_after END,
@@ -3842,7 +3955,8 @@ export async function failSchedulerJob(job, error, options = {}) {
       ]
     );
     await conn.commit();
-    return { skipped: false, status: nextStatus };
+    const skipped = Number.isFinite(Number(result?.affectedRows)) ? Number(result.affectedRows) === 0 : false;
+    return { skipped, status: skipped ? job.status : nextStatus };
   } catch (err) {
     await conn.rollback();
     throw err;

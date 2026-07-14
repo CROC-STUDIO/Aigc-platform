@@ -13,7 +13,9 @@ export const FISSION_ANALYSIS_PROMPT_REQUIREMENTS = Object.freeze([
   "Split by real narrative story beats only; avoid no-oversegmentation drift.",
   "Do not create a new story segment only because the video cuts to app UI, reward animation, cash/coin effect, subtitle card, title card, withdrawal visual, or CTA overlay.",
   "Keep app UI, subtitle overlays, withdrawal screens, reward effects, cash/coin feedback, sound cues, and CTA overlays inside timelineItems unless they change the narrative beat.",
+  "Every storySegment must include numeric startSec, endSec, and durationSec in source-video seconds; never omit timing and never default every segment to 0-15s.",
   "Every story segment must include scene, subject, action, camera, lighting, style, quality, coreHook, explosivePoint, segmentPurpose, segmentConversionStyle, segmentRhythm, segmentStructureSkeleton, timelineItems, conversionSignals, conversionEffectOpportunities, voiceoverObserved, variableLayers, and sliceSplitHints.",
+  "Output seedanceSlices as executable generation slices in source-video order; each seedanceSlice must include numeric startSec, endSec, durationSec, and sliceDurationSec. Keep every generated slice between 5 and 30 seconds, splitting longer story beats by narrative turning points.",
   "Observed conversionSignals must distinguish withdrawalSuccess, earningsNumber, emotionalVoiceover, cashCoinFeedback, and fastRewardCue.",
   "conversionEffectOpportunities are allowed fission placements; keep them separate from observed conversionSignals.",
   "Seedance prompts must use no burned subtitles, no captions, and no dense text blocks; subtitle text belongs in subtitleWorkflow.subtitleScript."
@@ -136,6 +138,14 @@ function assertValidTimeRange({ startSec, endSec, durationSec, label }) {
 }
 
 function normalizeStorySegment(segment, index = 0, options = {}) {
+  if (options.strictTiming) {
+    for (const field of ["startSec", "endSec", "durationSec"]) {
+      if (segment?.[field] === undefined || segment?.[field] === null || segment?.[field] === "") {
+        const storySegmentIndex = numberOrFallback(segment?.storySegmentIndex, index + 1);
+        throw new Error(`storySegmentIndex=${storySegmentIndex} ${field} is required`);
+      }
+    }
+  }
   const startSec = roundSec(numberOrFallback(segment?.startSec, 0));
   const fallbackDuration = numberOrFallback(options.durationSec, numberOrFallback(segment?.durationSec, 15));
   const endSec = roundSec(numberOrFallback(segment?.endSec, startSec + fallbackDuration));
@@ -207,6 +217,24 @@ function normalizeSeedanceSlice(slice, index = 0) {
     subtitleWorkflow: normalizeSubtitleWorkflow(slice),
     ...(slice?.sliceSplitReason ? { sliceSplitReason: cleanString(slice.sliceSplitReason) } : {})
   };
+}
+
+function assertSupportedSeedanceSliceDuration(slice, { minSliceSec = 5, maxSliceSec = 30 } = {}) {
+  const sliceDurationSec = numberOrFallback(slice?.sliceDurationSec || slice?.durationSec, 0);
+  if (sliceDurationSec < minSliceSec || sliceDurationSec > maxSliceSec) {
+    throw new Error(`seedanceSliceIndex=${slice?.seedanceSliceIndex || ""} duration must be ${minSliceSec}-${maxSliceSec}s`);
+  }
+}
+
+function assertChronologicalStorySegments(storySegments = []) {
+  let previousEndSec = -1;
+  for (const segment of storySegments) {
+    const startSec = numberOrFallback(segment?.startSec, 0);
+    if (startSec < previousEndSec) {
+      throw new Error("storySegments time ranges must be chronological and non-overlapping");
+    }
+    previousEndSec = numberOrFallback(segment?.endSec, previousEndSec);
+  }
 }
 
 function buildFallbackStorySegment(input, options = {}) {
@@ -290,10 +318,107 @@ function fallbackSplitSec(segment, minSliceSec, maxSliceSec) {
   return Number.NaN;
 }
 
+function chooseSliceCount(durationSec, minSliceSec, maxSliceSec) {
+  const minCount = Math.max(2, Math.ceil(durationSec / maxSliceSec));
+  const maxCount = Math.max(minCount, Math.floor(durationSec / minSliceSec));
+  for (let count = minCount; count <= maxCount; count += 1) {
+    const average = durationSec / count;
+    if (average >= minSliceSec && average <= maxSliceSec) {
+      return count;
+    }
+  }
+  return 0;
+}
+
+function normalizeSplitHints(segment) {
+  return normalizedArray(segment.sliceSplitHints)
+    .map((hint) => ({
+      splitSec: hintSplitSec(hint, segment),
+      reason: cleanString(hint?.reason || hint?.sliceSplitReason)
+    }))
+    .filter((hint) => Number.isFinite(hint.splitSec))
+    .sort((left, right) => left.splitSec - right.splitSec);
+}
+
+function normalizedArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function allocateSliceBoundaries(segment, sliceCount, minSliceSec, maxSliceSec, hints = []) {
+  const boundaries = [segment.startSec];
+  const totalDuration = segment.durationSec;
+  const usedHints = [];
+  let cursor = segment.startSec;
+  let remainingSlices = sliceCount;
+  let hintIndex = 0;
+
+  for (let boundaryIndex = 1; boundaryIndex < sliceCount; boundaryIndex += 1) {
+    const remainingAfterCurrent = remainingSlices - 1;
+    const minBoundary = Math.max(
+      roundSec(cursor + minSliceSec),
+      roundSec(segment.endSec - remainingAfterCurrent * maxSliceSec)
+    );
+    const maxBoundary = Math.min(
+      roundSec(cursor + maxSliceSec),
+      roundSec(segment.endSec - remainingAfterCurrent * minSliceSec)
+    );
+    if (minBoundary > maxBoundary) {
+      return null;
+    }
+
+    const targetBoundary = roundSec(segment.startSec + (totalDuration * boundaryIndex) / sliceCount);
+    let chosenBoundary = Number.NaN;
+    let chosenReason = "";
+
+    while (hintIndex < hints.length && hints[hintIndex].splitSec <= cursor) {
+      hintIndex += 1;
+    }
+    for (let scanIndex = hintIndex; scanIndex < hints.length; scanIndex += 1) {
+      const hint = hints[scanIndex];
+      if (hint.splitSec < minBoundary) continue;
+      if (hint.splitSec > maxBoundary) break;
+      if (!Number.isFinite(chosenBoundary)
+        || Math.abs(hint.splitSec - targetBoundary) < Math.abs(chosenBoundary - targetBoundary)) {
+        chosenBoundary = hint.splitSec;
+        chosenReason = hint.reason;
+        hintIndex = scanIndex + 1;
+      }
+    }
+
+    if (!Number.isFinite(chosenBoundary)) {
+      chosenBoundary = roundSec(Math.min(Math.max(targetBoundary, minBoundary), maxBoundary));
+    }
+    boundaries.push(chosenBoundary);
+    if (chosenReason) usedHints.push(chosenReason);
+    cursor = chosenBoundary;
+    remainingSlices -= 1;
+  }
+
+  boundaries.push(segment.endSec);
+  return { boundaries, usedHints };
+}
+
+function summarizeSliceSplitReason(sliceCount, usedHints = []) {
+  const reasons = usedHints.filter(Boolean);
+  if (reasons.length === 1 && sliceCount === 2) {
+    return reasons[0];
+  }
+  if (reasons.length > 0) {
+    return `hint-guided multi-slice split: ${reasons.join(" | ")}`;
+  }
+  return "even duration fallback split";
+}
+
 export function normalizeFissionAnalysis(input = {}, options = {}) {
+  const strictStorySegmentTiming = Boolean(options.strictStorySegmentTiming);
   const storySegments = Array.isArray(input?.storySegments)
-    ? input.storySegments.map((segment, index) => normalizeStorySegment(segment, index))
+    ? input.storySegments.map((segment, index) => normalizeStorySegment(segment, index, {
+        strictTiming: strictStorySegmentTiming
+      }))
     : [];
+  if (strictStorySegmentTiming) {
+    assertChronologicalStorySegments(storySegments);
+  }
   const fallbackStorySegments = storySegments.length === 0 && hasSevenDimensions(input)
     ? [buildFallbackStorySegment(input, options)]
     : storySegments;
@@ -301,12 +426,18 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
   if (Array.isArray(input?.seedanceSlices)) {
     try {
       seedanceSlices = input.seedanceSlices.map((slice, index) => normalizeSeedanceSlice(slice, index));
+      for (const slice of seedanceSlices) {
+        assertSupportedSeedanceSliceDuration(slice, options);
+      }
     } catch (error) {
       if (fallbackStorySegments.length === 0) {
         throw error;
       }
       seedanceSlices = [];
     }
+  }
+  if (!seedanceSlices.length && options.deriveSeedanceSlices && fallbackStorySegments.length) {
+    seedanceSlices = fallbackStorySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
   }
 
   return {
@@ -318,28 +449,42 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
   };
 }
 
-export function splitStorySegmentIntoSeedanceSlices(segment, { minSliceSec = 8, maxSliceSec = 15 } = {}) {
+export function splitStorySegmentIntoSeedanceSlices(segment, { minSliceSec = 5, maxSliceSec = 15 } = {}) {
   const normalized = normalizeStorySegment(segment);
+  if (normalized.durationSec < minSliceSec) {
+    throw new Error(`storySegmentIndex=${normalized.storySegmentIndex} duration must be ${minSliceSec}-${maxSliceSec}s`);
+  }
   if (normalized.durationSec <= maxSliceSec) {
     return [buildGeneratedSlice(normalized, normalized.startSec, normalized.endSec, 1)];
   }
 
-  const hintedSplit = normalized.sliceSplitHints
-    .map((hint) => ({
-      splitSec: hintSplitSec(hint, normalized),
-      reason: cleanString(hint?.reason || hint?.sliceSplitReason)
-    }))
-    .find((hint) => validSplit(hint.splitSec, normalized, minSliceSec, maxSliceSec));
-  const splitSec = hintedSplit?.splitSec ?? fallbackSplitSec(normalized, minSliceSec, maxSliceSec);
-  if (!Number.isFinite(splitSec) || !validSplit(splitSec, normalized, minSliceSec, maxSliceSec)) {
+  const sliceCount = chooseSliceCount(normalized.durationSec, minSliceSec, maxSliceSec);
+  if (!sliceCount) {
+    throw new Error(`storySegmentIndex=${normalized.storySegmentIndex} duration exceeds supported Seedance slice split`);
+  }
+  const splitPlan = allocateSliceBoundaries(
+    normalized,
+    sliceCount,
+    minSliceSec,
+    maxSliceSec,
+    normalizeSplitHints(normalized)
+  );
+  if (!splitPlan) {
     throw new Error(`storySegmentIndex=${normalized.storySegmentIndex} duration exceeds supported Seedance slice split`);
   }
 
-  const sliceSplitReason = hintedSplit?.reason || "even duration fallback split";
-  return [
-    buildGeneratedSlice(normalized, normalized.startSec, splitSec, 1, sliceSplitReason),
-    buildGeneratedSlice(normalized, splitSec, normalized.endSec, 2, sliceSplitReason)
-  ];
+  const sliceSplitReason = summarizeSliceSplitReason(sliceCount, splitPlan.usedHints);
+  const slices = [];
+  for (let index = 0; index < splitPlan.boundaries.length - 1; index += 1) {
+    slices.push(buildGeneratedSlice(
+      normalized,
+      splitPlan.boundaries[index],
+      splitPlan.boundaries[index + 1],
+      index + 1,
+      sliceSplitReason
+    ));
+  }
+  return slices;
 }
 
 export function buildSeedanceSlicesFromAnalysis(analysis, options = {}) {
@@ -348,5 +493,16 @@ export function buildSeedanceSlicesFromAnalysis(analysis, options = {}) {
     return normalized.seedanceSlices;
   }
 
+  return normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
+}
+
+export function deriveSeedanceSlicesForGeneration(analysis, options = {}) {
+  const normalized = normalizeFissionAnalysis(analysis, {
+    ...options,
+    deriveSeedanceSlices: false
+  });
+  if (normalized.seedanceSlices.length > 0) {
+    return normalized.seedanceSlices;
+  }
   return normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
 }

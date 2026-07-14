@@ -1,7 +1,8 @@
 import { hasAnyStrongTruthRule } from "./constants.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makePlanId } from "./ids.mjs";
-import { llmUsesGeminiNativeApi, resolveLlmConfig } from "./llm-config.mjs";
+import { isRetryableLlmError, llmUsesGeminiNativeApi, resolveLlmConfig } from "./llm-config.mjs";
+import { invokeLlmWithRetry } from "./llm-invoke.mjs";
 import { repairFormalPlanContract } from "./plan-repair.mjs";
 import {
   buildReferenceAssetSlotGuide,
@@ -12,6 +13,8 @@ import { callLlmStreaming } from "./llm-stream.mjs";
 import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { join } from "node:path";
 import { resolveBranchMediaRefs, branchHasReferenceAssets } from "./branches.mjs";
+import { recordTelemetryEvent } from "./telemetry.mjs";
+import { loadCachedPlan, planCacheKey, writeCachedPlan } from "./plan-cache.mjs";
 
 const REQUIRED_PLAN_FIELDS = Object.freeze([
   "hook",
@@ -32,8 +35,8 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   body: "Main script body in primary language for the current slice duration",
   voiceover: "Spoken lines in primary language",
   subtitles: ["Short subtitle lines in primary language, one beat per line"],
-  cta: "Optional call to action in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require a CTA",
-  ending: "Optional ending beat in primary language; default to empty unless channel rules, branch customPrompt, or truthRules explicitly require an ending card/beat",
+  cta: "Optional call to action metadata in primary language; can be empty at draft time, but confirmation repair fills a neutral non-forcing value for QC contract if no rendered CTA is required",
+  ending: "Optional ending beat metadata in primary language; can be empty at draft time, but confirmation repair fills a neutral non-forcing value for QC contract if no rendered ending card/beat is required",
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
   seedancePrompt: "Current-slice 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
   negativePrompt: "Things to avoid in generation",
@@ -58,13 +61,29 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
     productIcon: "URL or empty",
     productScreenshot: "URL or empty",
     productRecording: "URL or empty",
-    ctaAsset: "URL or empty; image-only final stitched tail reference, not a normal Seedance reference slot",
-    endingAsset: "URL or empty",
+    ctaAsset: "URL or empty; image-only reference for the final Seedance slice, not a normal numbered reference slot or post-process tail",
+    endingAsset: "URL or empty; image-only reference for the final Seedance slice, not a normal numbered reference slot or post-process tail",
     personAsset: "URL or empty",
     rewardElement: "URL or empty"
   },
   complianceNotes: ["Policy-safe reminders in primary language; do not paste disclaimer overlay text into seedancePrompt; record any omitted CTA/amount/claim risks here"]
 });
+
+const HIGH_ATTRACTION_VISUAL_EXAMPLES = "真钞、金币、现金雨、金币爆发、满屏撒钱/撒金币";
+const OPENING_REWARD_HOOK_EXAMPLES = "提现成功感、收益/奖励数字快速增长、金币/现金雨、金币爆发、满屏撒钱/撒金币、人物惊讶反应或强冲突情境";
+const HIGH_ENERGY_VOICEOVER_DIRECTION = "真人口播必须情绪高昂、节奏快、感染力强，使用短句推进；seedancePrompt 的音频/口播描述必须明确 high-energy, fast-paced, emotionally expressive, contagious delivery，禁止慢速平铺解释。";
+
+function formatSeedanceEnergyRules({ batch = false, compact = false } = {}) {
+  const prefix = batch ? "每个 variant" : "当前最终视频";
+  const lines = [
+    `${prefix}至少一个切片必须可见 ${HIGH_ATTRACTION_VISUAL_EXAMPLES} 之一；mandatoryMoneyVisualCarrier=true 的切片负责承载该 final-video high-attraction 要求，其他切片不要强塞额外满屏现金/金币效果。`,
+    `segmentIndex=1 或 mandatoryMoneyVisualCarrier=true 的切片，前 1-2 秒必须先给高吸引力场景和奖励反馈，优先使用 ${OPENING_REWARD_HOOK_EXAMPLES}；不得以普通走路、看手机或平静解释开场。`,
+    HIGH_ENERGY_VOICEOVER_DIRECTION
+  ];
+  return compact
+    ? `强视觉/强开头/强口播：${lines.join(" ")}`
+    : ["强视觉/强开头/强口播统一规则：", ...lines.map((line, index) => `${index + 1}. ${line}`)].join("\n");
+}
 
 const LANGUAGE_LABELS = Object.freeze({
   "en-US": "English (United States)",
@@ -396,7 +415,9 @@ export function formatPlanLocaleGuide(context = {}) {
     "6. 参考视频若为其他语言，必须完整改写为目标语言，不得保留原文。",
     "7. 用户可见文字强控制：seedancePrompt 与 imagePrompt 中出现的所有用户可见文字，包括口播、字幕、手机 UI、按钮、Slogan、CTA、弹窗、任务卡、奖励提示、进度条标签、页面标题，都必须使用主语言；除产品名/品牌名外，不得出现竞品原语言、英文默认按钮或其他非主语言文字。",
     "8. seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，并让人物外观、人种/肤色范围、生活环境、职业身份、服装道具和城市/室内环境符合目标地区；不能只写“用户/年轻人/女性”。",
-    "9. 免责声明只写入 complianceNotes（如需），不要写入 seedancePrompt。"
+    "9. 免责声明只写入 complianceNotes（如需），不要写入 seedancePrompt。",
+    "10. UI 文字质量强控制：不要生成大段 App 页面文字、乱码、伪文字、不可读字母或长段说明；需要手机界面时优先使用产品截图/参考素材，或只描述图标、按钮、进度条、奖励反馈等少量可控元素。",
+    "11. 免责声明强控制：Seedance 画面内部不得生成 disclaimer、policy、terms、legal、warning 等长免责声明；免责声明只能由后处理底部贴片添加。"
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -434,6 +455,144 @@ function storySegmentForSlice(decomposition = {}, currentSlice = {}) {
   return decomposition.storySegments.find((segment) => Number(segment?.storySegmentIndex || 0) === storySegmentIndex) || null;
 }
 
+function summarizeAdjacentStorySegment(segment = {}) {
+  if (!segment || typeof segment !== "object") return null;
+  return {
+    storySegmentIndex: segment.storySegmentIndex,
+    startSec: segment.startSec,
+    endSec: segment.endSec,
+    summary: segment.summary || segment.coreHook || segment.explosivePoint || "",
+    segmentRole: segment.segmentRole || segment.conversionRole || ""
+  };
+}
+
+function compactStorySegment(segment = {}) {
+  if (!segment || typeof segment !== "object") return null;
+  return {
+    storySegmentIndex: segment.storySegmentIndex,
+    startSec: segment.startSec,
+    endSec: segment.endSec,
+    durationSec: segment.durationSec,
+    summary: segment.summary,
+    scene: segment.scene,
+    subject: segment.subject,
+    action: segment.action,
+    camera: segment.camera,
+    lighting: segment.lighting,
+    style: segment.style,
+    quality: segment.quality,
+    coreHook: segment.coreHook,
+    explosivePoint: segment.explosivePoint,
+    segmentPurpose: segment.segmentPurpose,
+    segmentConversionStyle: segment.segmentConversionStyle,
+    segmentRhythm: segment.segmentRhythm,
+    segmentStructureSkeleton: segment.segmentStructureSkeleton,
+    conversionSignals: segment.conversionSignals,
+    conversionEffectOpportunities: segment.conversionEffectOpportunities,
+    openingHookIntensity: segment.openingHookIntensity,
+    voiceoverPerformance: segment.voiceoverPerformance,
+    timelineItems: segment.timelineItems,
+    voiceoverObserved: segment.voiceoverObserved,
+    variableLayers: segment.variableLayers,
+    replicatedSellingPoints: segment.replicatedSellingPoints,
+    moneyEffects: segment.moneyEffects,
+    sliceSplitHints: segment.sliceSplitHints,
+    subtitles: segment.subtitles
+  };
+}
+
+function compactSliceContext(slice = {}) {
+  if (!slice || typeof slice !== "object") return null;
+  return {
+    seedanceSliceIndex: slice.seedanceSliceIndex,
+    storySegmentIndex: slice.storySegmentIndex,
+    segmentIndex: slice.segmentIndex,
+    startSec: slice.startSec,
+    endSec: slice.endSec,
+    durationSec: slice.durationSec,
+    sliceDurationSec: slice.sliceDurationSec,
+    segmentRole: slice.segmentRole,
+    scene: slice.scene,
+    subject: slice.subject,
+    action: slice.action,
+    camera: slice.camera,
+    lighting: slice.lighting,
+    style: slice.style,
+    quality: slice.quality,
+    coreHook: slice.coreHook,
+    explosivePoint: slice.explosivePoint,
+    conversionSignals: slice.conversionSignals,
+    conversionEffectOpportunities: slice.conversionEffectOpportunities,
+    openingHookIntensity: slice.openingHookIntensity,
+    voiceoverPerformance: slice.voiceoverPerformance,
+    timelineItems: slice.timelineItems,
+    variableLayers: slice.variableLayers,
+    voiceoverObserved: slice.voiceoverObserved,
+    subtitleWorkflow: slice.subtitleWorkflow,
+    targetSegmentMerge: slice.targetSegmentMerge,
+    targetSegmentSplit: slice.targetSegmentSplit
+  };
+}
+
+export function buildCompactDecompositionForSlice(decomposition = {}, currentSlice = {}) {
+  const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
+  const storySegments = Array.isArray(decomposition?.storySegments) ? decomposition.storySegments : [];
+  const currentIndex = currentStorySegment
+    ? storySegments.findIndex((segment) => segment === currentStorySegment)
+    : -1;
+  return {
+    sourceVideoProfile: decomposition?.sourceVideoProfile || {},
+    wholeVideoConversion: decomposition?.wholeVideoConversion || {},
+    storySegments: currentStorySegment ? [compactStorySegment(currentStorySegment)] : [],
+    adjacentStorySegments: {
+      previous: currentIndex > 0 ? summarizeAdjacentStorySegment(storySegments[currentIndex - 1]) : null,
+      next: currentIndex >= 0 && currentIndex < storySegments.length - 1
+        ? summarizeAdjacentStorySegment(storySegments[currentIndex + 1])
+        : null
+    },
+    seedanceSlices: currentSlice ? [compactSliceContext(currentSlice)] : [],
+    cta: decomposition?.cta || "",
+    ending: decomposition?.ending || ""
+  };
+}
+
+export function filterChannelRulesForBranch(channelRules = {}, branch = {}) {
+  const rules = Array.isArray(channelRules?.rules) ? channelRules.rules : [];
+  const targets = new Set(
+    (Array.isArray(branch.targetChannels) ? branch.targetChannels : [])
+      .map((item) => cleanString(item).toLowerCase())
+      .filter(Boolean)
+  );
+  if (!targets.size) return channelRules;
+  return {
+    ...channelRules,
+    rules: rules.filter((rule) => {
+      const channel = cleanString(rule.channel || rule.targetChannel || rule.channelId).toLowerCase();
+      return !channel || targets.has(channel) || channel === "generic";
+    })
+  };
+}
+
+function buildCompactSchemaHint() {
+  return {
+    hook: "primaryLanguage hook",
+    body: "primaryLanguage body for this slice",
+    voiceover: "primaryLanguage spoken lines",
+    subtitles: ["short primaryLanguage subtitle lines"],
+    imagePrompt: "first frame: new person + new scene + product exposure",
+    seedancePrompt: "shot-by-shot Seedance formula; no burned subtitles; no dense/gibberish UI text",
+    negativePrompt: "avoid list",
+    segmentRole: "hook_slice|proof_slice|withdrawal_slice|cta_slice|continuity_slice",
+    sliceDurationSec: "current slice seconds",
+    moneyVisuals: ["coin_burst|cash_rain|reward_number_growth|withdrawal_success"],
+    withdrawalVisual: "reward/withdrawal proof visual; no invented exact amount",
+    subtitleWorkflow: { burnedInSubtitles: false, postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: ["post subtitle lines"] },
+    sliceDiversity: { personChangedFromPrevious: true, sceneChangedFromPrevious: true, clothingChangedFromPrevious: true, voiceChangedFromPrevious: true },
+    mediaRefs: { productIcon: "", productScreenshot: "", productRecording: "", ctaAsset: "", endingAsset: "", personAsset: "", rewardElement: "" },
+    complianceNotes: ["policy-safe notes"]
+  };
+}
+
 function buildRepairContext(input = {}) {
   const localeContext = resolvePlanLocaleContext(input.batch || {}, input.branch || {});
   const validationContext = resolveSeedancePlanValidationContext(input);
@@ -451,6 +610,9 @@ function buildRepairContext(input = {}) {
     totalSegmentCount: Number(input.totalSegmentCount || 0) || undefined,
     subtitleWorkflow: validationContext.subtitleWorkflow,
     truthRules: input.branch?.truthRules || input.batch?.templateSnapshot?.draft?.truthRules || {},
+    isOpeningSlice: Number(input.segmentIndex || input.currentSlice?.segmentIndex || input.currentSlice?.seedanceSliceIndex || 0) === 1,
+    voiceoverPerformance: input.currentSlice?.voiceoverPerformance || input.currentSlice?.voiceoverStyle || input.branch?.voiceoverStyle || input.batch?.templateSnapshot?.draft?.voiceoverStyle || "",
+    openingHookRepair: input.currentSlice?.openingHookIntensity || input.currentSlice?.coreHook || input.currentSlice?.explosivePoint || "",
     characterDiversity: input.currentSlice?.variableLayers
       ? JSON.stringify({ variableLayers: input.currentSlice.variableLayers })
       : ""
@@ -548,7 +710,8 @@ export function buildSeedancePlanMessages({
   mandatoryMoneyVisualCarrier = false,
   isFinalSeedanceSlice = false,
   totalSegmentCount,
-  knowledgeNotes = ""
+  knowledgeNotes = "",
+  options = {}
 }) {
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
@@ -577,7 +740,15 @@ export function buildSeedancePlanMessages({
     branchVariantIndex,
     branch.variantPrompt
   );
-  const requiredDisclaimers = [...new Set((channelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
+  const compactPrompt = Boolean(options.compact);
+  const promptDecomposition = compactPrompt
+    ? buildCompactDecompositionForSlice(decomposition, currentSlice)
+    : (decomposition || {});
+  const promptChannelRules = compactPrompt
+    ? filterChannelRulesForBranch(channelRules, branch)
+    : channelRules;
+  const schemaHint = compactPrompt ? buildCompactSchemaHint() : SEEDANCE_PLAN_SCHEMA_HINT;
+  const requiredDisclaimers = [...new Set((promptChannelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
   const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
   const fissionSliceContext = {
     mandatoryMoneyVisualCarrier: Boolean(mandatoryMoneyVisualCarrier),
@@ -592,26 +763,47 @@ export function buildSeedancePlanMessages({
     conversionEffectOpportunities: currentStorySegment?.conversionEffectOpportunities || currentSlice?.conversionEffectOpportunities || [],
     variableLayers: currentStorySegment?.variableLayers || currentSlice?.variableLayers || {}
   };
-  const promptText = [
+  const promptFissionSliceContext = compactPrompt
+    ? {
+        mandatoryMoneyVisualCarrier: Boolean(mandatoryMoneyVisualCarrier),
+        isFinalSeedanceSlice: Boolean(isFinalSeedanceSlice),
+        totalSegmentCount: Number(totalSegmentCount || 0) || null,
+        currentSlice: {
+          seedanceSliceIndex: currentSlice?.seedanceSliceIndex,
+          storySegmentIndex: currentSlice?.storySegmentIndex,
+          segmentIndex: currentSlice?.segmentIndex,
+          startSec: currentSlice?.startSec,
+          endSec: currentSlice?.endSec,
+          durationSec: currentSlice?.durationSec,
+          sliceDurationSec: currentSlice?.sliceDurationSec,
+          segmentRole: currentSlice?.segmentRole
+        },
+        targetSegmentCount: targetSegmentCount || "follow_decomposition",
+        conversionEffectOpportunities: currentStorySegment?.conversionEffectOpportunities || currentSlice?.conversionEffectOpportunities || [],
+        variableLayers: currentStorySegment?.variableLayers || currentSlice?.variableLayers || {}
+      }
+    : fissionSliceContext;
+  let promptText = [
     "你要复用参考视频的结构、节奏、镜头功能和转化逻辑。",
     "你必须重构参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达。",
-    "参考拆解中的 scene、subject、action、camera、lighting、style、quality 只作为画面骨架和镜头约束，不得作为照搬内容。",
+    "参考拆解中的 scene、subject、action、camera、lighting、style、quality 只作为画面骨架和镜头约束，不得作为照搬内容。具体描述要丰富一些",
     "不得复刻竞品品牌、原文案、人物身份、水印、UI 细节。",
     "必须替换为我方产品资产和业务规则。",
     "不得编造收益金额、到账承诺或提现门槛。",
     "默认不要生成 CTA 或 ending；只有 channelRules、branch.customPrompt 或 truthRules 明确要求时才填写，否则 cta 和 ending 必须为空字符串。",
     "不得在 hook、body、voiceover、subtitles、imagePrompt、seedancePrompt、cta、ending 或 UI 文案中编造任何金额、积分点数、奖励数值、余额、提现档位、到账路径或时间。",
+    "不得让 Seedance 生成大段 App 页面文字、乱码、伪文字、不可读字母、政策说明、条款说明或长免责声明；手机 UI 优先使用产品截图/参考素材或少量可控短词。",
     "若 truthRules 没有提供明确金额、积分点数、奖励数值或门槛，禁止出现具体金额、点数增长、余额增长、提现金额、R$ 数字，或任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强承诺语义。",
     "承诺强度规则：当 promiseLevel 不是 strong_commitment 时，只能使用弱承诺表达，禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；当 promiseLevel 是 strong_commitment 时，可以表达强承诺，但必须严格受 truthRules 约束，不得新增 truthRules 未写明的金额、到账速度、保证性词汇、提现资格或限制条件。",
     "可以表达为“按规则完成任务后累积奖励/积分/进度”，但必须避免让用户理解为必然赚钱、固定金额或 guaranteed cashout。",
     "",
     "参考视频拆解：",
-    JSON.stringify(decomposition || {}, null, 2),
+    JSON.stringify(promptDecomposition, null, 2),
     "",
     "当前裂变切片上下文：",
     JSON.stringify(fissionSliceContext, null, 2),
     "",
-    "最终视频强网赚视觉规则：每条最终拼接视频至少一个切片必须包含可见的真钞、金币、现金雨、金币爆发、满屏撒钱或满屏撒金币之一。mandatoryMoneyVisualCarrier=true 的切片负责承载该 final-video high-attraction 要求；其他切片不要强塞额外满屏现金/金币效果。",
+    formatSeedanceEnergyRules(),
     "",
     protagonistGuideText,
     "",
@@ -660,13 +852,14 @@ export function buildSeedancePlanMessages({
           "CTA 图 / Ending 图引用规则：",
           "1. ctaAsset 与 endingAsset 是仅图片尾图素材，不属于普通 Seedance 参考素材 slot，不使用 图片n/视频n 编号，不参与非最终切片生成。",
           "2. isFinalSeedanceSlice=false 时，seedancePrompt、imagePrompt、hook、body、voiceover、subtitles 均不得引用 ctaAsset 或 endingAsset，也不要提前生成 CTA/Ending 卡片。",
-          "3. isFinalSeedanceSlice=true 时，只能在最后一个 Seedance 切片末尾把 ctaAsset/endingAsset 作为 closing tail 的视觉风格、版式和产品承接参考；实际 CTA 图视频片段和 Ending 图视频片段会在 Seedance 视频之后由 ffmpeg 拼接。",
-          "4. mediaRefs.ctaAsset 与 mediaRefs.endingAsset 可填写对应 URL，便于审核和尾图拼接追踪；不得把它们描述为可动视频素材。"
+          "3. isFinalSeedanceSlice=true 时，最后一个 Seedance 切片会把 ctaAsset/endingAsset 作为 closing tail 的视觉风格、版式和产品承接参考提交给 Seedance；不要把它们放到开头或中段。",
+          "4. CTA/Ending 画面必须由最后一个 Seedance 分片在该分片末尾生成并在最终视频分片中呈现，不会在后处理阶段追加产品尾图。",
+          "5. mediaRefs.ctaAsset 与 mediaRefs.endingAsset 可填写对应 URL，便于审核和最终 Seedance 参考追踪；不得把它们描述为可动视频素材。"
         ].join("\n")
       : "",
     "",
     "渠道规则：",
-    JSON.stringify(channelRules.rules || [], null, 2),
+    JSON.stringify(promptChannelRules.rules || [], null, 2),
     requiredDisclaimers.length ? `Required disclaimers: ${requiredDisclaimers.join("; ")}` : "",
     "",
     `变体编号 branchVariantIndex=${branchVariantIndex}`,
@@ -678,21 +871,23 @@ export function buildSeedancePlanMessages({
     notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
     "",
     "字段说明：",
-    JSON.stringify(SEEDANCE_PLAN_SCHEMA_HINT, null, 2),
+    JSON.stringify(schemaHint, null, 2),
     "",
     "网赚出量模板规则：",
 	    "1. 出量模板由参考视频拆解决定：优先复用 wholeVideoConversion、storySegments、当前 currentSlice 的转化基调、段落转化风格、节奏、结构骨架、转化信号和变量分层；不要因为前端枚举值强行改成固定三段式或短剧高光模板。",
-	    "2. 切片策略由参考视频剧情段落决定：按 storySegments/seedanceSlices 的 startSec、endSec、sliceDurationSec 生成当前切片；只有同一剧情段过长时才按剧情节点拆成 8-15s 相邻 Seedance 切片。",
+	    "2. 切片策略由参考视频剧情段落决定：优先按已有 seedanceSlices 执行；若拆解只提供 storySegments + sliceSplitHints，则由后端按 startSec、endSec、sliceDurationSec 自动派生当前切片；只有同一剧情段过长时才按剧情节点拆成 5-30s 相邻 Seedance 切片。",
 	    "3. 如果 targetSegmentCount 是 1-5 的数字，必须在不改变参考视频核心转化基调的前提下，将参考视频剧情段落合并或拆分成用户选择的目标段数；每个 Seedance prompt 只写当前 currentSlice 对应的那一段，不要继续按原始拆解段数生成。",
-	    "4. 如果 targetSegmentCount=follow_decomposition，则完全跟随拆解出的 seedanceSlices/storySegments 数量和顺序。",
+	    "4. 如果 targetSegmentCount=follow_decomposition，则跟随拆解段落，并由系统优先复用 seedanceSlices、否则基于 storySegments + sliceSplitHints 自动切片后按顺序执行。",
 	    "5. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
 	    "6. 每个切片是否出现 Hook、承接、说服、转化、短剧高光、UI 强反馈或提现包装，主要依据参考视频拆解中该段是否存在对应结构，不得为了模板强制补齐不存在的段落。",
-    "7. moneyVisuals 可使用真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录，也可扩展为满屏撒钱/撒金币或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。",
+    `7. moneyVisuals 可使用 ${HIGH_ATTRACTION_VISUAL_EXAMPLES}、收益数字增长、提现成功、到账动画、提现记录或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。`,
     "8. withdrawalVisual 必须说明提现展示方式，例如 Pix/Nubank 选项、银行卡到账动画、提现记录截图或本地支付方式；具体金额、门槛和到账时间只能来自 truthRules。",
-    "9. Seedance 原视频不得烧录字幕、不得生成长字幕或密集画面文字；字幕内容写入 subtitleWorkflow.subtitleScript，供 Pixel Tech 或后处理贴字幕。",
+	    "9. Seedance 原视频不得烧录字幕、不得生成长字幕或密集画面文字；字幕内容写入 subtitleWorkflow.subtitleScript，供 Pixel Tech 或后处理贴字幕。",
+    "10. Seedance 原视频不得生成免责声明正文、政策说明、条款说明、长警告文本或底部密集 legal 文案；",
+    "11. Seedance 原视频不得生成乱码 UI、伪文字 UI、不可读字母或大段 AI 编造页面文字；需要 App 界面时使用产品截图/参考素材，或只保留图标、按钮、进度条、奖励反馈等少量可控视觉。",
     "",
     "Seedance prompt 补充要求：",
-    "1. seedancePrompt 必须按镜头拆分，每个镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",
+    "1. seedancePrompt 必须按镜头拆分，每个镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。描述要具体",
     "2. 每个镜头必须说明该镜头的转化功能，例如开场吸引、痛点、产品动作、反馈、疑虑消除、自然收束或引导。",
     "3. subject 只保留主体功能，必须换成新的具体人物/人群；scene 只保留场景功能，必须换成新的具体场景。",
     "4. action 必须复用节奏和转化功能，但动作表现、人物行为和口播表达必须重写。",
@@ -705,24 +900,99 @@ export function buildSeedancePlanMessages({
     "11. ending 和 CTA 默认不生成；除非 channelRules、branch.customPrompt 或 truthRules 明确要求，否则 cta/ending 必须为空，不要为了凑结构强行添加。",
     "12. 奖励数字与收益承诺约束：只有 truthRules 明确给出的金额、积分点数、奖励数值、门槛、到账条件才能出现在用户可见文案或 UI 描述中；未提供时不要写任何具体金额、点数增长、余额增长、提现档位、到账时间或保证性收益。",
     "13. 承诺强度按 promiseLevel 控制：非 strong_commitment 分支只能使用弱承诺（任务、积分、进度、奖励反馈、按规则可查看/申请/兑换），禁止任何语言中的确定到账、直接到账、即时到账、保证提现、真实收入、固定收益、稳赚等强收益语义；strong_commitment 分支可以表达强承诺，但必须逐项来自 truthRules，不得扩写或增强。",
-    "14. CTA 图 / Ending 图只允许出现在最终切片末尾的承接说明中；不要在非最终切片引用，不要让 Seedance 提前生成完整尾卡，因为最终视频会把上传图片转成视频片段后用 ffmpeg 拼到最后。",
+    "14. CTA 图 / Ending 图只允许出现在最终切片末尾的承接说明中；非最终切片不得引用。最终切片需要把它们作为末尾视觉参考，并在该 Seedance 分片自身的末尾画面中呈现；后处理不会追加这些产品图片。",
+    "15. UI 可读性：如果 seedancePrompt 需要手机 App 画面，必须避免让模型自由生成完整页面文字；写成“use approved product screenshot/reference asset for the phone UI”或“simple UI with icon, button, progress bar, no dense text, no gibberish, no pseudo-text”。",
+    "16. 免责声明处理：seedancePrompt 不得要求生成任何 disclaimer/policy/terms/legal/warning 文本；如需免责声明，只在 complianceNotes 记录，由后处理底部贴片完成。",
+    "17. 开头与口播执行：seedancePrompt 的第一个镜头和音频/口播描述必须落实上方“强视觉/强开头/强口播统一规则/情绪突出”，不要只在 complianceNotes 中复述。",
     "",
     "只返回 JSON 对象。"
   ].filter(Boolean).join("\n");
 
+  if (compactPrompt) {
+    promptText = [
+      "任务：仅为当前切片生成 Seedance 预案 JSON；复用参考视频结构/节奏/镜头功能/转化逻辑，但必须重构人物、场景、服装、道具、情节、口播和字幕。",
+      "禁止：复刻竞品品牌/原文案/人物身份/水印/UI 细节；编造金额、积分、提现门槛、到账时间或保证收益；Seedance 画面内生成大段文字、乱码、伪文字、免责声明/条款/legal 文本。",
+      "金额/承诺：具体金额、币种符号、余额、提现档位和到账条件只能来自 truthRules；无 truthRules 时只允许无具体金额的奖励进度/金币/现金雨/提现成功视觉。",
+      "字幕：seedancePrompt 不烧录字幕；字幕只进入 subtitleWorkflow.subtitleScript。",
+      "CTA/Ending：默认空；只有 channelRules、customPrompt 或 truthRules 明确要求才写。ctaAsset/endingAsset 只可在最终切片末尾作为视觉参考，必须由该 Seedance 分片自身呈现，后处理不会追加这些产品图片。",
+      "人物差异：不同切片必须换人物/场景/服装/声音，除非当前切片明确是连续性切片；sliceDiversity 写明差异。",
+      "Seedance 公式：每个镜头写 主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字，并说明该镜头转化功能。",
+	      formatSeedanceEnergyRules({ compact: true }),
+      "",
+      "当前参考拆解精简：",
+      JSON.stringify(promptDecomposition, null, 2),
+      "",
+      "当前切片上下文：",
+      JSON.stringify(promptFissionSliceContext, null, 2),
+      "",
+      "语言/地区/币种：",
+      `primaryLanguage=${localeContext.primaryLanguage}; regions=${(localeContext.regions || []).join(",")}; currencySymbol=${localeContext.currencySymbol}; targetChannel=${localeContext.targetChannel}; outputRatio=${localeContext.outputRatio}. 所有可见文字/口播/字幕用主语言；人物外观、场景、服装、道具、社会语境匹配地区；金额只用指定币种且必须来自 truthRules；描述要具体详细`,
+      "",
+      `人物场景重构：保留参考的镜头功能和转化作用，但重写人物身份、职业/人群、场景、服装、道具、情节、口播和字幕。variantPrompt=${branch.variantPrompt || ""}`,
+      "",
+      "业务分支精简：",
+      JSON.stringify({
+        branchId: branch.branchId,
+        branchLabel: branch.branchLabel,
+        productName: branch.productName || draft.productName,
+        productLink: branch.productLink || draft.productLink,
+        language: localeContext.primaryLanguage,
+        languages: localeContext.languages,
+        regions: localeContext.regions,
+        currencySymbol: localeContext.currencySymbol,
+        targetChannels: branch.targetChannels || (localeContext.targetChannel ? [localeContext.targetChannel] : []),
+        outputRatio: localeContext.outputRatio,
+        outputTemplateMode,
+        sliceStrategy: targetSegmentCount ? `user_selected_${targetSegmentCount}_segments` : sliceStrategy,
+        targetSegmentCount: targetSegmentCount || "follow_decomposition",
+        sliceDurationSec: currentSliceDurationSec,
+        moneyVisuals,
+        subtitleWorkflow,
+        promiseLevel: branch.promiseLevel || draft.promiseLevel,
+        materialDirection: branch.materialDirection,
+        voiceoverStyle: localeContext.voiceoverStyle,
+        customPrompt: branch.customPrompt,
+        negativePrompt: branch.negativePrompt,
+        variantPrompt: branch.variantPrompt,
+        truthRules: branch.truthRules || {},
+        assetUrls,
+        assetFileNames: branch.assetFileNames || {}
+      }, null, 2),
+      "",
+      "素材 slot：",
+      referenceSlotGuideText || "无编号参考素材；不要使用 图片n/视频n。",
+      referenceSlotGuide.length ? "如使用素材，imagePrompt/seedancePrompt 必须按 slot 写 图片n/视频n 及其参考功能。" : "",
+      "",
+      "渠道规则：",
+      JSON.stringify(promptChannelRules.rules || [], null, 2),
+      requiredDisclaimers.length ? `Required disclaimers: ${requiredDisclaimers.join("; ")}` : "",
+      "",
+      `branchVariantIndex=${branchVariantIndex}; segmentIndex=${segmentIndex}; isFinalSeedanceSlice=${Boolean(isFinalSeedanceSlice)}; totalSegmentCount=${totalSegmentCount || ""}; sliceDurationSec=${currentSliceDurationSec}s`,
+      notes ? `业务经验规则：\n${notes}` : "",
+      "",
+      "输出 JSON 字段：",
+      JSON.stringify(schemaHint, null, 2),
+      "",
+      "只返回 JSON 对象。"
+    ].filter(Boolean).join("\n");
+  }
+
   return [
     {
       role: "system",
-      content: [
-        "你是网赚广告 Seedance 前置参数策划专家。",
-        "你要基于参考视频的结构、节奏、镜头功能和转化逻辑，为我方业务重构可执行的 Seedance 分镜与 prompt。",
-        "必须改变参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达；禁止沿用原人物或把变化限制在相近职业。",
-        "seedancePrompt 必须逐镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。",
-        "seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，禁止“用户/年轻人”等泛化人物描述。",
-        "所有 hook、body、voiceover、subtitles 必须使用指定主语言；cta、ending 如存在也必须使用指定主语言，并符合目标地区表达习惯。",
-        "若提供了参考素材 slot 映射，imagePrompt 与 seedancePrompt 必须使用 图片1、图片2、视频1 等指代，并与 slot 顺序一致。",
-        "必须输出严格 JSON 对象，不要 markdown，不要解释。"
-      ].join("\n")
+      content: compactPrompt
+        ? "你是网赚广告 Seedance 前置参数策划专家。按当前切片输出严格 JSON；重构人物/场景/表达；遵守语言地区币种、素材 slot、无烧录字幕、无密集 UI/免责声明文字。"
+        : [
+            "你是网赚广告 Seedance 前置参数策划专家。",
+            "你要基于参考视频的结构、节奏、镜头功能和转化逻辑，为我方业务重构可执行的 Seedance 分镜与 prompt。",
+            "必须改变参考视频的人物身份、职业/人群、具体场景、服装、道具、具体情节、口播表达和字幕表达；禁止沿用原人物或把变化限制在相近职业。",
+            "seedancePrompt 必须逐镜头使用 Seedance 公式：主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字。描述要具体",
+            "seedancePrompt 与 imagePrompt 必须明确写出新人物/身份、新场景、新服装与新关键道具，禁止“用户/年轻人”等泛化人物描述。",
+            "所有 hook、body、voiceover、subtitles 必须使用指定主语言；cta、ending 如存在也必须使用指定主语言，并符合目标地区表达习惯。",
+            "手机 UI 只能使用产品截图/参考素材或少量可控短词，必须使用指定主语言，禁止生成乱码、伪文字、大段页面文字；免责声明不得出现在 Seedance 画面内部。",
+            "若提供了参考素材 slot 映射，imagePrompt 与 seedancePrompt 必须使用 图片1、图片2、视频1 等指代，并与 slot 顺序一致。",
+            "必须输出严格 JSON 对象，不要 markdown，不要解释。"
+          ].join("\n")
     },
     {
       role: "user",
@@ -765,54 +1035,420 @@ export function buildThirtySecondSeedancePlanMessages(input = {}) {
   return messages;
 }
 
+function buildSeedanceBranchPlanMessages(input = {}) {
+  const slicePlan = Array.isArray(input.slicePlan) ? input.slicePlan : [];
+  const variantCount = Number(input.variantCount || input.batch?.estimate?.variantCount || 1) || 1;
+  const firstSlice = slicePlan[0] || {};
+  const messages = buildSeedancePlanMessages({
+    ...input,
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    segmentRole: firstSlice.segmentRole,
+    sliceDurationSec: firstSlice.sliceDurationSec || firstSlice.durationSec || 15,
+    currentSlice: firstSlice,
+    totalSegmentCount: slicePlan.length,
+    mandatoryMoneyVisualCarrier: true,
+    isFinalSeedanceSlice: slicePlan.length === 1
+  });
+  const userMessage = messages.find((message) => message.role === "user");
+  if (userMessage) {
+    userMessage.content = [
+      userMessage.content,
+      "",
+      "Branch 批量预案生成规则：",
+      "1. 本次不是只生成一个变体的一个切片；必须一次性生成当前 branch 下所有 branchVariantIndex 与所有 Seedance 切片。",
+      "2. 上面的“当前裂变切片上下文”只是复用单切片模板的兼容字段；本批量任务必须以这里的完整 slicePlan 为准。",
+      "3. 每个 variant 都必须完整覆盖 slicePlan 中的所有切片，切片数量、segmentIndex、sliceDurationSec 必须与 slicePlan 严格一致。",
+      "4. 同一 variant 的切片按参考视频剧情顺序推进；不同切片之间人物、场景、服装、声音必须有明显变化，除非当前切片明确为连续性切片。",
+      "5. 不同 variant 之间也必须更换人物身份、场景、服装、道具和表达方式，不能只改文案。",
+      `6. ${formatSeedanceEnergyRules({ batch: true, compact: true })}`,
+      "7. 每个 slice 的 seedancePrompt 只描述该 slice 自己，不得把其他 slice 的镜头写入当前 prompt。",
+      "8. subtitleWorkflow.subtitleScript 独立输出字幕脚本；seedancePrompt 仍必须避免烧录字幕和大量画面文字。",
+      "",
+      "variantCount：",
+      String(variantCount),
+      "",
+      "slicePlan：",
+      JSON.stringify(slicePlan, null, 2),
+      "",
+      "Branch 批量输出 JSON 结构：",
+      JSON.stringify({
+        branchId: input.branch?.branchId || "",
+        variants: [
+          {
+            branchVariantIndex: 1,
+            variantDiversity: "This variant's distinct person, scene, clothing, props, voice and expression plan",
+            slices: slicePlan.map((slice, index) => ({
+              segmentIndex: index + 1,
+              sliceDurationSec: slice.sliceDurationSec || slice.durationSec || 15,
+              ...SEEDANCE_PLAN_SCHEMA_HINT
+            }))
+          }
+        ]
+      }, null, 2),
+      "",
+      "只返回上述 JSON 对象，不要返回 markdown，不要解释。"
+    ].join("\n");
+  }
+  return messages;
+}
+
+function buildSeedanceVariantPlanMessages(input = {}) {
+  const slicePlan = Array.isArray(input.slicePlan) ? input.slicePlan : [];
+  const branchVariantIndex = Number(input.branchVariantIndex || 1) || 1;
+  const firstSlice = slicePlan[0] || {};
+  const messages = buildSeedancePlanMessages({
+    ...input,
+    branchVariantIndex,
+    segmentIndex: 1,
+    segmentRole: firstSlice.segmentRole,
+    sliceDurationSec: firstSlice.sliceDurationSec || firstSlice.durationSec || 15,
+    currentSlice: firstSlice,
+    totalSegmentCount: slicePlan.length,
+    mandatoryMoneyVisualCarrier: true,
+    isFinalSeedanceSlice: slicePlan.length === 1
+  });
+  const userMessage = messages.find((message) => message.role === "user");
+  if (userMessage) {
+    userMessage.content = [
+      userMessage.content,
+      "",
+      "Variant 批量预案生成规则：",
+      "1. 本次只生成当前 branch 的当前 branchVariantIndex，不要生成其他 variant。",
+      "2. 必须一次性生成当前 variant 下的所有 Seedance 切片；切片数量、segmentIndex、sliceDurationSec 必须与 slicePlan 严格一致。",
+      "3. 同一 variant 的切片按参考视频剧情顺序推进；不同切片之间人物、场景、服装、声音必须有明显变化，除非当前切片明确为连续性切片。",
+      "4. 每个 slice 的 seedancePrompt 只描述该 slice 自己，不得把其他 slice 的镜头写入当前 prompt。",
+      "5. subtitleWorkflow.subtitleScript 独立输出字幕脚本；seedancePrompt 仍必须避免烧录字幕和大量画面文字。",
+      `6. ${formatSeedanceEnergyRules({ batch: true, compact: true })}`,
+      "",
+      "branchVariantIndex：",
+      String(branchVariantIndex),
+      "",
+      "slicePlan：",
+      JSON.stringify(slicePlan, null, 2),
+      "",
+      "Variant 批量输出 JSON 结构：",
+      JSON.stringify({
+        branchId: input.branch?.branchId || "",
+        branchVariantIndex,
+        variantDiversity: "This variant's distinct person, scene, clothing, props, voice and expression plan",
+        slices: slicePlan.map((slice, index) => ({
+          segmentIndex: index + 1,
+          sliceDurationSec: slice.sliceDurationSec || slice.durationSec || 15,
+          ...SEEDANCE_PLAN_SCHEMA_HINT
+        }))
+      }, null, 2),
+      "",
+      "只返回上述 JSON 对象，不要返回 markdown，不要解释。"
+    ].join("\n");
+  }
+  return messages;
+}
+
+function normalizeBranchPlanVariants(value = {}) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value.variants)) return value.variants;
+  if (Array.isArray(value.plans)) return value.plans;
+  return [];
+}
+
+function normalizeBranchVariantSlices(value = {}) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value.slices)) return value.slices;
+  if (Array.isArray(value.segments)) return value.segments;
+  if (Array.isArray(value.plans)) return value.plans;
+  return [];
+}
+
+export async function generateSeedanceVariantPlans(context, input = {}) {
+  const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
+  const messages = buildSeedanceVariantPlanMessages(input);
+  const branchVariantIndex = Number(input.branchVariantIndex || 1) || 1;
+  const slicePlan = Array.isArray(input.slicePlan) ? input.slicePlan : [];
+  return invokeLlmWithRetry({
+    maxRetries: 2,
+    initialBackoffMs: 1000,
+    maxBackoffMs: 8000,
+    isRetryable: isPlanContentRetryError,
+    call: async () => {
+      const content = await callPlanLlm({
+        ...context,
+        currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+      }, messages, llmConfig);
+      const parsed = parseLlmJsonContent(content);
+      const slices = normalizeBranchVariantSlices(parsed);
+      if (!slices.length) {
+        throw new WangzhuanError("schema_invalid", "Variant 批量 Seedance 预案缺少切片", {
+          branchId: input.branch?.branchId,
+          branchVariantIndex
+        });
+      }
+      const results = [];
+      for (let segmentIndex = 1; segmentIndex <= slicePlan.length; segmentIndex += 1) {
+        const currentSlice = slicePlan[segmentIndex - 1] || {};
+        const rawSlice = slices.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
+          || slices[segmentIndex - 1];
+        if (!rawSlice) {
+          throw new WangzhuanError("schema_invalid", "Variant 批量 Seedance 预案缺少切片", {
+            branchId: input.branch?.branchId,
+            branchVariantIndex,
+            segmentIndex
+          });
+        }
+        const segmentInput = {
+          ...input,
+          branchVariantIndex,
+          segmentIndex,
+          segmentRole: currentSlice.segmentRole,
+          sliceDurationSec: currentSlice.sliceDurationSec || currentSlice.durationSec,
+          currentSlice,
+          totalSegmentCount: slicePlan.length,
+          isFinalSeedanceSlice: segmentIndex === slicePlan.length,
+          mandatoryMoneyVisualCarrier: segmentIndex === 1,
+          conversionEffectOpportunities: currentSlice.conversionEffectOpportunities || []
+        };
+        const repaired = repairFormalPlanContract(rawSlice, buildRepairContext(segmentInput));
+        const parsedSlice = validateSeedancePlan(
+          repaired,
+          resolveSeedancePlanValidationContext(segmentInput)
+        );
+        results.push({
+          branchVariantIndex,
+          segmentIndex,
+          planPayload: parsedSlice
+        });
+      }
+      return results;
+    }
+  });
+}
+
+export async function generateSeedanceBranchPlans(context, input = {}) {
+  const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
+  const messages = buildSeedanceBranchPlanMessages(input);
+  const variantCount = Number(input.variantCount || input.batch?.estimate?.variantCount || 1) || 1;
+  const slicePlan = Array.isArray(input.slicePlan) ? input.slicePlan : [];
+  return invokeLlmWithRetry({
+    maxRetries: 2,
+    initialBackoffMs: 1000,
+    maxBackoffMs: 8000,
+    isRetryable: isPlanContentRetryError,
+    call: async () => {
+      const content = await callPlanLlm({
+        ...context,
+        currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+      }, messages, llmConfig);
+      const parsed = parseLlmJsonContent(content);
+      const variants = normalizeBranchPlanVariants(parsed);
+      const results = [];
+
+      for (let branchVariantIndex = 1; branchVariantIndex <= variantCount; branchVariantIndex += 1) {
+        const variant = variants.find((item) => Number(item?.branchVariantIndex || 0) === branchVariantIndex)
+          || variants[branchVariantIndex - 1];
+        const slices = normalizeBranchVariantSlices(variant);
+        if (!variant || !slices.length) {
+          throw new WangzhuanError("schema_invalid", "Branch 批量 Seedance 预案缺少变体切片", {
+            branchId: input.branch?.branchId,
+            branchVariantIndex
+          });
+        }
+        for (let segmentIndex = 1; segmentIndex <= slicePlan.length; segmentIndex += 1) {
+          const currentSlice = slicePlan[segmentIndex - 1] || {};
+          const rawSlice = slices.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
+            || slices[segmentIndex - 1];
+          if (!rawSlice) {
+            throw new WangzhuanError("schema_invalid", "Branch 批量 Seedance 预案缺少切片", {
+              branchId: input.branch?.branchId,
+              branchVariantIndex,
+              segmentIndex
+            });
+          }
+          const segmentInput = {
+            ...input,
+            branchVariantIndex,
+            segmentIndex,
+            segmentRole: currentSlice.segmentRole,
+            sliceDurationSec: currentSlice.sliceDurationSec || currentSlice.durationSec,
+            currentSlice,
+            totalSegmentCount: slicePlan.length,
+            isFinalSeedanceSlice: segmentIndex === slicePlan.length,
+            mandatoryMoneyVisualCarrier: segmentIndex === 1,
+            conversionEffectOpportunities: currentSlice.conversionEffectOpportunities || []
+          };
+          const repaired = repairFormalPlanContract(rawSlice, buildRepairContext(segmentInput));
+          const parsedSlice = validateSeedancePlan(
+            repaired,
+            resolveSeedancePlanValidationContext(segmentInput)
+          );
+          results.push({
+            branchVariantIndex,
+            segmentIndex,
+            planPayload: parsedSlice
+          });
+        }
+      }
+
+      return results;
+    }
+  });
+}
+
 async function callPlanLlm(context, messages, llmConfig) {
-  if (context.llmStreamHandlers) {
-    return callLlmStreaming(
-      llmConfig,
-      messages,
-      context.llmStreamHandlers,
-      (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
-    );
+  const promptCharCount = JSON.stringify(messages || []).length;
+  if (context?.currentBatchId) {
+    const recordEvent = typeof context.recordTelemetryEvent === "function"
+      ? context.recordTelemetryEvent
+      : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+    await recordEvent("plan_prompt_built", {
+      batchId: context.currentBatchId,
+      requestId: context.requestId || "",
+      model: llmConfig.model || "",
+      promptCharCount
+    }).catch(() => {});
   }
-  if (typeof context.callWangzhuanLlm === "function") {
-    return context.callWangzhuanLlm({
-      messages,
-      llmConfig: {
-        provider: llmConfig.provider,
-        endpoint: llmConfig.endpoint,
-        model: llmConfig.model,
-        temperature: llmConfig.temperature,
-        timeoutMs: llmConfig.timeoutMs,
-        apiKeyEnv: llmConfig.apiKeyEnv
-      },
-      planGeneration: true
-    });
-  }
-  const dumpRequest = async (dump) => {
-    const batchId = String(context?.currentBatchId || "").trim();
-    const requestId = String(context?.requestId || "").trim();
-    if (!batchId || !requestId || !context?.userProjectRoot) return;
-    const target = join(wangzhuanPaths(context).batchesDir, batchId, `llm-request-plan-${requestId}.json`);
-    await writeAtomicJson(target, dump);
+  const invokeOnce = async () => {
+    if (context.llmStreamHandlers) {
+      return callLlmStreaming(
+        llmConfig,
+        messages,
+        context.llmStreamHandlers,
+        (messageList) => buildGeminiRequestBody(messageList, llmConfig.temperature)
+      );
+    }
+    if (typeof context.callWangzhuanLlm === "function") {
+      return context.callWangzhuanLlm({
+        messages,
+        llmConfig: {
+          provider: llmConfig.provider,
+          endpoint: llmConfig.endpoint,
+          model: llmConfig.model,
+          temperature: llmConfig.temperature,
+          timeoutMs: llmConfig.timeoutMs,
+          apiKeyEnv: llmConfig.apiKeyEnv
+        },
+        planGeneration: true
+      });
+    }
+    const dumpRequest = async (dump) => {
+      const batchId = String(context?.currentBatchId || "").trim();
+      const requestId = String(context?.requestId || "").trim();
+      if (!batchId || !requestId || !context?.userProjectRoot) return;
+      const target = join(wangzhuanPaths(context).batchesDir, batchId, `llm-request-plan-${requestId}.json`);
+      await writeAtomicJson(target, dump);
+    };
+    return llmUsesGeminiNativeApi(llmConfig)
+      ? callGeminiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest })
+      : callOpenAiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest });
   };
-  return llmUsesGeminiNativeApi(llmConfig)
-    ? callGeminiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest })
-    : callOpenAiCompatibleLlm(llmConfig, messages, { requestId: context?.requestId, dumpRequest });
+  return invokeLlmWithRetry({
+    call: invokeOnce,
+    isRetryable: isRetryableLlmError,
+    maxRetries: 2,
+    initialBackoffMs: 1000,
+    maxBackoffMs: 8000,
+    retryTimeoutCapMs: 120000,
+    onRetry: async (attempt, { error }) => {
+      context.llmStreamHandlers?.onRetry?.({
+        attempt,
+        maxRetries: 2,
+        reason: error?.data?.reason || error?.code || "",
+        upstreamMessage: String(error?.data?.upstreamMessage || error?.message || "").slice(0, 300)
+      });
+    }
+  });
+}
+
+function compactPlanPromptEnabled(context = {}, input = {}) {
+  const config = context.config?.wangzhuan || {};
+  const branchId = cleanString(input.branch?.branchId);
+  const branchAllowList = Array.isArray(config.planPromptCompactBranches)
+    ? config.planPromptCompactBranches.map((item) => cleanString(item)).filter(Boolean)
+    : [];
+  return Boolean(config.planPromptCompact)
+    || (branchId && branchAllowList.includes(branchId));
+}
+
+function planCacheEnabled(context = {}) {
+  return context.config?.wangzhuan?.planCacheEnabled !== false;
+}
+
+function isPlanContentRetryError(error) {
+  return error?.code === "schema_invalid"
+    || error?.data?.reason === "invalid_json"
+    || /json|schema/i.test(String(error?.message || ""));
+}
+
+async function maybeLoadPlanCache(context = {}, input = {}, llmConfig = {}, compact = false) {
+  if (!planCacheEnabled(context) || !context.userProjectRoot || !context.sharedProjectRoot) return { key: "", plan: null };
+  const key = planCacheKey({
+    ...input,
+    model: llmConfig.model || "",
+    compact
+  });
+  const plan = await loadCachedPlan(context, key);
+  if (plan) {
+    const recordEvent = typeof context.recordTelemetryEvent === "function"
+      ? context.recordTelemetryEvent
+      : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+    await recordEvent("plan_cache_hit", {
+      batchId: input.batch?.batchId || context.currentBatchId || "",
+      branchId: input.branch?.branchId || "",
+      branchVariantIndex: input.branchVariantIndex,
+      segmentIndex: input.segmentIndex,
+      cacheKey: key
+    }).catch(() => {});
+  }
+  return { key, plan };
+}
+
+async function recordPlanPromptCompact(context = {}, input = {}, messages = []) {
+  if (!context?.currentBatchId && !input.batch?.batchId) return;
+  const recordEvent = typeof context.recordTelemetryEvent === "function"
+    ? context.recordTelemetryEvent
+    : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+  await recordEvent("plan_prompt_compact", {
+    batchId: input.batch?.batchId || context.currentBatchId || "",
+    branchId: input.branch?.branchId || "",
+    branchVariantIndex: input.branchVariantIndex,
+    segmentIndex: input.segmentIndex,
+    charCount: JSON.stringify(messages || []).length
+  }).catch(() => {});
 }
 
 export async function generateSeedancePlan(context, input = {}) {
   const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
-  const messages = buildSeedancePlanMessages(input);
-  const content = await callPlanLlm({
-    ...context,
-    currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
-  }, messages, llmConfig);
-  const validationContext = resolveSeedancePlanValidationContext(input);
-  const repaired = repairFormalPlanContract(parseLlmJsonContent(content), buildRepairContext(input));
-  const parsed = validateSeedancePlan(
-    repaired,
-    validationContext
-  );
+  const compact = compactPlanPromptEnabled(context, input);
+  const cached = await maybeLoadPlanCache(context, input, llmConfig, compact);
+  if (cached.plan) return cached.plan;
+  const messages = buildSeedancePlanMessages({
+    ...input,
+    options: {
+      ...(input.options || {}),
+      compact
+    }
+  });
+  if (compact) {
+    await recordPlanPromptCompact(context, input, messages);
+  }
+  const parsed = await invokeLlmWithRetry({
+    maxRetries: 2,
+    initialBackoffMs: 1000,
+    maxBackoffMs: 8000,
+    isRetryable: isPlanContentRetryError,
+    call: async () => {
+      const content = await callPlanLlm({
+        ...context,
+        currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+      }, messages, llmConfig);
+      const validationContext = resolveSeedancePlanValidationContext(input);
+      const repaired = repairFormalPlanContract(parseLlmJsonContent(content), buildRepairContext(input));
+      return validateSeedancePlan(
+        repaired,
+        validationContext
+      );
+    }
+  });
+  if (cached.key) await writeCachedPlan(context, cached.key, parsed);
   return parsed;
 }
 
@@ -825,35 +1461,57 @@ function normalizePlanSegments(value = {}) {
 
 export async function generateThirtySecondSeedancePlans(context, input = {}) {
   const llmConfig = resolveLlmConfig(context.config || {}, input.llmConfig || {});
-  const messages = buildThirtySecondSeedancePlanMessages(input);
-  const content = await callPlanLlm({
-    ...context,
-    currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
-  }, messages, llmConfig);
-  const parsed = parseLlmJsonContent(content);
-  const segments = normalizePlanSegments(parsed);
-  if (segments.length < 2) {
-    throw new WangzhuanError("schema_invalid", "30s Seedance 预案必须包含两个连续 15s segment", {
-      branchId: input.branch?.branchId,
-      branchVariantIndex: input.branchVariantIndex,
-      segmentCount: segments.length
-    });
-  }
-  return [1, 2].map((segmentIndex) => {
-    const segment = segments.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
-      || segments[segmentIndex - 1];
-    const segmentInput = {
-      ...input,
-      segmentIndex,
-      totalSegmentCount: 2,
-      isFinalSeedanceSlice: segmentIndex === 2,
-      mandatoryMoneyVisualCarrier: segmentIndex === 1
-    };
-    return validateSeedancePlan(
-      repairFormalPlanContract(segment, buildRepairContext(segmentInput)),
-      resolveSeedancePlanValidationContext(segmentInput)
-    );
+  const compact = compactPlanPromptEnabled(context, input);
+  const cached = await maybeLoadPlanCache(context, { ...input, segmentIndex: "1-2" }, llmConfig, compact);
+  if (cached.plan) return cached.plan;
+  const messages = buildThirtySecondSeedancePlanMessages({
+    ...input,
+    options: {
+      ...(input.options || {}),
+      compact
+    }
   });
+  if (compact) {
+    await recordPlanPromptCompact(context, { ...input, segmentIndex: "1-2" }, messages);
+  }
+  const plans = await invokeLlmWithRetry({
+    maxRetries: 2,
+    initialBackoffMs: 1000,
+    maxBackoffMs: 8000,
+    isRetryable: isPlanContentRetryError,
+    call: async () => {
+      const content = await callPlanLlm({
+        ...context,
+        currentBatchId: input.batch?.batchId || context?.currentBatchId || ""
+      }, messages, llmConfig);
+      const parsed = parseLlmJsonContent(content);
+      const segments = normalizePlanSegments(parsed);
+      if (segments.length < 2) {
+        throw new WangzhuanError("schema_invalid", "30s Seedance 预案必须包含两个连续 15s segment", {
+          branchId: input.branch?.branchId,
+          branchVariantIndex: input.branchVariantIndex,
+          segmentCount: segments.length
+        });
+      }
+      return [1, 2].map((segmentIndex) => {
+        const segment = segments.find((item) => Number(item?.segmentIndex || 0) === segmentIndex)
+          || segments[segmentIndex - 1];
+        const segmentInput = {
+          ...input,
+          segmentIndex,
+          totalSegmentCount: 2,
+          isFinalSeedanceSlice: segmentIndex === 2,
+          mandatoryMoneyVisualCarrier: segmentIndex === 1
+        };
+        return validateSeedancePlan(
+          repairFormalPlanContract(segment, buildRepairContext(segmentInput)),
+          resolveSeedancePlanValidationContext(segmentInput)
+        );
+      });
+    }
+  });
+  if (cached.key) await writeCachedPlan(context, cached.key, plans);
+  return plans;
 }
 
 export function buildGenerationPlanRecord({

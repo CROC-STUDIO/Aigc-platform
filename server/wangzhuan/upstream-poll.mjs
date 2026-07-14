@@ -29,6 +29,43 @@ import { WangzhuanError } from "./http.mjs";
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
 const MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS = 30;
 const execFileAsync = promisify(execFile);
+const UPSTREAM_POLL_IN_FLIGHT = new Map();
+
+function pollSingleFlightKey(context, batchId) {
+  const scope = context.userProjectRoot || context.sharedProjectRoot || context.userId || context.user?.username || "local";
+  return `${scope}:${batchId}`;
+}
+
+function runPollSingleFlight(key, worker) {
+  const active = UPSTREAM_POLL_IN_FLIGHT.get(key);
+  if (active) return active;
+  const task = Promise.resolve().then(worker);
+  const tracked = task.finally(() => {
+    if (UPSTREAM_POLL_IN_FLIGHT.get(key) === tracked) UPSTREAM_POLL_IN_FLIGHT.delete(key);
+  });
+  UPSTREAM_POLL_IN_FLIGHT.set(key, tracked);
+  return tracked;
+}
+
+async function mapWithConcurrency(items = [], concurrency = 1, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, Number(concurrency) || 1), items.length || 1);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }));
+  return results;
+}
+
+function resolvePollConcurrency(context = {}) {
+  const configured = Number(context.config?.wangzhuan?.upstreamPollConcurrency);
+  if (Number.isFinite(configured) && configured > 0) return Math.min(10, Math.round(configured));
+  return 3;
+}
 
 function userRelative(context, fullPath) {
   return toProjectRelative(context.userProjectRoot, fullPath);
@@ -335,9 +372,9 @@ export function shouldPollUpstreamBatch(batch = {}) {
   return batchNeedsUpstreamPoll(batch);
 }
 
-export async function pollUpstreamBatch(context, batchId) {
+async function pollUpstreamBatchOnce(context, batchId) {
   let batch = await readBatch(context, batchId);
-  if (["stopped", "failed", "succeeded"].includes(batch.status)) {
+  if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) {
     return { batch, needsPoll: false, polledCount: 0, advanced: false };
   }
 
@@ -347,17 +384,21 @@ export async function pollUpstreamBatch(context, batchId) {
   let tasksChanged = false;
   const nextTasks = [];
 
-  for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
+  const taskResults = await mapWithConcurrency(
+    Array.isArray(batch.tasks) ? batch.tasks : [],
+    resolvePollConcurrency(context),
+    async (task) => {
     if (!shouldPollTaskStatus(task)) {
-      nextTasks.push(task);
-      continue;
+      return { before: task, after: task, polled: false };
     }
-    polledCount += 1;
     const polledTask = await pollGenerationTask(context, batch, task, provider, now);
-    if (generationTaskPollChanged(task, polledTask)) {
-      tasksChanged = true;
+      return { before: task, after: polledTask, polled: true };
     }
-    nextTasks.push(polledTask);
+  );
+  for (const result of taskResults) {
+    if (result.polled) polledCount += 1;
+    if (generationTaskPollChanged(result.before, result.after)) tasksChanged = true;
+    nextTasks.push(result.after);
   }
 
   const durationSec = Number(batch.estimate?.durationSec || 15);
@@ -396,3 +437,16 @@ export async function pollUpstreamBatch(context, batchId) {
   const needsPoll = batchNeedsUpstreamPoll(batch);
   return { batch, needsPoll, polledCount, advanced };
 }
+
+export function pollUpstreamBatch(context, batchId) {
+  return runPollSingleFlight(
+    pollSingleFlightKey(context, batchId),
+    () => pollUpstreamBatchOnce(context, batchId)
+  );
+}
+
+export const __upstreamPollTestHooks = {
+  mapWithConcurrency,
+  resolvePollConcurrency,
+  runPollSingleFlight
+};

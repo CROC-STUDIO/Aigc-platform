@@ -138,9 +138,14 @@ function outputPackagePath(batchRoot, output) {
   const ext = outputFileExtension(output);
   const fileName = output.displayFileName || `${output.outputId}${output.kind === "stitched_video" ? "_30s" : ""}${ext}`;
   if (output.kind === "stitched_video") return `${batchRoot}/stitched/${fileName}`;
+  if (output.kind === "expanded_video") return `${batchRoot}/expanded/${zipSafeName(output.parentOutputId || "unknown-parent")}/${fileName}`;
   if (output.kind === "segment_video") return `${batchRoot}/segments/${fileName}`;
   return `${batchRoot}/outputs/${fileName}`;
 }
+
+export const packagePathHelpers = {
+  outputPackagePath
+};
 
 function packageOutputSelection(batch, request) {
   const selectedOutputIds = normalizeIdSet(request.outputIds);

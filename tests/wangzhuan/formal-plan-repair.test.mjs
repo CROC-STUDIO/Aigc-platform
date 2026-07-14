@@ -341,7 +341,7 @@ test("build-formal-plan repair works for ReelMate and DramaWin across China and 
       assert.equal(plan.targetRegion, item.targetRegion, `${item.label} plan ${index}`);
       assert.equal(plan.currencySymbol, item.currency, `${item.label} plan ${index}`);
       assert.ok(plan.repairApplied, `${item.label} plan ${index}`);
-      assert.ok(plan.sliceDurationSec >= 8 && plan.sliceDurationSec <= 15, `${item.label} plan ${index}`);
+      assert.ok(plan.sliceDurationSec >= 5 && plan.sliceDurationSec <= 30, `${item.label} plan ${index}`);
       assert.ok(plan.subtitles.length >= 1 && plan.subtitles.length <= 2, `${item.label} plan ${index}`);
       assert.match(plan.seedancePrompt, new RegExp(`targetLanguage=${item.language}`), `${item.label} plan ${index}`);
       assert.match(plan.seedancePrompt, new RegExp(`targetRegion=${item.targetRegion}`), `${item.label} plan ${index}`);

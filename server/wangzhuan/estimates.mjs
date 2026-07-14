@@ -27,12 +27,13 @@ import {
   syncEstimateFact,
   verifyEstimateConfirmationTokenFromMysql
 } from "./mysql-facts.mjs";
-import { prepareBatchForPipeline, stopBatch } from "./pipeline.mjs";
+import { prepareBatchForPipeline } from "./pipeline.mjs";
 import { loadReferenceVideoProbe } from "./reference-videos.mjs";
 import { assertSeedanceReferenceAssetLimits } from "./seedance-provider.mjs";
 import { DEFAULT_SEEDANCE_MODEL, resolveSeedanceModel } from "./seedance-provider.mjs";
 import { preflightStitcher } from "./stitch.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { normalizeBatchPostProcess } from "./postprocess.mjs";
 import { writeSseDelta, writeSseDone, writeSseError, writeSseLog, writeSseReset } from "./sse.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
@@ -309,6 +310,7 @@ export async function estimateBatch(context, request = {}) {
       bottomMargin: 3,
       horizontalMargin: 50
     };
+  const postProcess = normalizeBatchPostProcess(request.postProcess);
   const normalizedRequest = {
     templateId: request.templateId,
     versionId: request.versionId,
@@ -330,6 +332,7 @@ export async function estimateBatch(context, request = {}) {
     disclaimerLanguage,
     disclaimerByLanguage,
     disclaimerOverlay,
+    postProcess,
     seedanceModel,
     branches,
     ...(request.templateSnapshot ? { templateSnapshot: request.templateSnapshot } : {})
@@ -454,21 +457,6 @@ async function saveBatch(context, batch) {
       batchId: batch.batchId,
       cause: detail
     });
-  }
-}
-
-async function rollbackEmptyPlanPreviewBatch(context, batchId) {
-  if (!batchId) return;
-  try {
-    const detail = await loadBatchDetailFromMysql(context, batchId);
-    const batch = detail?.batch;
-    if (!batch || batch.status !== "preview_required") return;
-    const planCount = Array.isArray(batch.plans) ? batch.plans.length : 0;
-    const scriptCount = Array.isArray(batch.scripts) ? batch.scripts.length : 0;
-    if (planCount > 0 || scriptCount > 0) return;
-    await stopBatch(context, batchId, { reason: "plan_generation_failed" });
-  } catch (error) {
-    console.warn(`[estimates] failed to rollback empty plan preview batch ${batchId}: ${error?.message || error}`);
   }
 }
 
@@ -663,7 +651,6 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
     }, { audit: true });
     return result;
   } catch (error) {
-    await rollbackEmptyPlanPreviewBatch(context, planBatchId);
     throw enrichPlanGenerationError(error, planBatchId);
   }
 }
@@ -736,7 +723,6 @@ export async function prepareBatchPlanFromEstimateStream(context, request = {}, 
     writeSseLog(res, "[DONE] all plans ready — saving batch");
     writeSseDone(res, result, requestId);
   } catch (error) {
-    await rollbackEmptyPlanPreviewBatch(context, planBatchId);
     writeSseError(res, enrichPlanGenerationError(error, planBatchId), requestId);
   }
 }

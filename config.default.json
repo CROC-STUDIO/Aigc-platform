@@ -3,10 +3,11 @@
     "llm": {
       "provider": "skylink",
       "endpoint": "https://skylink-gateway.com/api/v1",
-      "model": "gemini-3.5-flash",
+      "model": "gpt-5.4",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 300000,
-      "maxRetries": 3
+      "maxRetries": 3,
+      "preferVideoUrl": true
     },
     "qcLlm": {
       "provider": "skylink",
@@ -51,10 +52,29 @@
       "model": "dreamina-seedance-2-0-260128",
       "apiKeyEnv": "WANGZHUAN_LLM_API_KEY",
       "timeoutMs": 600000,
+      "pollTimeoutMs": 60000,
       "ratio": "9:16",
       "resolution": "720p",
       "generateAudio": true,
       "watermark": false
-    }
+    },
+    "volcengineAsr": {
+      "endpoint": "https://openspeech.bytedance.com/api/v3/auc/bigmodel",
+      "resourceId": "volc.seedasr.auc",
+      "apiKeyEnv": "VOLCENGINE_ASR_API_KEY",
+      "appIdEnv": "VOLCENGINE_ASR_APP_ID",
+      "accessTokenEnv": "VOLCENGINE_ASR_ACCESS_TOKEN",
+      "timeoutMs": 600000,
+      "pollIntervalMs": 2000
+    },
+    "planPromptCompact": false,
+    "planPromptCompactBranches": [],
+    "planCacheEnabled": true,
+    "planLlmConcurrency": {
+      "branch": 2,
+      "variant": 3,
+      "total": 6
+    },
+    "upstreamPollConcurrency": 3
   }
 }

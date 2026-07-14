@@ -9,6 +9,7 @@ import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
 import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
 import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
+import { uploadPostProcessEnding } from "./postprocess.mjs";
 import { runBatchQc } from "./qc.mjs";
 import { detectRemixRegions } from "./remix-detection.mjs";
 import { buildRemixPlan } from "./remix-plan.mjs";
@@ -18,6 +19,7 @@ import {
   decomposeReferenceVideo,
   draftReferenceVideoDecomposition,
   draftReferenceVideoDecompositionStream,
+  findReusableReferenceVideo,
   getReferenceVideoWorkflowState
 } from "./reference-videos.mjs";
 import {
@@ -63,7 +65,10 @@ import {
 } from "./output-expansion.mjs";
 import {
   loadCodexPromptDraftFact,
+  loadBatchDetailFromMysql,
   loadOutputDetailFromMysql,
+  syncBatchFacts,
+  syncVideoDecompositionFact,
   syncCodexExecJobFact,
   syncCodexPromptDraftFact
 } from "./mysql-facts.mjs";
@@ -106,7 +111,7 @@ async function readReferenceVideoCheckRequest(context, req) {
     fileName: form.fields?.fileName || file.fileName,
     name: form.fields?.name || file.fileName,
     mimeType,
-    content: `data:${mimeType || "application/octet-stream"};base64,${file.buffer.toString("base64")}`
+    buffer: file.buffer
   };
 }
 
@@ -176,6 +181,77 @@ function productInfoRoute(pathname) {
 function codexSeedancePromptRoute(pathname) {
   if (pathname !== "/api/wangzhuan/codex/seedance-prompt") return null;
   return { collection: true };
+}
+
+const DECOMPOSITION_FAILED_MISSING_FIELDS = Object.freeze([
+  "scene",
+  "subject",
+  "action",
+  "camera",
+  "lighting",
+  "style",
+  "quality",
+  "hook"
+]);
+
+function normalizeDecompositionJobError(error) {
+  const code = error?.code || "model_failed";
+  const rawMessage = String(error?.message || "");
+  const upstreamMessage = String(error?.data?.upstreamMessage || "");
+  const reason = String(error?.data?.reason || "");
+  const aborted = rawMessage.includes("aborted")
+    || upstreamMessage.includes("aborted")
+    || rawMessage.includes("AbortError")
+    || upstreamMessage.includes("AbortError");
+  const timedOut = reason === "timeout" || rawMessage.includes("超时") || upstreamMessage.includes("timed out");
+  if (code === "model_failed" && (aborted || timedOut)) {
+    return new WangzhuanError("model_failed", "模型请求已中断，可重试", {
+      ...error?.data,
+      reason: reason || "timeout",
+      upstreamMessage: upstreamMessage || rawMessage || "This operation was aborted",
+      originalMessage: rawMessage || "模型拆解请求失败",
+      errorCode: code,
+      errorMessage: "模型请求已中断，可重试"
+    }, error?.status);
+  }
+  return error instanceof WangzhuanError
+    ? error
+    : new WangzhuanError(code, rawMessage || "AI 拆解失败", error?.data || {}, error?.status);
+}
+
+async function persistFailedDecompositionJob(scoped, context, body, error) {
+  if (!body?.referenceVideoId) return;
+  const persistDecomposition = scoped.syncVideoDecompositionFact
+    || context.syncVideoDecompositionFact
+    || syncVideoDecompositionFact;
+  const loadBatchDetail = scoped.loadBatchDetailFromMysql
+    || context.loadBatchDetailFromMysql
+    || loadBatchDetailFromMysql;
+  const persistBatch = scoped.syncBatchFacts
+    || context.syncBatchFacts
+    || syncBatchFacts;
+  const failedDecomposition = {
+    referenceVideoId: body.referenceVideoId,
+    schemaVersion: "video_decomposition.v1",
+    status: "failed",
+    missingFields: DECOMPOSITION_FAILED_MISSING_FIELDS.slice(),
+    errorCode: error?.data?.errorCode || error?.code || "model_failed",
+    errorMessage: error?.data?.errorMessage || error?.message || "AI 拆解失败",
+    upstreamMessage: String(error?.data?.upstreamMessage || "").slice(0, 500),
+    reason: String(error?.data?.reason || "").slice(0, 120)
+  };
+  await persistDecomposition(scoped, failedDecomposition);
+  if (!body.batchId) return;
+  const detail = await loadBatchDetail(scoped, body.batchId);
+  const batch = detail?.batch;
+  if (!batch) return;
+  await persistBatch(scoped, {
+    ...batch,
+    status: "failed",
+    stopReason: failedDecomposition.reason || "decomposition_failed",
+    decomposition: failedDecomposition,
+    updatedAt: new Date().toISOString()
+  }, "decomposition_failed");
 }
 
 function codexSeedancePromptJobRoute(pathname) {
@@ -248,6 +324,10 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         ...publicQcLlmConfig(scoped.config)
       }, requestId);
     }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/reuse-check") {
+      const runFindReusable = scoped.findReusableReferenceVideo || context.findReusableReferenceVideo || findReusableReferenceVideo;
+      return sendOk(res, await runFindReusable(scoped, await context.readJson(req)), requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/check") {
       const runCheck = scoped.checkReferenceVideo || context.checkReferenceVideo || checkReferenceVideo;
       return sendOk(res, await runCheck(scoped, await readReferenceVideoCheckRequest(context, req)), requestId);
@@ -269,24 +349,29 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         log("正在读取视频基础信息、模型、地区和语言配置");
         const runDraft = scoped.draftReferenceVideoDecomposition || context.draftReferenceVideoDecomposition || draftReferenceVideoDecomposition;
         progress(28, "正在进行场景切点、抽帧和 LLM 秒级剧情拆解");
-        const result = await runDraft(scoped, body, {
-          requestId,
-          streamHandlers: {
-            onRetry: ({ attempt, maxRetries, reason, upstreamMessage, code, status }) => log(
-              `拆解模型重试 ${attempt}/${maxRetries}`,
-              {
-                ...(reason ? { reason } : {}),
-                ...(upstreamMessage ? { upstreamMessage } : {}),
-                ...(code ? { code } : {}),
-                ...(status ? { status } : {})
-              }
-            ),
-            onFallback: ({ from, to, reason }) => log(
-              "拆解模型输入回退",
-              { from, to, reason }
-            )
-          }
-        });
+        let result;
+        try {
+          result = await runDraft(scoped, body, {
+            requestId,
+            streamHandlers: {
+              onRetry: ({ attempt, maxRetries, reason, upstreamMessage, code, status }) => log(
+                `拆解模型重试 ${attempt}/${maxRetries}`,
+                {
+                  ...(reason ? { reason } : {}),
+                  ...(upstreamMessage ? { upstreamMessage } : {}),
+                  ...(code ? { code } : {}),
+                  ...(status ? { status } : {})
+                }
+              ),
+              onFallback: ({ from, to, reason }) => log(
+                "拆解模型输入回退",
+                { from, to, reason }
+              )
+            }
+          });
+        } catch (error) {
+          throw normalizeDecompositionJobError(error);
+        }
         if (result?.draft?.source === "cache") {
           log("命中拆解缓存，跳过 LLM 调用", { cacheKey: result.draft.cacheKey });
         }
@@ -295,7 +380,10 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       }, {
         context: scoped,
         subjectType: "reference_video",
-        subjectId: String(body.referenceVideoId || "")
+        subjectId: String(body.referenceVideoId || ""),
+        onError: async ({ error }) => {
+          await persistFailedDecompositionJob(scoped, context, body, normalizeDecompositionJobError(error));
+        }
       });
       return sendOk(res, { ...job, decompositionJobId: job.id }, requestId);
     }
@@ -321,6 +409,9 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/disclaimer-overlays/upload") {
       return sendOk(res, await uploadDisclaimerOverlayAsset(scoped, await context.readJson(req)), requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/postprocess-assets/ending") {
+      return sendOk(res, await uploadPostProcessEnding(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/draft") {
       return sendOk(res, await saveBatchDraft(scoped, await context.readJson(req)), requestId);

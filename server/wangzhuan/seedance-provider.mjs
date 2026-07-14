@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { assetKeyToSlot, branchHasReferenceAsset, countReferencedAssets } from "./asset-review.mjs";
 import { configuredApiKey } from "./llm-config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER, REFERENCE_VIDEO_ASSET_KEYS } from "./reference-assets.mjs";
+import { FINAL_TAIL_REFERENCE_ASSET_ORDER, MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER, REFERENCE_VIDEO_ASSET_KEYS } from "./reference-assets.mjs";
 
 export const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
 
@@ -85,6 +85,24 @@ function mediaItemFromReviewedAsset(assetKey, review = {}) {
   };
 }
 
+function isFinalSeedanceSlice(batch = {}, task = {}) {
+  if (task.isFinalSeedanceSlice === true || task.segmentRole === "cta_slice") return true;
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const sameVariantTasks = tasks.filter((candidate) => {
+    return cleanString(candidate.branchId || "default") === cleanString(task.branchId || "default")
+      && Number(candidate.branchVariantIndex || candidate.variantIndex || 1) === Number(task.branchVariantIndex || task.variantIndex || 1);
+  });
+  if (!sameVariantTasks.length) return false;
+  const maxSegmentIndex = Math.max(...sameVariantTasks.map((candidate) => Number(candidate.segmentIndex || 1)));
+  return Number(task.segmentIndex || 1) === maxSegmentIndex;
+}
+
+function seedanceReferenceOrderForTask(batch = {}, task = {}) {
+  return isFinalSeedanceSlice(batch, task)
+    ? [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER]
+    : REFERENCE_ASSET_ORDER;
+}
+
 function latestBranchMediaFields(latest = {}) {
   const storedPaths = {
     ...(latest.assetStoredPaths && typeof latest.assetStoredPaths === "object" ? latest.assetStoredPaths : {}),
@@ -133,7 +151,7 @@ export function collectSeedanceMedia(batch = {}, task = {}) {
   const storedPaths = branch?.assetStoredPaths && typeof branch.assetStoredPaths === "object" ? branch.assetStoredPaths : {};
   const items = [];
   const seen = new Set();
-  for (const key of REFERENCE_ASSET_ORDER) {
+  for (const key of seedanceReferenceOrderForTask(batch, task)) {
     const review = reviews[key] || {};
     if (branchHasReferenceAsset(branch, key)) {
       if (!isApprovedAssetReview(review)) {
@@ -256,7 +274,7 @@ export function buildSeedanceGenerationPayload({
   const payload = {
     model: normalizedModel,
     prompt: promptText,
-    duration: Number(duration)
+    duration: normalizeSeedancePayloadDuration(duration)
   };
   const normalizedMode = cleanString(mode, references.length ? "omni_reference" : "text_to_video");
   if (normalizedMode) payload.mode = normalizedMode;
@@ -275,6 +293,12 @@ export function buildSeedanceGenerationPayload({
   return payload;
 }
 
+export function normalizeSeedancePayloadDuration(duration = 15) {
+  const numericDuration = Number(duration);
+  if (!Number.isFinite(numericDuration) || numericDuration <= 0) return 15;
+  return Math.max(1, Math.ceil(numericDuration));
+}
+
 function configuredProvider(context = {}, capability = {}) {
   const config = context.config?.wangzhuan?.seedanceProvider && typeof context.config.wangzhuan.seedanceProvider === "object"
     ? context.config.wangzhuan.seedanceProvider
@@ -285,6 +309,7 @@ function configuredProvider(context = {}, capability = {}) {
     cleanString(config.apiKey, cleanString(process.env.WANGZHUAN_SEEDANCE_API_KEY, configuredApiKey({ apiKeyEnv, apiKey: config.apiKey })))
   );
   const timeoutMs = positiveNumber(capability.timeoutMs ?? config.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const pollTimeoutMs = positiveNumber(capability.pollTimeoutMs ?? config.pollTimeoutMs, 60000);
   const useTai = Boolean(capability.useTai ?? config.useTai ?? false);
   return {
     provider: cleanString(capability.provider, cleanString(config.provider, "seedance")),
@@ -295,6 +320,7 @@ function configuredProvider(context = {}, capability = {}) {
     apiKeyEnv,
     apiKey,
     timeoutMs,
+    pollTimeoutMs,
     useTai,
     resolution: cleanString(capability.resolution, cleanString(config.resolution, "720p")),
     ratio: cleanString(capability.ratio, cleanString(config.ratio, "9:16")),
@@ -693,7 +719,7 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
       const response = await fetchWithTimeout(fetchImpl, seedanceTaskUrl(config.endpoint, taskId, config.taskPollPath), {
         method: "GET",
         headers: authHeaders(config.apiKey)
-      }, config.timeoutMs, config.provider);
+      }, config.pollTimeoutMs, config.provider);
       return parseSeedancePollResponse(await readJsonResponse(response, config.provider, "poll_seedance_task"));
     },
     async downloadVideo(videoUrl) {

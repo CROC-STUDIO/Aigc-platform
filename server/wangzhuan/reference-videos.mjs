@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -7,10 +8,12 @@ import { promisify } from "node:util";
 import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { callLlmStreaming, geminiStreamGenerateContentUrl } from "./llm-stream.mjs";
-import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, isRetryableLlmError, resolveLlmConfig } from "./llm-config.mjs";
+import { invokeLlmWithRetry } from "./llm-invoke.mjs";
+import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, isRetryableLlmError, resolveLlmConfig, llmSupportsVideoUrl } from "./llm-config.mjs";
 import { writeSseDelta, writeSseDone, writeSseError, writeSseLog } from "./sse.mjs";
 import {
   hasWangzhuanFactsStore,
+  loadReferenceVideoProbeByHashFromMysql,
   loadReferenceVideoProbeFromMysql,
   loadVideoDecompositionFromMysql,
   nextReferenceVideoIdFromMysql,
@@ -128,6 +131,39 @@ function parseUploadContent(content) {
     throw new WangzhuanError("invalid_video", "视频文件为空", { field: "content" });
   }
   return buffer;
+}
+
+function parseUploadBuffer(request = {}) {
+  if (Buffer.isBuffer(request.buffer)) return request.buffer;
+  if (request.buffer instanceof Uint8Array) return Buffer.from(request.buffer);
+  return parseUploadContent(request.content);
+}
+
+async function sha256File(filePath) {
+  const hash = createHash("sha256");
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return hash.digest("hex");
+}
+
+function probePreviewUrl(probe = {}) {
+  return String(probe.previewUrl || probe.storageUrl || "").trim()
+    || (probe.storedPath ? `/file?path=${encodeURIComponent(probe.storedPath)}` : "");
+}
+
+function referenceVideoResponse(probe = {}, extra = {}) {
+  const previewUrl = probePreviewUrl(probe);
+  return {
+    referenceVideo: {
+      ...probe,
+      ...(previewUrl ? { previewUrl } : {}),
+      ...extra
+    }
+  };
 }
 
 function ratioFor(width, height) {
@@ -333,13 +369,17 @@ export async function checkReferenceVideo(context, request = {}) {
     throw new WangzhuanError("invalid_video", "视频格式不符合要求", { field: "fileName", allowedExts: [...VIDEO_EXTS] });
   }
 
-  const buffer = parseUploadContent(request.content);
-  if (buffer.length > limits.maxUploadVideoBytes) {
+  const sourcePath = String(request.filePath || request.localPath || "").trim();
+  const buffer = sourcePath ? null : parseUploadBuffer(request);
+  const sourceSizeBytes = sourcePath ? await statSizeBytes(sourcePath) : buffer.length;
+  if (sourceSizeBytes > limits.maxUploadVideoBytes) {
     throw new WangzhuanError("file_too_large", "文件超过大小上限", {
-      sizeBytes: buffer.length,
+      sizeBytes: sourceSizeBytes,
       maxUploadVideoBytes: limits.maxUploadVideoBytes
     });
   }
+  const fileHash = String(request.fileHash || request.sha256 || "").trim()
+    || (sourcePath ? await sha256File(sourcePath) : createHash("sha256").update(buffer).digest("hex"));
 
   const referenceVideoId = typeof context.nextReferenceVideoId === "function"
     ? await context.nextReferenceVideoId()
@@ -351,11 +391,15 @@ export async function checkReferenceVideo(context, request = {}) {
   const referenceDir = join(paths.referenceVideosDir, referenceVideoId);
   await mkdir(referenceDir, { recursive: true });
   const originalPath = join(referenceDir, `original${ext}`);
-  await writeFile(originalPath, buffer);
+  if (sourcePath) {
+    await copyFile(sourcePath, originalPath);
+  } else {
+    await writeFile(originalPath, buffer);
+  }
 
   const mediaProbe = await probeReferenceVideo(context, originalPath, request);
   const proxySettings = referenceProxySettings(context);
-  const proxyRequired = shouldCreateReferenceProxy(buffer.length, mediaProbe, proxySettings);
+  const proxyRequired = shouldCreateReferenceProxy(sourceSizeBytes, mediaProbe, proxySettings);
   let uploadPath = originalPath;
   let proxyInfo = null;
   if (proxyRequired) {
@@ -380,7 +424,7 @@ export async function checkReferenceVideo(context, request = {}) {
       };
     }
   }
-  const uploadSizeBytes = proxyInfo?.sizeBytes || buffer.length;
+  const uploadSizeBytes = proxyInfo?.sizeBytes || sourceSizeBytes;
   const storage = await syncWangzhuanAsset(context, uploadPath, "reference_video", {
     required: true,
     preferRemote: true
@@ -408,7 +452,7 @@ export async function checkReferenceVideo(context, request = {}) {
     referenceVideoId,
     fileName,
     mimeType: mimeType || mimeForExt(ext),
-    fileHash: String(request.fileHash || request.sha256 || "").trim(),
+    fileHash,
     sizeBytes: uploadSizeBytes,
     durationSec,
     width,
@@ -429,7 +473,7 @@ export async function checkReferenceVideo(context, request = {}) {
     storageKey: storage.storageKey,
     storageUrl: storage.storageUrl,
     originalStoredPath: toProjectRelative(context.userProjectRoot, originalPath),
-    originalSizeBytes: buffer.length,
+    originalSizeBytes: sourceSizeBytes,
     ...(proxyInfo ? { decompositionProxy: proxyInfo } : {})
   };
 
@@ -451,10 +495,10 @@ export async function checkReferenceVideo(context, request = {}) {
     issueCodes: probe.issues.map((item) => item.code)
   });
 
-  return { referenceVideo: { ...probe, previewUrl: storage.storageUrl } };
+  return referenceVideoResponse(probe, { previewUrl: storage.storageUrl });
 }
 
-function decompositionCacheKey(probe = {}, request = {}, llmConfig = {}) {
+export function decompositionCacheKey(probe = {}, request = {}, llmConfig = {}) {
   const fileHash = String(request.fileHash || request.sha256 || probe.fileHash || "").trim();
   if (!fileHash) return "";
   return hashPayload({
@@ -464,8 +508,15 @@ function decompositionCacheKey(probe = {}, request = {}, llmConfig = {}) {
     language: request.language || request.primaryLanguage || "",
     targetRegion: request.targetRegion || "",
     targetRegions: request.targetRegions || request.regions || [],
-    promptVersion: "fission_decomposition_v1"
+    knowledgeNotesHash: sha256Normalized(request.knowledgeNotes),
+    promptVersion: "fission_decomposition_v2"
   });
+}
+
+function sha256Normalized(value) {
+  return createHash("sha256")
+    .update(String(value || "").trim().replace(/\s+/g, " "))
+    .digest("hex");
 }
 
 function decompositionCachePath(context, cacheKey) {
@@ -478,6 +529,11 @@ async function loadCachedDecomposition(context, probe, request, llmConfig) {
   const target = decompositionCachePath(context, cacheKey);
   if (!target) return null;
   try {
+    const info = await stat(target);
+    if (Date.now() - info.mtimeMs > 30 * 24 * 60 * 60 * 1000) {
+      await rm(target, { force: true });
+      return null;
+    }
     const parsed = JSON.parse(await readFile(target, "utf8"));
     if (!parsed?.decomposition) return null;
     return {
@@ -505,7 +561,8 @@ async function writeCachedDecomposition(context, probe, request, llmConfig, deco
     request: {
       language: request.language || request.primaryLanguage || "",
       targetRegion: request.targetRegion || "",
-      targetRegions: request.targetRegions || request.regions || []
+      targetRegions: request.targetRegions || request.regions || [],
+      knowledgeNotesHash: sha256Normalized(request.knowledgeNotes)
     },
     decomposition,
     updatedAt: new Date().toISOString()
@@ -535,6 +592,50 @@ export async function loadReferenceVideoProbe(context, referenceVideoId) {
     throw new WangzhuanError("reference_video_not_found", "参考视频不存在，请重新上传", { referenceVideoId });
   }
   return mysqlProbe;
+}
+
+async function loadReferenceVideoProbeByHashFromLocal(context, fileHash) {
+  const normalizedHash = String(fileHash || "").trim();
+  if (!normalizedHash) return null;
+  let entries = [];
+  try {
+    entries = await readdir(wangzhuanPaths(context).referenceVideosDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && /^ref_\d{8}_\d{3}$/.test(entry.name))
+    .sort((a, b) => b.name.localeCompare(a.name));
+  for (const entry of candidates) {
+    try {
+      const probe = JSON.parse(await readFile(join(wangzhuanPaths(context).referenceVideosDir, entry.name, "probe.json"), "utf8"));
+      if (String(probe.fileHash || "").trim() === normalizedHash && probe.status !== "deleted") {
+        return probe;
+      }
+    } catch {
+      // Ignore incomplete local reference records and keep searching.
+    }
+  }
+  return null;
+}
+
+export async function findReusableReferenceVideo(context, request = {}) {
+  const fileHash = String(request.fileHash || request.sha256 || "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(fileHash)) {
+    throw new WangzhuanError("validation_error", "文件指纹无效，请重新选择素材", { field: "fileHash" });
+  }
+  const fromContext = typeof context.findReusableReferenceVideo === "function"
+    ? await context.findReusableReferenceVideo({ ...request, fileHash })
+    : null;
+  const probe = fromContext
+    || await loadReferenceVideoProbeByHashFromMysql(context, fileHash)
+    || await loadReferenceVideoProbeByHashFromLocal(context, fileHash);
+  if (!probe) return { hit: false, fileHash, referenceVideo: null };
+  return {
+    hit: true,
+    fileHash,
+    referenceVideo: referenceVideoResponse(probe, { reused: true }).referenceVideo
+  };
 }
 
 export function validateVideoDecomposition(referenceVideoId, decomposition = {}) {
@@ -624,6 +725,10 @@ function normalizeVideoDecompositionPayload(raw = {}) {
     normalized.fissionAnalysis = normalizeFissionAnalysis({
       ...source,
       ...Object.fromEntries(DECOMPOSITION_REQUIRED_FIELDS.map((field) => [field, normalized[field] || ""]))
+    }, {
+      strictStorySegmentTiming: Array.isArray(source?.storySegments) && source.storySegments.length > 0,
+      deriveSeedanceSlices: true,
+      durationSec: Number(source?.sourceVideoProfile?.durationSec || source?.durationSec || 0) || undefined
     });
   }
   return normalized;
@@ -705,75 +810,152 @@ function buildSceneSegments(durationSec, sceneCutsSec = [], options = {}) {
   return segments;
 }
 
-function segmentSampleTimestamps(durationSec, segment, { longSceneThresholdSec = 8 } = {}) {
-  if (!segment || segment.durationSec <= 0) return [];
-  const samples = [];
-  const pushRelative = (ratio) => {
-    const span = Math.max(0.05, segment.endSec - segment.startSec);
-    const value = segment.startSec + (span * ratio);
-    samples.push(clampTimestampSec(durationSec, value));
-  };
-  pushRelative(1 / 3);
-  pushRelative(2 / 3);
-  if (segment.durationSec >= longSceneThresholdSec) {
-    pushRelative(0.2);
-    pushRelative(0.8);
+function mergeShortSceneSegments(segments = [], { shortSceneMergeThresholdSec = 1.5 } = {}) {
+  if (!Array.isArray(segments) || !segments.length || shortSceneMergeThresholdSec <= 0) {
+    return Array.isArray(segments) ? segments : [];
   }
-  return dedupeSortedTimestamps(samples);
+  const merged = [];
+  for (const segment of segments) {
+    if (!merged.length) {
+      merged.push({ ...segment });
+      continue;
+    }
+    const previous = merged[merged.length - 1];
+    if (segment.durationSec < shortSceneMergeThresholdSec || previous.durationSec < shortSceneMergeThresholdSec) {
+      previous.endSec = segment.endSec;
+      previous.durationSec = roundTimestampSec(previous.endSec - previous.startSec);
+      continue;
+    }
+    merged.push({ ...segment });
+  }
+  if (merged.length > 1 && merged.at(-1).durationSec < shortSceneMergeThresholdSec) {
+    const last = merged.pop();
+    const previous = merged[merged.length - 1];
+    previous.endSec = last.endSec;
+    previous.durationSec = roundTimestampSec(previous.endSec - previous.startSec);
+  }
+  return merged.map((segment, index) => ({ ...segment, index }));
+}
+
+function sceneSampleBudget(segment, {
+  mediumSceneThresholdSec = 6,
+  longSceneThresholdSec = 15
+} = {}) {
+  const durationSec = numberOrZero(segment?.durationSec);
+  if (durationSec > longSceneThresholdSec) return 4;
+  if (durationSec >= mediumSceneThresholdSec) return 2;
+  return 1;
+}
+
+function segmentSampleFrames(durationSec, segment, options = {}) {
+  if (!segment || segment.durationSec <= 0) return [];
+  const budget = sceneSampleBudget(segment, options);
+  const ratios = budget >= 4
+    ? [0.2, 0.4, 0.6, 0.8]
+    : budget === 2
+      ? [1 / 3, 2 / 3]
+      : [0.5];
+  return ratios.map((ratio, ratioIndex) => {
+    const span = Math.max(0.05, segment.endSec - segment.startSec);
+    const timestampSec = clampTimestampSec(durationSec, segment.startSec + (span * ratio));
+    return {
+      timestampSec,
+      segmentIndex: segment.index,
+      segmentDurationSec: segment.durationSec,
+      priority: ratioIndex === 0 ? 3 : ratioIndex === ratios.length - 1 ? 1 : 2,
+      order: ratioIndex
+    };
+  });
+}
+
+function reduceSceneAwareSamples(samples = [], durationSec, maxFrames, forcedTimestamps = []) {
+  const deduped = new Map();
+  for (const sample of samples) {
+    const key = String(roundTimestampSec(sample.timestampSec));
+    const existing = deduped.get(key);
+    if (!existing
+      || sample.priority > existing.priority
+      || (sample.priority === existing.priority && sample.segmentDurationSec > existing.segmentDurationSec)
+      || (sample.priority === existing.priority && sample.segmentDurationSec === existing.segmentDurationSec && sample.order < existing.order)) {
+      deduped.set(key, { ...sample, timestampSec: roundTimestampSec(sample.timestampSec) });
+    }
+  }
+  const normalized = Array.from(deduped.values()).sort((left, right) => left.timestampSec - right.timestampSec);
+  if (normalized.length <= maxFrames) {
+    return normalized.map((sample) => sample.timestampSec);
+  }
+
+  const forcedKeys = new Set(forcedTimestamps.map((value) => String(roundTimestampSec(value))));
+  const forced = normalized.filter((sample) => forcedKeys.has(String(sample.timestampSec)));
+  const primaryBySegment = new Map();
+  for (const sample of normalized) {
+    if (forcedKeys.has(String(sample.timestampSec))) continue;
+    const existing = primaryBySegment.get(sample.segmentIndex);
+    if (!existing
+      || sample.priority > existing.priority
+      || (sample.priority === existing.priority && sample.segmentDurationSec > existing.segmentDurationSec)
+      || (sample.priority === existing.priority && sample.segmentDurationSec === existing.segmentDurationSec && sample.order < existing.order)) {
+      primaryBySegment.set(sample.segmentIndex, sample);
+    }
+  }
+
+  const retained = [...forced];
+  const remainingSlotsForPrimary = Math.max(0, maxFrames - retained.length);
+  retained.push(...Array.from(primaryBySegment.values())
+    .sort((left, right) => {
+      if (right.segmentDurationSec !== left.segmentDurationSec) return right.segmentDurationSec - left.segmentDurationSec;
+      return left.timestampSec - right.timestampSec;
+    })
+    .slice(0, remainingSlotsForPrimary));
+
+  const retainedKeys = new Set(retained.map((sample) => String(sample.timestampSec)));
+  if (retained.length < maxFrames) {
+    retained.push(...normalized
+      .filter((sample) => !retainedKeys.has(String(sample.timestampSec)))
+      .sort((left, right) => {
+        if (right.priority !== left.priority) return right.priority - left.priority;
+        if (right.segmentDurationSec !== left.segmentDurationSec) return right.segmentDurationSec - left.segmentDurationSec;
+        return left.timestampSec - right.timestampSec;
+      })
+      .slice(0, maxFrames - retained.length));
+  }
+  return dedupeSortedTimestamps(retained.map((sample) => sample.timestampSec)).slice(0, maxFrames);
 }
 
 function buildSceneAwareFrameTimestamps(durationSec, sceneCutsSec = [], options = {}) {
   const duration = numberOrZero(durationSec);
   if (duration <= 0) return [];
   const {
-    longSceneThresholdSec = 8,
-    maxFrames = 40,
+    shortSceneMergeThresholdSec = 1.5,
+    mediumSceneThresholdSec = 6,
+    longSceneThresholdSec = 15,
+    maxFrames = 28,
     minSceneGapSec = 0.8,
     startFrameOffsetSec = 0.25,
     endFrameOffsetSec = 0.25
   } = options;
-  const segments = buildSceneSegments(duration, sceneCutsSec, { minGapSec: minSceneGapSec });
-  const samples = [];
-  samples.push(clampTimestampSec(duration, startFrameOffsetSec));
+  const segments = mergeShortSceneSegments(
+    buildSceneSegments(duration, sceneCutsSec, { minGapSec: minSceneGapSec }),
+    { shortSceneMergeThresholdSec }
+  );
+  const forcedStart = clampTimestampSec(duration, startFrameOffsetSec);
+  const forcedEnd = clampTimestampSec(duration, Math.max(0, duration - endFrameOffsetSec));
+  const samples = [
+    { timestampSec: forcedStart, segmentIndex: -1, segmentDurationSec: duration, priority: 5, order: 0 }
+  ];
   for (const segment of segments) {
-    samples.push(...segmentSampleTimestamps(duration, segment, { longSceneThresholdSec }));
+    samples.push(...segmentSampleFrames(duration, segment, {
+      mediumSceneThresholdSec,
+      longSceneThresholdSec
+    }));
   }
-  samples.push(clampTimestampSec(duration, Math.max(0, duration - endFrameOffsetSec)));
-  const deduped = dedupeSortedTimestamps(samples);
-  if (deduped.length <= maxFrames) return deduped;
-  const forced = new Set([
-    String(clampTimestampSec(duration, startFrameOffsetSec)),
-    String(clampTimestampSec(duration, Math.max(0, duration - endFrameOffsetSec)))
-  ]);
-  const middle = deduped.filter((value) => !forced.has(String(value)));
-  const remaining = Math.max(0, maxFrames - forced.size);
-  const reduced = remaining > 0 ? referenceFrameTimestamps(duration, remaining).map((timestampSec) => {
-    let best = middle[0] ?? deduped[0];
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const candidate of middle) {
-      const distance = Math.abs(candidate - timestampSec);
-      if (distance < bestDistance) {
-        best = candidate;
-        bestDistance = distance;
-      }
-    }
-    return best;
-  }) : [];
-  return dedupeSortedTimestamps([
-    ...Array.from(forced).map((value) => Number(value)),
-    ...reduced
-  ]).slice(0, maxFrames);
+  samples.push({ timestampSec: forcedEnd, segmentIndex: Number.POSITIVE_INFINITY, segmentDurationSec: duration, priority: 5, order: 0 });
+  return reduceSceneAwareSamples(samples, duration, maxFrames, [forcedStart, forcedEnd]);
 }
 
 function llmUsesGptFrameOnlyDecomposition(llmConfig = {}) {
   return String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
     && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
-}
-
-function llmUsesGeminiDecompositionUrlWithFrames(llmConfig = {}) {
-  const model = String(llmConfig.model || "").trim().toLowerCase();
-  const provider = String(llmConfig.provider || "").trim().toLowerCase();
-  return provider === "gemini" || provider === "google" || model.startsWith("gemini-");
 }
 
 async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
@@ -910,9 +1092,11 @@ async function detectReferenceVideoScenes(context, filePath, durationSec) {
 async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {}) {
   const videoPath = resolveStoredVideoPath(context, probe.storedPath);
   const mimeType = probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
-  const forceFramesOnly = llmUsesGptFrameOnlyDecomposition(llmConfig);
-  const useSceneAwareFrames = forceFramesOnly || llmUsesGeminiDecompositionUrlWithFrames(llmConfig);
-  const fileUrl = forceFramesOnly ? "" : resolveModelFileUrl(probe);
+  // 拆解只有两种输入模式：① 公网 URL（模型可读视频链接时，如 doubao / gemini）；
+  // ② 场景感知抽帧（模型不吃视频链接、或拿不到公网 URL 时）。
+  // 不再使用「整段视频 base64 内联」这种慢模式。
+  const frameOnlyModel = llmUsesGptFrameOnlyDecomposition(llmConfig);
+  let fileUrl = frameOnlyModel ? "" : resolveModelFileUrl(probe);
   const configuredFrameCount = clampInteger(
     context.config?.wangzhuan?.llm?.referenceFrameCount,
     DEFAULT_REFERENCE_FRAME_COUNT,
@@ -920,22 +1104,24 @@ async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {})
     MAX_REFERENCE_FRAME_COUNT
   );
   const warnings = [];
+  // 场景感知抽帧对所有模型统一启用；仅在场景检测失败时回退为等距抽帧。
+  // 即便走 URL 模式也预抽帧，作为 URL 不可用时降级为抽帧输入的兜底。
   let timestampsSec = referenceFrameTimestamps(probe.durationSec, configuredFrameCount);
-  if (useSceneAwareFrames) {
-    try {
-      const sceneCutsSec = await detectReferenceVideoScenes(context, videoPath, probe.durationSec);
-      timestampsSec = buildSceneAwareFrameTimestamps(probe.durationSec, sceneCutsSec, {
-        longSceneThresholdSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneLongThresholdSec) || 8,
-        maxFrames: clampInteger(context.config?.wangzhuan?.llm?.sceneMaxFrames, 40, 4, 40),
-        minSceneGapSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectMinGapSec) || 0.8
-      });
-    } catch (error) {
-      warnings.push({
-        code: "reference_scene_detect_failed",
-        message: "参考视频场景检测失败，已回退为基础抽帧",
-        reason: String(error?.message || error?.code || "unknown").slice(0, 160)
-      });
-    }
+  try {
+    const sceneCutsSec = await detectReferenceVideoScenes(context, videoPath, probe.durationSec);
+    timestampsSec = buildSceneAwareFrameTimestamps(probe.durationSec, sceneCutsSec, {
+      shortSceneMergeThresholdSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneShortMergeThresholdSec) || 1.5,
+      mediumSceneThresholdSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneMediumThresholdSec) || 6,
+      longSceneThresholdSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneLongThresholdSec) || 15,
+      maxFrames: clampInteger(context.config?.wangzhuan?.llm?.sceneMaxFrames, 28, 4, 40),
+      minSceneGapSec: numberOrZero(context.config?.wangzhuan?.llm?.sceneDetectMinGapSec) || 0.8
+    });
+  } catch (error) {
+    warnings.push({
+      code: "reference_scene_detect_failed",
+      message: "参考视频场景检测失败，已回退为基础抽帧",
+      reason: String(error?.message || error?.code || "unknown").slice(0, 160)
+    });
   }
   let frames = [];
   try {
@@ -943,23 +1129,34 @@ async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {})
   } catch (error) {
     warnings.push({
       code: "reference_frame_extract_failed",
-      message: "参考视频抽帧失败，已改为仅传原视频文件给模型",
+      message: "参考视频抽帧失败",
       reason: String(error?.message || error?.code || "unknown").slice(0, 160)
     });
   }
-  if (probe.storageUrl && !fileUrl) {
+  // 走 URL 模式前先做一次 HEAD 探测：确认该公网地址真的可被外部（doubao 服务端）拉取。
+  // 不可用则清空 fileUrl，自动落到场景感知抽帧兜底，避免"URL 存在但对方读不到"时白等一次上游失败。
+  if (fileUrl) {
+    const probeResult = await headProbeReferenceUrl(context, fileUrl);
+    if (!probeResult.ok) {
+      warnings.push({
+        code: "reference_video_url_head_unreachable",
+        message: "参考视频公网地址 HEAD 探测失败，已回退为场景感知抽帧输入",
+        reason: probeResult.reason
+      });
+      fileUrl = "";
+    }
+  }
+  if (probe.storageUrl && !fileUrl && !frameOnlyModel) {
     warnings.push({
       code: "reference_video_storage_url_not_external",
-      message: "参考视频存储地址不是可外部访问的 HTTP(S) URL，已回退为本地文件输入",
+      message: "参考视频存储地址不是可外部访问的 HTTP(S) URL，已回退为场景感知抽帧输入",
       reason: "storage_url_not_http"
     });
   }
-  const videoBuffer = fileUrl || forceFramesOnly ? null : await readFile(videoPath);
   return {
     fileName: probe.fileName || basename(videoPath),
     mimeType,
     ...(fileUrl ? { fileUrl } : {}),
-    ...(!fileUrl && !forceFramesOnly ? { fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}` } : {}),
     frames: frames.filter((frame) => typeof frame?.dataUrl === "string" && frame.dataUrl.startsWith("data:image/")),
     timestampsSec,
     warnings
@@ -968,6 +1165,37 @@ async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {})
 
 function resolveModelFileUrl(probe = {}) {
   return externalHttpUrl(probe.storageUrl) || directObjectStorageUrl(probe.storageKey) || "";
+}
+
+// 对参考视频公网 URL 做一次轻量 HEAD 探测，判断外部是否可达。
+// 可通过 context.headProbeReferenceUrl 注入（便于测试）；可用 wangzhuan.llm.urlHeadProbe=false 关闭。
+async function headProbeReferenceUrl(context, fileUrl) {
+  if (typeof context.headProbeReferenceUrl === "function") {
+    try {
+      const injected = await context.headProbeReferenceUrl({ fileUrl });
+      if (injected && typeof injected === "object") {
+        return { ok: injected.ok !== false, reason: String(injected.reason || "") };
+      }
+      return { ok: injected !== false, reason: "" };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error?.code || "head_probe_failed").slice(0, 160) };
+    }
+  }
+  if (context.config?.wangzhuan?.llm?.urlHeadProbe === false) {
+    return { ok: true, reason: "" };
+  }
+  const timeoutMs = clampInteger(context.config?.wangzhuan?.llm?.urlHeadProbeTimeoutMs, 5000, 1000, 30000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(fileUrl, { method: "HEAD", signal: controller.signal, redirect: "follow" });
+    if (response.ok) return { ok: true, reason: "" };
+    return { ok: false, reason: `http_status_${response.status}` };
+  } catch (error) {
+    return { ok: false, reason: String(error?.name === "AbortError" ? "head_probe_timeout" : (error?.message || "head_probe_failed")).slice(0, 160) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function externalHttpUrl(value) {
@@ -1025,27 +1253,31 @@ function buildDecompositionMessages(probe, request = {}, llmConfig = {}, visionI
     { type: "text", text: promptText }
   ];
   if (!forceFramesOnly && visionInputs.fileUrl) {
-    userContent.push({
-      type: "file",
-      file: {
-        filename: visionInputs.fileName || probe.fileName || "reference-video.mp4",
-        file_url: visionInputs.fileUrl
-      }
-    });
-  } else if (!forceFramesOnly && visionInputs.fileDataUrl) {
-    userContent.push({
-      type: "file",
-      file: {
-        filename: visionInputs.fileName || probe.fileName || "reference-video.mp4",
-        file_data: visionInputs.fileDataUrl
-      }
-    });
-  }
-  for (const frame of visionInputs.frames || []) {
-    userContent.push({
-      type: "image_url",
-      image_url: { url: frame.dataUrl }
-    });
+    // 模式①：公网 URL —— 模型直接读取整段视频，无需再附抽帧。
+    // doubao / 火山 Seed 系模型走 OpenAI 兼容的 video_url 部件（实测 file.file_url 会被拒：
+    // "filename must be used together with file_data"）；其它可读 file_url 的模型保留 file 部件。
+    if (llmSupportsVideoUrl(llmConfig)) {
+      userContent.push({
+        type: "video_url",
+        video_url: { url: visionInputs.fileUrl }
+      });
+    } else {
+      userContent.push({
+        type: "file",
+        file: {
+          filename: visionInputs.fileName || probe.fileName || "reference-video.mp4",
+          file_url: visionInputs.fileUrl
+        }
+      });
+    }
+  } else {
+    // 模式②：场景感知抽帧 —— 仅发送抽帧。
+    for (const frame of visionInputs.frames || []) {
+      userContent.push({
+        type: "image_url",
+        image_url: { url: frame.dataUrl }
+      });
+    }
   }
   return [
     {
@@ -1079,25 +1311,6 @@ function framesOnlyVisionInput(visionInputs = {}, reason = "file_data_unavailabl
       {
         code: "reference_video_frames_only_fallback",
         message: "视频文件输入失败，已回退为仅抽帧输入",
-        reason
-      }
-    ]
-  };
-}
-
-async function inlineReferenceVideoVisionInput(context, probe, visionInputs = {}, reason = "file_url_unavailable") {
-  const videoPath = resolveStoredVideoPath(context, probe.storedPath);
-  const mimeType = visionInputs.mimeType || probe.mimeType || mimeForExt(extname(videoPath).toLowerCase());
-  const videoBuffer = await readFile(videoPath);
-  return {
-    ...visionInputs,
-    fileUrl: "",
-    fileDataUrl: `data:${mimeType};base64,${videoBuffer.toString("base64")}`,
-    warnings: [
-      ...(Array.isArray(visionInputs.warnings) ? visionInputs.warnings : []),
-      {
-        code: "reference_video_file_url_fallback",
-        message: "模型无法读取参考视频链接，已回退为 base64 文件输入",
         reason
       }
     ]
@@ -1221,11 +1434,13 @@ function dropFileParts(messages = []) {
 }
 
 function modelInputMode(messages = []) {
+  const hasVideoUrlInput = messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === "video_url" && part.video_url?.url));
   const hasFileUrlInput = messages.some((message) => Array.isArray(message.content)
     && message.content.some((part) => part?.type === "file" && part.file?.file_url));
   const hasFileDataInput = messages.some((message) => Array.isArray(message.content)
     && message.content.some((part) => part?.type === "file" && part.file?.file_data));
-  return hasFileUrlInput ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
+  return (hasVideoUrlInput || hasFileUrlInput) ? "file_url" : hasFileDataInput ? "file_data" : "frames_only";
 }
 
 function shouldForceChatForFileUrl(llmConfig, messages) {
@@ -1721,22 +1936,13 @@ async function invokeDecompositionLlmOnce(context, probe, request, llmConfig, vi
 const DECOMPOSITION_RETRY_TIMEOUT_CAP_MS = 120000;
 const DECOMPOSITION_RETRY_BACKOFF_BASE_MS = 1000;
 const DECOMPOSITION_RETRY_BACKOFF_MAX_MS = 8000;
+const LONG_VIDEO_COMPACT_PROMPT_THRESHOLD_SEC = 45;
 
 /** 重试用更短的超时：首试可以等满配置窗口，但重试快速失败，避免每次都耗满导致总时长成倍膨胀。 */
 function decompositionRetryTimeoutMs(baseTimeoutMs) {
   const base = Number(baseTimeoutMs);
   if (!Number.isFinite(base) || base <= 0) return DECOMPOSITION_RETRY_TIMEOUT_CAP_MS;
   return Math.min(base, DECOMPOSITION_RETRY_TIMEOUT_CAP_MS);
-}
-
-/** 指数退避：第 1 次重试等 1s，之后翻倍，封顶 8s，给上游一点缓冲又不至于拖太久。 */
-function decompositionRetryBackoffMs(retryIndex) {
-  const delay = DECOMPOSITION_RETRY_BACKOFF_BASE_MS * (2 ** Math.max(0, retryIndex));
-  return Math.min(delay, DECOMPOSITION_RETRY_BACKOFF_MAX_MS);
-}
-
-function delayMs(ms) {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
 function parseAndValidateDecompositionContent(probe, content) {
@@ -1754,6 +1960,11 @@ function isCompactPromptRetryError(error) {
   return error?.code === "schema_invalid" || error?.data?.reason === "invalid_json";
 }
 
+function shouldUseCompactDecompositionPromptInitially(probe) {
+  const durationSec = Number(probe?.durationSec);
+  return Number.isFinite(durationSec) && durationSec > LONG_VIDEO_COMPACT_PROMPT_THRESHOLD_SEC;
+}
+
 async function invokeDecompositionLlm(context, probe, request, llmConfig, visionInputs, options = {}) {
   const maxRetries = Number.isFinite(Number(llmConfig.maxRetries))
     ? Math.max(0, Math.trunc(Number(llmConfig.maxRetries)))
@@ -1761,82 +1972,66 @@ async function invokeDecompositionLlm(context, probe, request, llmConfig, vision
   const retryTimeoutMs = decompositionRetryTimeoutMs(llmConfig.timeoutMs);
   let lastError;
   let activeVisionInputs = visionInputs;
-  let fellBackToInlineFile = false;
   let fellBackToFramesOnly = false;
-  let useCompactPrompt = false;
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    // 首试用完整超时窗口；真正的重试收紧到更短的超时，快速失败而不是每次都等满。
-    const activeLlmConfig = attempt > 0 && retryTimeoutMs < Number(llmConfig.timeoutMs || 0)
-      ? { ...llmConfig, timeoutMs: retryTimeoutMs }
-      : llmConfig;
-    try {
-      if (attempt > 0 && options.streamHandlers?.onRetry) {
+  let useCompactPrompt = shouldUseCompactDecompositionPromptInitially(probe);
+  return invokeLlmWithRetry({
+    maxRetries,
+    initialBackoffMs: DECOMPOSITION_RETRY_BACKOFF_BASE_MS,
+    maxBackoffMs: DECOMPOSITION_RETRY_BACKOFF_MAX_MS,
+    retryTimeoutCapMs: retryTimeoutMs,
+    onRetry: async (attempt, retry) => {
+      if (options.streamHandlers?.onRetry) {
         options.streamHandlers.onRetry({
           attempt,
           maxRetries,
-          timeoutMs: activeLlmConfig.timeoutMs,
-          inputMode: activeVisionInputs.fileUrl
-            ? "file_url"
-            : (activeVisionInputs.fileDataUrl ? "file_data" : "frames_only"),
+          timeoutMs: retry.timeoutCapMs,
+          inputMode: activeVisionInputs.fileUrl ? "file_url" : "frames_only",
           reason: lastError?.data?.reason || lastError?.code || "",
           upstreamMessage: String(lastError?.data?.upstreamMessage || lastError?.message || "").slice(0, 300),
           code: String(lastError?.code || ""),
           status: Number(lastError?.data?.status || 0) || undefined
         });
       }
+    },
+    call: async (attempt) => {
+      const activeLlmConfig = attempt > 1 && retryTimeoutMs < Number(llmConfig.timeoutMs || 0)
+        ? { ...llmConfig, timeoutMs: retryTimeoutMs }
+        : llmConfig;
       const content = await invokeDecompositionLlmOnce(context, probe, request, activeLlmConfig, activeVisionInputs, {
         ...options,
         compactPrompt: useCompactPrompt,
         forceFramesOnly: fellBackToFramesOnly
       });
       return parseAndValidateDecompositionContent(probe, content);
-    } catch (error) {
+    },
+    isRetryable: async (error) => {
       lastError = error;
-      if (!fellBackToInlineFile && activeVisionInputs.fileUrl && isModelFileUrlUnavailableError(error)) {
-        fellBackToInlineFile = true;
-        if (options.streamHandlers?.onFallback) {
-          options.streamHandlers.onFallback({
-            from: "file_url",
-            to: "file_data",
-            reason: String(error?.data?.upstreamMessage || error?.message || "file_url_unavailable").slice(0, 160)
-          });
-        }
-        activeVisionInputs = await inlineReferenceVideoVisionInput(context, probe, activeVisionInputs, "file_url_unavailable");
-        visionInputs.fileUrl = activeVisionInputs.fileUrl;
-        visionInputs.fileDataUrl = activeVisionInputs.fileDataUrl;
-        visionInputs.warnings = activeVisionInputs.warnings;
-        attempt -= 1;
-        continue;
-      }
+      // 两模式降级：公网 URL 不可读 → 直接改用场景感知抽帧（不再有 base64 内联中间态）。
       if (
         !fellBackToFramesOnly
+        && activeVisionInputs.fileUrl
         && (activeVisionInputs.frames?.length || 0) > 0
-        && isFramesOnlyFallbackError(error)
+        && (isModelFileUrlUnavailableError(error) || isFramesOnlyFallbackError(error))
       ) {
         fellBackToFramesOnly = true;
         if (options.streamHandlers?.onFallback) {
           options.streamHandlers.onFallback({
-            from: activeVisionInputs.fileUrl ? "file_url" : "file_data",
+            from: "file_url",
             to: "frames_only",
-            reason: String(error?.data?.upstreamMessage || error?.message || "file_data_unavailable").slice(0, 160)
+            reason: String(error?.data?.upstreamMessage || error?.message || "file_url_unavailable").slice(0, 160)
           });
         }
-        activeVisionInputs = framesOnlyVisionInput(activeVisionInputs, "file_data_unavailable");
+        activeVisionInputs = framesOnlyVisionInput(activeVisionInputs, "file_url_unavailable");
         visionInputs.fileUrl = activeVisionInputs.fileUrl;
-        visionInputs.fileDataUrl = activeVisionInputs.fileDataUrl;
         visionInputs.warnings = activeVisionInputs.warnings;
-        attempt -= 1;
-        continue;
+        return "fallback";
       }
       if (isCompactPromptRetryError(error)) {
         useCompactPrompt = true;
       }
-      if (attempt >= maxRetries || !isRetryableLlmError(error)) throw error;
-      // 决定重试：退避一小段再进入下一轮，避免对瞬时故障的上游连续打点。
-      await delayMs(decompositionRetryBackoffMs(attempt));
+      return isRetryableLlmError(error);
     }
-  }
-  throw lastError;
+  });
 }
 
 async function finalizeDraftDecomposition(context, probe, request, llmConfig, decomposition) {

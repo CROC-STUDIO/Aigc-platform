@@ -64,6 +64,30 @@ test("background job records failed status and safe error message", async () => 
   assert.equal(failed.error.message, "provider timeout");
 });
 
+test("background job invokes onError hook before persisting failure", async () => {
+  const calls = [];
+  const job = createBackgroundJob("decomposition", async () => {
+    throw new Error("provider timeout");
+  }, {
+    onError: async ({ error, job: publicJob }) => {
+      calls.push({
+        message: error.message,
+        jobId: publicJob.id,
+        status: publicJob.status
+      });
+    }
+  });
+
+  const failed = await waitForJob(null, job.id, "failed");
+
+  assert.equal(failed.status, "failed");
+  assert.deepEqual(calls, [{
+    message: "provider timeout",
+    jobId: job.id,
+    status: "running"
+  }]);
+});
+
 test("background job bounds events", async () => {
   const job = createBackgroundJob("decomposition", async ({ log }) => {
     for (let index = 0; index < 100; index += 1) {

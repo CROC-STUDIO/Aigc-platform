@@ -55,8 +55,16 @@ async function contextFor(body) {
         referenceVideoId: "ref_20260630_001",
         fileName: request.fileName,
         mimeType: request.mimeType,
-        contentPrefix: String(request.content || "").slice(0, 22)
+        bufferLength: request.buffer?.length || 0,
+        fileHash: request.fileHash || ""
       }
+    }),
+    findReusableReferenceVideo: async (_scoped, request) => ({
+      hit: request.fileHash === "a".repeat(64),
+      fileHash: request.fileHash,
+      referenceVideo: request.fileHash === "a".repeat(64)
+        ? { referenceVideoId: "ref_20260630_009", fileHash: request.fileHash, previewUrl: "/file?path=cached.mp4" }
+        : null
     }),
     draftReferenceVideoDecomposition: async (_scoped, request) => ({
       referenceVideoId: request.referenceVideoId,
@@ -380,6 +388,70 @@ test("decomposition job records model retry events", async () => {
   );
 });
 
+test("decomposition job persists failed decomposition and fails batch on upstream abort", async () => {
+  const body = {
+    referenceVideoId: "ref_20260629_001",
+    batchId: "wzb_20260709000000_abcd",
+    llmConfig: { model: "gpt-5.5", maxRetries: 1 }
+  };
+  const syncVideoDecompositionCalls = [];
+  const syncBatchCalls = [];
+  const baseContext = await contextFor(body);
+  const context = {
+    ...baseContext,
+    draftReferenceVideoDecomposition: async () => {
+      const error = new Error("模型拆解请求超时");
+      error.code = "model_failed";
+      error.data = {
+        reason: "timeout",
+        upstreamMessage: "This operation was aborted"
+      };
+      throw error;
+    },
+    syncVideoDecompositionFact: async (_scoped, record) => {
+      syncVideoDecompositionCalls.push(record);
+      return { skipped: false };
+    },
+    loadBatchDetailFromMysql: async () => ({
+      batch: {
+        batchId: body.batchId,
+        status: "checking",
+        referenceVideo: { referenceVideoId: body.referenceVideoId }
+      }
+    }),
+    syncBatchFacts: async (_scoped, batch, triggerName) => {
+      syncBatchCalls.push({ batch, triggerName });
+      return { skipped: false };
+    }
+  };
+  const req = { method: "POST" };
+  const res = new TestResponse();
+  await handleWangzhuanRequest(
+    req,
+    res,
+    new URL("http://127.0.0.1/api/wangzhuan/reference-videos/decomposition-jobs"),
+    context
+  );
+  const created = JSON.parse(res.body);
+
+  const polled = await waitForStatusWithContext(
+    `/api/wangzhuan/reference-videos/decomposition-jobs/${created.data.decompositionJobId}`,
+    "failed",
+    context
+  );
+
+  assert.equal(polled.payload.data.error.message, "模型请求已中断，可重试");
+  assert.equal(syncVideoDecompositionCalls.length, 1);
+  assert.equal(syncVideoDecompositionCalls[0].status, "failed");
+  assert.equal(syncVideoDecompositionCalls[0].errorCode, "model_failed");
+  assert.equal(syncVideoDecompositionCalls[0].reason, "timeout");
+  assert.equal(syncVideoDecompositionCalls[0].upstreamMessage, "This operation was aborted");
+  assert.equal(syncBatchCalls.length, 1);
+  assert.equal(syncBatchCalls[0].triggerName, "decomposition_failed");
+  assert.equal(syncBatchCalls[0].batch.status, "failed");
+  assert.equal(syncBatchCalls[0].batch.stopReason, "timeout");
+});
+
 test("returns not found for unknown decomposition job", async () => {
   const response = await call("GET", "/api/wangzhuan/reference-videos/decomposition-jobs/missing", {});
 
@@ -432,7 +504,20 @@ test("reference video check accepts multipart upload payloads", async () => {
   assert.equal(payload.code, "ok");
   assert.equal(payload.data.referenceVideo.fileName, "reference.mp4");
   assert.equal(payload.data.referenceVideo.mimeType, "video/mp4");
-  assert.equal(payload.data.referenceVideo.contentPrefix, "data:video/mp4;base64,");
+  assert.equal(payload.data.referenceVideo.bufferLength, Buffer.byteLength("video-bytes"));
+});
+
+test("reference video reuse check returns existing hash match before upload", async () => {
+  const response = await call("POST", "/api/wangzhuan/reference-videos/reuse-check", {
+    fileHash: "a".repeat(64),
+    fileName: "reference.mp4",
+    mimeType: "video/mp4",
+    sizeBytes: 19001403
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.data.hit, true);
+  assert.equal(response.payload.data.referenceVideo.referenceVideoId, "ref_20260630_009");
 });
 
 test("creates and polls Seedance plan job with draft signature", async () => {

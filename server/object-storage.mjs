@@ -230,10 +230,12 @@ export async function uploadObjectBuffer({ buffer, storageKey, contentType, env 
 export async function uploadObjectFile({ filePath, storageKey, contentType, env = process.env, client = null } = {}) {
   const settings = objectStorageSettings(env);
   const s3 = client || createObjectStorageClient(settings);
+  const info = await stat(filePath);
   const command = new PutObjectCommand({
     Bucket: settings.bucket,
     Key: storageKey,
     Body: createReadStream(filePath),
+    ContentLength: info.size,
     ContentType: normalizeContentType(contentType, filePath),
     CacheControl: CACHE_CONTROL,
     ...(settings.acl ? { ACL: settings.acl } : {})

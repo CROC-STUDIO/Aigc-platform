@@ -22,6 +22,7 @@ import {
   notifyBatchQcResult,
   applyQcReportsToBatch,
   stopWorkflowTask,
+  switchProjectScope,
   terminalBatchStatus,
   workbenchHref
 } from "./wangzhuan-common.js";
@@ -46,7 +47,7 @@ const els = {
   typeRemix: $("#wzTasksTypeRemix")
 };
 
-const OUTPUT_KIND_PRIORITY = ["stitched_video", "remix_video", "segment_video", "segment"];
+const OUTPUT_KIND_PRIORITY = ["stitched_video", "expanded_video", "remix_video", "segment_video", "segment"];
 
 const state = {
   user: null,
@@ -58,14 +59,14 @@ const state = {
   pagination: null,
   selectedId: "",
   selectedType: "",
+  selectedProjectKey: "",
+  activeProjectKey: "",
   detail: null,
   stopPagePoll: null,
   loading: false,
   bootstrapped: false,
   listRequestId: 0,
-  detailRequestId: 0,
-  outputExpansionUi: {},
-  outputExpansionPollers: {}
+  detailRequestId: 0
 };
 
 function shortId(value, head = 10, tail = 6) {
@@ -166,6 +167,7 @@ function readInitialSelection() {
   const params = new URLSearchParams(location.search);
   const batchId = params.get("batchId");
   const remixId = params.get("remixId");
+  state.selectedProjectKey = String(params.get("projectKey") || "").trim();
   if (batchId) {
     state.selectedType = "batch";
     state.selectedId = batchId;
@@ -183,6 +185,7 @@ function syncSelectionUrl() {
   const params = new URLSearchParams();
   if (state.selectedType === "batch" && state.selectedId) params.set("batchId", state.selectedId);
   if (state.selectedType === "remix" && state.selectedId) params.set("remixId", state.selectedId);
+  if (state.selectedProjectKey) params.set("projectKey", state.selectedProjectKey);
   const query = params.toString();
   const next = `${location.pathname}${query ? `?${query}` : ""}`;
   history.replaceState(null, "", next);
@@ -338,146 +341,6 @@ function assetPreviewUrl(asset) {
     || (asset.storedPath ? `/file?path=${encodeURIComponent(asset.storedPath)}` : "");
 }
 
-function outputExpansionState(outputId) {
-  const id = String(outputId || "").trim();
-  if (!id) return null;
-  if (!state.outputExpansionUi[id]) {
-    state.outputExpansionUi[id] = {
-      expanded: false,
-      selectedSizeKeys: [],
-      customWidth: "",
-      customHeight: "",
-      status: "idle",
-      message: "选择一个目标尺寸后开始扩展",
-      requestId: "",
-      items: []
-    };
-  }
-  return state.outputExpansionUi[id];
-}
-
-function parseSizeKey(sizeKey = "") {
-  const match = String(sizeKey || "").match(/^(\d+)x(\d+)$/);
-  if (!match) return null;
-  return {
-    targetWidth: Number(match[1]),
-    targetHeight: Number(match[2])
-  };
-}
-
-function stopOutputExpansionPolling(outputId) {
-  const id = String(outputId || "").trim();
-  const stop = state.outputExpansionPollers[id];
-  if (typeof stop === "function") stop();
-  delete state.outputExpansionPollers[id];
-}
-
-async function loadOutputExpansionJobs(outputId) {
-  return apiEnvelope(`/api/wangzhuan/outputs/${encodeURIComponent(outputId)}/expand-jobs`);
-}
-
-async function submitOutputExpansion(outputId, payload) {
-  return apiEnvelope(`/api/wangzhuan/outputs/${encodeURIComponent(outputId)}/expand`, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-}
-
-function syncOutputExpansionItems(outputId, items = []) {
-  const ui = outputExpansionState(outputId);
-  if (!ui) return;
-  ui.items = Array.isArray(items) ? items : [];
-  const active = ui.items.find((item) => ["queued", "running"].includes(item.status));
-  if (active) {
-    ui.status = "running";
-    ui.message = `正在生成 ${active.sizeKey || `${active.targetWidth}x${active.targetHeight}`} 版本...`;
-    ui.expanded = true;
-    return;
-  }
-  const latest = ui.items[0];
-  if (!latest) return;
-  if (latest.status === "succeeded") {
-    ui.status = "succeeded";
-    ui.message = `${latest.sizeKey || `${latest.targetWidth}x${latest.targetHeight}`} 已生成`;
-    ui.requestId = latest.requestId || "";
-    ui.expanded = true;
-    return;
-  }
-  if (latest.status === "failed") {
-    ui.status = "failed";
-    ui.message = latest.errorMessage || "扩展失败";
-    ui.requestId = latest.requestId || "";
-    ui.expanded = true;
-  }
-}
-
-function syncOutputExpansionStateView(outputId) {
-  const id = String(outputId || "").trim();
-  if (!id) return;
-  const region = els.detail?.querySelector(`[data-output-expand-region="${CSS.escape(id)}"]`);
-  if (!(region instanceof HTMLElement)) return;
-  const ui = outputExpansionState(id);
-  if (!ui) return;
-  const customPayload = selectedExpansionPayload(id);
-  const presetPayloads = selectedExpansionPresetPayloads(id);
-  const disabled = ui.status === "running";
-
-  const widthInput = region.querySelector(`.wz-output-expand-width[data-output-id="${CSS.escape(id)}"]`);
-  const heightInput = region.querySelector(`.wz-output-expand-height[data-output-id="${CSS.escape(id)}"]`);
-  if (widthInput instanceof HTMLInputElement && widthInput.value !== String(ui.customWidth ?? "")) widthInput.value = String(ui.customWidth ?? "");
-  if (heightInput instanceof HTMLInputElement && heightInput.value !== String(ui.customHeight ?? "")) heightInput.value = String(ui.customHeight ?? "");
-  if (widthInput instanceof HTMLInputElement) widthInput.disabled = disabled;
-  if (heightInput instanceof HTMLInputElement) heightInput.disabled = disabled;
-
-  const customButton = region.querySelector(`.wz-output-expand-submit[data-output-id="${CSS.escape(id)}"]`);
-  if (customButton instanceof HTMLButtonElement) {
-    customButton.disabled = disabled || !customPayload;
-    customButton.textContent = disabled ? "扩展中..." : "开始扩展";
-  }
-
-  const presetButton = region.querySelector(`.wz-output-expand-submit-presets[data-output-id="${CSS.escape(id)}"]`);
-  if (presetButton instanceof HTMLButtonElement) {
-    presetButton.disabled = disabled || !presetPayloads.length;
-    presetButton.textContent = disabled ? "扩展中..." : `开始扩展已选尺寸（${presetPayloads.length}）`;
-  }
-
-  const status = region.querySelector(".wz-output-expand-status");
-  if (status instanceof HTMLElement) {
-    status.setAttribute("data-state", ui.status);
-    const strong = status.querySelector("strong");
-    if (strong) strong.textContent = ui.message || "选择一个目标尺寸后开始扩展";
-    let requestIdNode = status.querySelector("small");
-    if (ui.requestId) {
-      if (!requestIdNode) {
-        requestIdNode = document.createElement("small");
-        status.append(requestIdNode);
-      }
-      requestIdNode.textContent = `requestId: ${ui.requestId}`;
-    } else if (requestIdNode) {
-      requestIdNode.remove();
-    }
-  }
-}
-
-function startOutputExpansionPolling(outputId) {
-  const id = String(outputId || "").trim();
-  if (!id) return;
-  stopOutputExpansionPolling(id);
-  state.outputExpansionPollers[id] = schedulePoll({
-    load: async () => {
-      const data = await loadOutputExpansionJobs(id);
-      syncOutputExpansionItems(id, data.items || []);
-      syncOutputExpansionPanel(id);
-      return data;
-    },
-    shouldStop: () => {
-      const ui = outputExpansionState(id);
-      return !ui || !["running"].includes(ui.status);
-    },
-    interval: 2500
-  });
-}
-
 function isVideoAsset(asset) {
   const mime = String(asset?.mimeType || "").toLowerCase();
   const url = assetPreviewUrl(asset);
@@ -521,7 +384,7 @@ function sortedOutputs(outputs = []) {
 }
 
 function isDeliveryOutput(output = {}) {
-  return ["stitched_video", "remix_video"].includes(output.kind);
+  return ["stitched_video", "expanded_video", "remix_video"].includes(output.kind);
 }
 
 function hasStitchedDeliveryOutput(outputs = []) {
@@ -530,7 +393,10 @@ function hasStitchedDeliveryOutput(outputs = []) {
 
 function isIntermediateOutput(output = {}, context = {}) {
   if (output.kind === "segment_video" || output.kind === "segment") {
-    return Number(context.expectedDurationSec) === 30 || Boolean(context.hasStitchedOutput || context.hasFinalOutput);
+    return context.batchStatus === "stitching"
+      || context.segmentCount > 1
+      || Number(context.expectedDurationSec) === 30
+      || Boolean(context.hasStitchedOutput || context.hasFinalOutput);
   }
   return !isDeliveryOutput(output);
 }
@@ -540,7 +406,9 @@ function splitOutputGroups(outputs = [], options = {}) {
   const context = {
     hasStitchedOutput: hasStitchedDeliveryOutput(items),
     hasFinalOutput: items.some((output) => isDeliveryOutput(output)),
-    expectedDurationSec: Number(options.expectedDurationSec || 0)
+    expectedDurationSec: Number(options.expectedDurationSec || 0),
+    batchStatus: String(options.batchStatus || ""),
+    segmentCount: items.filter((output) => ["segment_video", "segment"].includes(output.kind)).length
   };
   return {
     finalOutputs: items.filter((output) => !isIntermediateOutput(output, context)),
@@ -551,6 +419,8 @@ function splitOutputGroups(outputs = [], options = {}) {
 function outputStatusText(output = {}) {
   const parts = [];
   if (output.kind) parts.push(output.kind);
+  if (output.sizeKey) parts.push(output.sizeKey);
+  if (output.parentOutputId) parts.push(`源成片 ${output.parentOutputId}`);
   if (output.qcStatus) parts.push(`QC ${output.qcStatus}`);
   parts.push(output.downloadEligible ? "可下载" : "不可下载");
   if (output.visualPreviewRequired && !output.previewConfirmed) parts.push("待预览确认");
@@ -595,134 +465,9 @@ function hasSelectableOutputs(outputs = []) {
   return (Array.isArray(outputs) ? outputs : []).some((output) => outputSelectable(output));
 }
 
-function outputCanExpand(output = {}, options = {}) {
-  return Boolean(
-    output?.outputId
-    && isVideoAsset(output)
-    && assetPreviewUrl(output)
-  );
-}
-
-function selectedExpansionPayload(outputId) {
-  const ui = outputExpansionState(outputId);
-  if (!ui) return null;
-  const widthRaw = String(ui.customWidth ?? "").trim();
-  const heightRaw = String(ui.customHeight ?? "").trim();
-  if (!widthRaw || !heightRaw) return null;
-  const targetWidth = Number(widthRaw);
-  const targetHeight = Number(heightRaw);
-  if (Number.isInteger(targetWidth) && Number.isInteger(targetHeight)) {
-    return {
-      targetWidth,
-      targetHeight,
-      mode: "blur_pad",
-      sizeKey: `${targetWidth}x${targetHeight}`
-    };
-  }
-  return null;
-}
-
-function selectedExpansionPresetPayloads(outputId) {
-  const ui = outputExpansionState(outputId);
-  if (!ui || !Array.isArray(ui.selectedSizeKeys)) return [];
-  return ui.selectedSizeKeys
-    .map((sizeKey) => {
-      const preset = parseSizeKey(sizeKey);
-      return preset ? { ...preset, mode: "blur_pad", sizeKey } : null;
-    })
-    .filter(Boolean);
-}
-
-function expansionResultActions(item = {}) {
-  if (item.status === "succeeded" && item.videoUrl) {
-    return `
-      <a class="mini ghost" href="${escapeHtml(item.videoUrl)}" target="_blank" rel="noreferrer">预览</a>
-      <a class="mini ghost" href="${escapeHtml(item.downloadUrl || item.videoUrl)}" download rel="noreferrer">下载</a>
-    `;
-  }
-  return `<span class="wz-output-expand-result-status">${escapeHtml(item.status || "-")}</span>`;
-}
-
-function renderOutputExpansionPanelBody(output = {}) {
-  const outputId = String(output.outputId || "");
-  const ui = outputExpansionState(outputId);
-  if (!ui) return "";
-  const presetPayloads = selectedExpansionPresetPayloads(outputId);
-  const customPayload = selectedExpansionPayload(outputId);
-  const disabled = ui.status === "running";
-  return `
-    <section class="wz-output-expand-panel" aria-label="扩展视频尺寸">
-      <div class="wz-output-expand-head">
-        <strong>扩展视频尺寸</strong>
-        <p>原视频等比缩放，空白区域自动补高斯模糊背景</p>
-      </div>
-      <div class="wz-output-expand-presets" role="group" aria-label="目标尺寸">
-        ${["800x800", "1280x720", "720x1280"].map((sizeKey) => {
-          const alreadyGenerated = ui.items.some((item) => item.sizeKey === sizeKey && item.status === "succeeded");
-          return `
-            <button
-              type="button"
-              class="mini ghost ${ui.selectedSizeKeys?.includes(sizeKey) ? "is-selected" : ""} ${alreadyGenerated ? "is-generated" : ""}"
-              data-output-id="${escapeHtml(outputId)}"
-              data-expand-size="${escapeHtml(sizeKey)}"
-              ${disabled || alreadyGenerated ? "disabled" : ""}>
-              ${escapeHtml(alreadyGenerated ? `${sizeKey} 已生成` : sizeKey)}
-            </button>
-          `;
-        }).join("")}
-      </div>
-      <div class="wz-output-expand-custom">
-        <label><span>宽</span><input class="wz-output-expand-width" data-output-id="${escapeHtml(outputId)}" type="number" min="256" max="4096" value="${escapeHtml(ui.customWidth)}" ${disabled ? "disabled" : ""} /></label>
-        <span>x</span>
-        <label><span>高</span><input class="wz-output-expand-height" data-output-id="${escapeHtml(outputId)}" type="number" min="256" max="4096" value="${escapeHtml(ui.customHeight)}" ${disabled ? "disabled" : ""} /></label>
-        <button class="wz-output-expand-submit" type="button" data-output-id="${escapeHtml(outputId)}" ${disabled || !customPayload ? "disabled" : ""}>
-          ${escapeHtml(disabled ? "扩展中..." : "开始扩展")}
-        </button>
-      </div>
-      <div class="wz-output-expand-batch-actions">
-        <button class="wz-output-expand-submit-presets" type="button" data-output-id="${escapeHtml(outputId)}" ${disabled || !presetPayloads.length ? "disabled" : ""}>
-          ${escapeHtml(disabled ? "扩展中..." : `开始扩展已选尺寸（${presetPayloads.length}）`)}
-        </button>
-      </div>
-      <div class="wz-output-expand-status" data-state="${escapeHtml(ui.status)}" aria-live="polite">
-        <strong>${escapeHtml(ui.message || "选择一个目标尺寸后开始扩展")}</strong>
-        ${ui.requestId ? `<small>requestId: ${escapeHtml(ui.requestId)}</small>` : ""}
-      </div>
-      ${ui.items.length ? `
-        <div class="wz-output-expand-results">
-          <strong>扩展结果</strong>
-          ${ui.items.map((item) => `
-            <div class="wz-output-expand-result">
-              <span>${escapeHtml(item.sizeKey || `${item.targetWidth}x${item.targetHeight}`)}</span>
-              ${item.errorMessage ? `<small>${escapeHtml(item.errorMessage)}</small>` : `<small>${escapeHtml(item.fileName || item.status || "-")}</small>`}
-              <div class="wz-output-expand-result-actions">${expansionResultActions(item)}</div>
-            </div>
-          `).join("")}
-        </div>
-      ` : `<div class="wz-output-expand-results" hidden></div>`}
-    </section>
-  `;
-}
-
-function renderOutputExpansionPanel(output = {}, options = {}) {
-  if (!outputCanExpand(output, options)) return assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : "";
-  const outputId = String(output.outputId || "");
-  const ui = outputExpansionState(outputId);
-  return `
-    <div class="wz-tasks-output-actions">
-      ${assetPreviewUrl(output) ? `<a class="wz-tasks-media-link" href="${escapeHtml(assetPreviewUrl(output))}" target="_blank" rel="noreferrer">新窗口打开</a>` : ""}
-      <button
-        class="mini ghost wz-output-expand-toggle"
-        type="button"
-        data-output-id="${escapeHtml(outputId)}"
-        aria-expanded="${ui?.expanded ? "true" : "false"}">
-        扩展尺寸
-      </button>
-    </div>
-    <div class="wz-output-expand-region" data-output-expand-region="${escapeHtml(outputId)}">
-      ${ui?.expanded ? renderOutputExpansionPanelBody(output) : ""}
-    </div>
-  `;
+function renderOutputActions(output = {}) {
+  const url = assetPreviewUrl(output);
+  return url ? `<a class="wz-tasks-media-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">新窗口打开</a>` : "";
 }
 
 function renderOutputCards(items = [], options = {}) {
@@ -741,7 +486,7 @@ function renderOutputCards(items = [], options = {}) {
                 ${outputSelectable(output) ? "" : "disabled"}
                 ${outputSelectable(output) && defaultChecked ? "checked" : ""}
               />
-              <strong>${escapeHtml(output.outputId || output.fileName || "输出")}</strong>
+              <strong>${escapeHtml(output.displayFileName || output.fileName || output.outputId || "输出")}</strong>
             </label>
             <span class="wz-tasks-output-badges">
               ${qcBadge(output)}
@@ -751,7 +496,7 @@ function renderOutputCards(items = [], options = {}) {
           ${renderMediaPlayer(output, "该输出暂不可预览")}
           <footer class="wz-tasks-media-meta">${escapeHtml(outputStatusText(output))}</footer>
           ${renderOutputQcIssues(output)}
-          ${renderOutputExpansionPanel(output, { isIntermediate })}
+          ${renderOutputActions(output)}
         </article>
       `).join("")}
     </div>
@@ -932,13 +677,15 @@ function renderTaskList() {
   els.list.removeAttribute("aria-busy");
   els.list.innerHTML = state.items.map((item) => {
     const id = taskPrimaryId(item);
-    const selected = item.type === state.selectedType && id === state.selectedId;
+    const selected = item.type === state.selectedType
+      && id === state.selectedId
+      && (!state.selectedProjectKey || item.projectKey === state.selectedProjectKey);
     const typeClass = item.type === "remix" ? "remix" : "pipeline";
     const label = taskTypeLabelShort(item.type);
     const liveClass = item.isActive ? " is-live" : "";
     const title = taskDisplayTitle(item);
     return `
-      <button type="button" class="wz-tasks-item${selected ? " selected" : ""}${liveClass}" data-task-type="${escapeHtml(item.type)}" data-task-id="${escapeHtml(id)}">
+      <button type="button" class="wz-tasks-item${selected ? " selected" : ""}${liveClass}" data-task-type="${escapeHtml(item.type)}" data-task-id="${escapeHtml(id)}" data-project-key="${escapeHtml(item.projectKey || "")}">
         <span class="wz-tasks-item-rail" aria-hidden="true"></span>
         <span class="wz-tasks-item-row">
           ${typeStripe(typeClass, label)}
@@ -980,7 +727,7 @@ function renderBackgroundJobNotice(job, title) {
   const reason = job.error?.message || job.message || "";
   const statusLabel = recoverable ? "可重试查询" : (job.status || "-");
   const action = recoverable
-    ? `<a class="mini ghost" href="${escapeHtml(workbenchHref("batch", "running", state.selectedId, { jobType: job.type === "seedance_plan" ? "plan" : job.type, jobId: job.id }))}">${escapeHtml(backgroundJobRetryLabel(job.type))}</a>`
+    ? `<a class="mini ghost" href="${escapeHtml(workbenchHref("batch", "running", state.selectedId, { projectKey: state.selectedProjectKey, jobType: job.type === "seedance_plan" ? "plan" : job.type, jobId: job.id }))}">${escapeHtml(backgroundJobRetryLabel(job.type))}</a>`
     : "";
   return `
     <div class="wz-warning wz-tasks-notice">
@@ -1021,7 +768,13 @@ function renderBatchDetail(detail) {
       label: "参考输入视频",
       description: "原始参考视频独立展示；多条裂变输出在下方交付结果中查看"
     })}
-    ${renderOutputCollection(batch.outputs, { expectedDurationSec: batch.estimate?.durationSec })}
+    ${renderOutputCollection(batch.outputs, { expectedDurationSec: batch.estimate?.durationSec, batchStatus: batch.status })}
+    ${Array.isArray(batch.postProcessFailures) && batch.postProcessFailures.length ? `
+      <section class="wz-warning wz-tasks-notice">
+        <strong>部分扩展尺寸生成失败</strong>
+        ${batch.postProcessFailures.map((failure) => `<div>${escapeHtml(failure.parentOutputId || "输出")} · ${escapeHtml(failure.sizeKey || "未知尺寸")}：${escapeHtml(failure.message || "生成失败")}</div>`).join("")}
+      </section>
+    ` : ""}
     <div class="wz-kv-grid">
       ${renderKeyValues([
         ["任务数", tasks.length],
@@ -1044,7 +797,7 @@ function renderBatchDetail(detail) {
     <div class="modal-actions wz-actions wz-tasks-actions wz-tasks-actions-bar">
       ${batch.status === "preview_required" && plans.length ? `<button id="wzTasksConfirmPlanBtn" type="button">确认预案并生成视频</button>` : ""}
       ${qcRunnable ? `<button id="wzTasksRunQcBtn" type="button">${batch.status === "qc" ? "运行视频质检" : "重新质检"}</button>` : ""}
-      <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status, batch.batchId))}">前往管线工作台</a>
+      <a class="mini ghost" href="${escapeHtml(workbenchHref("batch", batch.status, batch.batchId, { projectKey: state.selectedProjectKey }))}">前往管线工作台</a>
       ${!terminalBatchStatus(batch.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">${batch.status === "qc" ? "放弃批次" : "停止任务"}</button>` : ""}
       ${canDownloadSelected ? `<button id="wzTasksDownloadBtn" type="button">下载选中视频</button>` : ""}
     </div>
@@ -1086,7 +839,7 @@ function renderRemixDetail(detail) {
       ])}
     </div>
     <div class="modal-actions wz-actions wz-tasks-actions wz-tasks-actions-bar">
-      <a class="mini ghost" href="${escapeHtml(workbenchHref("remix", remix.status, remix.remixId))}">前往改造工作台</a>
+      <a class="mini ghost" href="${escapeHtml(workbenchHref("remix", remix.status, remix.remixId, { projectKey: state.selectedProjectKey }))}">前往改造工作台</a>
       ${remix.status === "preview_required" && output ? `<button id="wzTasksConfirmPreviewBtn" type="button">确认预览</button>` : ""}
       ${!["succeeded", "failed", "stopped"].includes(remix.status) ? `<button id="wzTasksStopBtn" class="ghost" type="button">停止任务</button>` : ""}
       ${canDownloadSelected ? `<button id="wzTasksDownloadBtn" type="button">下载选中视频</button>` : ""}
@@ -1109,55 +862,6 @@ function selectedOutputIds() {
     .filter(Boolean);
 }
 
-function captureExpansionFocusSnapshot(root = document) {
-  const active = root?.activeElement;
-  if (!(active instanceof HTMLInputElement)) return null;
-  const isWidth = active.matches(".wz-output-expand-width");
-  const isHeight = active.matches(".wz-output-expand-height");
-  if (!isWidth && !isHeight) return null;
-  return {
-    outputId: String(active.dataset.outputId || "").trim(),
-    field: isWidth ? "width" : "height",
-    selectionStart: active.selectionStart ?? null,
-    selectionEnd: active.selectionEnd ?? null
-  };
-}
-
-function restoreExpansionFocusSnapshot(snapshot) {
-  if (!snapshot?.outputId || !snapshot?.field) return;
-  const selector = snapshot.field === "width" ? ".wz-output-expand-width" : ".wz-output-expand-height";
-  const input = document.querySelector(`${selector}[data-output-id="${CSS.escape(snapshot.outputId)}"]`);
-  if (!(input instanceof HTMLInputElement)) return;
-  input.focus({ preventScroll: true });
-  if (snapshot.selectionStart != null && snapshot.selectionEnd != null) {
-    try {
-      input.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
-    } catch {}
-  }
-}
-
-function findDetailOutputById(outputId) {
-  const id = String(outputId || "").trim();
-  if (!id) return null;
-  const batchOutputs = Array.isArray(state.detail?.batch?.outputs) ? state.detail.batch.outputs : [];
-  const remixOutputs = Array.isArray(state.detail?.remix?.outputs) ? state.detail.remix.outputs : [];
-  return [...batchOutputs, ...remixOutputs].find((output) => String(output?.outputId || "").trim() === id) || null;
-}
-
-function syncOutputExpansionPanel(outputId) {
-  const id = String(outputId || "").trim();
-  if (!id) return;
-  const output = findDetailOutputById(id);
-  if (!output) return;
-  const focusSnapshot = captureExpansionFocusSnapshot();
-  const region = els.detail?.querySelector(`[data-output-expand-region="${CSS.escape(id)}"]`);
-  const ui = outputExpansionState(id);
-  if (region) region.innerHTML = ui?.expanded ? renderOutputExpansionPanelBody(output) : "";
-  const toggle = els.detail?.querySelector(`.wz-output-expand-toggle[data-output-id="${CSS.escape(id)}"]`);
-  if (toggle) toggle.setAttribute("aria-expanded", ui?.expanded ? "true" : "false");
-  restoreExpansionFocusSnapshot(focusSnapshot);
-}
-
 function renderDetailPanel(options = {}) {
   const { force = false } = options;
   updateTasksLayout();
@@ -1177,102 +881,8 @@ function renderDetailPanel(options = {}) {
     : renderBatchDetail(state.detail);
   if (!force && els.detail.innerHTML === nextHtml) return;
   const scrollTop = els.detail.scrollTop;
-  const focusSnapshot = captureExpansionFocusSnapshot();
   els.detail.innerHTML = nextHtml;
   if (scrollTop > 0) els.detail.scrollTop = scrollTop;
-  restoreExpansionFocusSnapshot(focusSnapshot);
-}
-
-function toggleOutputExpansion(outputId) {
-  const ui = outputExpansionState(outputId);
-  if (!ui) return;
-  ui.expanded = !ui.expanded;
-}
-
-function selectOutputExpansionPreset(outputId, sizeKey) {
-  const ui = outputExpansionState(outputId);
-  if (!ui) return;
-  const selected = new Set(ui.selectedSizeKeys || []);
-  if (selected.has(sizeKey)) selected.delete(sizeKey);
-  else selected.add(sizeKey);
-  ui.selectedSizeKeys = Array.from(selected);
-  ui.customWidth = "";
-  ui.customHeight = "";
-  ui.status = ui.selectedSizeKeys.length ? "ready" : "idle";
-  ui.message = ui.selectedSizeKeys.length
-    ? `将生成 ${ui.selectedSizeKeys.join("、")} 版本`
-    : "选择一个目标尺寸后开始扩展";
-  ui.requestId = "";
-  ui.expanded = true;
-}
-
-function updateOutputExpansionCustom(outputId, field, value) {
-  const ui = outputExpansionState(outputId);
-  if (!ui) return;
-  if (field === "width") ui.customWidth = value;
-  if (field === "height") ui.customHeight = value;
-  ui.selectedSizeKeys = [];
-  const payload = selectedExpansionPayload(outputId);
-  ui.status = payload ? "ready" : "idle";
-  ui.message = payload ? `将生成 ${payload.sizeKey} 版本` : "选择一个目标尺寸后开始扩展";
-  ui.requestId = "";
-}
-
-async function handleOutputExpansionSubmit(outputId) {
-  const ui = outputExpansionState(outputId);
-  const payload = selectedExpansionPayload(outputId);
-  if (!ui || !payload) {
-    renderError(els.globalError, new Error("请选择或填写目标尺寸"), "扩展失败");
-    return;
-  }
-  ui.status = "running";
-  ui.message = `正在生成 ${payload.sizeKey} 版本...`;
-  ui.requestId = "";
-  ui.expanded = true;
-  syncOutputExpansionPanel(outputId);
-  try {
-    await submitOutputExpansion(outputId, {
-      targetWidth: payload.targetWidth,
-      targetHeight: payload.targetHeight,
-      mode: payload.mode
-    });
-    startOutputExpansionPolling(outputId);
-  } catch (error) {
-    ui.status = "failed";
-    ui.message = error?.message || "扩展失败";
-    ui.requestId = error?.requestId || "";
-    syncOutputExpansionPanel(outputId);
-  }
-}
-
-async function handleOutputExpansionPresetBatchSubmit(outputId) {
-  const ui = outputExpansionState(outputId);
-  const payloads = selectedExpansionPresetPayloads(outputId);
-  if (!ui || !payloads.length) {
-    renderError(els.globalError, new Error("请先选择至少一个预设尺寸"), "扩展失败");
-    return;
-  }
-  ui.status = "running";
-  ui.message = `正在生成 ${payloads.map((item) => item.sizeKey).join("、")} 版本...`;
-  ui.requestId = "";
-  ui.expanded = true;
-  syncOutputExpansionPanel(outputId);
-  try {
-    for (const payload of payloads) {
-      await submitOutputExpansion(outputId, {
-        targetWidth: payload.targetWidth,
-        targetHeight: payload.targetHeight,
-        mode: payload.mode
-      });
-    }
-    ui.selectedSizeKeys = [];
-    startOutputExpansionPolling(outputId);
-  } catch (error) {
-    ui.status = "failed";
-    ui.message = error?.message || "扩展失败";
-    ui.requestId = error?.requestId || "";
-    syncOutputExpansionPanel(outputId);
-  }
 }
 
 async function loadTasks(options = {}) {
@@ -1313,6 +923,7 @@ async function loadTasks(options = {}) {
       const firstActive = state.items.find((item) => item.isActive) || state.items[0];
       state.selectedType = firstActive.type;
       state.selectedId = taskPrimaryId(firstActive);
+      state.selectedProjectKey = firstActive.projectKey || "";
       syncSelectionUrl();
     }
     const nextSignature = listSignature(state.items);
@@ -1360,6 +971,11 @@ async function loadSelectedDetail(options = {}) {
     ? `/api/wangzhuan/remix/${encodeURIComponent(state.selectedId)}`
     : `/api/wangzhuan/batches/${encodeURIComponent(state.selectedId)}`;
   try {
+    if (state.selectedProjectKey && state.activeProjectKey !== state.selectedProjectKey) {
+      await switchProjectScope(state.selectedProjectKey);
+      if (requestId !== state.detailRequestId) return;
+      state.activeProjectKey = state.selectedProjectKey;
+    }
     const nextDetail = await apiEnvelope(url);
     if (requestId !== state.detailRequestId) return;
     state.detail = nextDetail;
@@ -1382,11 +998,12 @@ async function loadSelectedDetail(options = {}) {
   }
 }
 
-async function selectTask(type, id) {
-  if (type === state.selectedType && id === state.selectedId) return;
+async function selectTask(type, id, projectKey = "") {
+  if (type === state.selectedType && id === state.selectedId && projectKey === state.selectedProjectKey) return;
   stopPagePolling();
   state.selectedType = type;
   state.selectedId = id;
+  state.selectedProjectKey = projectKey;
   state.detail = null;
   syncSelectionUrl();
   renderTaskList();
@@ -1535,7 +1152,7 @@ function bindEvents() {
   els.list?.addEventListener("click", (event) => {
     const item = event.target.closest("[data-task-id]");
     if (!item) return;
-    selectTask(item.dataset.taskType, item.dataset.taskId);
+    selectTask(item.dataset.taskType, item.dataset.taskId, item.dataset.projectKey || "");
   });
   els.pager?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-tasks-page]");
@@ -1547,28 +1164,6 @@ function bindEvents() {
   });
   els.detail?.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    const toggle = event.target.closest(".wz-output-expand-toggle");
-    if (toggle) {
-      toggleOutputExpansion(toggle.dataset.outputId);
-      syncOutputExpansionPanel(toggle.dataset.outputId);
-      return;
-    }
-    const preset = event.target.closest("[data-expand-size]");
-    if (preset) {
-      selectOutputExpansionPreset(preset.dataset.outputId, preset.dataset.expandSize);
-      syncOutputExpansionPanel(preset.dataset.outputId);
-      return;
-    }
-    const expandSubmit = event.target.closest(".wz-output-expand-submit");
-    if (expandSubmit) {
-      void handleOutputExpansionSubmit(expandSubmit.dataset.outputId);
-      return;
-    }
-    const expandPresetSubmit = event.target.closest(".wz-output-expand-submit-presets");
-    if (expandPresetSubmit) {
-      void handleOutputExpansionPresetBatchSubmit(expandPresetSubmit.dataset.outputId);
-      return;
-    }
     if (event.target.closest("#wzTasksConfirmPlanBtn")) {
       confirmBatchPlan();
       return;
@@ -1587,18 +1182,6 @@ function bindEvents() {
     }
     if (event.target.closest("#wzTasksDownloadBtn")) {
       downloadSelectedTask();
-    }
-  });
-  els.detail?.addEventListener("input", (event) => {
-    if (!(event.target instanceof Element)) return;
-    if (event.target.matches(".wz-output-expand-width")) {
-      updateOutputExpansionCustom(event.target.dataset.outputId, "width", event.target.value);
-      syncOutputExpansionStateView(event.target.dataset.outputId);
-      return;
-    }
-    if (event.target.matches(".wz-output-expand-height")) {
-      updateOutputExpansionCustom(event.target.dataset.outputId, "height", event.target.value);
-      syncOutputExpansionStateView(event.target.dataset.outputId);
     }
   });
 }

@@ -4,10 +4,11 @@ import test from "node:test";
 import {
   FISSION_ANALYSIS_PROMPT_REQUIREMENTS,
   buildSeedanceSlicesFromAnalysis,
+  deriveSeedanceSlicesForGeneration,
   normalizeFissionAnalysis,
   splitStorySegmentIntoSeedanceSlices
 } from "../../server/wangzhuan/fission-analysis.mjs";
-import { buildDecompositionUserPrompt } from "../../server/wangzhuan/decomposition-prompt.mjs";
+import { buildCompactDecompositionUserPrompt, buildDecompositionUserPrompt } from "../../server/wangzhuan/decomposition-prompt.mjs";
 import { validateVideoDecomposition } from "../../server/wangzhuan/reference-videos.mjs";
 
 const sevenDimensions = {
@@ -102,6 +103,53 @@ test("splitStorySegmentIntoSeedanceSlices uses narrative split hints and preserv
     );
     assert.deepEqual(slice.conversionSignals, [{ type: "earningsNumber", value: "$3.20" }, "fastRewardCue"]);
     assert.deepEqual(slice.conversionEffectOpportunities, ["magnify coin feedback"]);
+  }
+});
+
+test("splitStorySegmentIntoSeedanceSlices falls back to efficient multi-slice split for 44s segment", () => {
+  const slices = splitStorySegmentIntoSeedanceSlices({
+    storySegmentIndex: 1,
+    startSec: 0,
+    endSec: 44,
+    durationSec: 44,
+    ...sevenDimensions,
+    coreHook: "long-form opening beat"
+  });
+
+  assert.equal(slices.length, 3);
+  assert.equal(slices[0].startSec, 0);
+  assert.equal(slices.at(-1).endSec, 44);
+  assert.equal(
+    Math.round(slices.reduce((total, slice) => total + slice.durationSec, 0) * 1000) / 1000,
+    44
+  );
+  for (const [index, slice] of slices.entries()) {
+    assert.equal(slice.storySegmentIndex, 1);
+    assert.equal(slice.seedanceSliceIndex, index + 1);
+    assert.ok(slice.durationSec >= 5);
+    assert.ok(slice.durationSec <= 15);
+    assert.equal(slice.sliceSplitReason, "even duration fallback split");
+  }
+});
+
+test("splitStorySegmentIntoSeedanceSlices combines hint-guided and fallback multi-slice boundaries", () => {
+  const slices = splitStorySegmentIntoSeedanceSlices({
+    storySegmentIndex: 2,
+    startSec: 0,
+    endSec: 31,
+    durationSec: 31,
+    ...sevenDimensions,
+    sliceSplitHints: [{ splitSec: 12, reason: "claim turns into proof UI" }]
+  });
+
+  assert.equal(slices.length, 3);
+  assert.equal(slices[0].endSec, 12);
+  assert.equal(slices[1].startSec, 12);
+  assert.equal(slices.at(-1).endSec, 31);
+  for (const slice of slices) {
+    assert.ok(slice.durationSec >= 5);
+    assert.ok(slice.durationSec <= 15);
+    assert.match(slice.sliceSplitReason, /hint-guided multi-slice split/);
   }
 });
 
@@ -242,6 +290,44 @@ test("normalizeFissionAnalysis rejects invalid story segment timing", () => {
   );
 });
 
+test("normalizeFissionAnalysis strict mode rejects story segments without explicit timing", () => {
+  assert.throws(
+    () => normalizeFissionAnalysis({
+      storySegments: [
+        {
+          storySegmentIndex: 1,
+          ...sevenDimensions
+        }
+      ]
+    }, { strictStorySegmentTiming: true }),
+    /storySegmentIndex=1 startSec is required/
+  );
+});
+
+test("normalizeFissionAnalysis strict mode rejects overlapping story segment timing", () => {
+  assert.throws(
+    () => normalizeFissionAnalysis({
+      storySegments: [
+        {
+          storySegmentIndex: 1,
+          startSec: 0,
+          endSec: 12,
+          durationSec: 12,
+          ...sevenDimensions
+        },
+        {
+          storySegmentIndex: 2,
+          startSec: 6,
+          endSec: 14,
+          durationSec: 8,
+          ...sevenDimensions
+        }
+      ]
+    }, { strictStorySegmentTiming: true }),
+    /chronological and non-overlapping/
+  );
+});
+
 test("buildSeedanceSlicesFromAnalysis rejects invalid seedance slice timing without story segments", () => {
   assert.throws(
     () => buildSeedanceSlicesFromAnalysis({
@@ -294,6 +380,200 @@ test("buildSeedanceSlicesFromAnalysis ignores invalid suggested seedance slices 
   assert.equal(slices[0].coreHook, "valid story hook");
 });
 
+test("buildSeedanceSlicesFromAnalysis accepts explicit slices up to 30 seconds", () => {
+  const slices = buildSeedanceSlicesFromAnalysis({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 40,
+        endSec: 56,
+        durationSec: 16,
+        ...sevenDimensions,
+        coreHook: "final payoff"
+      }
+    ],
+    seedanceSlices: [
+      {
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 40,
+        endSec: 56,
+        durationSec: 16,
+        sliceDurationSec: 16,
+        ...sevenDimensions,
+        coreHook: "bad overlong slice"
+      }
+    ]
+  });
+
+  assert.equal(slices.length, 1);
+  assert.equal(slices[0].startSec, 40);
+  assert.equal(slices[0].endSec, 56);
+  assert.equal(slices[0].sliceDurationSec, 16);
+  assert.equal(slices[0].coreHook, "bad overlong slice");
+});
+
+test("buildSeedanceSlicesFromAnalysis derives multi-slice output from long story segment", () => {
+  const slices = buildSeedanceSlicesFromAnalysis({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 44,
+        durationSec: 44,
+        ...sevenDimensions,
+        coreHook: "full long beat"
+      }
+    ]
+  });
+
+  assert.equal(slices.length, 3);
+  assert.equal(slices[0].startSec, 0);
+  assert.equal(slices.at(-1).endSec, 44);
+  assert.equal(slices[0].coreHook, "full long beat");
+  assert.ok(slices.every((slice) => slice.durationSec >= 5 && slice.durationSec <= 15));
+});
+
+test("deriveSeedanceSlicesForGeneration prefers explicit seedanceSlices when present", () => {
+  const slices = deriveSeedanceSlicesForGeneration({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 24,
+        durationSec: 24,
+        ...sevenDimensions,
+        coreHook: "story fallback"
+      }
+    ],
+    seedanceSlices: [
+      {
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 9,
+        durationSec: 9,
+        segmentRole: "hook_slice",
+        ...sevenDimensions,
+        coreHook: "explicit generation slice"
+      }
+    ]
+  });
+
+  assert.equal(slices.length, 1);
+  assert.equal(slices[0].coreHook, "explicit generation slice");
+  assert.equal(slices[0].durationSec, 9);
+});
+
+test("deriveSeedanceSlicesForGeneration derives slices from storySegments when seedanceSlices are absent", () => {
+  const slices = deriveSeedanceSlicesForGeneration({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 26,
+        durationSec: 26,
+        ...sevenDimensions,
+        coreHook: "story-driven split",
+        sliceSplitHints: [{ splitSec: 12, reason: "claim changes into app proof" }]
+      }
+    ]
+  });
+
+  assert.deepEqual(
+    slices.map((slice) => ({ startSec: slice.startSec, endSec: slice.endSec, durationSec: slice.durationSec })),
+    [
+      { startSec: 0, endSec: 12, durationSec: 12 },
+      { startSec: 12, endSec: 26, durationSec: 14 }
+    ]
+  );
+  assert.equal(slices[0].sliceSplitReason, "claim changes into app proof");
+});
+
+test("deriveSeedanceSlicesForGeneration falls back to storySegments when explicit seedanceSlices are invalid", () => {
+  const slices = deriveSeedanceSlicesForGeneration({
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 16,
+        durationSec: 16,
+        ...sevenDimensions,
+        coreHook: "valid fallback segment"
+      }
+    ],
+    seedanceSlices: [
+      {
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 31,
+        durationSec: 31,
+        sliceDurationSec: 31,
+        ...sevenDimensions,
+        coreHook: "invalid explicit slice"
+      }
+    ]
+  });
+
+  assert.equal(slices.length, 2);
+  assert.equal(slices[0].coreHook, "valid fallback segment");
+  assert.deepEqual(slices.map((slice) => slice.durationSec), [8, 8]);
+});
+
+test("Seedance generation slices accept the full 5-30 second range", () => {
+  const slices = deriveSeedanceSlicesForGeneration({
+    seedanceSlices: [
+      {
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 5,
+        durationSec: 5,
+        sliceDurationSec: 5,
+        ...sevenDimensions
+      },
+      {
+        storySegmentIndex: 2,
+        seedanceSliceIndex: 2,
+        startSec: 5,
+        endSec: 35,
+        durationSec: 30,
+        sliceDurationSec: 30,
+        ...sevenDimensions
+      }
+    ]
+  });
+
+  assert.deepEqual(slices.map((slice) => slice.durationSec), [5, 30]);
+  assert.throws(
+    () => deriveSeedanceSlicesForGeneration({
+      seedanceSlices: [{
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 4.9,
+        durationSec: 4.9,
+        sliceDurationSec: 4.9,
+        ...sevenDimensions
+      }]
+    }),
+    /duration must be 5-30s/
+  );
+});
+
+test("story segments can opt into a 30 second maximum", () => {
+  const slices = splitStorySegmentIntoSeedanceSlices({
+    storySegmentIndex: 1,
+    startSec: 0,
+    endSec: 30,
+    durationSec: 30,
+    ...sevenDimensions
+  }, { minSliceSec: 5, maxSliceSec: 30 });
+
+  assert.deepEqual(slices.map((slice) => slice.durationSec), [30]);
+});
+
 test("FISSION_ANALYSIS_PROMPT_REQUIREMENTS covers production fission analysis rules", () => {
   const text = FISSION_ANALYSIS_PROMPT_REQUIREMENTS.join("\n");
 
@@ -323,6 +603,11 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
 
   assert.match(prompt, /whole video first/i);
   assert.match(prompt, /storySegments/);
+  assert.match(prompt, /startSec\/endSec\/durationSec/);
+  assert.match(prompt, /seedanceSlices are optional/i);
+  assert.match(prompt, /sliceSplitHints are mandatory/i);
+  assert.match(prompt, /backend will derive generation slices from storySegments plus sliceSplitHints/i);
+  assert.match(prompt, /5-30s slices/i);
   assert.match(prompt, /timelineItems/);
   assert.match(prompt, /conversionSignals/);
   assert.match(prompt, /conversionEffectOpportunities/);
@@ -339,6 +624,24 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /subtitleWorkflow\.subtitleScript/);
   assert.match(prompt, /subtitles for post-processing/i);
   assert.match(prompt, /not burned/i);
+  assert.doesNotMatch(prompt, /可选的 seedanceSlices 示例/);
+  assert.doesNotMatch(prompt, /segmentRole/);
+});
+
+test("compact decomposition prompt keeps downstream-required story segment contract", () => {
+  const prompt = buildCompactDecompositionUserPrompt(
+    { durationSec: 62 },
+    { knowledgeNotes: "keep story beats" },
+    { provider: "skylink", model: "gpt-5.4" },
+    () => "mock probe prompt"
+  );
+
+  assert.match(prompt, /必须优先保证这 8 个字段/i);
+  assert.match(prompt, /必须输出 storySegments/i);
+  assert.match(prompt, /startSec、endSec、durationSec/);
+  assert.match(prompt, /超过 15 秒时，必须给出 sliceSplitHints/i);
+  assert.match(prompt, /seedanceSlices 可选/i);
+  assert.match(prompt, /storySegments \+ sliceSplitHints 自动派生/);
 });
 
 test("reference video decomposition validation preserves fission fields", () => {
@@ -426,5 +729,33 @@ test("reference video decomposition backfills required fields from storySegments
   assert.equal(normalized.style, "UGC selfie");
   assert.equal(normalized.quality, "clear UI");
   assert.equal(normalized.hook, "cashout proof in first seconds");
+  assert.deepEqual(normalized.missingFields, []);
+});
+
+test("reference video decomposition derives seedanceSlices from timed storySegments", () => {
+  const normalized = validateVideoDecomposition("ref_derive_slices", {
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 12,
+        durationSec: 12,
+        scene: "kitchen",
+        subject: "delivery rider",
+        action: "0-12s: opens app and reacts",
+        camera: "phone close-up",
+        lighting: "indoor warm",
+        style: "UGC selfie",
+        quality: "clear UI",
+        coreHook: "cashout proof in first seconds"
+      }
+    ]
+  });
+
+  assert.equal(normalized.storySegments.length, 1);
+  assert.equal(normalized.seedanceSlices.length, 1);
+  assert.equal(normalized.seedanceSlices[0].startSec, 0);
+  assert.equal(normalized.seedanceSlices[0].endSec, 12);
+  assert.equal(normalized.seedanceSlices[0].sliceDurationSec, 12);
   assert.deepEqual(normalized.missingFields, []);
 });

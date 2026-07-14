@@ -4,39 +4,20 @@ import test from "node:test";
 
 const root = new URL("../../", import.meta.url);
 
-async function readText(path) {
-  return readFile(new URL(path, root), "utf8");
-}
+test("task detail presents expanded outputs without creation controls", async () => {
+  const js = await readFile(new URL("public/wangzhuan-tasks.js", root), "utf8");
 
-test("task detail output cards include size expansion controls and polling hooks", async () => {
-  const js = await readText("public/wangzhuan-tasks.js");
-  assert.match(js, /wz-output-expand-toggle/);
-  assert.match(js, /\/api\/wangzhuan\/outputs\/\$\{encodeURIComponent\(outputId\)\}\/expand/);
-  assert.match(js, /\/api\/wangzhuan\/outputs\/\$\{encodeURIComponent\(outputId\)\}\/expand-jobs/);
-  assert.match(js, /wz-output-expand-submit-presets/);
-  assert.match(js, /开始扩展已选尺寸/);
-  assert.match(js, /正在生成 .* 版本/);
-  assert.match(js, /wz-output-expand-panel/);
-  assert.match(js, /wz-output-expand-region/);
-  assert.match(js, /wz-output-expand-presets/);
-  assert.match(js, /wz-output-expand-custom/);
-  assert.match(js, /wz-output-expand-results/);
-  assert.match(js, /ui\.status = "succeeded"/);
-  assert.match(js, /ui\.expanded = true/);
-  assert.match(js, /if \(!widthRaw \|\| !heightRaw\) return null;/);
-  assert.match(js, /function syncOutputExpansionPanel\(outputId\)/);
-  assert.match(js, /function syncOutputExpansionStateView\(outputId\)/);
-  assert.match(js, /function hasSelectableOutputs\(outputs = \[\]\)/);
-  assert.match(js, /function captureExpansionFocusSnapshot\(root = document\)/);
-  assert.match(js, /function restoreExpansionFocusSnapshot\(snapshot\)/);
-  assert.match(js, /download rel="noreferrer">下载<\/a>/);
-  assert.match(js, /syncOutputExpansionStateView\(event\.target\.dataset\.outputId\)/);
-  assert.match(js, /\$\{canDownloadSelected \? `<button id="wzTasksDownloadBtn" type="button">下载选中视频<\/button>` : ""\}/);
-
-  const expansion = await readText("server/wangzhuan/output-expansion.mjs");
-  assert.match(expansion, /&download=1/);
-  assert.match(expansion, /const info = await stat\(outputPath\)/);
-
-  const router = await readText("server/wangzhuan/router.mjs");
-  assert.match(router, /const latestBySize = new Map\(\)/);
+  assert.match(js, /"expanded_video"/);
+  assert.match(js, /parentOutputId/);
+  assert.match(js, /sizeKey/);
+  assert.match(js, /output\.displayFileName \|\| output\.fileName \|\| output\.outputId/);
+  assert.match(js, /postProcessFailures/);
+  assert.match(js, /data-project-key/);
+  assert.match(js, /state\.activeProjectKey !== state\.selectedProjectKey/);
+  assert.match(js, /switchProjectScope\(state\.selectedProjectKey\)/);
+  assert.match(js, /segmentCount > 1/);
+  assert.match(js, /batchStatus === "stitching"/);
+  assert.doesNotMatch(js, /\/api\/wangzhuan\/outputs\/\$\{encodeURIComponent\(outputId\)\}\/expand/);
+  assert.doesNotMatch(js, /wz-output-expand-submit|wz-output-expand-presets|wz-output-expand-custom/);
+  assert.doesNotMatch(js, /开始扩展|选择一个目标尺寸后开始扩展/);
 });

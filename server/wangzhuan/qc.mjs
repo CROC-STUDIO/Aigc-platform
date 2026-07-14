@@ -1286,9 +1286,80 @@ function qcStatusFromChecks(checks) {
 function downloadEligibility(batch, output, qcStatus) {
   if (qcStatus !== "pass") return false;
   if (output.sourceType !== "pipeline") return false;
-  if (output.kind === "stitched_video" && Number(output.durationSec) === 30) return true;
+  if (output.kind === "stitched_video" && Number(output.durationSec) > 0) return true;
+  if (output.kind === "expanded_video" && output.parentOutputId && Number(output.durationSec) > 0) return true;
   if (Number(batch.estimate?.durationSec) !== 30 && output.kind === "segment_video" && Number(output.durationSec) > 0) return true;
   return false;
+}
+
+function expandedParentStatus(output, reportByOutputId) {
+  if (!output.parentOutputId) {
+    return check("expanded_parent_qc", "fail", "扩展视频缺少父成片编号", "parentOutputId");
+  }
+  const parent = reportByOutputId.get(output.parentOutputId);
+  if (!parent) {
+    return check("expanded_parent_qc", "fail", "扩展视频找不到父成片 QC 结果", "parentOutputId");
+  }
+  return check(
+    "expanded_parent_qc",
+    parent.qcStatus === "pass" ? "pass" : "fail",
+    parent.qcStatus === "pass" ? "父成片内容 QC 已通过" : "父成片内容 QC 未通过",
+    "parentOutputId"
+  );
+}
+
+async function qcReportForExpandedOutput(context, batch, output, reportByOutputId) {
+  const checks = [expandedParentStatus(output, reportByOutputId), videoSpecCheck(context, output)];
+  const localPath = tryResolveUserPath(context, output.filePath);
+  const parentOutput = (batch.outputs || []).find((item) => item.outputId === output.parentOutputId);
+  if (!localPath || !existsSync(localPath)) {
+    checks.push(check("expanded_decode", outputHasRemoteAsset(output) ? "warn" : "fail", "扩展视频本地文件不可用，无法执行完整解码检查", "filePath"));
+  } else {
+    try {
+      const probe = await outputMediaProbe(context, output);
+      const dimensionsMatch = Number(probe.width) === Number(output.targetWidth) && Number(probe.height) === Number(output.targetHeight);
+      checks.push(checkWithData(
+        "expanded_dimensions",
+        dimensionsMatch ? "pass" : "fail",
+        dimensionsMatch ? "扩展视频尺寸正确" : "扩展视频尺寸与目标不一致",
+        "targetWidth,targetHeight",
+        { width: probe.width, height: probe.height, targetWidth: output.targetWidth, targetHeight: output.targetHeight }
+      ));
+      const parentDuration = Number(parentOutput?.durationSec || output.durationSec || 0);
+      const durationDelta = Math.abs(Number(probe.durationSec || 0) - parentDuration);
+      const durationTolerance = Math.max(0.5, parentDuration * 0.05);
+      checks.push(checkWithData(
+        "expanded_duration",
+        durationDelta <= durationTolerance ? "pass" : "fail",
+        durationDelta <= durationTolerance ? "扩展视频时长与父成片一致" : "扩展视频时长偏差过大",
+        "durationSec",
+        { durationSec: probe.durationSec, parentDuration, durationDelta, durationTolerance }
+      ));
+      if (typeof context.decodeGeneratedVideo === "function") {
+        await context.decodeGeneratedVideo({ filePath: localPath, output });
+      } else {
+        await execFileAsync("ffmpeg", ["-nostdin", "-v", "error", "-i", localPath, "-f", "null", "-"], {
+          encoding: "utf8",
+          timeout: 120000,
+          maxBuffer: 10 * 1024 * 1024
+        });
+      }
+      checks.push(check("expanded_decode", "pass", "扩展视频完整解码通过"));
+    } catch (error) {
+      checks.push(check("expanded_decode", "fail", `扩展视频校验失败：${cleanText(error?.message || "解码失败", 300)}`, "filePath"));
+    }
+  }
+  const qcStatus = qcStatusFromChecks(checks);
+  return {
+    schemaVersion: "qc_report.v1",
+    outputId: output.outputId,
+    sourceType: output.sourceType,
+    batchId: output.batchId,
+    qcStatus,
+    checks,
+    summary: qcStatus === "pass" ? "Expanded video QC passed" : "Expanded video QC requires attention",
+    createdAt: new Date().toISOString()
+  };
 }
 
 async function qcReportForOutput(context, batch, output) {
@@ -1400,10 +1471,17 @@ export async function runBatchQc(context, batchId) {
     throw new WangzhuanError("validation_error", "当前批次没有可质检的输出", { batchId });
   }
   const reports = [];
-  const nextOutputs = [];
+  const nextOutputById = new Map();
+  const reportByOutputId = new Map();
 
-  for (const output of outputs) {
-    const report = await qcReportForOutput(context, batch, output);
+  const orderedOutputs = [
+    ...outputs.filter((output) => output.kind !== "expanded_video"),
+    ...outputs.filter((output) => output.kind === "expanded_video")
+  ];
+  for (const output of orderedOutputs) {
+    const report = output.kind === "expanded_video"
+      ? await qcReportForExpandedOutput(context, batch, output, reportByOutputId)
+      : await qcReportForOutput(context, batch, output);
     const reportTarget = join(batchDir(context, batch.batchId), "qc", `${output.outputId}.json`);
     await writeAtomicJson(reportTarget, report);
     await recordTelemetryEvent(context, "qc_completed", {
@@ -1414,7 +1492,8 @@ export async function runBatchQc(context, batchId) {
       checkFailureCodes: report.checks.filter((item) => item.status !== "pass").map((item) => item.checkId)
     });
     reports.push(report);
-    nextOutputs.push({
+    reportByOutputId.set(output.outputId, report);
+    nextOutputById.set(output.outputId, {
       ...output,
       qcStatus: report.qcStatus,
       downloadEligible: downloadEligibility(batch, output, report.qcStatus),
@@ -1434,12 +1513,13 @@ export async function runBatchQc(context, batchId) {
       } : {})
     });
   }
+  const nextOutputs = outputs.map((output) => nextOutputById.get(output.outputId) || output);
 
   const failed = reports.filter((report) => report.qcStatus === "fail" || report.qcStatus === "manual_required").length;
   const warningReports = reports.filter((report) => report.qcStatus === "warn");
   const nextBatch = await writeBatch(context, {
     ...batch,
-    status: batchStatusFromReports(reports),
+    status: (batch.postProcessFailures || []).length ? "partial_failed" : batchStatusFromReports(reports),
     outputs: nextOutputs,
     qcSummary: {
       total: reports.length,
@@ -1466,6 +1546,7 @@ export const qcPathHelpers = {
   videoSpecCheck,
   downloadEligibility,
   shouldRunModelVideoQc,
+  expandedParentStatus,
   templateSnapshotCheck,
   deterministicVideoChecks
 };

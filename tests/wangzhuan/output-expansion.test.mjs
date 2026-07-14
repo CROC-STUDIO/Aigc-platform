@@ -11,6 +11,7 @@ import {
   buildExpandedOutputName,
   buildExpansionResultShape,
   ensureExpandableOutput,
+  expansionTimeoutMs,
   expansionModeLabel,
   normalizeExpansionRequest,
   runOutputExpansion,
@@ -62,6 +63,15 @@ test("normalizeExpansionRequest rejects invalid dimensions", () => {
 test("buildExpandedOutputName appends target size suffix", () => {
   assert.equal(buildExpandedOutputName("out_001.mp4", 800, 800), "out_001__800x800.mp4");
   assert.equal(buildExpandedOutputName("out_001", 1280, 720), "out_001__1280x720");
+  assert.equal(
+    buildExpandedOutputName("wzb_20260713124628_76b4_US_720x1280.mp4", 800, 800),
+    "wzb_20260713124628_76b4_US_800x800.mp4"
+  );
+});
+
+test("render timeout scales with long source duration", () => {
+  assert.equal(expansionTimeoutMs(10), 120000);
+  assert.equal(expansionTimeoutMs(64.393), 322000);
 });
 
 test("expansionModeLabel exposes only blur_pad in v1", () => {
@@ -120,12 +130,35 @@ test("renderExpandedVideo writes a derived mp4 when ffmpeg is available", async 
     await access(result.outputPath);
     assert.equal(basename(result.outputPath), result.fileName);
     assert.match(result.fileName, /800x800/);
+    assert.equal(result.width, 800);
+    assert.equal(result.height, 800);
+    assert.ok(result.durationSec > 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("renderExpandedVideo treats existing non-empty output as success even if ffmpeg exits non-zero", async () => {
+test("renderExpandedVideo creates a missing derived output directory", async (t) => {
+  if (!await ffmpegAvailable()) return t.skip("ffmpeg is unavailable");
+  const root = await mkdtemp(join(tmpdir(), "wz-expand-missing-dir-"));
+  try {
+    const inputPath = join(root, "source.mp4");
+    const outputDir = join(root, "expanded", "out_001");
+    await writeSampleVideo(inputPath);
+    const result = await renderExpandedVideo({
+      inputPath,
+      targetWidth: 800,
+      targetHeight: 800,
+      outputDir
+    });
+    await access(result.outputPath);
+    assert.equal(result.outputPath, join(outputDir, "source__800x800.mp4"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("renderExpandedVideo rejects a non-decodable output even when ffmpeg leaves a non-empty file", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-expand-existing-output-"));
   const inputPath = join(root, "source.mp4");
   const binDir = join(root, "bin");
@@ -143,14 +176,12 @@ exit 1
 `, "utf8");
     await chmod(ffmpegPath, 0o755);
     process.env.PATH = `${binDir}:${originalPath}`;
-    const result = await renderExpandedVideo({
+    await assert.rejects(() => renderExpandedVideo({
       inputPath,
       targetWidth: 800,
       targetHeight: 800,
       outputDir: root
-    });
-    assert.equal(result.outputPath, join(root, "source__800x800.mp4"));
-    assert.equal(result.fileName, "source__800x800.mp4");
+    }));
   } finally {
     process.env.PATH = originalPath;
     await rm(root, { recursive: true, force: true });

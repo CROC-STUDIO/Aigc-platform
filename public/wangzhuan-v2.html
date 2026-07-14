@@ -104,8 +104,8 @@
                     <label>模型名称
                       <select id="wzLlmModel">
                         <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
-                        <option value="gpt-5.5" selected>GPT-5.5</option>
-                        <option value="gpt-5.4">GPT-5.4</option>
+                        <option value="gpt-5.5">GPT-5.5</option>
+                        <option value="gpt-5.4" selected>GPT-5.4</option>
                       </select>
                     </label>
                     <input id="wzLlmEndpoint" type="hidden" value="https://skylink-gateway.com/api/v1" />
@@ -162,6 +162,13 @@
                       <option value="en">英文</option>
                       <option value="pt">葡语</option>
                       <option value="zh">中文</option>
+                      <option value="ar">阿拉伯语</option>
+                      <option value="es">西班牙语</option>
+                      <option value="fr">法语</option>
+                      <option value="de">德语</option>
+                      <option value="id">印尼语</option>
+                      <option value="th">泰语</option>
+                      <option value="vi">越南语</option>
                       <option value="other">其他</option>
                     </select>
                   </label>
@@ -187,8 +194,8 @@
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">产品录屏（最多 2 个）</span><input id="wzProductRecordingFile" type="file" accept="video/mp4,video/webm,video/quicktime" multiple /></label>
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">人物</span><input id="wzPersonAssetFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">奖励元素</span><input id="wzRewardElementFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">CTA 图（仅图片，拼接到末尾）</span><input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">Ending 图（仅图片，拼接到末尾）</span><input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">CTA 图（仅图片，仅用于最后一个 Seedance 分片）</span><input id="wzCtaAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+                  <label class="wz-asset-slot"><span class="wz-asset-slot-label">Ending 图（仅图片，仅用于最后一个 Seedance 分片）</span><input id="wzEndingAssetFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
                 </div>
               </section>
 
@@ -217,8 +224,10 @@
                       <option value="ID">ID</option>
                       <option value="TH">TH</option>
                       <option value="VN">VN</option>
+                      <option value="custom">自定义</option>
                     </select>
                   </label>
+                  <label id="wzTargetRegionCustomWrap" hidden>自定义地区 <input id="wzTargetRegionCustom" type="text" placeholder="例如 JP / KR / MY" /></label>
                   <label>语言
                     <select id="wzLanguage">
                       <option value="en-US" selected>English (US)</option>
@@ -231,8 +240,10 @@
                       <option value="th-TH">Thai</option>
                       <option value="vi-VN">Vietnamese</option>
                       <option value="zh-CN">Chinese (Simplified)</option>
+                      <option value="custom">自定义</option>
                     </select>
                   </label>
+                  <label id="wzLanguageCustomWrap" hidden>自定义语言 <input id="wzLanguageCustom" type="text" placeholder="例如 ja-JP / ko-KR / ms-MY" /></label>
                   <label>素材方向
                     <select id="wzMaterialDirection">
                       <option value="痛点开场">痛点开场</option>
@@ -324,7 +335,7 @@
               </label>
               <label>目标段数
                 <select id="wzDuration">
-                  <option value="follow_decomposition" selected>跟随拆解视频</option>
+                  <option value="follow_decomposition" selected>跟随拆解段落（系统自动切片）</option>
                   <option value="1">1 段</option>
                   <option value="2">2 段</option>
                   <option value="3">3 段</option>
@@ -340,17 +351,60 @@
                 </select>
               </label>
               <label>裂变数量 <input id="wzVariantCount" type="number" min="1" max="10" value="3" /></label>
-              <label>同时生成数量 <input id="wzRequestedConcurrency" type="number" min="1" max="8" value="1" /></label>
+              <input id="wzRequestedConcurrency" type="hidden" value="1" />
               <input id="wzSeedanceModel" type="hidden" value="dreamina-seedance-2-0-fast-260128" />
             </div>
+            <details class="wz-details wz-postprocess-settings" open>
+              <summary>成片后处理</summary>
+              <div class="wz-postprocess-grid">
+                <div class="wz-postprocess-group">
+                  <label class="wz-check"><input id="wzPostProcessSubtitles" type="checkbox" checked />添加字幕</label>
+                  <div class="wz-subtitle-style-controls">
+                    <label class="wz-subtitle-style-row" for="wzSubtitleFontSizeNumber">
+                      <span>字幕字号</span>
+                      <input id="wzSubtitleFontSizeRange" type="range" min="12" max="96" step="1" value="30" />
+                      <input id="wzSubtitleFontSizeNumber" type="number" min="12" max="96" step="1" value="30" />
+                      <span class="wz-unit">px</span>
+                    </label>
+                    <label class="wz-subtitle-style-row" for="wzSubtitleCenterYNumber">
+                      <span>中心 Y</span>
+                      <input id="wzSubtitleCenterYRange" type="range" min="0" max="1280" step="1" value="1140" />
+                      <input id="wzSubtitleCenterYNumber" type="number" min="0" max="1280" step="1" value="1140" />
+                      <span class="wz-unit">px</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="wz-postprocess-group">
+                  <label>追加 Ending（可选，图片默认展示 1 秒）
+                    <input id="wzPostProcessEndingFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                  </label>
+                  <div id="wzPostProcessEndingPreview" class="wz-postprocess-preview empty-line">未添加 Ending</div>
+                  <button id="wzPostProcessEndingRemove" class="mini ghost" type="button" hidden>移除 Ending</button>
+                </div>
+                <div class="wz-postprocess-group">
+                  <span class="wz-field-label">扩展尺寸（可多选，不选择则仅保留原始尺寸）</span>
+                  <div class="wz-expansion-presets">
+                    <label class="wz-check"><input type="checkbox" data-expansion-preset="800x800" />800 x 800</label>
+                    <label class="wz-check"><input type="checkbox" data-expansion-preset="1280x720" />1280 x 720</label>
+                    <label class="wz-check"><input type="checkbox" data-expansion-preset="720x1280" />720 x 1280</label>
+                  </div>
+                  <div class="wz-expansion-custom">
+                    <label>宽 <input id="wzExpansionCustomWidth" type="number" min="256" max="4096" step="2" placeholder="1080" /></label>
+                    <label>高 <input id="wzExpansionCustomHeight" type="number" min="256" max="4096" step="2" placeholder="1920" /></label>
+                    <button id="wzExpansionAddCustom" class="mini ghost" type="button">添加尺寸</button>
+                  </div>
+                  <div id="wzExpansionSelectedSizes" class="wz-expansion-selected empty-line">未选择扩展尺寸</div>
+                </div>
+              </div>
+            </details>
             <details class="wz-details">
               <summary>高级设置</summary>
               <div class="wz-inline-form">
                 <input id="wzPlanLlmProvider" type="hidden" value="skylink" />
                 <label>提示词模型
                   <select id="wzPlanLlmModel">
-                    <option value="gpt-5.5" selected>GPT-5.5</option>
-                    <option value="gpt-5.4">GPT-5.4</option>
+                    <option value="gpt-5.5">GPT-5.5</option>
+                    <option value="gpt-5.4" selected>GPT-5.4</option>
                   </select>
                 </label>
                 <input id="wzPlanLlmEndpoint" type="hidden" value="https://skylink-gateway.com/api/v1" />

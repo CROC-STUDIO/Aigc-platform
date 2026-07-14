@@ -1631,12 +1631,13 @@ export function workbenchFocusHash(type, status = "") {
 export function readWorkbenchRestoreRequest() {
   const params = new URLSearchParams(location.search);
   if (params.get("restore") !== "1") return null;
+  const projectKey = String(params.get("projectKey") || "").trim();
   const jobType = String(params.get("jobType") || "").trim();
   const jobId = String(params.get("jobId") || "").trim();
   const remixId = String(params.get("remixId") || "").trim();
-  if (remixId) return { type: "remix", id: remixId, jobType, jobId };
+  if (remixId) return { type: "remix", id: remixId, projectKey, jobType, jobId };
   const batchId = String(params.get("batchId") || "").trim();
-  if (batchId) return { type: "batch", id: batchId, jobType, jobId };
+  if (batchId) return { type: "batch", id: batchId, projectKey, jobType, jobId };
   return null;
 }
 
@@ -1648,9 +1649,19 @@ export function workbenchHref(type, status = "", id = "", options = {}) {
   const params = new URLSearchParams({ restore: "1" });
   if (type === "remix") params.set("remixId", taskId);
   else params.set("batchId", taskId);
+  if (options.projectKey) params.set("projectKey", String(options.projectKey));
   if (options.jobType) params.set("jobType", String(options.jobType));
   if (options.jobId) params.set("jobId", String(options.jobId));
   return `${base}?${params}${hash}`;
+}
+
+export async function switchProjectScope(projectKey = "") {
+  const key = String(projectKey || "").trim();
+  if (!key) return null;
+  return apiLegacy("/api/projects/switch", {
+    method: "POST",
+    body: JSON.stringify({ projectKey: key })
+  });
 }
 
 export function activeLockActionsHtml(lock) {

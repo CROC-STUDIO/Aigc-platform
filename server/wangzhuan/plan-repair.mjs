@@ -38,6 +38,9 @@ export const MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS = Object.freeze([
   "full_screen_coin_rain"
 ]);
 
+const DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR = "high-energy, fast-paced, emotionally expressive, contagious net-earning ad delivery; the speaker sounds excited, urgent, credible, and drives curiosity in every spoken beat";
+const DEFAULT_OPENING_HOOK_REPAIR = "first 1-2 seconds must start with a high-impact attention hook scene: visible reward feedback, top balance/reward counter rising, coin or cash burst, surprised human reaction, or withdrawal-success style proof visual before any slow explanation";
+
 function normalizeConversionEffect(effect = "") {
   const value = cleanString(effect).toLowerCase();
   const aliases = {
@@ -164,6 +167,23 @@ function normalizeSubtitleWorkflow(plan = {}, context = {}) {
   };
 }
 
+function localizedFallbackText(kind, language = "") {
+  const normalized = cleanString(language).toLowerCase();
+  if (normalized.startsWith("zh")) {
+    return kind === "ending" ? "继续按步骤体验" : "继续";
+  }
+  if (normalized.startsWith("id")) {
+    return kind === "ending" ? "Lanjutkan sesuai aturan aplikasi" : "Lanjutkan";
+  }
+  if (normalized.startsWith("pt")) {
+    return kind === "ending" ? "Continue seguindo as regras do app" : "Continuar";
+  }
+  if (normalized.startsWith("es")) {
+    return kind === "ending" ? "Continúa siguiendo las reglas de la app" : "Continuar";
+  }
+  return kind === "ending" ? "Continue following the app rules" : "Continue";
+}
+
 export function repairSeedancePromptContract(prompt, context = {}) {
   const targetLanguage = cleanString(context.targetLanguage);
   const targetRegion = cleanString(context.targetRegion);
@@ -171,15 +191,18 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   const currencyName = cleanString(context.currencyName);
   const localeIdentity = cleanString(context.localeIdentity);
   const characterDiversity = cleanString(context.characterDiversity);
+  const voiceoverPerformance = cleanString(context.voiceoverPerformance) || DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR;
+  const openingHookRepair = cleanString(context.openingHookRepair) || DEFAULT_OPENING_HOOK_REPAIR;
   const moneyVisuals = uniqueList(context.moneyVisuals);
   const effectOpportunities = normalizeConversionEffectOpportunities(context.conversionEffectOpportunities, context);
-  const isMandatoryMoneyVisualCarrier = Boolean(context.mandatoryMoneyVisualCarrier || context.isOpeningSlice);
+  const isOpeningSlice = Boolean(context.isOpeningSlice);
+  const isMandatoryMoneyVisualCarrier = Boolean(context.mandatoryMoneyVisualCarrier || isOpeningSlice);
   const forbiddenCurrencies = forbiddenCurrencyText(currencySymbol);
   const additions = [];
   let repaired = sanitizeMoneyAmounts(prompt, context);
 
   if (targetLanguage && !new RegExp(`targetLanguage\\s*=\\s*${escapeRegExp(targetLanguage)}|language must be ${escapeRegExp(targetLanguage)}|use target language ${escapeRegExp(targetLanguage)}`, "i").test(repaired)) {
-    additions.push(`Hard language lock: targetLanguage=${targetLanguage}; all voiceover, CTA, minimal UI microcopy, and visible text must use ${targetLanguage} only; do not mix source-video language or English defaults.`);
+    additions.push(`Hard language lock: targetLanguage=${targetLanguage}; all visible scene text, generated app/UI microcopy, subtitles/captions, CTA wording, voiceover, spoken dialogue, and audio direction must use ${targetLanguage} only. Do not show Chinese, English defaults, source-video language, or mixed-language text unless ${targetLanguage} explicitly requires it.`);
   }
   if (targetRegion && !new RegExp(`targetRegion\\s*=\\s*${escapeRegExp(targetRegion)}|targetRegion=${escapeRegExp(targetRegion)}|region ${escapeRegExp(targetRegion)}`, "i").test(repaired)) {
     additions.push(`Hard region lock: targetRegion=${targetRegion}; people, faces, clothing, homes, streets, phones, UI habits, and voice identity must match the target market.`);
@@ -196,8 +219,20 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   if (characterDiversity && !/Character diversity requirement|must visibly differ from adjacent slices|person, scene, clothing/i.test(repaired)) {
     additions.push(`Character diversity requirement for this slice: ${characterDiversity}. This slice must visibly differ from adjacent slices in person, scene, clothing, and camera setup.`);
   }
+  if (!/Voiceover performance repair|high-energy|fast-paced|emotionally expressive|contagious/i.test(repaired)) {
+    additions.push(`Voiceover performance repair: all spoken lines and audio direction for this slice must use ${voiceoverPerformance}; avoid slow, flat, neutral explanatory delivery.`);
+  }
+  if (isOpeningSlice && !/Opening hook repair|first 1-2 seconds|first two seconds|high-impact attention hook/i.test(repaired)) {
+    additions.push(`Opening hook repair: ${openingHookRepair}; do not begin with a slow walking setup or calm explanation.`);
+  }
   if (!/no burned subtitles|no captions|no dense text blocks/i.test(repaired)) {
     additions.push("Subtitle repair: no burned subtitles, no captions, no dense text blocks, no paragraph text; if visible text appears, keep only 1-3 short UI words in the target language.");
+  }
+  if (!/no gibberish|no pseudo-text|avoid AI-generated gibberish|real product screenshots/i.test(repaired)) {
+    additions.push("UI text repair: avoid AI-generated gibberish text, pseudo-letters, fake unreadable app UI, and dense generated screens; when a phone UI is needed, use approved product screenshots/reference assets or simple icon/button/progress visuals with only 1-3 short target-language words.");
+  }
+  if (!/no disclaimer text inside|post-production bottom overlay only|do not generate disclaimer/i.test(repaired)) {
+    additions.push("Disclaimer repair: do not generate disclaimer, policy, terms, legal, or long warning text inside Seedance frames; any disclaimer is added only by post-production bottom overlay, so keep the generated frame clean and readable.");
   }
   if (moneyVisuals.length || effectOpportunities.length) {
     const effectText = uniqueList([
@@ -206,7 +241,7 @@ export function repairSeedancePromptContract(prompt, context = {}) {
     ]).join(", ");
     if (effectText && !repaired.includes(effectText)) {
       if (isMandatoryMoneyVisualCarrier) {
-        additions.push(`Mandatory wangzhuan visual carrier repair: this slice is the final-video carrier for at least one visible high-attraction net-earning visual, such as real cash, coins, cash rain, coin burst, full-screen money rain, or full-screen coin rain. Carry these money/reward visual opportunities into the shot plan where natural: ${effectText}; intensity can vary by slice, but this final video must visibly include at least one high-attraction money visual; keep all amounts generic and currency-locked.`);
+        additions.push(`Mandatory wangzhuan visual carrier repair: this slice is the final-video carrier for at least one visible high-attraction net-earning visual, such as real cash, coins, cash rain, coin burst, full-screen money rain, or full-screen coin rain. Carry these money/reward visual opportunities into the shot plan where natural: ${effectText}; intensity can vary by slice, but this final video must visibly include at least one high-attraction money visual; when this is the opening slice, place the strongest visible effect in the first 0-3 seconds; keep all amounts generic and currency-locked.`);
       } else {
         additions.push(`Conversion visual repair: preserve only the observed or selected money/reward visual opportunities for this slice where natural: ${effectText}; do not force extra full-screen cash or coin effects here unless they fit this slice; keep all amounts generic and currency-locked.`);
       }
@@ -226,6 +261,7 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
   const currencyName = cleanString(plan.currencyName) || cleanString(context.currencyName);
   const localeIdentity = cleanString(plan.localeIdentity) || cleanString(context.localeIdentity);
   const sourceSlice = context.sourceSlice || {};
+  const isOpeningSlice = Boolean(context.isOpeningSlice || context.segmentIndex === 1 || plan.segmentIndex === 1);
   const sourceOpportunities = [
     ...normalizeConversionEffectOpportunities(sourceSlice.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
     ...normalizeConversionEffectOpportunities(plan.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
@@ -234,10 +270,10 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
   const sourceMoneyVisuals = sourceOpportunities
     .map((item) => conversionEffectToMoneyVisual(item.effect))
     .filter(Boolean);
-  const openingMoneyVisuals = context.isOpeningSlice && context.enableOpeningConversionEffects !== false
+  const openingMoneyVisuals = isOpeningSlice && context.enableOpeningConversionEffects !== false
     ? ["top_balance_growth", "continuous_earnings_rise", "real_cash_sound_cue"]
     : [];
-  const isMandatoryMoneyVisualCarrier = Boolean(context.mandatoryMoneyVisualCarrier ?? context.isOpeningSlice);
+  const isMandatoryMoneyVisualCarrier = Boolean(context.mandatoryMoneyVisualCarrier ?? isOpeningSlice);
   const mandatoryMoneyVisuals = context.disableMandatoryMoneyVisuals || !isMandatoryMoneyVisualCarrier
     ? []
     : MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS;
@@ -253,10 +289,12 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     ? normalizeStringList(plan.subtitles).slice(0, 2)
     : normalizeStringList(context.defaultSubtitles).slice(0, 2);
   const voiceover = cleanString(plan.voiceover) || subtitles.join(" ") || cleanString(context.defaultVoiceover);
+  const cta = cleanString(plan.cta) || cleanString(context.defaultCta) || localizedFallbackText("cta", targetLanguage);
+  const ending = cleanString(plan.ending) || cleanString(context.defaultEnding) || localizedFallbackText("ending", targetLanguage);
   const rawSliceDurationSec = Number.isFinite(Number(plan.sliceDurationSec))
     ? Number(plan.sliceDurationSec)
     : Number(context.sliceDurationSec || sourceSlice.durationSec || 15);
-  const sliceDurationSec = Math.max(8, Math.min(15, rawSliceDurationSec));
+  const sliceDurationSec = Math.max(5, Math.min(30, rawSliceDurationSec));
   const repairedOpportunities = normalizeConversionEffectOpportunities([
     ...sourceOpportunities,
     ...moneyVisuals.map((effect) => ({
@@ -278,6 +316,9 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     characterDiversity,
     moneyVisuals,
     conversionEffectOpportunities: repairedOpportunities,
+    isOpeningSlice,
+    voiceoverPerformance: cleanString(context.voiceoverPerformance) || cleanString(plan.voiceoverPerformance),
+    openingHookRepair: cleanString(context.openingHookRepair) || cleanString(plan.openingHookRepair),
     mandatoryMoneyVisualCarrier: isMandatoryMoneyVisualCarrier,
     truthRules: context.truthRules,
     allowExactMoneyAmounts: context.allowExactMoneyAmounts
@@ -289,6 +330,8 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     isMandatoryMoneyVisualCarrier
       ? "Repair applied: this slice carries the final-video requirement for at least one visible high-attraction wangzhuan visual such as real cash, coins, cash rain, coin burst, full-screen money rain, or full-screen coin rain."
       : "",
+    "Repair applied: voiceover must be high-energy, fast-paced, emotionally expressive, and contagious instead of slow neutral explanation.",
+    isOpeningSlice ? "Repair applied: opening slice must start with a high-impact hook scene in the first 1-2 seconds and front-load reward/cash/coin feedback where natural." : "",
     currencySymbol ? `Repair applied: money-related visuals must use ${currencySymbol} only and avoid exact payout amounts.` : "",
     "Repair applied: Seedance prompt must avoid burned subtitles; subtitle scripts remain post-process fields."
   ]);
@@ -303,6 +346,8 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     sliceDurationSec,
     subtitles,
     voiceover,
+    cta,
+    ending,
     seedancePrompt: repairedPrompt,
     moneyVisuals,
     withdrawalVisual: cleanString(plan.withdrawalVisual) || (hasWithdrawal ? `generic AI-generated withdrawal success visual using ${currencySymbol || "target currency"} symbol without exact amount` : ""),

@@ -42,3 +42,20 @@ test("invalid state transition responses expose transition detail", () => {
   );
   assert.deepEqual(payload.data, error.details);
 });
+
+test("known plain wangzhuan error codes are not downgraded to internal error", () => {
+  const res = new TestResponse();
+  const error = new Error("产品素材审核未通过");
+  error.code = "asset_review_pending";
+  error.data = {
+    failures: [{ assetKey: "productIcon", status: "pending" }]
+  };
+
+  sendErrorEnvelope(res, error, "req_asset");
+
+  const payload = JSON.parse(res.body);
+  assert.equal(res.statusCode, 409);
+  assert.equal(payload.code, "asset_review_pending");
+  assert.equal(payload.message, "产品素材审核未通过");
+  assert.deepEqual(payload.data, error.data);
+});
