@@ -26,12 +26,14 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   sourceVideoProfile: "裂变分析：整条参考视频的素材类型、主角/场景、产品露出方式、主要转化承诺与节奏概览",
   wholeVideoConversion: "裂变分析：整条视频的转化策略、核心转化语气、信任建立方式、奖励/提现证明和 CTA 承接",
   wholeVideoSummary: "裂变分析：先理解整条视频后给出的完整故事线摘要，不要直接按 UI/特效碎片拆段",
-  storySegments: "裂变分析：按真实叙事 beat 拆分；每段必须包含 scene/subject/action/camera/lighting/style/quality 七维以及 coreHook、explosivePoint、segmentPurpose、timelineItems、conversionSignals、conversionEffectOpportunities、sliceSplitHints",
+  storySegments: "裂变分析：按真实叙事 beat 拆分；每段必须包含数字 startSec/endSec/durationSec（单位秒，使用原视频时间轴，禁止所有段都写 0-15s），并包含 scene/subject/action/camera/lighting/style/quality 七维以及 coreHook、explosivePoint、segmentPurpose、timelineItems、conversionSignals、conversionEffectOpportunities、sliceSplitHints",
   timelineItems: "裂变分析：App UI、reward animation、cash/coin、subtitle/title、withdrawal、CTA overlay 等时间轴事件；除非改变叙事 beat，否则放在这里而不是新 storySegment",
   conversionSignals: "裂变分析：视频中真实观察到的提现成功、收益数字、情绪口播、现金金币反馈、快速奖励线索等转化信号",
   conversionEffectOpportunities: "裂变分析：可裂变放大的特效/反馈机会，与已观察到的 conversionSignals 分开记录",
-  sliceSplitHints: "裂变分析：Seedance 8-15s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现",
-  seedanceSlices: "裂变分析：可选的 Seedance 子段；字幕不烧录，字幕文本进入 subtitleWorkflow.subtitleScript 或 subtitles 供后处理"
+  openingHookIntensity: "裂变分析：前三秒吸引力强度，必须判断是否有强冲突、提现成功感、收益数字增长、金币/现金雨、金币爆发、满屏撒钱/撒金币、人物惊讶反应；如果参考视频开头偏慢，也要标注可裂变增强机会",
+  voiceoverPerformance: "裂变分析：人物口播的情绪、语速、感染力、能量水平和节奏；必须明确是高亢快节奏、平稳说明、疑虑转化还是弱口播，并说明后续裂变是否应增强",
+  sliceSplitHints: "裂变分析：Seedance 5-30s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现；当某个 storySegment 超过 15 秒时，必须给出可执行 splitSec 建议，供后端优先按较短相邻切片派生",
+  seedanceSlices: "裂变分析：可选输出的 Seedance 子段；如果模型能稳定给出可执行切片，则按 storySegments 顺序输出 seedanceSliceIndex/storySegmentIndex/startSec/endSec/durationSec/sliceDurationSec，单片 5-30 秒；若未输出，将由后端基于 storySegments + sliceSplitHints 自动派生；字幕不烧录，字幕文本进入 subtitleWorkflow.subtitleScript 或 subtitles 供后处理"
 });
 
 export const DECOMPOSITION_ANTI_GENERALIZATION_PHRASES = Object.freeze([
@@ -56,20 +58,32 @@ export const DECOMPOSITION_SYSTEM_PROMPT = [
   "有真人时必须推断或合理补全人物职业/身份，并写入 subject；有口播时必须按时间段细化 voiceover，并把关键口播功能同步写入 action。"
 ].join("\n");
 
+const CORE_DECOMPOSITION_FIELDS = ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"];
+const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
+const CONDENSED_OPTIONAL_FIELDS = ["phoneUi", "protagonist", "voiceover", "onscreenText", "ctaMoment", "endingMoment", "continuityAnchors", "actionReference", "cameraReference", "textElements", "effectReference", "doNotCopyElements", "rewardFeedback", "cta"];
+
+function pickSchemaHints(fields = []) {
+  return Object.fromEntries(fields.map((field) => [field, DECOMPOSITION_JSON_SCHEMA_HINT[field]]));
+}
+
 export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt) {
   const notes = String(request.knowledgeNotes || "").trim();
-  const requiredHint = Object.fromEntries(
-    ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"]
-      .map((field) => [field, DECOMPOSITION_JSON_SCHEMA_HINT[field]])
-  );
+  const requiredHint = pickSchemaHints([
+    ...CORE_DECOMPOSITION_FIELDS,
+    "storySegments",
+    "sliceSplitHints",
+    "seedanceSlices"
+  ]);
   return [
-    "上次拆解输出不完整或不是合法 JSON。请重新生成，只返回一个合法 JSON 对象。",
+    "请生成一个更紧凑、合法的 JSON 拆解结果；如果之前已有失败结果，以这次结果为准。",
     "",
     "【输出格式 — 强制 JSON】",
     "1. 只返回一个 JSON 对象，根层级直接是字段。",
     "2. 禁止 markdown、代码围栏、注释、解释性文字。",
-    "3. 必须包含且仅优先保证这 8 个字段：scene, subject, action, camera, lighting, style, quality, hook。",
-    "4. 若能判断，可额外附带简短 storySegments（每段含 scene/subject/action/camera/lighting/style/quality）。",
+    "3. 必须优先保证这 8 个字段：scene, subject, action, camera, lighting, style, quality, hook。",
+    "4. 必须输出 storySegments；每段必须包含数字 startSec、endSec、durationSec，以及 scene、subject、action、camera、lighting、style、quality。",
+    "5. 当某个 storySegment 超过 15 秒时，必须给出 sliceSplitHints，切点基于叙事转折，不要只因为字幕/UI/特效出现就切段。",
+    "6. seedanceSlices 可选；如果不输出，后端会基于 storySegments + sliceSplitHints 自动派生生成切片。",
     "",
     "参考视频信息：",
     videoProbePrompt(probe),
@@ -119,7 +133,14 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "Do not create a new story segment only because an app UI, reward animation, cash/coin effect, subtitle card, title card, withdrawal visual, or CTA overlay appears; keep these in timelineItems unless they change the narrative beat.",
     "Keep old fields scene/subject/action/camera/lighting/style/quality/hook for compatibility.",
     "If output storySegments, each segment includes seven dimensions: scene, subject, action, camera, lighting, style, quality.",
+    "storySegments timing is mandatory: each segment must include numeric startSec, endSec, durationSec in source-video seconds; segments must be chronological and non-overlapping.",
+    "storySegments are mandatory when using fission analysis: each segment must be executable on the source-video timeline.",
+    "If a storySegment is longer than 15 seconds, sliceSplitHints are mandatory: provide exact narrative splitSec suggestions such as claim -> proof, proof -> CTA, or setup -> payoff; never split only because UI/subtitle/effect appears.",
+    "seedanceSlices are optional: if you can output high-quality executable 5-30s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
     "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
+    "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
+    "Voiceover energy analysis: if there is human speaking, record emotion, speaking speed, rhythm, and infectiousness; mark whether fission should upgrade it to high-energy, fast-paced, emotionally expressive delivery.",
+    "Net-earning visual analysis:提现成功、收益数字增长、顶部余额快速增长、真钞、金币、现金雨、金币爆发、满屏撒钱/撒金币都必须进入 conversionSignals 或 conversionEffectOpportunities；不要只写 generic reward feedback。",
     ...FISSION_ANALYSIS_PROMPT_REQUIREMENTS.map((requirement, index) => `${index + 1}. ${requirement}`),
     "",
     "参考视频信息：",
@@ -128,7 +149,55 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     durationHint,
     "",
     "字段说明：",
-    JSON.stringify(DECOMPOSITION_JSON_SCHEMA_HINT, null, 2),
+    JSON.stringify(pickSchemaHints([
+      ...CORE_DECOMPOSITION_FIELDS,
+      ...DOWNSTREAM_CRITICAL_FIELDS
+    ]), null, 2),
+    "",
+    "其他可选字段（能观察到再填，保持简短但具体）：",
+    JSON.stringify(pickSchemaHints(CONDENSED_OPTIONAL_FIELDS), null, 2),
+    "",
+    "裂变 JSON 主结构最小示例：",
+    JSON.stringify({
+      sourceVideoProfile: {
+        durationSec: probe.durationSec || 0,
+        language: request.language || request.primaryLanguage || "",
+        region: request.targetRegion || "",
+        currencySymbol: request.currencySymbol || ""
+      },
+      wholeVideoConversion: {
+        coreConversionTone: "...",
+        mainPersuasionPath: "...",
+        globalRhythm: "..."
+      },
+      storySegments: [{
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 12,
+        durationSec: 12,
+        scene: "...",
+        subject: "...",
+        action: "...",
+        camera: "...",
+        lighting: "...",
+        style: "...",
+        quality: "...",
+        coreHook: "...",
+        explosivePoint: "...",
+        segmentPurpose: "...",
+        segmentConversionStyle: "...",
+        segmentRhythm: "...",
+        segmentStructureSkeleton: "...",
+        conversionSignals: {},
+        conversionEffectOpportunities: [],
+        openingHookIntensity: "...",
+        voiceoverPerformance: "...",
+        variableLayers: {},
+        timelineItems: [{ startSec: 0, endSec: 3, type: "...", content: "..." }],
+        sliceSplitHints: []
+      }],
+      seedanceSlices: []
+    }, null, 2),
     "",
     "Seedance decomposition dimensions:",
     "- actionReference = 动作参考：提炼人物/手部/手机操作/奖励反馈的可复用动作链。",
@@ -151,6 +220,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "7. protagonist/voiceover/onscreenText 能判断时必须填写；人物要有职业，口播要按段写功能与节奏。",
     "8. phoneUi/rewardFeedback/ctaMoment/endingMoment 能判断时必须填写具体 UI、按钮、数字、触发画面。",
     "9. continuityAnchors 必须总结后续裂变应保持一致的主角职业/外观、服装、地点、手机 UI 状态和最后关键帧。",
-    "10. 只返回 JSON 对象。"
+    "10. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-30s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
+    "11. 只返回 JSON 对象。"
   ].join("\n");
 }

@@ -195,6 +195,14 @@ export function createBackgroundJob(type, runner, options = {}) {
       pushEvent(job, { type: "succeeded", message: job.message });
       await queuePersist(context, job);
     } catch (error) {
+      try {
+        await options.onError?.({
+          error,
+          job: publicJob(job)
+        });
+      } catch (hookError) {
+        console.warn(`[background-jobs] onError hook failed for ${job.id}: ${hookError.message}`);
+      }
       job.status = "failed";
       job.progress = 100;
       job.message = "任务失败";

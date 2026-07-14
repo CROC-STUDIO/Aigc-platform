@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  switchProjectScope,
   workbenchFocusHash,
   workbenchHref
 } from "../../public/wangzhuan-common.js";
@@ -23,8 +24,12 @@ test("workbenchHref carries batch restore params and focus hash", () => {
     "/wangzhuan-v2.html?restore=1&batchId=wzb_20260626010101_abcd#wzNodeLog"
   );
   assert.equal(
-    workbenchHref("batch", "running", "wzb_20260626010101_abcd", { jobType: "plan", jobId: "planjob_1" }),
-    "/wangzhuan-v2.html?restore=1&batchId=wzb_20260626010101_abcd&jobType=plan&jobId=planjob_1#wzNodeLog"
+    workbenchHref("batch", "running", "wzb_20260626010101_abcd", {
+      jobType: "plan",
+      jobId: "planjob_1",
+      projectKey: "abc123"
+    }),
+    "/wangzhuan-v2.html?restore=1&batchId=wzb_20260626010101_abcd&projectKey=abc123&jobType=plan&jobId=planjob_1#wzNodeLog"
   );
 });
 
@@ -33,6 +38,24 @@ test("workbenchHref carries remix restore params", () => {
     workbenchHref("remix", "preview_required", "wzr_20260626010101_abcd"),
     "/competitor-remix.html?restore=1&remixId=wzr_20260626010101_abcd#remixNodeDelivery"
   );
+});
+
+test("switchProjectScope accepts the legacy project switch response", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, "/api/projects/switch");
+    assert.deepEqual(JSON.parse(options.body), { projectKey: "abc123" });
+    return new Response(JSON.stringify({ ok: true, baseProjectRoot: "/data/project-data/cwz" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  try {
+    const result = await switchProjectScope("abc123");
+    assert.equal(result.baseProjectRoot, "/data/project-data/cwz");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("workbenchHref without id keeps legacy hash-only links", () => {

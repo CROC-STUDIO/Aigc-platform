@@ -1,4 +1,4 @@
-import { WangzhuanApiError, isBatchQcRunnable, readWorkbenchRestoreRequest, strongTruthFields } from "./wangzhuan-common.js";
+import { WangzhuanApiError, isBatchQcRunnable, readWorkbenchRestoreRequest, strongTruthFields, switchProjectScope } from "./wangzhuan-common.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const signatureFields = [
@@ -52,7 +52,9 @@ const els = {
   branchTabs: $("#wzBranchTabs"),
   targetChannel: $("#wzTargetChannel"),
   targetRegion: $("#wzTargetRegion"),
+  targetRegionCustom: $("#wzTargetRegionCustom"),
   language: $("#wzLanguage"),
+  languageCustom: $("#wzLanguageCustom"),
   currencySymbol: $("#wzCurrencySymbol"),
   currencyCustom: $("#wzCurrencyCustom"),
   productName: $("#wzProductName"),
@@ -77,6 +79,18 @@ const els = {
   variantPrompt: $("#wzVariantPrompt"),
   customPrompt: $("#wzCustomPrompt"),
   negativePrompt: $("#wzNegativePrompt"),
+  postProcessEndingFile: $("#wzPostProcessEndingFile"),
+  postProcessSubtitles: $("#wzPostProcessSubtitles"),
+  subtitleFontSizeRange: $("#wzSubtitleFontSizeRange"),
+  subtitleFontSizeNumber: $("#wzSubtitleFontSizeNumber"),
+  subtitleCenterYRange: $("#wzSubtitleCenterYRange"),
+  subtitleCenterYNumber: $("#wzSubtitleCenterYNumber"),
+  postProcessEndingRemove: $("#wzPostProcessEndingRemove"),
+  postProcessEndingPreview: $("#wzPostProcessEndingPreview"),
+  expansionCustomWidth: $("#wzExpansionCustomWidth"),
+  expansionCustomHeight: $("#wzExpansionCustomHeight"),
+  expansionAddCustom: $("#wzExpansionAddCustom"),
+  expansionSelectedSizes: $("#wzExpansionSelectedSizes"),
   estimateBox: $("#wzEstimateBox"),
   confirmLimits: $("#wzConfirmLimits"),
   planLlmProvider: $("#wzPlanLlmProvider"),
@@ -141,6 +155,8 @@ const state = {
   productLibraryLoading: false,
   pendingAssetFiles: new Map(),
   disclaimerOverlayAsset: null,
+  postProcessEndingAsset: null,
+  expansionSizes: [],
   confirmPlanSubmitting: false,
   loggedTaskFailures: new Set()
 };
@@ -150,6 +166,8 @@ let batchPollNetworkErrorActive = false;
 const DECOMPOSITION_LLM_TIMEOUT_MS = 180_000;
 const GEMINI_DECOMPOSITION_TIMEOUT_MS = 300_000;
 const POLL_INTERVAL_MS = 1500;
+const POLL_RETRY_BASE_MS = 2_000;
+const POLL_RETRY_MAX_MS = 10_000;
 // 软超时：过了预期窗口不停止轮询，只降频继续查，直到后端真正返回终态。
 const SLOW_POLL_INTERVAL_MS = 5_000;
 const VISIBLE_LOG_LIMIT = 50;
@@ -223,6 +241,10 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzPlanLlmModel",
   "#wzPlanLlmEndpoint",
   "#wzPlanLlmTemperature",
+  "#wzSubtitleFontSizeRange",
+  "#wzSubtitleFontSizeNumber",
+  "#wzSubtitleCenterYRange",
+  "#wzSubtitleCenterYNumber",
   "#wzConfirmLimits",
   "#wzPlanBatchBtn",
   "#wzProductIconFile",
@@ -269,6 +291,14 @@ function currencyValue() {
   return value(els.currencySymbol) === "custom" ? value(els.currencyCustom) : value(els.currencySymbol);
 }
 
+function regionValue() {
+  return value(els.targetRegion) === "custom" ? value(els.targetRegionCustom) : value(els.targetRegion);
+}
+
+function languageValue() {
+  return value(els.language) === "custom" ? value(els.languageCustom) : value(els.language);
+}
+
 function effectiveMaterialDirection() {
   if (value(els.materialDirection) === "other") {
     return value(els.materialDirectionCustom) || "跟随竞品";
@@ -287,6 +317,42 @@ function setCurrencyValue(symbol = "$") {
     if (els.currencyCustom) els.currencyCustom.value = clean;
   }
   syncCurrencyCustom();
+}
+
+function setRegionValue(region = "US") {
+  const clean = String(region || "US").trim() || "US";
+  const option = [...(els.targetRegion?.options || [])].find((item) => item.value === clean);
+  if (option) {
+    els.targetRegion.value = clean;
+    if (els.targetRegionCustom) els.targetRegionCustom.value = "";
+  } else {
+    els.targetRegion.value = "custom";
+    if (els.targetRegionCustom) els.targetRegionCustom.value = clean;
+  }
+  syncRegionCustom();
+}
+
+function setLanguageValue(language = "en-US") {
+  const clean = String(language || "en-US").trim() || "en-US";
+  const option = [...(els.language?.options || [])].find((item) => item.value === clean);
+  if (option) {
+    els.language.value = clean;
+    if (els.languageCustom) els.languageCustom.value = "";
+  } else {
+    els.language.value = "custom";
+    if (els.languageCustom) els.languageCustom.value = clean;
+  }
+  syncLanguageCustom();
+}
+
+function syncRegionCustom() {
+  const wrap = $("#wzTargetRegionCustomWrap");
+  if (wrap) wrap.hidden = value(els.targetRegion) !== "custom";
+}
+
+function syncLanguageCustom() {
+  const wrap = $("#wzLanguageCustomWrap");
+  if (wrap) wrap.hidden = value(els.language) !== "custom";
 }
 
 function syncCurrencyCustom() {
@@ -530,10 +596,41 @@ function activeBranch() {
   return state.branchDraft;
 }
 
+function formatAssetReviewFailure(item = {}) {
+  const branch = item.branchLabel || item.branchId || "默认分支";
+  const file = item.fileName || item.assetKey || "未命名素材";
+  const status = item.status || "pending";
+  const reason = item.reason || item.reviewReason || (item.assetId ? "等待审核完成" : "缺少 Seedance assetId");
+  return `${branch} / ${item.assetKey || "asset"} / ${file}：${status}，${reason}`;
+}
+
+function formatAssetReviewErrorDetails(error = {}) {
+  if (error?.code !== "asset_review_pending") return "";
+  const failures = Array.isArray(error.data?.failures) ? error.data.failures : [];
+  if (failures.length) {
+    return `\n未通过素材：\n${failures.map((item, index) => `${index + 1}. ${formatAssetReviewFailure(item)}`).join("\n")}`;
+  }
+  const assetsByBranch = Array.isArray(error.data?.assetsByBranch) ? error.data.assetsByBranch : [];
+  const pendingAssets = assetsByBranch.flatMap((branch) => (Array.isArray(branch.assets) ? branch.assets : [])
+    .filter((asset) => !isAssetReviewApproved(asset.status))
+    .map((asset) => formatAssetReviewFailure({
+      ...asset,
+      branchId: branch.branchId,
+      branchLabel: branch.branchLabel,
+      assetKey: asset.key,
+      fileName: asset.fileName,
+      reason: asset.reason
+    })));
+  return pendingAssets.length
+    ? `\n未通过素材：\n${pendingAssets.map((text, index) => `${index + 1}. ${text}`).join("\n")}`
+    : "";
+}
+
 function showError(error, title = "操作失败") {
   const message = error?.message || String(error || "未知错误");
   const requestId = String(error?.requestId || "").trim();
-  const detail = requestId ? `${message}（requestId: ${requestId}）` : message;
+  const extra = formatAssetReviewErrorDetails(error);
+  const detail = `${message}${extra}${requestId ? `\nrequestId: ${requestId}` : ""}`;
   if (els.globalError) {
     els.globalError.hidden = false;
     els.globalError.textContent = `${title}：${detail}`;
@@ -582,14 +679,105 @@ function stableJson(value) {
 
 async function sha256Hex(text) {
   const bytes = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return sha256BytesHex(bytes);
 }
 
 async function fileSha256Hex(file) {
   const bytes = await file.arrayBuffer();
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return sha256BytesHex(bytes);
+}
+
+async function sha256BytesHex(bytes) {
+  if (globalThis.crypto?.subtle?.digest) {
+    const hash = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    return hexFromBytes(new Uint8Array(hash));
+  }
+  return sha256BytesHexFallback(new Uint8Array(bytes));
+}
+
+function hexFromBytes(bytes) {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function rotateRight32(value, bits) {
+  return (value >>> bits) | (value << (32 - bits));
+}
+
+function sha256BytesHexFallback(inputBytes) {
+  const constants = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  const hashWords = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+  const bitLength = inputBytes.length * 8;
+  const paddedLength = (((inputBytes.length + 9 + 63) >> 6) << 6);
+  const padded = new Uint8Array(paddedLength);
+  padded.set(inputBytes);
+  padded[inputBytes.length] = 0x80;
+  const dataView = new DataView(padded.buffer);
+  dataView.setUint32(paddedLength - 8, Math.floor(bitLength / 0x100000000), false);
+  dataView.setUint32(paddedLength - 4, bitLength >>> 0, false);
+
+  const messageSchedule = new Uint32Array(64);
+  for (let chunkOffset = 0; chunkOffset < paddedLength; chunkOffset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      messageSchedule[index] = dataView.getUint32(chunkOffset + index * 4, false);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const smallSigma0 = rotateRight32(messageSchedule[index - 15], 7) ^ rotateRight32(messageSchedule[index - 15], 18) ^ (messageSchedule[index - 15] >>> 3);
+      const smallSigma1 = rotateRight32(messageSchedule[index - 2], 17) ^ rotateRight32(messageSchedule[index - 2], 19) ^ (messageSchedule[index - 2] >>> 10);
+      messageSchedule[index] = (messageSchedule[index - 16] + smallSigma0 + messageSchedule[index - 7] + smallSigma1) >>> 0;
+    }
+
+    let wordA = hashWords[0];
+    let wordB = hashWords[1];
+    let wordC = hashWords[2];
+    let wordD = hashWords[3];
+    let wordE = hashWords[4];
+    let wordF = hashWords[5];
+    let wordG = hashWords[6];
+    let wordH = hashWords[7];
+
+    for (let index = 0; index < 64; index += 1) {
+      const bigSigma1 = rotateRight32(wordE, 6) ^ rotateRight32(wordE, 11) ^ rotateRight32(wordE, 25);
+      const choice = (wordE & wordF) ^ (~wordE & wordG);
+      const temp1 = (wordH + bigSigma1 + choice + constants[index] + messageSchedule[index]) >>> 0;
+      const bigSigma0 = rotateRight32(wordA, 2) ^ rotateRight32(wordA, 13) ^ rotateRight32(wordA, 22);
+      const majority = (wordA & wordB) ^ (wordA & wordC) ^ (wordB & wordC);
+      const temp2 = (bigSigma0 + majority) >>> 0;
+      wordH = wordG;
+      wordG = wordF;
+      wordF = wordE;
+      wordE = (wordD + temp1) >>> 0;
+      wordD = wordC;
+      wordC = wordB;
+      wordB = wordA;
+      wordA = (temp1 + temp2) >>> 0;
+    }
+
+    hashWords[0] = (hashWords[0] + wordA) >>> 0;
+    hashWords[1] = (hashWords[1] + wordB) >>> 0;
+    hashWords[2] = (hashWords[2] + wordC) >>> 0;
+    hashWords[3] = (hashWords[3] + wordD) >>> 0;
+    hashWords[4] = (hashWords[4] + wordE) >>> 0;
+    hashWords[5] = (hashWords[5] + wordF) >>> 0;
+    hashWords[6] = (hashWords[6] + wordG) >>> 0;
+    hashWords[7] = (hashWords[7] + wordH) >>> 0;
+  }
+
+  const output = new Uint8Array(32);
+  const outputView = new DataView(output.buffer);
+  hashWords.forEach((word, index) => outputView.setUint32(index * 4, word, false));
+  return hexFromBytes(output);
 }
 
 async function clientPlanDraftSignature(input = planSignatureInput()) {
@@ -693,13 +881,26 @@ function referenceVideoPreviewUrl(referenceVideo = {}) {
     || "";
 }
 
+function disclaimerPresetForLanguage(language = "") {
+  const normalized = String(language || "").trim().toLowerCase();
+  if (normalized.startsWith("pt")) return "pt";
+  if (normalized.startsWith("zh") || normalized.includes("chinese")) return "zh";
+  if (normalized.startsWith("ar")) return "ar";
+  if (normalized.startsWith("es")) return "es";
+  if (normalized.startsWith("fr")) return "fr";
+  if (normalized.startsWith("de")) return "de";
+  if (normalized.startsWith("id")) return "id";
+  if (normalized.startsWith("th")) return "th";
+  if (normalized.startsWith("vi")) return "vi";
+  return "en";
+}
+
 function disclaimerTemplateUrl(preset = "auto", language = "") {
-  let key = String(preset || "auto").trim();
-  if (key === "auto") {
-    const normalized = String(language || "").trim().toLowerCase();
-    key = normalized.startsWith("pt") ? "pt" : (normalized.startsWith("zh") || normalized.includes("chinese") ? "zh" : "en");
-  }
-  return ["en", "pt", "zh"].includes(key) ? `/assets/wangzhuan/disclaimers/${key}.png` : "";
+  const selected = String(preset || "auto").trim();
+  const key = selected === "auto" ? disclaimerPresetForLanguage(language) : selected;
+  return ["en", "pt", "zh", "ar", "es", "fr", "de", "id", "th", "vi"].includes(key)
+    ? `/assets/wangzhuan/disclaimers/${key}.png`
+    : "";
 }
 
 function disclaimerOverlayAssetFromState() {
@@ -711,13 +912,134 @@ function renderDisclaimerOverlayPreview() {
   if (!box) return;
   const asset = disclaimerOverlayAssetFromState();
   const preset = value($("#wzDisclaimerPreset")) || "auto";
-  const url = asset.previewUrl || asset.storageUrl || fileUrlFromStoredPath(asset.storedPath) || disclaimerTemplateUrl(preset, value(els.language));
+  const url = asset.previewUrl || asset.storageUrl || fileUrlFromStoredPath(asset.storedPath) || disclaimerTemplateUrl(preset, languageValue());
   const label = asset.fileName ? `已上传：${escapeHtml(asset.fileName)}` : "使用内置透明 PNG 模板";
   if (!url) {
     box.textContent = "请选择内置模板或上传透明 PNG。";
     return;
   }
   box.innerHTML = `<span>${label}</span><img src="${escapeHtml(url)}" alt="免责声明贴片预览" style="display:block;width:min(100%,360px);height:auto;margin-top:6px;background:#222;" />`;
+}
+
+function normalizeExpansionSize(width, height) {
+  const targetWidth = Number(width);
+  const targetHeight = Number(height);
+  if (!Number.isInteger(targetWidth) || !Number.isInteger(targetHeight)
+    || targetWidth < 256 || targetHeight < 256
+    || targetWidth > 4096 || targetHeight > 4096
+    || targetWidth % 2 || targetHeight % 2) {
+    throw new Error("扩展尺寸的宽高必须是 256-4096 之间的偶数");
+  }
+  return { targetWidth, targetHeight, sizeKey: `${targetWidth}x${targetHeight}` };
+}
+
+function addExpansionSize(width, height) {
+  const next = normalizeExpansionSize(width, height);
+  if (!state.expansionSizes.some((item) => item.sizeKey === next.sizeKey)) {
+    state.expansionSizes.push(next);
+  }
+  renderExpansionSizes();
+}
+
+function removeExpansionSize(sizeKey) {
+  state.expansionSizes = state.expansionSizes.filter((item) => item.sizeKey !== sizeKey);
+  renderExpansionSizes();
+}
+
+function renderExpansionSizes() {
+  const selected = new Set(state.expansionSizes.map((item) => item.sizeKey));
+  for (const input of document.querySelectorAll("[data-expansion-preset]")) {
+    input.checked = selected.has(input.dataset.expansionPreset || "");
+  }
+  if (!els.expansionSelectedSizes) return;
+  if (!state.expansionSizes.length) {
+    els.expansionSelectedSizes.classList.add("empty-line");
+    els.expansionSelectedSizes.textContent = "未选择扩展尺寸";
+    return;
+  }
+  els.expansionSelectedSizes.classList.remove("empty-line");
+  els.expansionSelectedSizes.innerHTML = state.expansionSizes.map((item) => `
+    <span>${escapeHtml(item.sizeKey)}<button type="button" aria-label="移除 ${escapeHtml(item.sizeKey)}" data-remove-expansion-size="${escapeHtml(item.sizeKey)}">×</button></span>
+  `).join("");
+}
+
+function renderPostProcessEndingPreview() {
+  if (!els.postProcessEndingPreview) return;
+  const asset = state.postProcessEndingAsset || {};
+  const url = asset.previewUrl || asset.storageUrl || fileUrlFromStoredPath(asset.storedPath);
+  if (!asset.fileName || !url) {
+    els.postProcessEndingPreview.classList.add("empty-line");
+    els.postProcessEndingPreview.textContent = "未添加 Ending";
+    if (els.postProcessEndingRemove) els.postProcessEndingRemove.hidden = true;
+    return;
+  }
+  const media = asset.mediaType === "video"
+    ? `<video src="${escapeHtml(url)}" controls playsinline preload="metadata"></video>`
+    : `<img src="${escapeHtml(url)}" alt="追加 Ending 预览" />`;
+  els.postProcessEndingPreview.classList.remove("empty-line");
+  els.postProcessEndingPreview.innerHTML = `<span>${escapeHtml(asset.fileName)}</span>${media}`;
+  if (els.postProcessEndingRemove) els.postProcessEndingRemove.hidden = false;
+}
+
+function postProcessRequestFields() {
+  return {
+    ending: state.postProcessEndingAsset ? { ...state.postProcessEndingAsset, enabled: true, imageDurationSec: 1 } : null,
+    subtitles: {
+      enabled: els.postProcessSubtitles?.checked !== false,
+      fontSize: Number(els.subtitleFontSizeNumber?.value || 30),
+      centerY: Number(els.subtitleCenterYNumber?.value || 1140)
+    },
+    expansionSizes: state.expansionSizes.map(({ targetWidth, targetHeight }) => ({ targetWidth, targetHeight }))
+  };
+}
+
+function subtitleControlValue(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function syncSubtitleStyleControls(settings = {}, changed = null) {
+  const fontSource = changed === els.subtitleFontSizeRange || changed === els.subtitleFontSizeNumber
+    ? changed.value
+    : settings.fontSize ?? els.subtitleFontSizeNumber?.value ?? 30;
+  const centerYSource = changed === els.subtitleCenterYRange || changed === els.subtitleCenterYNumber
+    ? changed.value
+    : settings.centerY ?? els.subtitleCenterYNumber?.value ?? 1140;
+  const fontSize = subtitleControlValue(fontSource, 12, 96, 30);
+  const centerY = subtitleControlValue(centerYSource, 0, 1280, 1140);
+  for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber]) {
+    if (control) control.value = String(fontSize);
+  }
+  for (const control of [els.subtitleCenterYRange, els.subtitleCenterYNumber]) {
+    if (control) control.value = String(centerY);
+  }
+  const disabled = els.postProcessSubtitles?.checked === false;
+  for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber, els.subtitleCenterYRange, els.subtitleCenterYNumber]) {
+    if (control) control.disabled = disabled;
+  }
+}
+
+async function uploadPostProcessEnding() {
+  const file = els.postProcessEndingFile?.files?.[0];
+  if (!file) return;
+  const content = await fileToDataUrl(file);
+  const data = await api("/api/wangzhuan/postprocess-assets/ending", {
+    method: "POST",
+    body: JSON.stringify({ fileName: file.name, mimeType: file.type || "application/octet-stream", content })
+  });
+  state.postProcessEndingAsset = data.asset || null;
+  if (els.postProcessEndingFile) els.postProcessEndingFile.value = "";
+  renderPostProcessEndingPreview();
+  renderTasks();
+  log("成片 Ending 已上传");
+}
+
+function removePostProcessEnding() {
+  state.postProcessEndingAsset = null;
+  if (els.postProcessEndingFile) els.postProcessEndingFile.value = "";
+  renderPostProcessEndingPreview();
+  renderTasks();
 }
 
 function describeReferenceVideo(referenceVideo = {}) {
@@ -811,7 +1133,7 @@ function removeBranchAssetEntry(entryKey) {
 }
 
 function disclaimerRequestFields() {
-  const language = value(els.language) || "en-US";
+  const language = languageValue() || "en-US";
   const preset = value($("#wzDisclaimerPreset")) || "auto";
   const enabled = $("#wzDisclaimerEnabled")?.checked !== false;
   const asset = disclaimerOverlayAssetFromState();
@@ -838,8 +1160,8 @@ function disclaimerRequestFields() {
 }
 
 function collectCurrentBranchDraft() {
-  const region = value(els.targetRegion);
-  const language = value(els.language);
+  const region = regionValue();
+  const language = languageValue();
   const branch = activeBranch();
   return {
     ...branch,
@@ -912,8 +1234,8 @@ function loadBranchToForm(branch = activeBranch()) {
   els.ending.value = branch.ending || "";
   setCurrencyValue(branch.currencySymbol || "$");
   els.targetChannel.value = branch.targetChannel || branch.targetChannels?.[0] || "meta_ads";
-  els.targetRegion.value = branch.targetRegion || branch.targetRegions?.[0] || branch.regions?.[0] || "US";
-  els.language.value = branch.language || branch.languages?.[0] || "en-US";
+  setRegionValue(branch.targetRegion || branch.targetRegions?.[0] || branch.regions?.[0] || "US");
+  setLanguageValue(branch.language || branch.languages?.[0] || "en-US");
   els.duration.value = String(branch.targetSegmentCount || FOLLOW_DECOMPOSITION_SEGMENT_COUNT);
   els.outputRatio.value = branch.defaultOutputRatio || "9:16";
   els.promiseLevel.value = branch.promiseLevel || "strong_conversion";
@@ -1015,6 +1337,7 @@ function restoreV2FromBatchDetail(detail = {}) {
   if (!batch?.batchId) return false;
   const draft = draftFromBatch(batch);
   const request = batch.request || batch.estimate?.request || {};
+  const postProcess = request.postProcess || draft.postProcess || {};
   const referenceVideo = referenceVideoFromBatch(batch);
   if (referenceVideo?.referenceVideoId) {
     state.referenceVideo = referenceVideo;
@@ -1052,6 +1375,22 @@ function restoreV2FromBatchDetail(detail = {}) {
   syncSeedanceModel();
   if (request.variantCount && els.variantCount) els.variantCount.value = String(request.variantCount);
   if (request.requestedConcurrency && els.requestedConcurrency) els.requestedConcurrency.value = String(request.requestedConcurrency);
+  state.postProcessEndingAsset = postProcess.ending || null;
+  if (els.postProcessSubtitles) els.postProcessSubtitles.checked = postProcess.subtitles?.enabled !== false;
+  syncSubtitleStyleControls({
+    fontSize: postProcess.subtitles?.fontSize ?? 30,
+    centerY: postProcess.subtitles?.centerY ?? 1140
+  });
+  state.expansionSizes = [];
+  for (const item of Array.isArray(postProcess.expansionSizes) ? postProcess.expansionSizes : []) {
+    try {
+      addExpansionSize(item.targetWidth ?? item.width, item.targetHeight ?? item.height);
+    } catch {
+      // Ignore stale invalid dimensions while restoring an older draft.
+    }
+  }
+  renderPostProcessEndingPreview();
+  renderExpansionSizes();
   if (batch.draftSignature) state.draftSignature = batch.draftSignature;
   state.rewriteConfirmed = restoreRewriteConfirmedFromBatch(batch);
   state.stalePlanPreview = false;
@@ -1166,10 +1505,10 @@ function currentDraft() {
     productLink: primary.productLink || value(els.productLink),
     currencySymbol: primary.currencySymbol || currencyValue() || "$",
     targetChannels: [value(els.targetChannel) || "meta_ads"],
-    targetRegions: [value(els.targetRegion) || "US"],
-    regions: [value(els.targetRegion) || "US"],
-    language: value(els.language) || "en-US",
-    languages: [value(els.language) || "en-US"],
+    targetRegions: [regionValue() || "US"],
+    regions: [regionValue() || "US"],
+    language: languageValue() || "en-US",
+    languages: [languageValue() || "en-US"],
     materialDirection: effectiveMaterialDirection(),
     materialDirectionCustom: value(els.materialDirectionCustom),
     outputTemplateMode: AUTO_OUTPUT_TEMPLATE_MODE,
@@ -1486,7 +1825,7 @@ function renderPlanEditors(plans = []) {
       <label>首帧 Image Prompt <textarea data-plan-field="imagePrompt" class="wz-json-box compact">${escapeHtml(plan.imagePrompt || "")}</textarea></label>
       <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
       <label>切片角色 <input data-plan-field="segmentRole" value="${escapeHtml(plan.segmentRole || "")}" placeholder="hook_slice / proof_slice / withdrawal_slice" /></label>
-      <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="10" max="15" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
+      <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="5" max="30" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
       <label>Story Segment <input data-plan-field="storySegmentIndex" type="number" min="1" value="${escapeHtml(plan.storySegmentIndex || "")}" /></label>
       <label>Seedance Slice <input data-plan-field="seedanceSliceIndex" type="number" min="1" value="${escapeHtml(plan.seedanceSliceIndex || "")}" /></label>
       <label>拆解决定模板 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="reference_fission" readonly /></label>
@@ -1504,12 +1843,10 @@ function renderPlanEditors(plans = []) {
   `).join("")}`;
 }
 
-function hasGeneratedSeedancePlan(batch = state.batchDetail?.batch || state.batchDetail || {}) {
-  const plans = Array.isArray(batch?.plans) ? batch.plans : [];
-  const batchStatus = String(batch?.status || "").trim();
-  return plans.length > 0
-    || ["queued", "running", "stitching", "qc", "partial_failed", "succeeded", "failed", "stopped", "skipped"].includes(batchStatus)
-    || ["running", "succeeded"].includes(state.planJob?.status);
+function hasConfirmedVideoGeneration(batch = state.batchDetail?.batch || state.batchDetail || {}) {
+  if (batch?.previewConfirmedAt) return true;
+  const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
+  return tasks.some((task) => task?.status && task.status !== "pending_preview");
 }
 
 function setPlanUpstreamLocked(locked) {
@@ -1646,14 +1983,48 @@ async function uploadReferenceVideo() {
   if (!file) return;
   const localUrl = URL.createObjectURL(file);
   renderVideoPreview(localUrl);
-  els.referenceUploadStatus.textContent = "正在上传并检查参考视频...";
+  els.referenceUploadStatus.textContent = "正在计算文件指纹...";
+  log(`参考视频已选择，正在上传：${file.name || "未命名视频"}`);
+  renderTasks();
   try {
     const fileHash = await fileSha256Hex(file);
+    els.referenceUploadStatus.textContent = "正在检查是否可复用已有参考视频...";
+    const reuse = await api("/api/wangzhuan/reference-videos/reuse-check", {
+      method: "POST",
+      body: JSON.stringify({
+        fileHash,
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size
+      })
+    });
+    if (reuse?.hit && reuse.referenceVideo) {
+      state.referenceVideo = reuse.referenceVideo;
+      resetDecompositionDraft({ clearForm: true });
+      ensureBatchName();
+      renderVideoPreview(state.referenceVideo.previewUrl || localUrl);
+      els.referenceUploadStatus.textContent = "已复用已有参考视频";
+      els.referenceBox.textContent = `${state.referenceVideo.referenceVideoId} · ${state.referenceVideo.durationSec || "-"}s · ${state.referenceVideo.ratio || "-"}`;
+      els.draftDecompositionBtn.disabled = false;
+      renderTasks();
+      log(`参考视频已复用：${state.referenceVideo.referenceVideoId}`);
+      startDecompositionJob().catch((error) => {
+        els.decompositionStatus.hidden = false;
+        els.decompositionStatus.textContent = `自动启动拆解失败：${error.message}`;
+        log(`自动启动拆解失败：${error.message}`);
+        renderTasks();
+      });
+      return;
+    }
+
+    els.referenceUploadStatus.textContent = "正在上传参考视频...";
     const form = new FormData();
     form.append("file", file, file.name);
     form.append("fileName", file.name);
     form.append("mimeType", file.type || "application/octet-stream");
     form.append("fileHash", fileHash);
+    form.append("sizeBytes", String(file.size || 0));
+    els.referenceUploadStatus.textContent = "正在上传并检查参考视频...";
     const data = await api("/api/wangzhuan/reference-videos/check", {
       method: "POST",
       headers: {},
@@ -1810,8 +2181,8 @@ function assertSeedanceReferenceAssetLimit(branches = collectBranchDrafts()) {
 }
 
 function planSignatureInput() {
-  const region = value(els.targetRegion);
-  const language = value(els.language);
+  const region = regionValue();
+  const language = languageValue();
   const branches = collectBranchDrafts();
   const active = branches[state.activeBranchIndex] || branches[0] || {};
   return {
@@ -1852,8 +2223,8 @@ function planSignatureInput() {
 }
 
 function estimateRequest() {
-  const region = value(els.targetRegion);
-  const language = value(els.language);
+  const region = regionValue();
+  const language = languageValue();
   const disclaimerFields = disclaimerRequestFields();
   const branches = collectBranchDrafts();
   const active = branches[state.activeBranchIndex] || branches[0] || {};
@@ -1876,6 +2247,7 @@ function estimateRequest() {
     outputRatio: value(els.outputRatio),
     seedanceModel: selectedSeedanceModel(),
     decomposition: currentDecomposition(),
+    postProcess: postProcessRequestFields(),
     ...disclaimerFields,
     templateSnapshot: {
       draft: {
@@ -1906,6 +2278,7 @@ function estimateRequest() {
         defaultDurationSec: compatibleDurationSecValue(),
         defaultOutputRatio: value(els.outputRatio) || "9:16",
         seedanceModel: selectedSeedanceModel(),
+        postProcess: postProcessRequestFields(),
         ...disclaimerFields,
         branches
       }
@@ -2064,18 +2437,21 @@ function renderTasks() {
     </div>
   `).join("");
   els.planStaleNotice.hidden = !state.stalePlanPreview;
-  const planUpstreamLocked = hasGeneratedSeedancePlan(batch);
+  const planUpstreamLocked = hasConfirmedVideoGeneration(batch);
   setPlanUpstreamLocked(planUpstreamLocked);
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
+  const planJobRunning = ["queued", "running"].includes(state.planJob?.status);
   const codexTestRunning = ["queued", "running"].includes(state.codexPromptTestJob?.status);
   const planBlockedByRewrite = !state.rewriteConfirmed;
   const planBlockedByDecomposition = !decompositionReady;
   const planDisabled = planRetryable
     ? false
-    : (planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
+    : (planJobRunning || planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
   els.planBatchBtn.disabled = planDisabled;
   if (planRetryable) {
     els.planBatchBtn.title = "后台任务可能仍在运行，可重试查询 prompt 结果";
+  } else if (planJobRunning) {
+    els.planBatchBtn.title = state.planJob?.message || "Seedance prompt 正在生成";
   } else if (codexTestRunning) {
     els.planBatchBtn.title = "测试版 Seedance prompt 正在生成，请等待完成后再走正式生成";
   } else if (state.stalePlanPreview) {
@@ -2244,6 +2620,18 @@ function retryableJobMessage(type, detail = "") {
   return cleanDetail
     ? `${prefix}，后台任务可能仍在运行，可重试查询。原因：${cleanDetail}`
     : `${prefix}，后台任务可能仍在运行，可重试查询。`;
+}
+
+function isRecoverableJobPollError(error) {
+  const status = Number(error?.status || 0);
+  return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+function pollRetryDelayMs(consecutiveFailures) {
+  const exponent = Math.max(0, Math.min(3, Number(consecutiveFailures || 1) - 1));
+  const delay = POLL_RETRY_BASE_MS * (2 ** exponent);
+  const jitter = Math.floor(Math.random() * 500);
+  return Math.min(POLL_RETRY_MAX_MS, delay + jitter);
 }
 
 function taskFailureHint(task = {}) {
@@ -2648,10 +3036,11 @@ async function startDecompositionJob() {
     method: "POST",
     body: JSON.stringify({
       referenceVideoId: state.referenceVideo.referenceVideoId,
+      batchId: currentBatchId() || undefined,
       fileHash: state.referenceVideo.fileHash || "",
-      language: value(els.language),
-      targetRegion: value(els.targetRegion),
-      targetRegions: [value(els.targetRegion)].filter(Boolean),
+      language: languageValue(),
+      targetRegion: regionValue(),
+      targetRegions: [regionValue()].filter(Boolean),
       knowledgeNotes: value($("#wzKnowledgeNotes")),
       llmConfig: {
         provider: value($("#wzLlmProvider")),
@@ -2703,7 +3092,6 @@ async function startPlanJob() {
   state.draftSignature = job.draftSignature;
   state.stalePlanPreview = false;
   log("Seedance prompt 任务已提交");
-  setPlanUpstreamLocked(true);
   renderTasks();
   pollJob("plan", job.planJobId);
 }
@@ -2794,6 +3182,7 @@ async function pollJob(type, jobId, options = {}) {
   const softTimeoutMs = type === "decomposition" ? (options.timeoutMs || decompositionJobTimeoutWindowMs()) : 0;
   let stopped = false;
   let slowNoticeShown = false;
+  let consecutivePollFailures = 0;
   let timer = null;
 
   const stop = () => {
@@ -2815,6 +3204,10 @@ async function pollJob(type, jobId, options = {}) {
     }
     try {
       const job = await api(path);
+      if (consecutivePollFailures > 0) {
+        log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}查询已恢复`);
+        consecutivePollFailures = 0;
+      }
       if (type === "decomposition") state.decompositionJob = job;
       if (type === "plan") state.planJob = job;
       if (job.status === "succeeded") {
@@ -2822,7 +3215,7 @@ async function pollJob(type, jobId, options = {}) {
         if (type === "decomposition") {
           state.decompositionDraft = job.decomposition || {};
           renderDecompositionForm(state.decompositionDraft, { preserveUserInput: true });
-          els.draftDecompositionBtn.disabled = hasGeneratedSeedancePlan();
+          els.draftDecompositionBtn.disabled = hasConfirmedVideoGeneration();
           els.decompositionStatus.hidden = false;
           els.decompositionStatus.textContent = state.decompositionEditedFields.size
             ? "AI 结果可用，已回填未手动编辑字段，后续估算会直接读取当前表单；如需调整，可重新拆解。"
@@ -2831,11 +3224,24 @@ async function pollJob(type, jobId, options = {}) {
             els.decompositionStatus.textContent = "命中拆解缓存，已快速回填到页面；如需调整，可重新拆解。";
           }
         } else {
-          state.batchDetail = job.batch;
-          state.draftSignature = job.draftSignature;
-          renderPlanEditors(job.plans || []);
+          const plans = Array.isArray(job.plans) && job.plans.length
+            ? job.plans
+            : (Array.isArray(job.batch?.plans) ? job.batch.plans : []);
+          if (job.batch) {
+            state.batchDetail = {
+              ...(state.batchDetail && typeof state.batchDetail === "object" ? state.batchDetail : {}),
+              batch: {
+                ...job.batch,
+                plans: plans.length ? plans : (job.batch.plans || [])
+              }
+            };
+          }
+          state.draftSignature = job.draftSignature || state.draftSignature;
+          state.stalePlanPreview = state.draftSignature !== await clientPlanDraftSignature();
+          renderPlanEditors(plans);
         }
         log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}完成`);
+        renderTasks();
         return;
       }
       if (job.status === "failed") {
@@ -2851,11 +3257,31 @@ async function pollJob(type, jobId, options = {}) {
       renderTasks();
       schedule(overSoftWindow ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     } catch (error) {
-      stop();
-      markBackgroundJobPollFailure(type, error.message, {
-        code: error.code || "job_poll_failed",
-        jobId
-      });
+      if (!isRecoverableJobPollError(error)) {
+        stop();
+        markBackgroundJobPollFailure(type, error.message, {
+          code: error.code || "job_poll_failed",
+          jobId
+        });
+        return;
+      }
+      consecutivePollFailures += 1;
+      const label = type === "decomposition" ? "AI 拆解" : "Seedance prompt";
+      const message = `${label}查询暂时断开，正在自动重试（第 ${consecutivePollFailures} 次）`;
+      const existing = type === "decomposition" ? state.decompositionJob : state.planJob;
+      const retryingJob = {
+        ...(existing || {}),
+        id: jobId,
+        type,
+        status: "running",
+        message,
+        error: null
+      };
+      if (type === "decomposition") state.decompositionJob = retryingJob;
+      if (type === "plan") state.planJob = retryingJob;
+      if (consecutivePollFailures === 1) log(message);
+      renderTasks();
+      schedule(pollRetryDelayMs(consecutivePollFailures));
     }
   }
 
@@ -2909,9 +3335,11 @@ async function restoreWorkbenchFromUrl() {
   const restoreRequest = readWorkbenchRestoreRequest();
   if (!restoreRequest?.id) return false;
   if (restoreRequest.type === "remix") {
-    location.href = `/competitor-remix.html?restore=1&remixId=${encodeURIComponent(restoreRequest.id)}#remixNodeDelivery`;
+    const projectParam = restoreRequest.projectKey ? `&projectKey=${encodeURIComponent(restoreRequest.projectKey)}` : "";
+    location.href = `/competitor-remix.html?restore=1&remixId=${encodeURIComponent(restoreRequest.id)}${projectParam}#remixNodeDelivery`;
     return true;
   }
+  await switchProjectScope(restoreRequest.projectKey);
   const detail = await loadBatchDetail(restoreRequest.id);
   const restored = restoreV2FromBatchDetail(detail);
   const batch = detail?.batch || detail || {};
@@ -2948,6 +3376,7 @@ async function confirmPlanAndGenerate() {
         confirmedPlanIds: plans.map((plan) => plan.planId).filter(Boolean),
         plans,
         branchDrafts: estimateRequest().branches,
+        postProcess: postProcessRequestFields(),
         draftSignature: state.draftSignature,
         draftSignatureInput: planSignatureInput()
       })
@@ -3004,6 +3433,10 @@ function startNewTask() {
   state.draftSignature = "";
   state.stalePlanPreview = false;
   state.loggedTaskFailures = new Set();
+  state.postProcessEndingAsset = null;
+  if (els.postProcessSubtitles) els.postProcessSubtitles.checked = true;
+  syncSubtitleStyleControls({ fontSize: 30, centerY: 1140 });
+  state.expansionSizes = [];
   $("#wzBatchName").value = generatedBatchName();
   els.referenceFile.value = "";
   renderVideoPreview("");
@@ -3018,6 +3451,8 @@ function startNewTask() {
   loadBranchToForm(state.branchDraft);
   renderBranchTabs();
   renderAssetReviewState();
+  renderPostProcessEndingPreview();
+  renderExpansionSizes();
   clearError();
   log("已开始新任务");
   renderTasks();
@@ -3116,15 +3551,49 @@ $("#wzModelSelect")?.addEventListener("change", () => {
 els.materialDirection?.addEventListener("change", syncMaterialDirectionCustom);
 els.promiseLevel?.addEventListener("change", syncTruthDetails);
 els.currencySymbol?.addEventListener("change", syncCurrencyCustom);
+els.targetRegion?.addEventListener("change", syncRegionCustom);
+els.language?.addEventListener("change", syncLanguageCustom);
 els.truthFields?.addEventListener("input", markPlanMaybeStale);
 els.truthFields?.addEventListener("change", markPlanMaybeStale);
 $("#wzDisclaimerOverlayFile")?.addEventListener("change", () => uploadDisclaimerOverlayAsset().catch((error) => showError(error, "贴片上传失败")));
+els.postProcessEndingFile?.addEventListener("change", () => uploadPostProcessEnding().catch((error) => showError(error, "Ending 上传失败")));
+els.postProcessEndingRemove?.addEventListener("click", removePostProcessEnding);
+for (const input of document.querySelectorAll("[data-expansion-preset]")) {
+  input.addEventListener("change", () => {
+    const [width, height] = String(input.dataset.expansionPreset || "").split("x").map(Number);
+    if (input.checked) addExpansionSize(width, height);
+    else removeExpansionSize(input.dataset.expansionPreset || "");
+  });
+}
+els.expansionAddCustom?.addEventListener("click", () => {
+  try {
+    addExpansionSize(value(els.expansionCustomWidth), value(els.expansionCustomHeight));
+    els.expansionCustomWidth.value = "";
+    els.expansionCustomHeight.value = "";
+  } catch (error) {
+    showError(error, "添加扩展尺寸失败");
+  }
+});
+els.expansionSelectedSizes?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-remove-expansion-size]");
+  if (button) removeExpansionSize(button.dataset.removeExpansionSize || "");
+});
 els.planBatchBtn?.addEventListener("click", () => startPlanJob().catch((error) => showError(error, "prompt 任务提交失败")));
 els.codexPromptTestBtn?.addEventListener("click", () => startCodexPromptTestJob().catch((error) => showError(error, "测试版 Seedance prompt 提交失败")));
 els.confirmPlanBtn?.addEventListener("click", () => confirmPlanAndGenerate().catch((error) => showError(error, "确认 prompt 失败")));
 els.stopBatchBtn?.addEventListener("click", () => stopBatch().catch((error) => showError(error, "停止失败")));
 els.runQcBtn?.addEventListener("click", () => runVideoQc().catch((error) => showError(error, "视频质检失败")));
 els.saveDraftBtn?.addEventListener("click", () => saveDraftBatch().catch((error) => showError(error, "草稿保存失败")));
+els.postProcessSubtitles?.addEventListener("change", () => syncSubtitleStyleControls());
+for (const control of [
+  els.subtitleFontSizeRange,
+  els.subtitleFontSizeNumber,
+  els.subtitleCenterYRange,
+  els.subtitleCenterYNumber
+]) {
+  control?.addEventListener("input", () => syncSubtitleStyleControls({}, control));
+  control?.addEventListener("change", () => syncSubtitleStyleControls({}, control));
+}
 els.uploadSeedanceAssetsBtn?.addEventListener("click", () => uploadSeedanceAssetsForReview().catch((error) => showError(error, "Seedance 素材上传失败")));
 els.loadOlderLogsBtn?.addEventListener("click", loadOlderLogs);
 els.refreshRecentBtn?.addEventListener("click", () => loadRecentResults(1).catch((error) => showError(error, "最近结果加载失败")));
@@ -3168,7 +3637,7 @@ for (const el of [
   els.productLink,
   els.targetChannel,
   els.targetRegion,
-  els.language,
+  els.targetRegionCustom,
   els.materialDirection,
   els.materialDirectionCustom,
   els.outputTemplateMode,
@@ -3179,6 +3648,7 @@ for (const el of [
   els.promiseLevel,
   els.currencySymbol,
   els.currencyCustom,
+  els.languageCustom,
   els.cta,
   els.ending,
   els.variantPrompt,
@@ -3187,6 +3657,24 @@ for (const el of [
 ]) {
   el?.addEventListener("change", markPlanMaybeStale);
   el?.addEventListener("input", markPlanMaybeStale);
+}
+
+els.language?.addEventListener("change", () => {
+  renderDisclaimerOverlayPreview();
+  renderTasks();
+  markPlanMaybeStale();
+});
+for (const el of [els.languageCustom]) {
+  el?.addEventListener("change", () => {
+    renderDisclaimerOverlayPreview();
+    renderTasks();
+    markPlanMaybeStale();
+  });
+  el?.addEventListener("input", () => {
+    renderDisclaimerOverlayPreview();
+    renderTasks();
+    markPlanMaybeStale();
+  });
 }
 
 for (const el of [
@@ -3214,6 +3702,8 @@ for (const [, selector] of assetInputs) {
 }
 
 syncMaterialDirectionCustom();
+syncRegionCustom();
+syncLanguageCustom();
 syncCurrencyCustom();
 syncTruthDetails();
 syncGeminiDecompositionHint();
@@ -3221,6 +3711,9 @@ renderBranchTabs();
 renderAssetReviewState();
 renderPlanEditors([]);
 renderDisclaimerOverlayPreview();
+renderPostProcessEndingPreview();
+syncSubtitleStyleControls({ fontSize: 30, centerY: 1140 });
+renderExpansionSizes();
 renderTasks();
 renderLogs();
 renderRecentResults();

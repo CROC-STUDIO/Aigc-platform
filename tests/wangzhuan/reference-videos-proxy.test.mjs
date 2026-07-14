@@ -9,7 +9,8 @@ import {
   buildSceneAwareFrameTimestamps,
   buildBatchReferenceFrameExtractionPlan,
   checkReferenceVideo,
-  draftReferenceVideoDecomposition
+  draftReferenceVideoDecomposition,
+  findReusableReferenceVideo
 } from "../../server/wangzhuan/reference-videos.mjs";
 
 function dataUrl(bytes) {
@@ -112,7 +113,44 @@ test("large reference videos use compressed proxy for S3 and decomposition", asy
   }
 });
 
-test("decomposition tries S3 file_url first and falls back to base64 when URL is unavailable", async () => {
+test("reference video reuse check can find local probe by file hash", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-reuse-"));
+  try {
+    const referenceDir = join(root, "批处理记录", "网赚管线", "reference-videos", "ref_20260714_001");
+    await mkdir(referenceDir, { recursive: true });
+    await writeFile(join(referenceDir, "probe.json"), JSON.stringify({
+      referenceVideoId: "ref_20260714_001",
+      fileName: "reference.mp4",
+      mimeType: "video/mp4",
+      fileHash: "b".repeat(64),
+      status: "pass",
+      storedPath: "批处理记录/网赚管线/reference-videos/ref_20260714_001/decomposition-proxy.mp4",
+      durationSec: 12,
+      width: 480,
+      height: 854,
+      ratio: "9:16"
+    }));
+
+    const result = await findReusableReferenceVideo({
+      userProjectRoot: root,
+      sharedProjectRoot: root,
+      config: {}
+    }, {
+      fileHash: "b".repeat(64),
+      fileName: "reference.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 19001403
+    });
+
+    assert.equal(result.hit, true);
+    assert.equal(result.referenceVideo.referenceVideoId, "ref_20260714_001");
+    assert.match(result.referenceVideo.previewUrl, /^\/file\?path=/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("decomposition tries S3 file_url first and falls back to frames-only when URL is unavailable", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-fallback-"));
   const calls = [];
   const fallbackEvents = [];
@@ -125,7 +163,11 @@ test("decomposition tries S3 file_url first and falls back to base64 when URL is
       userProjectRoot: root,
       sharedProjectRoot: root,
       config: {},
-      extractReferenceFrames: async () => [],
+      detectReferenceVideoScenes: async () => [],
+      headProbeReferenceUrl: async () => ({ ok: true }),
+      extractReferenceFrames: async () => [
+        { index: 0, timestampSec: 0, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,AAAA" }
+      ],
       recordTelemetryEvent: async () => {},
       loadReferenceVideoProbe: async () => ({
         referenceVideoId: "ref_20260630_002",
@@ -184,12 +226,12 @@ test("decomposition tries S3 file_url first and falls back to base64 when URL is
     assert.equal(calls[0].fileUrl, "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4");
     assert.equal(calls[0].hasFileDataUrl, false);
     assert.equal(calls[1].fileUrl, "");
-    assert.equal(calls[1].hasFileDataUrl, true);
+    assert.equal(calls[1].hasFileDataUrl, false);
     assert.equal(result.decomposition.scene, "office");
-    assert.equal(result.warnings.at(-1).code, "reference_video_file_url_fallback");
+    assert.equal(result.warnings.at(-1).code, "reference_video_frames_only_fallback");
     assert.deepEqual(fallbackEvents[0], {
       from: "file_url",
-      to: "file_data",
+      to: "frames_only",
       reason: "video link is not accessible"
     });
   } finally {
@@ -264,7 +306,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
       assert.equal(body.model, "gpt-5.5");
       const parts = body.messages?.flatMap((message) => message.content || []) || [];
       assert.equal(parts.some((part) => part?.type === "file"), false);
-      assert.equal(parts.filter((part) => part?.type === "image_url").length, 10);
+      assert.equal(parts.filter((part) => part?.type === "image_url").length, 4);
       return new Response(JSON.stringify({
         choices: [{
           message: {
@@ -329,7 +371,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
     });
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(frameRequests[0], [0.25, 0.27, 0.53, 2.6, 3.8, 6.8, 8, 10.2, 10.6, 10.75]);
+    assert.deepEqual(frameRequests[0], [0.25, 3.67, 7.33, 10.75]);
     assert.equal(result.decomposition.scene, "office");
 
     const cached = await draftReferenceVideoDecomposition(context, {
@@ -356,7 +398,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
   }
 });
 
-test("gemini decomposition keeps S3 URL and uses scene-aware default frames", async () => {
+test("url-capable model sends video URL only and still pre-extracts scene-aware frames", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gemini-"));
   const calls = [];
   const frameRequests = [];
@@ -374,7 +416,7 @@ test("gemini decomposition keeps S3 URL and uses scene-aware default frames", as
       const parts = body.messages?.flatMap((message) => message.content || []) || [];
       const filePart = parts.find((part) => part?.type === "file");
       assert.equal(filePart?.file?.file_url, "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4");
-      assert.equal(parts.filter((part) => part?.type === "image_url").length, 8);
+      assert.equal(parts.filter((part) => part?.type === "image_url").length, 0);
       return new Response(JSON.stringify({
         choices: [{
           message: {
@@ -400,6 +442,7 @@ test("gemini decomposition keeps S3 URL and uses scene-aware default frames", as
       sharedProjectRoot: root,
       config: {},
       detectReferenceVideoScenes: async () => [0.7, 6.8],
+      headProbeReferenceUrl: async () => ({ ok: true }),
       extractReferenceFrames: async ({ timestampsSec }) => {
         frameRequests.push(timestampsSec);
         return timestampsSec.map((timestampSec, index) => ({
@@ -436,7 +479,7 @@ test("gemini decomposition keeps S3 URL and uses scene-aware default frames", as
     });
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(frameRequests[0], [0.23, 0.25, 0.47, 2.73, 4.77, 7.33, 7.87, 8.15]);
+    assert.deepEqual(frameRequests[0], [0.25, 2.27, 4.53, 7.6, 8.15]);
     assert.equal(result.decomposition.scene, "factory");
   } finally {
     globalThis.fetch = originalFetch;
@@ -444,34 +487,30 @@ test("gemini decomposition keeps S3 URL and uses scene-aware default frames", as
   }
 });
 
-test("scene-aware frame sampling keeps 2 frames per scene, adds extras for long scenes, and forces start/end", () => {
+test("scene-aware frame sampling merges tiny scenes and uses 1/2/4 dynamic budgets with forced start/end", () => {
   const timestamps = buildSceneAwareFrameTimestamps(24, [4, 16], {
-    longSceneThresholdSec: 8,
-    maxFrames: 40
+    mediumSceneThresholdSec: 6,
+    longSceneThresholdSec: 15,
+    maxFrames: 28
   });
   assert.deepEqual(timestamps, [
     0.25,
-    1.33,
-    2.67,
-    6.4,
+    2,
     8,
     12,
-    13.6,
-    17.6,
     18.67,
     21.33,
-    22.4,
     23.75
   ]);
 });
 
-test("scene-aware frame sampling never exceeds 40 frames", () => {
+test("scene-aware frame sampling never exceeds the configured budget", () => {
   const sceneCuts = Array.from({ length: 24 }, (_, index) => index + 1);
   const timestamps = buildSceneAwareFrameTimestamps(30, sceneCuts, {
     longSceneThresholdSec: 100,
-    maxFrames: 40
+    maxFrames: 28
   });
-  assert.ok(timestamps.length <= 40);
+  assert.ok(timestamps.length <= 28);
   assert.equal(timestamps[0], 0.25);
   assert.equal(timestamps.at(-1), 29.75);
 });
@@ -658,8 +697,8 @@ test("decomposition retries invalid_json with compact prompt and succeeds", asyn
           .map((part) => part.text)
           .join("\n");
         if (calls === 1) return "not-json{{{";
-        assert.match(prompt, /上次拆解输出不完整或不是合法 JSON/);
-        assert.match(prompt, /必须包含且仅优先保证这 8 个字段/);
+        assert.match(prompt, /更紧凑、合法的 JSON 拆解结果/);
+        assert.match(prompt, /必须优先保证这 8 个字段/);
         return validDecompositionJson();
       }
     };
@@ -689,7 +728,70 @@ test("decomposition retries invalid_json with compact prompt and succeeds", asyn
   }
 });
 
-test("decomposition falls back to frames-only when file_data payload fails", async () => {
+test("long reference videos use compact prompt on first decomposition attempt", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-long-video-compact-"));
+  const prompts = [];
+  try {
+    const videoRelativePath = "批处理记录/网赚管线/reference-videos/ref_20260710_001/decomposition-proxy.mp4";
+    const videoPath = join(root, videoRelativePath);
+    await mkdir(join(root, "批处理记录/网赚管线/reference-videos/ref_20260710_001"), { recursive: true });
+    await writeFile(videoPath, Buffer.from("video bytes"));
+    const context = {
+      userProjectRoot: root,
+      sharedProjectRoot: root,
+      config: {},
+      extractReferenceFrames: async () => [],
+      recordTelemetryEvent: async () => {},
+      loadReferenceVideoProbe: async () => probeFixture("ref_20260710_001", videoRelativePath, {
+        durationSec: 62
+      }),
+      callWangzhuanLlm: async ({ messages }) => {
+        const prompt = messages
+          .flatMap((message) => Array.isArray(message.content) ? message.content : [{ type: "text", text: message.content }])
+          .filter((part) => part?.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        prompts.push(prompt);
+        return validDecompositionJson({
+          storySegments: [{
+            storySegmentIndex: 1,
+            startSec: 0,
+            endSec: 20,
+            durationSec: 20,
+            scene: "office",
+            subject: "phone",
+            action: "tap",
+            camera: "close-up",
+            lighting: "bright",
+            style: "realistic",
+            quality: "high",
+            sliceSplitHints: [{ splitSec: 12, reason: "hook shifts into proof" }]
+          }]
+        });
+      }
+    };
+
+    const result = await draftReferenceVideoDecomposition(context, {
+      referenceVideoId: "ref_20260710_001",
+      llmConfig: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "gpt-5.4",
+        apiKey: "test-key",
+        maxRetries: 0
+      }
+    });
+
+    assert.equal(result.decomposition.scene, "office");
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /更紧凑、合法的 JSON 拆解结果/);
+    assert.match(prompts[0], /必须输出 storySegments/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("decomposition uses scene-aware frames directly when no public URL is available", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-frames-only-"));
   const fallbackEvents = [];
   const calls = [];
@@ -702,6 +804,7 @@ test("decomposition falls back to frames-only when file_data payload fails", asy
       userProjectRoot: root,
       sharedProjectRoot: root,
       config: {},
+      detectReferenceVideoScenes: async () => [],
       extractReferenceFrames: async () => ([
         { dataUrl: "data:image/jpeg;base64,aaa", timestampSec: 1 }
       ]),
@@ -718,13 +821,6 @@ test("decomposition falls back to frames-only when file_data payload fails", asy
           hasFilePart,
           frameCount: referenceVideo.frameCount
         });
-        if (calls.length === 1) {
-          throw new WangzhuanError("model_failed", "模型拆解请求失败", {
-            inputMode: "file_data",
-            upstreamMessage: "file_data payload too large",
-            reason: "request_failed"
-          });
-        }
         return validDecompositionJson({ scene: "frames-only-office" });
       }
     };
@@ -744,19 +840,67 @@ test("decomposition falls back to frames-only when file_data payload fails", asy
       }
     });
 
-    assert.equal(calls.length, 2);
-    assert.equal(calls[0].hasFileDataUrl, true);
-    assert.equal(calls[0].hasFilePart, true);
-    assert.equal(calls[1].hasFileDataUrl, false);
-    assert.equal(calls[1].hasFilePart, false);
-    assert.equal(calls[1].frameCount, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].hasFileDataUrl, false);
+    assert.equal(calls[0].hasFilePart, false);
+    assert.equal(calls[0].frameCount, 1);
     assert.equal(result.decomposition.scene, "frames-only-office");
-    assert.equal(result.warnings.at(-1).code, "reference_video_frames_only_fallback");
-    assert.deepEqual(fallbackEvents[0], {
-      from: "file_data",
-      to: "frames_only",
-      reason: "file_data payload too large"
+    assert.equal(fallbackEvents.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("unreachable public URL (HEAD fails) falls back to scene-aware frames before calling the model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-ref-head-fail-"));
+  const calls = [];
+  const headProbes = [];
+  try {
+    const videoRelativePath = "批处理记录/网赚管线/reference-videos/ref_20260710_009/decomposition-proxy.mp4";
+    const videoPath = join(root, videoRelativePath);
+    await mkdir(join(root, "批处理记录/网赚管线/reference-videos/ref_20260710_009"), { recursive: true });
+    await writeFile(videoPath, Buffer.from("video bytes"));
+    const context = {
+      userProjectRoot: root,
+      sharedProjectRoot: root,
+      config: {},
+      detectReferenceVideoScenes: async () => [],
+      headProbeReferenceUrl: async ({ fileUrl }) => {
+        headProbes.push(fileUrl);
+        return { ok: false, reason: "http_status_403" };
+      },
+      extractReferenceFrames: async () => ([
+        { dataUrl: "data:image/jpeg;base64,aaa", timestampSec: 1 }
+      ]),
+      recordTelemetryEvent: async () => {},
+      loadReferenceVideoProbe: async () => probeFixture("ref_20260710_009", videoRelativePath),
+      callWangzhuanLlm: async ({ referenceVideo, messages }) => {
+        const hasFilePart = messages.some((message) => Array.isArray(message.content)
+          && message.content.some((part) => part?.type === "file"));
+        calls.push({ hasFilePart, frameCount: referenceVideo.frameCount, fileUrl: referenceVideo.fileUrl || "" });
+        return validDecompositionJson({ scene: "head-fallback-office" });
+      }
+    };
+
+    const result = await draftReferenceVideoDecomposition(context, {
+      referenceVideoId: "ref_20260710_009",
+      llmConfig: {
+        provider: "skylink",
+        endpoint: "https://skylink-gateway.com/api/v1",
+        model: "doubao-seed-2-0-lite-260428",
+        apiKey: "test-key",
+        maxRetries: 0
+      }
     });
+
+    assert.equal(headProbes.length, 1);
+    assert.equal(headProbes[0], "https://cdn.example.com/uploads/reference/decomposition-proxy.mp4");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].hasFilePart, false);
+    assert.equal(calls[0].fileUrl, "");
+    assert.equal(calls[0].frameCount, 1);
+    assert.equal(result.decomposition.scene, "head-fallback-office");
+    assert.ok(result.warnings.some((warning) => warning.code === "reference_video_url_head_unreachable"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

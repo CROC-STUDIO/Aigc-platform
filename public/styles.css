@@ -10369,6 +10369,103 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   background: rgba(12, 12, 18, 0.35);
 }
 
+.wz-v2-body .wz-postprocess-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.wz-v2-body .wz-postprocess-group {
+  min-width: 0;
+}
+
+.wz-v2-body .wz-subtitle-style-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.wz-v2-body .wz-subtitle-style-row {
+  display: grid;
+  grid-template-columns: 72px minmax(120px, 1fr) 76px 22px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.wz-v2-body .wz-subtitle-style-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #41dcff;
+}
+
+.wz-v2-body .wz-subtitle-style-row input[type="number"] {
+  width: 76px;
+}
+
+.wz-v2-body .wz-subtitle-style-row .wz-unit {
+  color: rgba(246, 244, 255, 0.58);
+  font-size: 12px;
+}
+
+.wz-v2-body .wz-postprocess-preview {
+  min-height: 44px;
+  margin: 8px 0;
+}
+
+.wz-v2-body .wz-postprocess-preview img,
+.wz-v2-body .wz-postprocess-preview video {
+  display: block;
+  width: min(100%, 320px);
+  max-height: 180px;
+  margin-top: 8px;
+  object-fit: contain;
+  background: #111;
+}
+
+.wz-v2-body .wz-expansion-presets,
+.wz-v2-body .wz-expansion-custom,
+.wz-v2-body .wz-expansion-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wz-v2-body .wz-expansion-custom label {
+  width: 110px;
+}
+
+.wz-v2-body .wz-expansion-selected > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(65, 220, 255, 0.3);
+  border-radius: 6px;
+}
+
+.wz-v2-body .wz-expansion-selected button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 1;
+}
+
+@media (max-width: 760px) {
+  .wz-v2-body .wz-postprocess-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wz-v2-body .wz-subtitle-style-row {
+    grid-template-columns: 68px minmax(80px, 1fr) 70px 20px;
+  }
+}
+
 .wz-v2-body .wz-info,
 .wz-v2-body .wz-service-pill {
   border-color: rgba(255, 209, 102, 0.36);

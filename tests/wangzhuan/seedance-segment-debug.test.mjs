@@ -57,7 +57,7 @@ test("parseDebugCliArgs normalizes defaults and optional fields", async () => {
   assert.equal(parsed.region, "BR");
   assert.equal(parsed.productName, "Drama Gold");
   assert.equal(parsed.currencySymbol, "R$");
-  assert.equal(parsed.minSliceSec, 8);
+  assert.equal(parsed.minSliceSec, 5);
   assert.equal(parsed.maxSliceSec, 15);
 });
 

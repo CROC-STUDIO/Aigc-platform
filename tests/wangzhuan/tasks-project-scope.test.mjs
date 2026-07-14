@@ -18,14 +18,12 @@ test.afterEach(async () => {
   await closeWangzhuanFactsPool();
 });
 
-test("loadWorkflowTasksFromMysql scopes task list to current project", async () => {
+test("loadWorkflowTasksFromMysql scopes task list to current user across projects", async () => {
   const executed = [];
   const fakeConn = {
     async execute(sql, params) {
       executed.push({ sql: String(sql), params: Array.from(params || []) });
       if (String(sql).includes("SELECT id FROM app_users")) return [[{ id: 11 }]];
-      if (String(sql).includes("SELECT id FROM projects WHERE project_key")) return [[{ id: 22 }]];
-      if (String(sql).includes("INSERT INTO project_members")) return [{ affectedRows: 1 }];
       if (String(sql).includes("COUNT(*) AS total")) return [[{ total: 1 }]];
       if (String(sql).includes("FROM workflow_runs wr")) {
         return [[{
@@ -63,7 +61,8 @@ test("loadWorkflowTasksFromMysql scopes task list to current project", async () 
   assert.equal(result.items.length, 1);
   const taskQuery = executed.find((entry) => entry.sql.includes("FROM workflow_runs wr") && entry.sql.includes("LIMIT"));
   assert.ok(taskQuery);
-  assert.match(taskQuery.sql, /wr\.project_id = \?/);
-  assert.equal(taskQuery.params[0], 22);
-  assert.equal(taskQuery.params[1], 11);
+  assert.doesNotMatch(taskQuery.sql, /wr\.project_id = \?/);
+  assert.match(taskQuery.sql, /wr\.user_id = \?/);
+  assert.equal(taskQuery.params[0], 11);
+  assert.equal(executed.some((entry) => entry.sql.includes("SELECT id FROM projects WHERE project_key")), false);
 });

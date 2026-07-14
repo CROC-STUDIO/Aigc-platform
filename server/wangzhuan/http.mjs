@@ -37,6 +37,9 @@ export const ERROR_HTTP_STATUS = Object.freeze({
   region_required: 400,
   remix_not_found: 404,
   output_not_found: 404,
+  product_not_found: 404,
+  asset_not_found: 404,
+  asset_review_pending: 409,
   missing_required_file: 409,
   object_storage_required: 503,
   object_storage_upload_failed: 502,
@@ -87,21 +90,27 @@ export function sendOk(res, data, requestId) {
 
 export function sendErrorEnvelope(res, error, requestId) {
   let safeError = error;
-  if (!(safeError instanceof WangzhuanError)) {
-    if (safeError?.code === "invalid_state_transition") {
-      const detail = safeError.details || {};
-      const fromStatus = detail.fromStatus || "__new__";
-      const toStatus = detail.toStatus || "unknown";
-      const triggerName = detail.triggerName || "unknown";
-      safeError = new WangzhuanError(
-        "invalid_state_transition",
-        `任务状态流转不被允许：${fromStatus} -> ${toStatus} by ${triggerName}`,
-        detail,
-        409
-      );
-    } else {
-      safeError = new WangzhuanError("internal_error", ERROR_MESSAGES.internal_error);
-    }
+  const hasKnownErrorCode = Boolean(safeError?.code && ERROR_HTTP_STATUS[safeError.code]);
+  if (!(safeError instanceof WangzhuanError) && safeError?.code === "invalid_state_transition") {
+    const detail = safeError.details || {};
+    const fromStatus = detail.fromStatus || "__new__";
+    const toStatus = detail.toStatus || "unknown";
+    const triggerName = detail.triggerName || "unknown";
+    safeError = new WangzhuanError(
+      "invalid_state_transition",
+      `任务状态流转不被允许：${fromStatus} -> ${toStatus} by ${triggerName}`,
+      detail,
+      409
+    );
+  } else if (!(safeError instanceof WangzhuanError) && !hasKnownErrorCode) {
+    safeError = new WangzhuanError("internal_error", ERROR_MESSAGES.internal_error);
+  } else if (!(safeError instanceof WangzhuanError)) {
+    safeError = new WangzhuanError(
+      safeError.code,
+      safeError.message || ERROR_MESSAGES[safeError.code] || ERROR_MESSAGES.internal_error,
+      safeError.data && typeof safeError.data === "object" ? safeError.data : {},
+      safeError.status || statusForCode(safeError.code)
+    );
   }
   return sendEnvelope(res, errorEnvelope(safeError, requestId), safeError.status);
 }

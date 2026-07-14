@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
-import { MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER } from "./reference-assets.mjs";
+import { FINAL_TAIL_REFERENCE_ASSET_ORDER, MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER } from "./reference-assets.mjs";
 import { openWangzhuanObjectStream } from "./storage.mjs";
 
 const ASSET_KEY_TO_SLOT = Object.freeze({
@@ -14,6 +14,19 @@ const ASSET_KEY_TO_SLOT = Object.freeze({
   personAsset: { key: "person", index: 4 },
   rewardElement: { key: "reward_element", index: 5 }
 });
+
+const MIME_BY_EXT = Object.freeze({
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime"
+});
+
+const DEFAULT_ASSET_REVIEW_WAIT_TIMEOUT_MS = 30_000;
+const DEFAULT_ASSET_REVIEW_POLL_INTERVAL_MS = 2_000;
 
 export function assetKeyToAssetType(assetKey) {
   const videoKeys = new Set(["productRecording"]);
@@ -41,11 +54,48 @@ function reviewStatus(value) {
   return status || "pending";
 }
 
+function positiveInteger(value, fallback, { min = 0, max = 120_000 } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function assetReviewWaitOptions(context = {}) {
+  const config = context.config?.wangzhuan?.seedanceAssetReview || {};
+  return {
+    timeoutMs: positiveInteger(
+      config.waitTimeoutMs ?? process.env.WANGZHUAN_ASSET_REVIEW_WAIT_MS,
+      DEFAULT_ASSET_REVIEW_WAIT_TIMEOUT_MS
+    ),
+    intervalMs: positiveInteger(
+      config.pollIntervalMs ?? process.env.WANGZHUAN_ASSET_REVIEW_POLL_MS,
+      DEFAULT_ASSET_REVIEW_POLL_INTERVAL_MS,
+      { min: 100, max: 30_000 }
+    )
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isReviewPending(status) {
+  return ["pending", "queued", "running", "processing"].includes(reviewStatus(status));
+}
+
 function assetTypeFromMime(mimeType = "") {
   const mime = cleanString(mimeType).toLowerCase();
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   return "image";
+}
+
+function mimeTypeFromAsset(asset = {}) {
+  const explicit = cleanString(asset.mimeType).toLowerCase();
+  if (explicit) return explicit;
+  const fileName = cleanString(asset.fileName).toLowerCase();
+  const ext = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : "";
+  return MIME_BY_EXT[ext] || "application/octet-stream";
 }
 
 function normalizeReviewResponse(payload = {}, fallback = {}) {
@@ -99,9 +149,10 @@ function seedanceApiKey(context = {}) {
 }
 
 export async function reviewSeedanceAsset(context = {}, asset = {}) {
+  const mimeType = mimeTypeFromAsset(asset);
   if (typeof context.reviewProductAsset === "function") {
     return normalizeReviewResponse(await context.reviewProductAsset(asset), {
-      assetType: assetTypeFromMime(asset.mimeType),
+      assetType: assetTypeFromMime(mimeType),
       contentUrl: asset.storageUrl
     });
   }
@@ -111,7 +162,7 @@ export async function reviewSeedanceAsset(context = {}, asset = {}) {
     return {
       assetId: "",
       status: "pending",
-      assetType: assetTypeFromMime(asset.mimeType),
+      assetType: assetTypeFromMime(mimeType),
       contentUrl: asset.storageUrl || "",
       reviewReason: "素材审核服务未配置或暂不可用"
     };
@@ -121,7 +172,7 @@ export async function reviewSeedanceAsset(context = {}, asset = {}) {
     ? asset.buffer
     : await loadAssetBuffer(context, asset);
   const form = new FormData();
-  form.append("file", new Blob([buffer], { type: asset.mimeType || "application/octet-stream" }), asset.fileName || "asset");
+  form.append("file", new Blob([buffer], { type: mimeType }), asset.fileName || "asset");
   let response;
   try {
     response = await fetchImpl(url, {
@@ -133,7 +184,7 @@ export async function reviewSeedanceAsset(context = {}, asset = {}) {
     return {
       assetId: "",
       status: "pending",
-      assetType: assetTypeFromMime(asset.mimeType),
+      assetType: assetTypeFromMime(mimeType),
       contentUrl: asset.storageUrl || "",
       reviewReason: `素材审核服务请求失败，已先保存素材：${String(error?.message || error || "").slice(0, 160)}`
     };
@@ -149,13 +200,13 @@ export async function reviewSeedanceAsset(context = {}, asset = {}) {
     return {
       assetId: "",
       status: "failed",
-      assetType: assetTypeFromMime(asset.mimeType),
+      assetType: assetTypeFromMime(mimeType),
       contentUrl: asset.storageUrl || "",
       reviewReason: payload.message || payload.detail || `素材审核上传失败：HTTP ${response.status}`
     };
   }
   return normalizeReviewResponse(payload, {
-    assetType: assetTypeFromMime(asset.mimeType),
+    assetType: assetTypeFromMime(mimeType),
     contentUrl: asset.storageUrl
   });
 }
@@ -225,6 +276,25 @@ export async function refreshSeedanceAssetReview(context = {}, asset = {}) {
   };
 }
 
+async function waitForSeedanceAssetReview(context = {}, asset = {}, initialReview = {}) {
+  let latest = { ...initialReview };
+  if (!cleanString(latest.assetId) || !isReviewPending(latest.status)) return latest;
+  const { timeoutMs, intervalMs } = assetReviewWaitOptions(context);
+  if (!timeoutMs) return latest;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && isReviewPending(latest.status)) {
+    await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+    latest = await refreshSeedanceAssetReview(context, {
+      ...asset,
+      ...latest,
+      assetId: latest.assetId,
+      status: latest.status,
+      reviewReason: latest.reviewReason
+    });
+  }
+  return latest;
+}
+
 async function bufferFromReadable(body) {
   const chunks = [];
   for await (const chunk of body) {
@@ -248,6 +318,8 @@ function isMissingStorageObjectError(error) {
 
 async function loadAssetBuffer(context, asset = {}) {
   if (Buffer.isBuffer(asset.buffer) && asset.buffer.length) return asset.buffer;
+  const productInfoPath = resolveProductInfoAssetPath(context, asset.storedPath || asset.storageKey);
+  if (productInfoPath) return readFile(productInfoPath);
   if (asset.storageKey) {
     try {
       const object = await openWangzhuanObjectStream(context, asset.storageKey);
@@ -265,6 +337,20 @@ async function loadAssetBuffer(context, asset = {}) {
     assetKey: asset.assetKey,
     fileName: asset.fileName || ""
   });
+}
+
+function resolveProductInfoAssetPath(context = {}, value = "") {
+  const relative = cleanString(value).replace(/\\/g, "/").replace(/^\/+/, "");
+  const parts = relative.split("/").filter(Boolean);
+  if (parts.length !== 4 || parts[0] !== "product_info" || parts[2] !== "assets") return "";
+  const productId = parts[1];
+  const fileName = parts[3];
+  if (!/^[a-z0-9._-]+$/i.test(productId)) return "";
+  if (!fileName || fileName !== basename(fileName) || fileName.includes("..")) return "";
+  const root = resolve(context.productInfoRoot || join(process.cwd(), "product_info"));
+  const assetsRoot = resolve(root, productId, "assets");
+  const target = resolve(assetsRoot, fileName);
+  return target.startsWith(`${assetsRoot}/`) ? target : "";
 }
 
 function shouldReviewAsset(branch = {}, assetKey) {
@@ -308,6 +394,10 @@ export function countReferencedAssets(branch = {}) {
   return count;
 }
 
+function reviewAssetOrder() {
+  return [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER];
+}
+
 export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
   const branches = Array.isArray(branchDrafts) ? branchDrafts : [branchDrafts];
   const nextBranches = [];
@@ -324,7 +414,7 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
       ...branch,
       assetReviews: { ...(branch.assetReviews || {}) }
     };
-    for (const assetKey of REFERENCE_ASSET_ORDER) {
+    for (const assetKey of reviewAssetOrder()) {
       if (!shouldReviewAsset(nextBranch, assetKey)) continue;
       const current = nextBranch.assetReviews?.[assetKey] || {};
       const currentStatus = reviewStatus(current.status);
@@ -351,9 +441,18 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
             storageKey: nextBranch.assetStorageKeys?.[assetKey] || "",
             storedPath: nextBranch.assetStoredPaths?.[assetKey] || nextBranch.assetRelativePaths?.[assetKey] || ""
           });
+      const settledReview = await waitForSeedanceAssetReview(context, {
+        assetKey,
+        branchId: nextBranch.branchId,
+        fileName: nextBranch.assetFileNames?.[assetKey] || assetKey,
+        mimeType: current.mimeType || "",
+        storageUrl: nextBranch.assetUrls?.[assetKey] || "",
+        storageKey: nextBranch.assetStorageKeys?.[assetKey] || "",
+        storedPath: nextBranch.assetStoredPaths?.[assetKey] || nextBranch.assetRelativePaths?.[assetKey] || ""
+      }, review);
       nextBranch.assetReviews[assetKey] = {
         ...current,
-        ...review
+        ...settledReview
       };
     }
     nextBranches.push(nextBranch);
@@ -367,7 +466,7 @@ export function validateAssetReviewState(branchDrafts = []) {
   const failures = [];
   for (const branch of branches) {
     const assetReviews = branch.assetReviews || {};
-    for (const key of REFERENCE_ASSET_ORDER) {
+    for (const key of reviewAssetOrder()) {
       if (!requiresSeedanceAssetReview(branch, key)) continue;
       const fileName = branch.assetFileNames?.[key];
       const state = assetReviews[key] || {};
@@ -389,7 +488,7 @@ export function validateAssetReviewState(branchDrafts = []) {
     assetsByBranch: branches.map((branch) => ({
       branchId: branch.branchId || "branch_0",
       branchLabel: branch.branchLabel || "",
-      assets: REFERENCE_ASSET_ORDER
+      assets: reviewAssetOrder()
         .filter((key) => requiresSeedanceAssetReview(branch, key))
         .map((key) => ({
           key,

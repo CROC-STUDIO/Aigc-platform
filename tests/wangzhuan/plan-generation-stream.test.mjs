@@ -65,6 +65,12 @@ test("pipeline no longer replays legacy batch_prepared transition after plan pre
   assert.doesNotMatch(body, /writeBatchWithTrigger\([^)]*"batch_prepared"/);
 });
 
+test("plan generation failure does not stop an editable preview batch", async () => {
+  const source = await readFile(new URL("../../server/wangzhuan/estimates.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /rollbackEmptyPlanPreviewBatch/);
+  assert.doesNotMatch(source, /stopBatch\(context, batchId, \{ reason: "plan_generation_failed" \}\)/);
+});
+
 test("enrichPlanGenerationError attaches batchId to WangzhuanError data", () => {
   const error = enrichPlanGenerationError(
     new WangzhuanError("model_failed", "upstream failed", { upstreamMessage: "bad key" }),

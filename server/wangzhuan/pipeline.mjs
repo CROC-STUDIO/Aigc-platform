@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { normalizeBranchDrafts, normalizeStoredBranchDrafts } from "./branches.mjs";
 import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
-import { buildSeedanceSlicesFromAnalysis, normalizeFissionAnalysis } from "./fission-analysis.mjs";
+import { deriveSeedanceSlicesForGeneration, normalizeFissionAnalysis } from "./fission-analysis.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
 import {
@@ -30,6 +30,8 @@ import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
   formatProtagonistFissionGuide,
+  generateSeedanceBranchPlans,
+  generateSeedanceVariantPlans,
   generateThirtySecondSeedancePlans,
   generateSeedancePlan,
   validateBranchTruthRulesForPlan,
@@ -37,6 +39,7 @@ import {
 } from "./plan-preview.mjs";
 import { repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
+import { normalizeBatchPostProcess } from "./postprocess.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
@@ -69,6 +72,56 @@ const FISSION_SLICE_METADATA_FIELDS = [
   "mergedSourceSegments",
   "sourceSegmentIndex"
 ];
+
+function normalizePositiveInteger(value, fallback, { min = 1, max = 10 } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function resolvePlanLlmConcurrency(context = {}, options = {}) {
+  if (context.llmStreamHandlers) return { branch: 1, variant: 1, total: 1 };
+  const configured = options.planConcurrency
+    ?? context.config?.wangzhuan?.planLlmConcurrency
+    ?? process.env.WANGZHUAN_PLAN_LLM_CONCURRENCY;
+  if (configured && typeof configured === "object") {
+    const branch = normalizePositiveInteger(configured.branch, 2, { min: 1, max: 5 });
+    const variant = normalizePositiveInteger(configured.variant, 3, { min: 1, max: 6 });
+    return {
+      branch,
+      variant,
+      total: normalizePositiveInteger(configured.total, branch * variant, { min: 1, max: 10 })
+    };
+  }
+  const branch = normalizePositiveInteger(configured, 2, { min: 1, max: 5 });
+  return { branch, variant: 1, total: branch };
+}
+
+async function mapWithConcurrency(items = [], concurrency = 1, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length || 1);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }));
+  return results;
+}
+
+function branchPlanCacheKey(branch = {}) {
+  return branch.branchId || branch.branchLabel || String(branch.branchIndex || "");
+}
+
+function pickBranchBatchPlan(branchPlans = [], branchVariantIndex, segmentIndex) {
+  if (!Array.isArray(branchPlans) || !branchPlans.length) return null;
+  return branchPlans.find((item) => {
+    return Number(item?.branchVariantIndex || 0) === Number(branchVariantIndex)
+      && Number(item?.segmentIndex || 0) === Number(segmentIndex);
+  })?.planPayload || null;
+}
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -336,7 +389,7 @@ export function buildSlicePlanFromDecomposition(batch = {}) {
   const targetSegmentCount = resolveTargetSegmentCount(batch);
   if (hasFissionAnalysisSource(decomposition)) {
     const fissionAnalysis = normalizeFissionAnalysis(decomposition, { durationSec });
-    const slices = buildSeedanceSlicesFromAnalysis(fissionAnalysis, { durationSec });
+    const slices = deriveSeedanceSlicesForGeneration(fissionAnalysis, { durationSec });
     if (slices.length > 0) {
       const slicePlan = slices.map((slice, index) => ({
         ...pickSliceMetadata(slice),
@@ -398,10 +451,14 @@ function buildPrompt(batch, script, kind) {
   const channel = branch.targetChannels?.[0] || batch.estimate?.request?.targetChannel || batch.templateSnapshot?.draft?.targetChannels?.[0] || "generic";
   const languages = Array.isArray(branch.languages) && branch.languages.length
     ? branch.languages
-    : [branch.language || draft.language || batch.estimate?.request?.language || "en-US"];
+    : [branch.language || draft.languages?.[0] || draft.language || batch.estimate?.request?.languages?.[0] || batch.estimate?.request?.language || "en-US"];
   const regions = Array.isArray(branch.regions) && branch.regions.length
     ? branch.regions
-    : (Array.isArray(draft.regions) && draft.regions.length ? draft.regions : []);
+    : (Array.isArray(branch.targetRegions) && branch.targetRegions.length
+      ? branch.targetRegions
+      : (Array.isArray(draft.regions) && draft.regions.length
+        ? draft.regions
+        : (Array.isArray(draft.targetRegions) && draft.targetRegions.length ? draft.targetRegions : [])));
   const lines = [
     script.branchId ? `Branch: ${script.branchLabel || script.branchId} (${script.branchId})` : "",
     `Product: ${branch.productName || draft.productName || "Product"}`,
@@ -431,7 +488,7 @@ function buildPrompt(batch, script, kind) {
     formatProtagonistFissionGuide(decomposition, script.branchVariantIndex || script.variantIndex || 1, branch.variantPrompt),
     branch.customPrompt ? `Additional user prompt: ${branch.customPrompt}` : "",
     branch.negativePrompt ? `User restrictions: ${branch.negativePrompt}` : "",
-    `Locale rule: all on-screen UI text, subtitles, CTA phrasing, and voiceover must match the primary language ${languages[0] || "en-US"}; multi-language config (${languages.join(", ")}) and target regions (${regions.join(", ") || "US"}) should only affect localization style, scenario, and wording choices, never mixed-language output in one segment.`,
+    `Strict language rule: the generated video must use only the user-specified primary language ${languages[0] || "en-US"} for every visible scene text, app/UI microcopy, subtitles/captions, CTA wording, voiceover, spoken dialogue, and audio direction. Do not show Chinese, English defaults, source-video language, or mixed-language text unless ${languages[0] || "en-US"} explicitly requires it. Multi-language config (${languages.join(", ")}) and target regions (${regions.join(", ") || "US"}) may only influence localization style and scenario choices.`,
     "Protagonist rule: seedancePrompt must name a specific profession/identity and reflect it in clothing, props, scene, and voiceover tone; do not use generic labels like user or young woman.",
     "Do not include competitor names, watermarks, logos, signed URLs, or policy-unsafe income guarantees.",
     kind === "image" ? "Task: create the first-frame image prompt for Seedance." : `Task: create a ${script.durationSec || 15} second 9:16 Seedance image-to-video prompt.`
@@ -875,85 +932,231 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
   const variantCount = Number(batch.estimate?.variantCount || 0);
   const totalPlans = useLlmPlans ? branchDrafts.length * variantCount * (useThirtySecondContinuityPlan ? 1 : segmentMultiplier) : 0;
   let planSequence = 0;
+  const branchPlanBatches = new Map();
+  const branchChannelRules = new Map();
+  const planWarnings = [];
+  const generateBranchPlans = context.generateSeedanceBranchPlansForTest || generateSeedanceBranchPlans;
+  const generateVariantPlans = context.generateSeedanceVariantPlansForTest || generateSeedanceVariantPlans;
+  const useBranchBatchPlans = useLlmPlans
+    && !useThirtySecondContinuityPlan
+    && options.branchBatchPlans === true
+    && options.planBatchMode === "branch"
+    && segmentMultiplier > 0
+    && variantCount > 0;
+  const useVariantBatchPlans = useLlmPlans
+    && !useThirtySecondContinuityPlan
+    && options.variantBatchPlans !== false
+    && segmentMultiplier > 0
+    && variantCount > 0;
 
-  for (const branch of branchDrafts) {
+  const loadBranchChannelRules = async (branch) => {
+    const key = branchPlanCacheKey(branch);
+    if (branchChannelRules.has(key)) return branchChannelRules.get(key);
     const branchChannel = branch.targetChannels?.[0] || batch.estimate?.request?.targetChannel || "generic";
     const branchPromiseLevel = branch.promiseLevel || batch.estimate?.request?.promiseLevel || "stable";
     const channelRules = typeof context.getChannelRulesForTest === "function"
       ? await context.getChannelRulesForTest({ channel: branchChannel, promiseLevel: branchPromiseLevel })
       : await getChannelRules(context, { channel: branchChannel, promiseLevel: branchPromiseLevel });
-    const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
-    for (let branchVariantIndex = 1; branchVariantIndex <= Number(batch.estimate?.variantCount || 0); branchVariantIndex += 1) {
-      let thirtySecondPlanPayloads = null;
-      if (useLlmPlans && useThirtySecondContinuityPlan) {
-        planSequence += 1;
-        options.onPlanProgress?.({
-          index: planSequence,
-          total: totalPlans,
-          branchLabel: branch.branchLabel || branch.branchId,
-          branchVariantIndex,
-          segmentIndex: "1-2"
-        });
-        thirtySecondPlanPayloads = await generateThirtySecondSeedancePlans(context, {
-          batch,
-          branch,
-          decomposition: batch.decomposition,
-          channelRules,
-          branchVariantIndex,
-          knowledgeNotes: options.knowledgeNotes,
-          llmConfig: options.llmConfig || {}
-        });
-      }
-      for (let segmentIndex = 1; segmentIndex <= segmentMultiplier; segmentIndex += 1) {
-        const slice = slicePlan[segmentIndex - 1] || { segmentIndex, durationSec: 15, segmentRole: "proof_slice" };
-        const scriptId = makeScriptId(batch.batchId, sequence);
-        const generationTaskId = makeGenerationTaskId(batch.batchId, sequence);
-        const segmentSuffix = segmentMultiplier > 1 ? `_segment${segmentIndex}` : "";
-        const scriptTarget = join(batchDir(context, batch.batchId), "scripts", `${scriptId}${segmentSuffix}.json`);
-        const promptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_seedance.txt`);
-        const imagePromptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_image.txt`);
-        let hook = scriptHook(batch, branch, branchVariantIndex);
-        let body = scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers, slice.durationSec);
-        let cta = branch.cta || batch.decomposition?.cta || "Install now";
-        let ending = branch.ending || "Try it today";
-        let seedancePrompt = "";
-        let imagePrompt = "";
-        let negativePrompt = branch.negativePrompt || "";
-        let voiceover = "";
-        let subtitles = [];
-        let complianceNotes = [];
-        let mediaRefs = branch.assetUrls || {};
-        let planRecord = null;
+    branchChannelRules.set(key, channelRules);
+    return channelRules;
+  };
 
-        if (useLlmPlans) {
-          let planPayload = thirtySecondPlanPayloads?.[segmentIndex - 1];
-          if (!planPayload) {
+  if (useBranchBatchPlans) {
+    let completedBranchPlanCount = 0;
+    await mapWithConcurrency(
+      branchDrafts,
+      resolvePlanLlmConcurrency(context, options).branch,
+      async (branch) => {
+        const key = branchPlanCacheKey(branch);
+        const channelRules = await loadBranchChannelRules(branch);
+        completedBranchPlanCount += 1;
+        options.onPlanProgress?.({
+          index: completedBranchPlanCount,
+          total: branchDrafts.length,
+          branchLabel: branch.branchLabel || branch.branchId,
+          branchVariantIndex: `1-${variantCount}`,
+          segmentIndex: `1-${segmentMultiplier}`,
+          mode: "branch_batch"
+        });
+        try {
+          const branchPlans = await generateBranchPlans(context, {
+            batch,
+            branch,
+            decomposition: batch.decomposition,
+            channelRules,
+            variantCount,
+            slicePlan,
+            knowledgeNotes: options.knowledgeNotes,
+            llmConfig: options.llmConfig || {}
+          });
+          branchPlanBatches.set(key, branchPlans);
+        } catch (error) {
+          branchPlanBatches.set(key, { error });
+          const errorMessage = String(error?.message || error || "branch_batch_plan_failed").slice(0, 500);
+          console.warn(`[wangzhuan] branch batch plan fallback for ${batch.batchId}/${key}: ${errorMessage}`);
+          batch.warnings = [
+            ...(Array.isArray(batch.warnings) ? batch.warnings : []),
+            {
+              code: "plan_batch_fallback",
+              branchId: branch.branchId || "",
+              branchLabel: branch.branchLabel || "",
+              message: errorMessage
+            }
+          ];
+          planWarnings.push(batch.warnings[batch.warnings.length - 1]);
+          const recordEvent = typeof context.recordTelemetryEvent === "function"
+            ? context.recordTelemetryEvent
+            : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+          await recordEvent("plan_batch_fallback", {
+            batchId: batch.batchId,
+            branchId: branch.branchId || "",
+            branchLabel: branch.branchLabel || "",
+            errorMessage
+          }).catch(() => {});
+        }
+      }
+    );
+  }
+
+  for (const branch of branchDrafts) {
+    const branchKey = branchPlanCacheKey(branch);
+    const channelRules = await loadBranchChannelRules(branch);
+    const requiredDisclaimers = [...new Set(channelRules.rules.flatMap((rule) => rule.requiredDisclaimers || []))];
+    const planConcurrency = resolvePlanLlmConcurrency(context, options);
+    const variantResults = await mapWithConcurrency(
+      Array.from({ length: Number(batch.estimate?.variantCount || 0) }, (_, index) => index + 1),
+      planConcurrency.variant,
+      async (branchVariantIndex) => {
+        const localScripts = [];
+        const localTasks = [];
+        const localPlans = [];
+        let variantBatchPlans = null;
+        let thirtySecondPlanPayloads = null;
+        if (useLlmPlans && useThirtySecondContinuityPlan) {
+          planSequence += 1;
+          options.onPlanProgress?.({
+            index: planSequence,
+            total: totalPlans,
+            branchLabel: branch.branchLabel || branch.branchId,
+            branchVariantIndex,
+            segmentIndex: "1-2"
+          });
+          thirtySecondPlanPayloads = await generateThirtySecondSeedancePlans(context, {
+            batch,
+            branch,
+            decomposition: batch.decomposition,
+            channelRules,
+            branchVariantIndex,
+            knowledgeNotes: options.knowledgeNotes,
+            llmConfig: options.llmConfig || {}
+          });
+        }
+        if (useLlmPlans && useVariantBatchPlans && !useThirtySecondContinuityPlan) {
+          const branchPlans = branchPlanBatches.get(branchKey);
+          const hasBranchBatchPlans = Boolean(pickBranchBatchPlan(branchPlans, branchVariantIndex, 1));
+          if (!hasBranchBatchPlans) {
             planSequence += 1;
             options.onPlanProgress?.({
               index: planSequence,
               total: totalPlans,
               branchLabel: branch.branchLabel || branch.branchId,
               branchVariantIndex,
-              segmentIndex
+              segmentIndex: `1-${segmentMultiplier}`,
+              mode: "variant_batch"
             });
-            planPayload = await generatePlan(context, {
-              batch,
-              branch,
-              decomposition: batch.decomposition,
-              channelRules,
-              branchVariantIndex,
-              segmentIndex,
-              segmentRole: slice.segmentRole,
-              sliceDurationSec: slice.sliceDurationSec || slice.durationSec,
-              currentSlice: slice,
-              totalSegmentCount: segmentMultiplier,
-              isFinalSeedanceSlice: segmentIndex === segmentMultiplier,
-              mandatoryMoneyVisualCarrier: segmentIndex === 1,
-              conversionEffectOpportunities: slice.conversionEffectOpportunities || [],
-              knowledgeNotes: options.knowledgeNotes,
-              llmConfig: options.llmConfig || {}
-            });
+            try {
+              variantBatchPlans = await generateVariantPlans(context, {
+                batch,
+                branch,
+                decomposition: batch.decomposition,
+                channelRules,
+                branchVariantIndex,
+                slicePlan,
+                knowledgeNotes: options.knowledgeNotes,
+                llmConfig: options.llmConfig || {}
+              });
+            } catch (error) {
+              variantBatchPlans = null;
+              const errorMessage = String(error?.message || error || "variant_batch_plan_failed").slice(0, 500);
+              console.warn(`[wangzhuan] variant batch plan fallback for ${batch.batchId}/${branchKey}/v${branchVariantIndex}: ${errorMessage}`);
+              batch.warnings = [
+                ...(Array.isArray(batch.warnings) ? batch.warnings : []),
+                {
+                  code: "plan_variant_batch_fallback",
+                  branchId: branch.branchId || "",
+                  branchLabel: branch.branchLabel || "",
+                  branchVariantIndex,
+                  message: errorMessage
+                }
+              ];
+              planWarnings.push(batch.warnings[batch.warnings.length - 1]);
+              const recordEvent = typeof context.recordTelemetryEvent === "function"
+                ? context.recordTelemetryEvent
+                : (eventName, payload) => recordTelemetryEvent(context, eventName, payload);
+              await recordEvent("plan_variant_batch_fallback", {
+                batchId: batch.batchId,
+                branchId: branch.branchId || "",
+                branchLabel: branch.branchLabel || "",
+                branchVariantIndex,
+                errorMessage
+              }).catch(() => {});
+            }
           }
+        }
+        for (let segmentIndex = 1; segmentIndex <= segmentMultiplier; segmentIndex += 1) {
+          const localSequence = sequence + ((branchVariantIndex - 1) * segmentMultiplier) + (segmentIndex - 1);
+          const slice = slicePlan[segmentIndex - 1] || { segmentIndex, durationSec: 15, segmentRole: "proof_slice" };
+          const scriptId = makeScriptId(batch.batchId, localSequence);
+          const generationTaskId = makeGenerationTaskId(batch.batchId, localSequence);
+          const segmentSuffix = segmentMultiplier > 1 ? `_segment${segmentIndex}` : "";
+          const scriptTarget = join(batchDir(context, batch.batchId), "scripts", `${scriptId}${segmentSuffix}.json`);
+          const promptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_seedance.txt`);
+          const imagePromptTarget = join(batchDir(context, batch.batchId), "prompts", `${generationTaskId}_image.txt`);
+          let hook = scriptHook(batch, branch, branchVariantIndex);
+          let body = scriptBody(batch, branch, branchVariantIndex, segmentIndex, requiredDisclaimers, slice.durationSec);
+          let cta = branch.cta || batch.decomposition?.cta || "Install now";
+          let ending = branch.ending || "Try it today";
+          let seedancePrompt = "";
+          let imagePrompt = "";
+          let negativePrompt = branch.negativePrompt || "";
+          let voiceover = "";
+          let subtitles = [];
+          let complianceNotes = [];
+          let mediaRefs = branch.assetUrls || {};
+          let planRecord = null;
+
+          if (useLlmPlans) {
+            const branchPlans = branchPlanBatches.get(branchKey);
+            let planPayload = thirtySecondPlanPayloads?.[segmentIndex - 1]
+              || pickBranchBatchPlan(variantBatchPlans, branchVariantIndex, segmentIndex)
+              || pickBranchBatchPlan(branchPlans, branchVariantIndex, segmentIndex);
+            if (!planPayload) {
+              planSequence += 1;
+              options.onPlanProgress?.({
+                index: planSequence,
+                total: totalPlans,
+                branchLabel: branch.branchLabel || branch.branchId,
+                branchVariantIndex,
+                segmentIndex
+              });
+              planPayload = await generatePlan(context, {
+                batch,
+                branch,
+                decomposition: batch.decomposition,
+                channelRules,
+                branchVariantIndex,
+                segmentIndex,
+                segmentRole: slice.segmentRole,
+                sliceDurationSec: slice.sliceDurationSec || slice.durationSec,
+                currentSlice: slice,
+                totalSegmentCount: segmentMultiplier,
+                isFinalSeedanceSlice: segmentIndex === segmentMultiplier,
+                mandatoryMoneyVisualCarrier: segmentIndex === 1,
+                conversionEffectOpportunities: slice.conversionEffectOpportunities || [],
+                knowledgeNotes: options.knowledgeNotes,
+                llmConfig: options.llmConfig || {}
+              });
+            }
           hook = planPayload.hook;
           body = planPayload.body;
           cta = planPayload.cta;
@@ -985,7 +1188,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
             generationTaskId,
             branchVariantIndex,
             segmentIndex,
-            sequence,
+            sequence: localSequence,
             planPayload: {
               hook,
               body,
@@ -1009,7 +1212,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
               conversionEffectOpportunities
             }
           });
-          plans.push(planRecord);
+          localPlans.push(planRecord);
         }
 
         const script = {
@@ -1019,7 +1222,7 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           branchIndex: branch.branchIndex,
           branchLabel: branch.branchLabel,
           branchVariantIndex,
-          variantIndex: sequence,
+          variantIndex: localSequence,
           segmentIndex,
           durationSec: slice.durationSec,
           isFinalSeedanceSlice: segmentIndex === segmentMultiplier,
@@ -1063,8 +1266,8 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           useLlmPlans ? imagePrompt : buildPrompt(batch, script, "image")
         );
 
-        scripts.push(script);
-        tasks.push({
+        localScripts.push(script);
+        localTasks.push({
           generationTaskId,
           batchId: batch.batchId,
           scriptId,
@@ -1091,9 +1294,16 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
           remoteUrlStored: false,
           attempts: 0
         });
-        sequence += 1;
       }
+        return { branchVariantIndex, scripts: localScripts, tasks: localTasks, plans: localPlans };
+      }
+    );
+    for (const result of variantResults.sort((a, b) => Number(a.branchVariantIndex || 0) - Number(b.branchVariantIndex || 0))) {
+      plans.push(...result.plans);
+      scripts.push(...result.scripts);
+      tasks.push(...result.tasks);
     }
+    sequence += Number(batch.estimate?.variantCount || 0) * segmentMultiplier;
   }
 
   const prepared = {
@@ -1103,6 +1313,10 @@ export async function prepareBatchForPipeline(context, batch, options = {}) {
       plans
     } : {}),
     branchDrafts,
+    warnings: [
+      ...(Array.isArray(batch.warnings) ? batch.warnings : []),
+      ...planWarnings.filter((warning) => !(Array.isArray(batch.warnings) ? batch.warnings : []).includes(warning))
+    ],
     scripts,
     tasks,
     outputs: Array.isArray(batch.outputs) ? batch.outputs : [],
@@ -1431,8 +1645,9 @@ function editablePlanById(request = {}) {
 
 function planRepairContextForConfirm(batch = {}, branch = {}, plan = {}) {
   const draft = batch.templateSnapshot?.draft || {};
-  const targetLanguage = branch.languages?.[0] || branch.language || draft.languages?.[0] || draft.language;
-  const targetRegion = branch.regions?.[0] || draft.regions?.[0] || batch.estimate?.request?.targetRegions?.[0];
+  const request = batch.estimate?.request || {};
+  const targetLanguage = branch.languages?.[0] || branch.language || draft.languages?.[0] || draft.language || request.languages?.[0] || request.language;
+  const targetRegion = branch.regions?.[0] || branch.targetRegions?.[0] || branch.targetRegion || draft.regions?.[0] || draft.targetRegions?.[0] || draft.targetRegion || request.targetRegions?.[0] || request.targetRegion;
   return {
     targetLanguage,
     targetRegion,
@@ -1563,20 +1778,22 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     ? { branches: branchSource, reviewResult: validateAssetReviewState(branchSource) }
     : await ensureAssetReviewsApproved(context, branchSource);
   const reviewResult = review.reviewResult;
-  if (!reviewResult.ok) {
-    throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请上传 Seedance 素材并完成审核后再确认生成", {
-      failures: reviewResult.failures,
-      assetsByBranch: reviewResult.assetsByBranch
-    });
-  }
   const reviewedBatch = {
     ...batch,
     branchDrafts: review.branches,
     request: {
       ...(batch.request || {}),
-      branches: review.branches
+      branches: review.branches,
+      postProcess: normalizeBatchPostProcess(request.postProcess ?? batch.request?.postProcess)
     }
   };
+  if (!reviewResult.ok) {
+    await writeBatchWithTrigger(context, reviewedBatch, "batch_write");
+    throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请上传 Seedance 素材并完成审核后再确认生成", {
+      failures: reviewResult.failures,
+      assetsByBranch: reviewResult.assetsByBranch
+    });
+  }
   const { nextPlans, nextScripts, confirmedAt } = await applyConfirmedPlanEdits(context, reviewedBatch, plans, confirmedPlanIds, request);
   const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
     if (task.status !== "pending_preview") return task;
@@ -1617,6 +1834,15 @@ export async function confirmBatchAssets(context, batchId, request = {}) {
   const branchSource = normalizeBranchDrafts(batch.templateSnapshot?.draft || {}, rawBranchSource);
   const review = await ensureAssetReviewsApproved(context, branchSource);
   if (!review.reviewResult.ok) {
+    await writeBatchWithTrigger(context, {
+      ...batch,
+      branchDrafts: review.branches,
+      request: {
+        ...(batch.request || {}),
+        branches: review.branches,
+        branchDrafts: review.branches
+      }
+    }, "batch_write");
     throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请等待审核通过后再确认结果", {
       failures: review.reviewResult.failures,
       assetsByBranch: review.reviewResult.assetsByBranch

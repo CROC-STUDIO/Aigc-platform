@@ -114,13 +114,13 @@ export function parseDebugCliArgs(
     truthRulesPath: truthRulesJson
       ? resolvePathUnderCwd(cwd, truthRulesJson, "--truth-rules-json", { allowOutsideWorkspace })
       : "",
-    minSliceSec: Math.max(1, Math.round(numberOrFallback(values["min-slice-sec"], 8))),
+    minSliceSec: Math.max(1, Math.round(numberOrFallback(values["min-slice-sec"], 5))),
     maxSliceSec: Math.max(1, Math.round(numberOrFallback(values["max-slice-sec"], 15)))
   };
 }
 
 export function splitStorySegmentIntoSlices(segment = {}, options = {}) {
-  const minSliceSec = Math.max(1, Math.round(numberOrFallback(options.minSliceSec, 8)));
+  const minSliceSec = Math.max(1, Math.round(numberOrFallback(options.minSliceSec, 5)));
   const maxSliceSec = Math.max(minSliceSec, Math.round(numberOrFallback(options.maxSliceSec, 15)));
   const startSec = roundSec(segment.startSec);
   const durationSec = roundSec(segment.durationSec || (numberOrFallback(segment.endSec, 0) - startSec));
@@ -703,7 +703,7 @@ export async function runSeedanceSegmentDebugCli(options = {}) {
     region: options.region || "BR",
     productName: options.productName || "Product",
     currencySymbol: options.currencySymbol || "",
-    minSliceSec: options.minSliceSec || 8,
+    minSliceSec: options.minSliceSec || 5,
     maxSliceSec: options.maxSliceSec || 15,
     slices
   };

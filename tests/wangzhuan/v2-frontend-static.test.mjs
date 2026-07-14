@@ -45,6 +45,8 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.doesNotMatch(html, /id="wzTargetRegions"[^>]*multiple/);
   assert.match(html, /<select id="wzLanguage">/);
   assert.doesNotMatch(html, /id="wzLanguages"[^>]*multiple/);
+  assert.match(html, /id="wzTargetRegionCustom"/);
+  assert.match(html, /id="wzLanguageCustom"/);
   assert.match(html, /<select id="wzCurrencySymbol">/);
   assert.match(html, /<option value="R\$">R\$ BRL<\/option>/);
   assert.match(html, /<option value="MX\$">MX\$ MXN<\/option>/);
@@ -80,8 +82,10 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /产品 Logo（最多 9 个）[\s\S]*id="wzProductIconFile"[^>]*multiple/);
   assert.match(html, /产品截图（最多 9 个）[\s\S]*id="wzProductScreenshotFile"[^>]*multiple/);
   assert.match(html, /产品录屏（最多 2 个）[\s\S]*id="wzProductRecordingFile"[^>]*multiple/);
-  assert.match(html, /CTA 图（仅图片，拼接到末尾）[\s\S]*id="wzCtaAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
-  assert.match(html, /Ending 图（仅图片，拼接到末尾）[\s\S]*id="wzEndingAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(html, /CTA 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzCtaAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(html, /Ending 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzEndingAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="1"/);
+  assert.doesNotMatch(html, /同时生成数量/);
   assert.match(html, /Seedance prompt/);
   assert.doesNotMatch(html, /Seedance 预案/);
   assert.doesNotMatch(html, /id="wzEstimateBtn"/);
@@ -91,8 +95,8 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /id="wzCodexTestStoreLink" type="url"/);
   assert.match(html, /<option value="gemini-3\.1-pro-preview">Gemini 3\.1 Pro Preview<\/option>/);
   assert.match(html, /id="wzGeminiDecompositionHint"[\s\S]*视频拆解通常需要 1-3 分钟/);
-  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.5" selected>GPT-5\.5<\/option>/);
-  assert.match(html, /<select id="wzPlanLlmModel">[\s\S]*<option value="gpt-5\.5" selected>GPT-5\.5<\/option>/);
+  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.4" selected>GPT-5\.4<\/option>/);
+  assert.match(html, /<select id="wzPlanLlmModel">[\s\S]*<option value="gpt-5\.4" selected>GPT-5\.4<\/option>/);
   assert.doesNotMatch(html, /<option value="gemini-3\.5-flash"/);
   assert.doesNotMatch(html, /Gemini 3\.5 Flash/);
   assert.doesNotMatch(html, /id="wzDecomposeBtn"/);
@@ -107,9 +111,16 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /targetRegions:\s*\[region\]/);
   assert.match(js, /languages:\s*\[language\]/);
   assert.match(js, /\/api\/wangzhuan\/reference-videos\/decomposition-jobs/);
+  assert.match(js, /batchId:\s*currentBatchId\(\)\s*\|\|\s*undefined/);
   assert.match(js, /\/api\/wangzhuan\/batches\/plan-jobs/);
   assert.match(js, /function fileSha256Hex\(file\)/);
+  assert.match(js, /function sha256BytesHexFallback\(inputBytes\)/);
+  assert.match(js, /globalThis\.crypto\?\.subtle\?\.digest/);
+  assert.match(js, /const fileHash = await fileSha256Hex\(file\)/);
+  assert.match(js, /\/api\/wangzhuan\/reference-videos\/reuse-check/);
   assert.match(js, /form\.append\("fileHash", fileHash\)/);
+  assert.match(js, /已复用已有参考视频/);
+  assert.match(js, /参考视频已选择，正在上传/);
   assert.match(js, /startDecompositionJob\(\)\.catch/);
   assert.doesNotMatch(js, /function renderDecompositionProgressPreview/);
   assert.doesNotMatch(js, /渐进拆解预览/);
@@ -143,13 +154,18 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /startsWith\("gemini-"\)/);
   assert.match(js, /timeoutMs = decompositionTimeoutMs\(model\)/);
   assert.doesNotMatch(js, /Gemini 视频拆解可能持续数分钟/);
-  assert.match(js, /els\.draftDecompositionBtn\.disabled = hasGeneratedSeedancePlan\(\)/);
+  assert.match(js, /els\.draftDecompositionBtn\.disabled = hasConfirmedVideoGeneration\(\)/);
   assert.match(js, /如需调整，可重新拆解/);
+  assert.match(js, /state\.stalePlanPreview = state\.draftSignature !== await clientPlanDraftSignature\(\);\s*renderPlanEditors\(plans\);/);
   assert.match(js, /PLAN_UPSTREAM_LOCK_SELECTOR/);
-  assert.match(js, /function hasGeneratedSeedancePlan/);
-  assert.match(js, /\["queued", "running", "stitching", "qc", "partial_failed", "succeeded", "failed", "stopped", "skipped"\]/);
+  assert.match(js, /function hasConfirmedVideoGeneration/);
+  assert.match(js, /batch\?\.previewConfirmedAt/);
+  assert.match(js, /task\.status !== "pending_preview"/);
   assert.match(js, /function setPlanUpstreamLocked\(locked\)/);
   assert.match(js, /setPlanUpstreamLocked\(planUpstreamLocked\)/);
+  const startPlanJobSource = js.slice(js.indexOf("async function startPlanJob"), js.indexOf("async function startCodexPromptTestJob"));
+  assert.doesNotMatch(startPlanJobSource, /setPlanUpstreamLocked\(true\)/);
+  assert.match(js, /const planJobRunning = \["queued", "running"\]\.includes\(state\.planJob\?\.status\)/);
   assert.match(js, /const planRetryable = isRecoverableBackgroundJob\(state\.planJob\)/);
   assert.match(js, /const planDisabled = planRetryable/);
   assert.match(js, /els\.planBatchBtn\.disabled = planDisabled/);
@@ -221,6 +237,14 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /markBackgroundJobSlow/);
   assert.match(js, /SLOW_POLL_INTERVAL_MS/);
   assert.match(js, /markBackgroundJobPollFailure/);
+  assert.match(js, /function isRecoverableJobPollError\(error\)/);
+  assert.match(js, /const POLL_RETRY_BASE_MS\s*=\s*2_000/);
+  assert.match(js, /const POLL_RETRY_MAX_MS\s*=\s*10_000/);
+  assert.match(js, /consecutivePollFailures \+= 1/);
+  assert.match(js, /schedule\(pollRetryDelayMs\(consecutivePollFailures\)\)/);
+  assert.match(js, /查询暂时断开，正在自动重试/);
+  assert.match(js, /查询已恢复/);
+  assert.match(js, /if \(!isRecoverableJobPollError\(error\)\) \{\s*stop\(\);/);
   assert.match(js, /job_poll_timeout/);
   assert.match(js, /job_poll_failed/);
   assert.match(js, /重试查询 prompt 结果/);
@@ -240,6 +264,8 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /function collectTruthRules\(\)/);
   assert.match(js, /truthRules:\s*collectTruthRules\(\)/);
   assert.match(js, /function currencyValue\(\)/);
+  assert.match(js, /function regionValue\(\)/);
+  assert.match(js, /function languageValue\(\)/);
   assert.match(js, /currencySymbol:\s*currencyValue\(\)/);
   assert.match(js, /function effectiveMaterialDirection\(\)/);
   assert.match(js, /materialDirection:\s*effectiveMaterialDirection\(\)/);
@@ -273,6 +299,20 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.doesNotMatch(js, /const content = await fileToDataUrl\(file\);\s*const data = await api\("\/api\/wangzhuan\/reference-videos\/check"/);
 });
 
+
+test("wangzhuan v2 error display includes asset review failure details", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  assert.match(js, /function formatAssetReviewErrorDetails/);
+  assert.match(js, /asset_review_pending/);
+  assert.match(js, /error\.data\?\.failures/);
+  assert.match(js, /assetsByBranch/);
+  assert.match(js, /未通过素材/);
+  assert.match(js, /branchLabel/);
+  assert.match(js, /assetKey/);
+  assert.match(js, /fileName/);
+  assert.match(js, /requestId:/);
+});
+
 test("v2 captures wangzhuan output template fields for Seedance planning", async () => {
   const html = await readFile(new URL("../../public/wangzhuan-v2.html", import.meta.url), "utf8");
   const js = await readFile(new URL("../../public/wangzhuan-v2.js", import.meta.url), "utf8");
@@ -292,7 +332,7 @@ test("v2 captures wangzhuan output template fields for Seedance planning", async
   assert.doesNotMatch(html, /<option value="two_15s"/);
   assert.doesNotMatch(html, /<option value="three_slice"/);
   assert.match(html, /目标段数/);
-  assert.match(html, /<option value="follow_decomposition" selected>跟随拆解视频<\/option>/);
+  assert.match(html, /<option value="follow_decomposition" selected>跟随拆解段落（系统自动切片）<\/option>/);
   assert.match(html, /<option value="5">5 段<\/option>/);
   assert.doesNotMatch(html, /<option value="15">15s<\/option>/);
   assert.doesNotMatch(html, /<option value="30">30s<\/option>/);
@@ -350,6 +390,8 @@ test("v2 plan editor exposes output-template plan fields", async () => {
   const js = await readFile(new URL("../../public/wangzhuan-v2.js", import.meta.url), "utf8");
   const common = await readFile(new URL("../../public/wangzhuan-common.js", import.meta.url), "utf8");
   const pipeline = await readFile(new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url), "utf8");
+
+  assert.match(js, /data-plan-field="sliceDurationSec" type="number" min="5" max="30"/);
 
   assert.match(js, /data-plan-field="body"/);
   assert.match(js, /data-plan-field="imagePrompt"/);
@@ -465,7 +507,7 @@ test("task manager separates final outputs from intermediate outputs", async () 
   assert.match(js, /function isDeliveryOutput\(output = \{\}\)/);
   assert.match(js, /function hasStitchedDeliveryOutput\(outputs = \[\]\)/);
   assert.match(js, /context\.hasStitchedOutput/);
-  assert.match(js, /\["stitched_video", "remix_video"\]/);
+  assert.match(js, /\["stitched_video", "expanded_video", "remix_video"\]/);
   assert.match(js, /"stitched_video"/);
   assert.match(js, /交付结果/);
   assert.match(js, /包含 QC 通过、警告、未通过和未质检状态/);

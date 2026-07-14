@@ -5,7 +5,7 @@ import { access, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { homedir, networkInterfaces } from "node:os";
+import { homedir, hostname, networkInterfaces } from "node:os";
 import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
@@ -452,7 +452,12 @@ function normalizeProjects(items) {
 function projectList() {
   savedProjects = normalizeProjects(savedProjects);
   const activeBase = resolve(currentBaseProjectRoot());
-  return savedProjects.map((item) => ({ ...item, active: item.path === activeBase, userPath: userProjectRoot(item.path, currentUserId()) }));
+  return savedProjects.map((item) => ({
+    ...item,
+    projectKey: sha256Hex(item.path),
+    active: item.path === activeBase,
+    userPath: userProjectRoot(item.path, currentUserId())
+  }));
 }
 
 function userProjectRoot(baseRoot = currentBaseProjectRoot(), userId = currentUserId()) {
@@ -2562,10 +2567,23 @@ async function updateConfig(body) {
 }
 
 async function switchProject(body) {
+  const requestedKey = String(body.projectKey ?? "").trim().replace(/^root:/, "");
+  const keyedProject = requestedKey
+    ? savedProjects.find((item) => sha256Hex(item.path) === requestedKey)
+    : null;
+  if (requestedKey && !keyedProject) throw new Error("Project not found");
+  const nextRoot = resolve(String(keyedProject?.path ?? body.projectRoot ?? "").trim());
+  if (!nextRoot) throw new Error("Project root is required");
+  if (keyedProject) {
+    const scoped = requestScope.getStore();
+    if (scoped) {
+      scoped.baseProjectRoot = nextRoot;
+      scoped.userProjectRoot = await ensureUserProjectScope(scoped.userId);
+    }
+    return { ok: true, projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), projects: projectList() };
+  }
   const runState = getRunState();
   if (runState.running) throw new Error("Batch is running; cannot switch project now");
-  const nextRoot = resolve(String(body.projectRoot ?? "").trim());
-  if (!nextRoot) throw new Error("Project root is required");
   try {
     await mkdir(nextRoot, { recursive: true });
     await access(nextRoot, fsConstants.R_OK | fsConstants.W_OK);
@@ -3949,7 +3967,7 @@ async function tickWangzhuanScheduler() {
   schedulerRunning = true;
   try {
     const result = await runDueSchedulerJobs(schedulerContext(), {
-      workerId: `aigc-platform:${process.pid}`,
+      workerId: `aigc-platform:${hostname()}:${process.pid}`,
       limit: Number(process.env.AIGC_SCHEDULER_BATCH_SIZE || appConfig.wangzhuan?.scheduler?.batchSize || 5),
       lockSeconds: Number(process.env.AIGC_SCHEDULER_LOCK_SECONDS || appConfig.wangzhuan?.scheduler?.lockSeconds || 60),
       contextForJob: (job) => schedulerContext(job)

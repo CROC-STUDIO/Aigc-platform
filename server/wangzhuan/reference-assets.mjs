@@ -11,6 +11,11 @@ export const REFERENCE_VIDEO_ASSET_KEYS = new Set([
   "personAsset"
 ]);
 
+export const FINAL_TAIL_REFERENCE_ASSET_ORDER = Object.freeze([
+  "ctaAsset",
+  "endingAsset"
+]);
+
 const NON_SEEDANCE_REFERENCE_ASSET_KEYS = new Set([
   "ctaAsset",
   "endingAsset",

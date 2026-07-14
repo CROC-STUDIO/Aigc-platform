@@ -364,11 +364,62 @@ test("prepareBatchForPipeline derives slices from storySegments when seedanceSli
   assert.equal(prepared.scripts[0].sliceSplitReason, "claim changes into app proof");
 });
 
+test("prepareBatchForPipeline falls back to storySegments when explicit seedanceSlices are invalid", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-invalid-explicit-slices-"));
+  const batch = testBatch({ durationSec: 16, sliceStrategy: "fixed_15s" });
+  batch.decomposition = {
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        startSec: 0,
+        endSec: 16,
+        durationSec: 16,
+        scene: "home",
+        subject: "student",
+        action: "claim then proof",
+        camera: "selfie then close-up",
+        lighting: "soft indoor",
+        style: "UGC",
+        quality: "clear"
+      }
+    ],
+    seedanceSlices: [
+      {
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 31,
+        durationSec: 31,
+        sliceDurationSec: 31,
+        scene: "bad explicit slice",
+        subject: "student",
+        action: "bad slice",
+        camera: "selfie",
+        lighting: "soft indoor",
+        style: "UGC",
+        quality: "clear"
+      }
+    ]
+  };
+
+  const prepared = await prepareBatchForPipeline(testContext(root), batch);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [8, 8]);
+  assert.deepEqual(prepared.tasks.map((task) => task.sliceDurationSec), [8, 8]);
+  assert.deepEqual(prepared.scripts.map((script) => script.storySegmentIndex), [1, 1]);
+});
+
 test("prepareBatchForPipeline passes fission slice context to LLM plan generation", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-fission-plan-context-"));
   const seen = [];
+  const telemetry = [];
   const context = {
     ...testContext(root),
+    recordTelemetryEvent: async (eventName, payload) => {
+      telemetry.push({ eventName, payload });
+    },
+    generateSeedanceVariantPlansForTest: async () => {
+      throw new Error("variant batch fixture failure");
+    },
     generateSeedancePlanForTest: async (_context, input) => {
       seen.push(input);
       return {
@@ -407,8 +458,208 @@ test("prepareBatchForPipeline passes fission slice context to LLM plan generatio
   assert.equal(seen.length, 1);
   assert.equal(seen[0].currentSlice.storySegmentIndex, 1);
   assert.equal(seen[0].mandatoryMoneyVisualCarrier, true);
+  assert.equal(prepared.warnings?.[0]?.code, "plan_variant_batch_fallback");
+  assert.match(prepared.warnings?.[0]?.message || "", /variant batch fixture failure/);
+  assert.equal(telemetry[0]?.eventName, "plan_variant_batch_fallback");
+  assert.match(telemetry[0]?.payload?.errorMessage || "", /variant batch fixture failure/);
   assert.deepEqual(prepared.plans[0].conversionEffectOpportunities, [{ effect: "coin_burst" }]);
   assert.deepEqual(prepared.tasks[0].conversionEffectOpportunities, [{ effect: "coin_burst" }]);
+});
+
+function testPlanPayload(label, input = {}) {
+  return {
+    hook: `Hook ${label}`,
+    body: `Body ${label}`,
+    voiceover: `Voiceover ${label}`,
+    subtitles: [`Subtitle ${label}`],
+    cta: "",
+    ending: "",
+    imagePrompt: `Image prompt ${label}`,
+    seedancePrompt: `Seedance prompt ${label}; no burned subtitles.`,
+    negativePrompt: "No watermark",
+    sliceDurationSec: input.sliceDurationSec || input.currentSlice?.durationSec || 12,
+    segmentRole: input.segmentRole || input.currentSlice?.segmentRole || "hook_slice",
+    moneyVisuals: ["coin_burst"],
+    conversionEffectOpportunities: input.currentSlice?.conversionEffectOpportunities || [],
+    subtitleWorkflow: { burnedInSubtitles: false, postSubtitleRequired: true, provider: "pixel_tech", subtitleScript: [`Subtitle ${label}`] },
+    sliceDiversity: {}
+  };
+}
+
+test("prepareBatchForPipeline consumes one variant-level plan for all slices", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-variant-batch-plan-"));
+  const seenVariantCalls = [];
+  const context = {
+    ...testContext(root),
+    generateSeedanceVariantPlansForTest: async (_context, input) => {
+      seenVariantCalls.push(input);
+      const rows = [];
+      for (const [index, slice] of input.slicePlan.entries()) {
+        const segmentIndex = index + 1;
+        rows.push({
+          branchVariantIndex: input.branchVariantIndex,
+          segmentIndex,
+          planPayload: testPlanPayload(`v${input.branchVariantIndex}s${segmentIndex}`, {
+            currentSlice: slice,
+            segmentRole: slice.segmentRole,
+            sliceDurationSec: slice.durationSec
+          })
+        });
+      }
+      return rows;
+    },
+    generateSeedanceBranchPlansForTest: async () => {
+      throw new Error("branch batch should not run by default");
+    },
+    generateSeedancePlanForTest: async () => {
+      throw new Error("single-slice fallback should not run");
+    }
+  };
+  const batch = testBatch({ durationSec: 36, sliceStrategy: "three_slice" });
+  batch.estimate.variantCount = 3;
+
+  const prepared = await prepareBatchForPipeline(context, batch, { useLlmPlans: true });
+
+  assert.equal(seenVariantCalls.length, 3);
+  assert.deepEqual(seenVariantCalls.map((input) => input.branchVariantIndex).sort((a, b) => a - b), [1, 2, 3]);
+  assert.deepEqual(seenVariantCalls.map((input) => input.slicePlan.length), [3, 3, 3]);
+  assert.equal(prepared.plans.length, 9);
+  assert.equal(prepared.scripts.length, 9);
+  assert.equal(prepared.tasks.length, 9);
+  assert.deepEqual(prepared.scripts.map((script) => script.branchVariantIndex), [1, 1, 1, 2, 2, 2, 3, 3, 3]);
+  assert.deepEqual(prepared.scripts.map((script) => script.segmentIndex), [1, 2, 3, 1, 2, 3, 1, 2, 3]);
+  assert.match(prepared.scripts[8].seedancePrompt, /v3s3/);
+});
+
+test("prepareBatchForPipeline can still consume explicit branch-level plans", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-branch-batch-plan-"));
+  const seenBranchCalls = [];
+  const context = {
+    ...testContext(root),
+    generateSeedanceBranchPlansForTest: async (_context, input) => {
+      seenBranchCalls.push(input);
+      const rows = [];
+      for (let branchVariantIndex = 1; branchVariantIndex <= input.variantCount; branchVariantIndex += 1) {
+        for (const [index, slice] of input.slicePlan.entries()) {
+          const segmentIndex = index + 1;
+          rows.push({
+            branchVariantIndex,
+            segmentIndex,
+            planPayload: testPlanPayload(`v${branchVariantIndex}s${segmentIndex}`, {
+              currentSlice: slice,
+              segmentRole: slice.segmentRole,
+              sliceDurationSec: slice.durationSec
+            })
+          });
+        }
+      }
+      return rows;
+    },
+    generateSeedanceVariantPlansForTest: async () => {
+      throw new Error("variant batch should not run when branch batch is enabled");
+    },
+    generateSeedancePlanForTest: async () => {
+      throw new Error("single-slice fallback should not run");
+    }
+  };
+  const batch = testBatch({ durationSec: 36, sliceStrategy: "three_slice" });
+  batch.estimate.variantCount = 3;
+
+  const prepared = await prepareBatchForPipeline(context, batch, {
+    useLlmPlans: true,
+    branchBatchPlans: true,
+    planBatchMode: "branch"
+  });
+
+  assert.equal(seenBranchCalls.length, 1);
+  assert.equal(seenBranchCalls[0].variantCount, 3);
+  assert.equal(seenBranchCalls[0].slicePlan.length, 3);
+  assert.equal(prepared.plans.length, 9);
+  assert.match(prepared.scripts[8].seedancePrompt, /v3s3/);
+});
+
+test("prepareBatchForPipeline limits concurrent branch-level plan generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-branch-plan-concurrency-"));
+  let active = 0;
+  let maxActive = 0;
+  const context = {
+    ...testContext(root),
+    generateSeedanceBranchPlansForTest: async (_context, input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      return [{
+        branchVariantIndex: 1,
+        segmentIndex: 1,
+        planPayload: testPlanPayload(input.branch.branchId, {
+          currentSlice: input.slicePlan[0],
+          segmentRole: input.slicePlan[0]?.segmentRole,
+          sliceDurationSec: input.slicePlan[0]?.durationSec
+        })
+      }];
+    }
+  };
+  const batch = testBatch({ durationSec: 12, sliceStrategy: "fixed_15s" });
+  batch.estimate.variantCount = 1;
+  batch.estimate.request.branches = [
+    { branchId: "branch_1", branchLabel: "Branch 1", targetChannels: ["tiktok"] },
+    { branchId: "branch_2", branchLabel: "Branch 2", targetChannels: ["tiktok"] },
+    { branchId: "branch_3", branchLabel: "Branch 3", targetChannels: ["tiktok"] }
+  ];
+  batch.templateSnapshot.draft.branches = batch.estimate.request.branches;
+
+  const prepared = await prepareBatchForPipeline(context, batch, {
+    useLlmPlans: true,
+    branchBatchPlans: true,
+    planBatchMode: "branch",
+    planConcurrency: 2
+  });
+
+  assert.equal(maxActive, 2);
+  assert.equal(prepared.scripts.length, 3);
+  assert.deepEqual(prepared.scripts.map((script) => script.branchId), ["branch_1", "branch_2", "branch_3"]);
+});
+
+test("prepareBatchForPipeline limits concurrent variant-level plan generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-variant-plan-concurrency-"));
+  let active = 0;
+  let maxActive = 0;
+  const startedVariants = [];
+  const context = {
+    ...testContext(root),
+    generateSeedancePlanForTest: async (_context, input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      startedVariants.push(input.branchVariantIndex);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      return testPlanPayload(`v${input.branchVariantIndex}s${input.segmentIndex}`, input);
+    },
+    generateSeedanceBranchPlansForTest: async () => {
+      throw new Error("branch batch generation should be disabled");
+    }
+  };
+  const batch = testBatch({ durationSec: 12, sliceStrategy: "fixed_15s" });
+  batch.estimate.variantCount = 4;
+
+  const prepared = await prepareBatchForPipeline(context, batch, {
+    useLlmPlans: true,
+    branchBatchPlans: false,
+    variantBatchPlans: false,
+    planConcurrency: { branch: 1, variant: 2, total: 2 }
+  });
+
+  assert.equal(maxActive, 2);
+  assert.equal(prepared.scripts.length, 4);
+  assert.deepEqual(startedVariants.sort((a, b) => a - b), [1, 2, 3, 4]);
+  assert.deepEqual(prepared.scripts.map((script) => script.branchVariantIndex), [1, 2, 3, 4]);
+  assert.deepEqual(prepared.tasks.map((task) => task.generationTaskId), [
+    "gen_abcd_001",
+    "gen_abcd_002",
+    "gen_abcd_003",
+    "gen_abcd_004"
+  ]);
 });
 
 test("prepareBatchForPipeline source writes slice duration and role into payloads", async () => {

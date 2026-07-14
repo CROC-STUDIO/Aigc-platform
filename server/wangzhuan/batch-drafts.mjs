@@ -11,6 +11,7 @@ import {
   syncVideoDecompositionFact
 } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
+import { normalizeBatchPostProcess } from "./postprocess.mjs";
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -115,6 +116,7 @@ function requestSnapshotFromDraft(request = {}, referenceVideo = {}) {
     disclaimerLanguage: normalizeString(request.disclaimerLanguage, 64),
     disclaimerByLanguage: cleanObject(request.disclaimerByLanguage),
     disclaimerOverlay: cleanObject(request.disclaimerOverlay),
+    ...(request.postProcess !== undefined ? { postProcess: normalizeBatchPostProcess(request.postProcess) } : {}),
     durationSec: Number(request.durationSec || 0) || undefined,
     outputRatio: normalizeString(request.outputRatio, 16),
     variantCount: Number(request.variantCount || 0) || undefined,

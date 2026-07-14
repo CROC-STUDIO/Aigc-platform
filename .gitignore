@@ -27,7 +27,8 @@ video_frames/
 Thumbs.db
 ad-picture-web-backups-*
 .release/*.tar.gz
-docs/
+docs/*
+!docs/网赚素材管线修改计划-observability.md
 mysql-data/
 .release/env.local.sh
 .superpowers/

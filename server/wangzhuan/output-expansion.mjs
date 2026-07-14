@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -42,6 +42,9 @@ export function normalizeExpansionRequest(body = {}) {
 
 export function buildExpandedOutputName(fileName = "output.mp4", width, height) {
   const safe = String(fileName || "output.mp4");
+  if (/_\d+x\d+(?=\.[^.]+$|$)/i.test(safe)) {
+    return safe.replace(/_\d+x\d+(?=\.[^.]+$|$)/i, `_${width}x${height}`);
+  }
   return safe.replace(/(\.[^.]+)?$/, `__${width}x${height}$1`);
 }
 
@@ -55,6 +58,45 @@ export function buildBlurPadFilter(width, height) {
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`
   ].join(";");
+}
+
+export function expansionTimeoutMs(durationSec = 0) {
+  return Math.max(120000, Math.ceil(Number(durationSec || 0) * 5) * 1000);
+}
+
+async function inspectExpandedVideo(outputPath, targetWidth, targetHeight, timeoutMs = 120000) {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error",
+    "-select_streams", "v:0",
+    "-show_entries", "stream=width,height,codec_name,pix_fmt",
+    "-show_entries", "format=duration,size",
+    "-of", "json",
+    outputPath
+  ], { encoding: "utf8", timeout: 15000, maxBuffer: 2 * 1024 * 1024 });
+  const parsed = JSON.parse(String(stdout || "{}"));
+  const stream = parsed.streams?.[0] || {};
+  const format = parsed.format || {};
+  const width = Number(stream.width || 0);
+  const height = Number(stream.height || 0);
+  const durationSec = Number(format.duration || 0);
+  const sizeBytes = Number(format.size || 0);
+  if (width !== targetWidth || height !== targetHeight || !(durationSec > 0) || !(sizeBytes > 1024)
+    || !stream.codec_name || !stream.pix_fmt) {
+    throw new WangzhuanError("output_expansion_failed", "扩展视频尺寸或流信息校验失败", {
+      width,
+      height,
+      targetWidth,
+      targetHeight,
+      durationSec,
+      sizeBytes
+    });
+  }
+  await execFileAsync("ffmpeg", ["-nostdin", "-v", "error", "-i", outputPath, "-f", "null", "-"], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return { width, height, durationSec, sizeBytes };
 }
 
 export function buildExpansionResultShape({
@@ -85,7 +127,8 @@ export function buildExpansionResultShape({
   };
 }
 
-export async function renderExpandedVideo({ inputPath, targetWidth, targetHeight, outputDir, outputFileName = "" }) {
+export async function renderExpandedVideo({ inputPath, targetWidth, targetHeight, outputDir, outputFileName = "", timeoutMs = 120000 }) {
+  await mkdir(outputDir, { recursive: true });
   const fileName = outputFileName || buildExpandedOutputName(basename(inputPath), targetWidth, targetHeight);
   const outputPath = join(outputDir, fileName);
   const filter = buildBlurPadFilter(targetWidth, targetHeight);
@@ -99,22 +142,26 @@ export async function renderExpandedVideo({ inputPath, targetWidth, targetHeight
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-crf", "18",
-      "-c:a", "copy",
+      "-c:a", "aac",
+      "-ar", "44100",
+      "-ac", "2",
+      "-movflags", "+faststart",
       outputPath
     ], {
-      timeout: 120000,
+      timeout: timeoutMs,
       maxBuffer: 8 * 1024 * 1024
     });
   } catch (error) {
-    try {
-      const info = await stat(outputPath);
-      if (info.isFile() && info.size > 0) {
-        return { outputPath, fileName };
-      }
-    } catch {}
+    await rm(outputPath, { force: true }).catch(() => {});
     throw error;
   }
-  return { outputPath, fileName };
+  try {
+    const metadata = await inspectExpandedVideo(outputPath, targetWidth, targetHeight, timeoutMs);
+    return { outputPath, fileName, ...metadata };
+  } catch (error) {
+    await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 async function fileExists(path) {
@@ -205,7 +252,8 @@ export async function runOutputExpansion(context, output, request, options = {})
       targetWidth: request.targetWidth,
       targetHeight: request.targetHeight,
       outputDir: derivedDir,
-      outputFileName: buildExpandedOutputName(safeOutput.fileName || basename(sourcePath), request.targetWidth, request.targetHeight)
+      outputFileName: buildExpandedOutputName(safeOutput.fileName || basename(sourcePath), request.targetWidth, request.targetHeight),
+      timeoutMs: expansionTimeoutMs(safeOutput.durationSec)
     });
   } finally {
     if (prepared.cleanupPath) {

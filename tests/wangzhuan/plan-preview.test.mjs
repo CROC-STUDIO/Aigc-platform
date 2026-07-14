@@ -58,6 +58,12 @@ test("Seedance plan prompt includes fission story segment and carrier context", 
   assert.match(text, /conversionEffectOpportunities/);
   assert.match(text, /mandatoryMoneyVisualCarrier/);
   assert.match(text, /final-video high-attraction/);
+  assert.match(text, /强视觉\/强开头\/强口播统一规则/);
+  assert.match(text, /前 1-2 秒必须先给高吸引力场景/);
+  assert.match(text, /情绪高昂、节奏快、感染力强/);
+  assert.match(text, /high-energy, fast-paced, emotionally expressive, contagious delivery/);
+  assert.match(text, /优先按已有 seedanceSlices 执行/);
+  assert.match(text, /基于 storySegments \+ sliceSplitHints 自动切片/);
 });
 
 test("generateSeedancePlan repairs prompt before returning validated plan", async () => {
@@ -89,7 +95,44 @@ test("generateSeedancePlan repairs prompt before returning validated plan", asyn
   assert.doesNotMatch(plan.seedancePrompt, /\$50/);
   assert.match(plan.seedancePrompt, /¥/);
   assert.match(plan.seedancePrompt, /no burned subtitles/i);
+  assert.match(plan.seedancePrompt, /Opening hook repair/);
+  assert.match(plan.seedancePrompt, /Voiceover performance repair/);
   assert.ok(plan.moneyVisuals.includes("real_cash_stack"));
+});
+
+test("generateSeedancePlan retries invalid JSON content and succeeds", async () => {
+  let calls = 0;
+  const context = {
+    callWangzhuanLlm: async () => {
+      calls += 1;
+      if (calls === 1) return "{ invalid json";
+      return JSON.stringify({
+        hook: "Hook",
+        body: "Body",
+        voiceover: "Voiceover",
+        subtitles: ["打开应用"],
+        cta: "",
+        ending: "",
+        imagePrompt: "Phone proof.",
+        seedancePrompt: "UGC shot with coin burst, no burned subtitles.",
+        negativePrompt: "No watermark."
+      });
+    }
+  };
+
+  const plan = await generateSeedancePlan(context, {
+    batch: { templateSnapshot: { draft: { productName: "App", language: "zh-CN", regions: ["CN"], currencySymbol: "¥" } }, estimate: { request: {} } },
+    branch: { branchId: "b1", productName: "App", languages: ["zh-CN"], regions: ["CN"], currencySymbol: "¥", truthRules: {} },
+    decomposition: {},
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12,
+    mandatoryMoneyVisualCarrier: true
+  });
+
+  assert.equal(calls, 2);
+  assert.match(plan.seedancePrompt, /coin|金币|cash|现金/i);
 });
 
 test("Seedance plan prompt requires visual reconstruction with Seedance formula", () => {
@@ -286,12 +329,13 @@ test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () 
   const text = messagesText(messages);
   assert.match(text, /出量模板由参考视频拆解决定/);
   assert.match(text, /切片策略由参考视频剧情段落决定/);
-  assert.match(text, /storySegments\/seedanceSlices/);
-  assert.match(text, /8-15s/);
+  assert.match(text, /优先按已有 seedanceSlices 执行/);
+  assert.match(text, /storySegments \+ sliceSplitHints/);
+  assert.match(text, /5-30s/);
   assert.match(text, /不要因为前端枚举值强行改成固定三段式或短剧高光模板/);
   assert.match(text, /人物、场景、服装.*变化/);
   assert.match(text, /主要依据参考视频拆解中该段是否存在对应结构/);
-  assert.match(text, /真钞、金币、现金雨、金币爆发、收益数字增长、提现成功、到账动画、提现记录/);
+  assert.match(text, /真钞、金币、现金雨、金币爆发、满屏撒钱\/撒金币、收益数字增长、提现成功、到账动画、提现记录/);
   assert.match(text, /Seedance 原视频不得烧录字幕/);
   assert.match(text, /subtitleWorkflow/);
   assert.match(text, /无具体金额的数字增长|不含具体金额/);
@@ -410,10 +454,13 @@ test("Seedance plan prompt treats CTA and Ending images as final-tail only asset
   assert.match(text, /CTA 图 \/ Ending 图引用规则/);
   assert.match(text, /仅图片尾图素材，不属于普通 Seedance 参考素材 slot/);
   assert.match(text, /isFinalSeedanceSlice=true/);
-  assert.match(text, /实际 CTA 图视频片段和 Ending 图视频片段会在 Seedance 视频之后由 ffmpeg 拼接/);
+  assert.match(text, /最后一个 Seedance 切片会把 ctaAsset\/endingAsset 作为 closing tail/);
+  assert.match(text, /最终视频分片中呈现/);
+  assert.doesNotMatch(text, /ffmpeg 拼接|ffmpeg 拼到最后|后续会被 ffmpeg 拼接/i);
   assert.match(text, /mediaRefs\.ctaAsset/);
   assert.match(text, /mediaRefs\.endingAsset/);
   assert.match(text, /CTA 图 \/ Ending 图只允许出现在最终切片末尾/);
+  assert.match(text, /最终切片需要把它们作为末尾视觉参考/);
   assert.match(text, /图片1 = 产品 Logo/);
   assert.doesNotMatch(text, /图片2 = CTA 图/);
   assert.doesNotMatch(text, /图片2 = Ending 图/);
@@ -467,6 +514,51 @@ test("Seedance plan prompt uses current slice duration instead of hardcoded 15s"
   assert.match(text, /Current-slice 9:16 Seedance omni_reference prompt/);
   assert.doesNotMatch(text, /输出时长 durationSec=15/);
   assert.doesNotMatch(text, /15s 9:16 Seedance omni_reference prompt/);
+});
+
+test("Seedance plan prompt forbids gibberish UI text and in-frame disclaimers", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_20260707120500_abcd",
+      templateSnapshot: {
+        draft: {
+          productName: "Drama Gold",
+          language: "en-US",
+          regions: ["US"],
+          currencySymbol: "$"
+        }
+      },
+      estimate: { outputRatio: "9:16", request: { language: "en-US", targetRegions: ["US"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      branchLabel: "US",
+      productName: "Drama Gold",
+      languages: ["en-US"],
+      regions: ["US"],
+      currencySymbol: "$",
+      truthRules: {}
+    },
+    decomposition: {
+      scene: "phone UI reward beat",
+      subject: "viewer",
+      action: "checks app progress",
+      camera: "phone close-up",
+      lighting: "bright",
+      style: "UGC",
+      quality: "realistic"
+    },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /乱码/);
+  assert.match(text, /伪文字/);
+  assert.match(text, /no gibberish/);
+  assert.match(text, /免责声明/);
+  assert.match(text, /post-process|后处理/);
 });
 
 test("Seedance plan prompt and validation preserve coherent 16s slice duration", () => {

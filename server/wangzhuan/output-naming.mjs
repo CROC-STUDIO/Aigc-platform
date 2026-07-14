@@ -2,16 +2,6 @@ function cleanText(value = "") {
   return String(value || "").trim();
 }
 
-function compactPhrase(value = "", fallback = "") {
-  const text = cleanText(value)
-    .replace(/[，。、“”"'`]/g, " ")
-    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!text) return fallback;
-  return text.split(" ").slice(0, 4).join("");
-}
-
 function safeFileStem(value = "", fallback = "video") {
   const text = cleanText(value)
     .replace(/[\\/:*?"<>|]/g, "_")
@@ -21,13 +11,44 @@ function safeFileStem(value = "", fallback = "video") {
   return text || fallback;
 }
 
-export function buildOutputDisplayName({ batch = {}, script = {}, outputId = "", durationSec = 15 } = {}) {
-  const decomposition = batch.decomposition || {};
+function firstValue(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const first = value.map(cleanText).find(Boolean);
+      if (first) return first;
+      continue;
+    }
+    const clean = cleanText(value);
+    if (clean) return clean;
+  }
+  return "";
+}
+
+function outputRegion(batch = {}, script = {}) {
   const branch = script.branchDraft || {};
-  const scene = compactPhrase(decomposition.scene, "场景");
-  const subject = compactPhrase(decomposition.subject, "主角");
-  const materialDirection = compactPhrase(branch.materialDirection || batch.templateSnapshot?.draft?.materialDirection, "方向");
-  const durationTag = Number(durationSec) === 30 ? "30s" : "15s";
-  const stem = safeFileStem([scene, subject, materialDirection, durationTag].filter(Boolean).join("_"), outputId || "video");
+  const request = batch.request || {};
+  const estimateRequest = batch.estimate?.request || {};
+  const region = firstValue(
+    branch.regions,
+    branch.targetRegions,
+    branch.targetRegion,
+    script.regions,
+    script.targetRegions,
+    script.targetRegion,
+    request.regions,
+    request.targetRegions,
+    request.targetRegion,
+    estimateRequest.regions,
+    estimateRequest.targetRegions,
+    estimateRequest.targetRegion
+  );
+  return safeFileStem(region || "UNKNOWN", "UNKNOWN").toUpperCase();
+}
+
+export function buildOutputDisplayName({ batch = {}, script = {}, outputId = "", width = 720, height = 1280 } = {}) {
+  const batchId = safeFileStem(batch.batchId, outputId || "video");
+  const canvasWidth = Number(width) > 0 ? Math.trunc(Number(width)) : 720;
+  const canvasHeight = Number(height) > 0 ? Math.trunc(Number(height)) : 1280;
+  const stem = safeFileStem(`${batchId}_${outputRegion(batch, script)}_${canvasWidth}x${canvasHeight}`, outputId || "video");
   return `${stem}.mp4`;
 }

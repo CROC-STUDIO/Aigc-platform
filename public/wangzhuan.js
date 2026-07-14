@@ -294,7 +294,14 @@ const branchFieldIds = {
 const DISCLAIMER_PRESETS = {
   en: "Rewards are subject to in-app rules, eligibility, task completion, and regional availability. Results are not guaranteed.",
   pt: "As recompensas dependem das regras do app, elegibilidade, conclusão das tarefas e disponibilidade regional. Os resultados não são garantidos",
-  zh: "奖励结果受 App 内活动规则、用户资格、任务完成情况、地区限制和活动时间影响，不保证每位用户都能获得相同奖励"
+  zh: "奖励结果受 App 内活动规则、用户资格、任务完成情况、地区限制和活动时间影响，不保证每位用户都能获得相同奖励",
+  ar: "تخضع المكافآت لقواعد التطبيق، والأهلية، وإكمال المهام، والتوافر حسب المنطقة. النتائج غير مضمونة.",
+  es: "Las recompensas están sujetas a las reglas de la aplicación, los requisitos de elegibilidad, la finalización de las tareas y la disponibilidad regional. Los resultados no están garantizados.",
+  fr: "Les récompenses dépendent des règles de l’application, des conditions d’éligibilité, de l’accomplissement des tâches et de la disponibilité dans la région concernée. Les résultats ne sont pas garantis.",
+  de: "Prämien hängen von den Regeln der App, der Teilnahmeberechtigung, dem Abschluss von Aufgaben und der regionalen Verfügbarkeit ab. Ergebnisse werden nicht garantiert.",
+  id: "Hadiah bergantung pada aturan aplikasi, kelayakan pengguna, penyelesaian tugas, dan ketersediaan regional. Hasil tidak dijamin.",
+  th: "รางวัลขึ้นอยู่กับกฎของแอป การมีสิทธิ์ได้รับรางวัล การทำภารกิจให้สำเร็จ และความพร้อมให้บริการในแต่ละภูมิภาค ไม่รับประกันผลลัพธ์",
+  vi: "Phần thưởng phụ thuộc vào quy định của ứng dụng, điều kiện nhận thưởng, việc hoàn thành nhiệm vụ và tình trạng khả dụng tại từng khu vực. Kết quả không được đảm bảo."
 };
 
 const DECOMPOSITION_CONFIRMED_MESSAGE = "脚本拆解已确认，请继续填写第三步产品改写。";
@@ -1588,6 +1595,13 @@ function disclaimerPresetForLanguage(language) {
   const value = String(language || "").trim().toLowerCase();
   if (value.startsWith("pt")) return "pt";
   if (value.startsWith("zh") || value.includes("chinese")) return "zh";
+  if (value.startsWith("ar")) return "ar";
+  if (value.startsWith("es")) return "es";
+  if (value.startsWith("fr")) return "fr";
+  if (value.startsWith("de")) return "de";
+  if (value.startsWith("id")) return "id";
+  if (value.startsWith("th")) return "th";
+  if (value.startsWith("vi")) return "vi";
   return "en";
 }
 

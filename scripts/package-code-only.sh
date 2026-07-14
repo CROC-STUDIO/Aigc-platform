@@ -17,6 +17,7 @@ INCLUDE_PATHS=(
   "public"
   "server"
   "database"
+  "product_info"
   "scripts"
   "server.mjs"
   "package.json"
@@ -35,8 +36,13 @@ done
 echo "Including runtime paths:"
 printf '  - %s\n' "${INCLUDE_PATHS[@]}"
 
-tar --exclude='.DS_Store' \
+COPYFILE_DISABLE=1 tar --exclude='.DS_Store' \
+    --exclude='*/.DS_Store' \
     --exclude='._*' \
+    --exclude='*/._*' \
+    --exclude='public/*-draft.html' \
+    --exclude='scripts/_probe-*.mjs' \
+    --exclude='scripts/test-doubao-decomposition.mjs' \
     -czf "${PACKAGE_PATH}" \
     -C "${ROOT_DIR}" \
     "${INCLUDE_PATHS[@]}"
