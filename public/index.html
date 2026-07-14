@@ -55,7 +55,7 @@
       <section class="operation-pane">
         <section class="topbar">
           <div>
-            <h1>广告素材工作台 <span class="app-version">v1.0.30</span></h1>
+            <h1>广告素材工作台 <span class="app-version">v1.0.31</span></h1>
             <div class="path-editor">
               <select id="projectSelect" title="切换项目"></select>
               <button id="renameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
@@ -157,7 +157,10 @@
               </div>
               <div class="guangdada-box">
               <div class="guangdada-controls">
-                <label>竞品 <select id="guangdadaKeyword"></select></label>
+                <label class="guangdada-name-label">竞品
+                  <div id="guangdadaKeywordPicker" class="guangdada-name-picker"></div>
+                  <select id="guangdadaKeyword" hidden></select>
+                </label>
                 <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" /></label>
                 <label>数量 <input id="guangdadaTopN" type="number" min="1" max="10" value="3" /></label>
                 <label>类型
@@ -180,7 +183,6 @@
                   </select>
                 </label>
                 <button id="guangdadaSearchBtn" class="ghost compact-action" type="button">抓取</button>
-                <button id="guangdadaDeleteFolderBtn" class="ghost danger compact-action" type="button">删除</button>
               </div>
               <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div></div>
               </div>
@@ -337,6 +339,7 @@
     <script src="/app.js" type="module"></script>
   </body>
 </html>
+
 
 
 

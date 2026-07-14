@@ -13,6 +13,7 @@ const state = {
   uploadingCompetitors: new Set(),
   guangdadaItems: [],
   guangdadaTargetFolder: "",
+  guangdadaSelectedName: "",
   pollTimer: null,
   appVersion: "",
   versionUpdateHandled: false
@@ -66,6 +67,7 @@ const els = {
   guangdadaStartDate: document.querySelector("#guangdadaStartDate"),
   guangdadaEndDate: document.querySelector("#guangdadaEndDate"),
   guangdadaRecentRange: document.querySelector("#guangdadaRecentRange"),
+  guangdadaKeywordPicker: document.querySelector("#guangdadaKeywordPicker"),
   guangdadaSearchBtn: document.querySelector("#guangdadaSearchBtn"),
   guangdadaStatus: document.querySelector("#guangdadaStatus"),
   guangdadaGrid: document.querySelector("#guangdadaGrid"),
@@ -565,7 +567,7 @@ function selectedGuangdadaCompetitor() {
 function renderGuangdadaCompetitorSelect() {
   if (!els.guangdadaKeyword) return;
   const names = competitorNameOptions();
-  const previous = els.guangdadaKeyword.value;
+  const previous = els.guangdadaKeyword.value && !els.guangdadaKeyword.value.startsWith("__") ? els.guangdadaKeyword.value : state.guangdadaSelectedName;
   els.guangdadaKeyword.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -582,14 +584,79 @@ function renderGuangdadaCompetitorSelect() {
   createOption.value = "__create__";
   createOption.textContent = "+ 新增竞品名称";
   els.guangdadaKeyword.append(createOption);
+  if (els.guangdadaKeywordPicker) renderGuangdadaNamePicker(names, previous);
   updateGuangdadaDeleteButton();
+}
+
+function renderGuangdadaNamePicker(names, selectedName = "") {
+  els.guangdadaKeywordPicker.innerHTML = "";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "guangdada-name-trigger";
+  button.innerHTML = `<span>${escapeHtml(selectedName || "请选择竞品")}</span><span class="chevron">⌄</span>`;
+  const menu = document.createElement("div");
+  menu.className = "guangdada-name-menu";
+
+  const addRow = (label, className, onClick) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `guangdada-name-row ${className || ""}`.trim();
+    row.textContent = label;
+    row.addEventListener("click", onClick);
+    menu.append(row);
+  };
+
+  addRow("请选择竞品", "muted", () => selectGuangdadaName(""));
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = `guangdada-name-row name-row${name === selectedName ? " active" : ""}`;
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "guangdada-name-value";
+    nameButton.textContent = name;
+    nameButton.addEventListener("click", () => selectGuangdadaName(name));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "guangdada-name-delete";
+    deleteButton.textContent = "×";
+    deleteButton.title = `删除 ${name}`;
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteGuangdadaCompetitorName(name);
+    });
+    row.append(nameButton, deleteButton);
+    menu.append(row);
+  }
+  addRow("+ 新增竞品名称", "create", () => {
+    closeGuangdadaNamePicker();
+    openCompetitorNameModal();
+  });
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    els.guangdadaKeywordPicker.classList.toggle("open");
+  });
+  els.guangdadaKeywordPicker.append(button, menu);
+}
+
+function closeGuangdadaNamePicker() {
+  els.guangdadaKeywordPicker?.classList.remove("open");
+}
+
+function selectGuangdadaName(name) {
+  state.guangdadaSelectedName = name;
+  els.guangdadaKeyword.value = name;
+  closeGuangdadaNamePicker();
+  renderGuangdadaCompetitorSelect();
+  if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
 }
 
 function updateGuangdadaDeleteButton() {
   if (!els.guangdadaDeleteFolderBtn || !els.guangdadaKeyword) return;
   const value = els.guangdadaKeyword.value;
-  els.guangdadaDeleteFolderBtn.disabled = !value || value === "__create__";
-  els.guangdadaDeleteFolderBtn.title = els.guangdadaDeleteFolderBtn.disabled ? "请先选择要删除的竞品名称" : `删除 ${value}`;
+  const displayName = value && !value.startsWith("__") ? value : state.guangdadaSelectedName;
+  els.guangdadaDeleteFolderBtn.disabled = !displayName || value === "__create__";
+  els.guangdadaDeleteFolderBtn.title = els.guangdadaDeleteFolderBtn.disabled ? "请先选择要删除的竞品名称" : `删除 ${displayName}`;
 }
 
 function resetProjectState() {
@@ -1307,6 +1374,9 @@ async function confirmCreateCompetitorName() {
     els.competitorNameModal.hidden = true;
     await loadMaterials();
     els.guangdadaKeyword.value = result.displayName || displayName;
+    state.guangdadaSelectedName = els.guangdadaKeyword.value;
+    renderGuangdadaCompetitorSelect();
+    updateGuangdadaDeleteButton();
     if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
   } catch (error) {
     alert(error.message);
@@ -1710,7 +1780,7 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
     els.guangdadaStatus.textContent = "已禁用";
     return alert("广大大抓取暂时禁用，请自行上传竞品素材。");
   }
-  if (!els.guangdadaKeyword.value || els.guangdadaKeyword.value === "__create__") {
+  if (!els.guangdadaKeyword.value || els.guangdadaKeyword.value.startsWith("__")) {
     alert("请先选择或新增一个竞品名称");
     return;
   }
@@ -1805,12 +1875,12 @@ els.outputModeSelect?.addEventListener("change", () => {
 });
 
 els.guangdadaKeyword.addEventListener("change", async () => {
-  const selectedOption = els.guangdadaKeyword.options[els.guangdadaKeyword.selectedIndex];
   if (els.guangdadaKeyword.value === "__create__") {
     updateGuangdadaDeleteButton();
     openCompetitorNameModal();
     return;
   }
+  state.guangdadaSelectedName = els.guangdadaKeyword.value || "";
   updateGuangdadaDeleteButton();
   if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
 });
@@ -1825,15 +1895,17 @@ els.competitorNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeCompetitorNameModal();
 });
 
-els.guangdadaDeleteFolderBtn.addEventListener("click", async () => {
-  const selectedOption = els.guangdadaKeyword.options[els.guangdadaKeyword.selectedIndex];
-  const displayName = selectedOption?.value || "";
-  if (!displayName || displayName === "__create__") return alert("请先选择要删除的竞品名称");
+async function deleteGuangdadaCompetitorName(displayName) {
+  if (!displayName || displayName.startsWith("__")) {
+    renderGuangdadaCompetitorSelect();
+    return alert("请先选择要删除的竞品名称");
+  }
   if (!confirm(`确定删除 ${displayName} 吗？只会删除竞品名称，不会删除竞品素材栏位。`)) return;
-  els.guangdadaDeleteFolderBtn.disabled = true;
+  if (els.guangdadaDeleteFolderBtn) els.guangdadaDeleteFolderBtn.disabled = true;
   try {
     await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
     state.guangdadaItems = [];
+    state.guangdadaSelectedName = "";
     await loadMaterials();
     els.guangdadaKeyword.value = "";
     updateGuangdadaDeleteButton();
@@ -1845,6 +1917,16 @@ els.guangdadaDeleteFolderBtn.addEventListener("click", async () => {
   } finally {
     updateGuangdadaDeleteButton();
   }
+}
+
+els.guangdadaDeleteFolderBtn?.addEventListener("click", async () => {
+  const value = els.guangdadaKeyword.value;
+  const displayName = value && !value.startsWith("__") ? value : state.guangdadaSelectedName;
+  await deleteGuangdadaCompetitorName(displayName);
+});
+
+document.addEventListener("click", (event) => {
+  if (!els.guangdadaKeywordPicker?.contains(event.target)) closeGuangdadaNamePicker();
 });
 
 els.startBtn.addEventListener("click", async () => {

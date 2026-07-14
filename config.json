@@ -57,43 +57,43 @@
       "watermark": false
     }
   },
-  "projectRoot": "../project-data/PROJECT_ROOT_P",
+  "projectRoot": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P",
   "projects": [
+    {
+      "name": "PROJECT_ROOT_P",
+      "path": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P"
+    },
+    {
+      "name": "鍖呭寘4",
+      "path": "../opt/ad-picture-web-data/鍖呭寘4"
+    },
+    {
+      "name": "涓夊浗",
+      "path": "../project-data/PROJECT_ROOT_P 涓夊浗"
+    },
+    {
+      "name": "瓒呬紤",
+      "path": "../opt/ad-picture-web-data/瓒呬紤"
+    },
     {
       "name": "puzzle",
       "path": "../project-data/puzzle"
     },
     {
-      "name": "PROJECT_ROOT_P",
-      "path": "../project-data/PROJECT_ROOT_P"
-    },
-    {
-      "name": "网赚业务",
-      "path": "/opt/ad-picture-web-data/cwz"
+      "name": "缃戣禋涓氬姟",
+      "path": "../opt/ad-picture-web-data/cwz"
     },
     {
       "name": "KaKaPic",
-      "path": "/opt/ad-picture-web-data/KaKaPic"
+      "path": "../opt/ad-picture-web-data/KaKaPic"
     },
     {
       "name": "hoshi",
-      "path": "/opt/ad-picture-web-data/hoshi"
+      "path": "../opt/ad-picture-web-data/hoshi"
     },
     {
       "name": "ad-picture-web-data",
-      "path": "/opt/ad-picture-web-data"
-    },
-    {
-      "name": "超休",
-      "path": "/opt/ad-picture-web-data/超休"
-    },
-    {
-      "name": "包包4",
-      "path": "/opt/ad-picture-web-data/包包4"
-    },
-    {
-      "name": "三国",
-      "path": "../project-data/PROJECT_ROOT_P 三国"
+      "path": "../opt/ad-picture-web-data"
     }
   ]
 }

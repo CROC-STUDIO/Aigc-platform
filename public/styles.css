@@ -682,6 +682,122 @@ textarea {
   min-width: 220px;
 }
 
+.guangdada-name-label {
+  position: relative;
+  z-index: 8;
+}
+
+.guangdada-name-picker {
+  position: relative;
+}
+
+.guangdada-name-trigger {
+  width: 100%;
+  height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  text-align: left;
+  background: rgba(4, 10, 14, 0.82);
+  border: 1px solid rgba(168, 112, 255, 0.72);
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.guangdada-name-trigger span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guangdada-name-trigger .chevron {
+  color: var(--muted);
+  text-align: right;
+}
+
+.guangdada-name-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: none;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  background: rgba(39, 45, 45, 0.98);
+  border: 1px solid rgba(168, 112, 255, 0.42);
+  border-radius: 8px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.38);
+}
+
+.guangdada-name-picker.open .guangdada-name-menu {
+  display: grid;
+  gap: 2px;
+}
+
+.guangdada-name-row {
+  min-height: 28px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  font-size: 13px;
+}
+
+.guangdada-name-row.muted,
+.guangdada-name-row.create {
+  display: block;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.guangdada-name-row:hover,
+.guangdada-name-row.active {
+  background: rgba(126, 179, 255, 0.34);
+}
+
+.guangdada-name-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.guangdada-name-delete {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 210, 220, 0.86);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.guangdada-name-delete:hover {
+  background: rgba(255, 88, 116, 0.18);
+  color: #ff8ca0;
+}
+
 .guangdada-controls label {
   flex: 0 0 126px;
   min-width: 126px;

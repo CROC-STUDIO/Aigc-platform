@@ -1837,6 +1837,23 @@ function repeatSuffix(index, repeatCount) {
   return repeatCount > 1 ? `_第${index}次` : "";
 }
 
+function roleOutputLabel(roles = []) {
+  const names = roles.map((role) => parse(role.name || role.title || "角色").name).filter(Boolean);
+  return names.length ? names.join("-") : "组合";
+}
+
+function nextNamedOutputBase(batchTag, roleLabel, competitorName, counters) {
+  const counterKey = `${competitorName}\u0000${roleLabel}`;
+  const nextIndex = (counters.get(counterKey) || 0) + 1;
+  counters.set(counterKey, nextIndex);
+  return [
+    sanitizeSegment(batchTag, "batch"),
+    sanitizeSegment(roleLabel, "role"),
+    sanitizeSegment(competitorName, "competitor"),
+    String(nextIndex)
+  ].join("_");
+}
+
 function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
   const chosenRoles = roles.filter((role) => selectedRoleNames.includes(role.name));
   const chosenMonsters = monsters.filter((monster) => selectedMonsterNames.includes(monster.name));
@@ -1846,6 +1863,7 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
   const resolvedImageModel = resolveImageModel(imageModel);
   const resolvedVideoModel = resolveVideoModel(videoModel);
   const jobs = [];
+  const outputCounters = new Map();
 
   for (const competitor of chosenCompetitors) {
     const setting = competitorSettings?.[competitor.name] ?? {};
@@ -1883,6 +1901,7 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           const baseGroupName = `组合_${roleCount}角色_${monsterCount}怪物_${groupIndex + 1}`;
           const groupName = `${baseGroupName}${repeatSuffix(repeatIndex, repeats)}`;
           const ref = competitor.images[0]?.path;
+          const outputBase = nextNamedOutputBase(batchTag, roleOutputLabel(groupRoles), competitor.name, outputCounters);
           jobs.push({
             id: `${competitor.name}_${groupName}`,
             name: `${competitor.name}_${groupName}`,
@@ -1898,8 +1917,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
             images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-            output: join(dirs().outputDir, `${batchTag}_${competitor.name}_${groupName}.png`),
-            videoOutput: join(dirs().outputDir, `${batchTag}_${competitor.name}_${groupName}.mp4`)
+            output: join(dirs().outputDir, `${outputBase}.png`),
+            videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
           });
         }
       }
@@ -1912,6 +1931,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
         const layout = promptCompetitor.layout ?? layoutFromDimensions();
         const baseTypeName = layout.orientation === "wide" ? "参考图横版" : layout.orientation === "tall" ? "参考图竖版" : "参考图构图";
         const typeName = `${baseTypeName}${repeatSuffix(repeatIndex, repeats)}`;
+        const roleLabel = parse(role.name).name;
+        const outputBase = nextNamedOutputBase(batchTag, roleLabel, competitor.name, outputCounters);
         jobs.push({
           id: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           name: `${parse(role.name).name}_${competitor.name}_${typeName}`,
@@ -1927,8 +1948,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           prompt: singleRolePrompt(role, promptCompetitor, jobLogos),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
           images: [role.sourcePath, ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-          output: join(dirs().outputDir, `${batchTag}_${parse(role.name).name}_${competitor.name}_${typeName}.png`),
-          videoOutput: join(dirs().outputDir, `${batchTag}_${parse(role.name).name}_${competitor.name}_${typeName}.mp4`)
+          output: join(dirs().outputDir, `${outputBase}.png`),
+          videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
         });
       }
     }
