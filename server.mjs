@@ -1144,9 +1144,13 @@ async function writeCompetitorDisplayName(folder, displayName) {
 async function loadCompetitorNameLibrary() {
   await mkdir(dirname(dirs().competitorNameLibraryPath), { recursive: true });
   let names = [];
-  const libraryPaths = await competitorNameLibraryPaths();
+  const primaryLibraryPath = dirs().competitorNameLibraryPath;
+  const hasPrimaryLibrary = existsSync(primaryLibraryPath);
+  const libraryPaths = hasPrimaryLibrary ? [primaryLibraryPath] : await competitorNameLibraryPaths();
+  let hasLibraryFile = false;
   for (const libraryPath of libraryPaths) {
     if (!existsSync(libraryPath)) continue;
+    hasLibraryFile = true;
     try {
       const data = JSON.parse(await readFile(libraryPath, "utf8"));
       names.push(...(Array.isArray(data.names) ? data.names : Array.isArray(data) ? data : []));
@@ -1154,10 +1158,12 @@ async function loadCompetitorNameLibrary() {
       // Ignore malformed legacy libraries and keep any valid names already loaded.
     }
   }
-  const legacyFolders = await competitorFolders().catch(() => []);
-  for (const folder of legacyFolders) {
-    const displayName = await readCompetitorDisplayName(folder).catch(() => folder);
-    if (displayName && displayName !== folder) names.push(displayName);
+  if (!hasLibraryFile) {
+    const legacyFolders = await competitorFolders().catch(() => []);
+    for (const folder of legacyFolders) {
+      const displayName = await readCompetitorDisplayName(folder).catch(() => folder);
+      if (displayName && displayName !== folder) names.push(displayName);
+    }
   }
   const clean = [...new Set(names.map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
   if (clean.length) await saveCompetitorNameLibrary(clean).catch(() => {});

@@ -593,7 +593,7 @@ function renderGuangdadaNamePicker(names, selectedName = "") {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "guangdada-name-trigger";
-  button.innerHTML = `<span>${escapeHtml(selectedName || "请选择竞品")}</span><span class="chevron">⌄</span>`;
+  button.innerHTML = `<span>${escapeHtml(selectedName || "\u8bf7\u9009\u62e9\u7ade\u54c1")}</span><span class="chevron">&#x2304;</span>`;
   const menu = document.createElement("div");
   menu.className = "guangdada-name-menu";
 
@@ -606,7 +606,11 @@ function renderGuangdadaNamePicker(names, selectedName = "") {
     menu.append(row);
   };
 
-  addRow("请选择竞品", "muted", () => selectGuangdadaName(""));
+  addRow("\u8bf7\u9009\u62e9\u7ade\u54c1", "muted", () => selectGuangdadaName(""));
+  addRow("+ \u65b0\u589e\u7ade\u54c1\u540d\u79f0", "create", () => {
+    closeGuangdadaNamePicker();
+    openCompetitorNameModal();
+  });
   for (const name of names) {
     const row = document.createElement("div");
     row.className = `guangdada-name-row name-row${name === selectedName ? " active" : ""}`;
@@ -618,8 +622,8 @@ function renderGuangdadaNamePicker(names, selectedName = "") {
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "guangdada-name-delete";
-    deleteButton.textContent = "×";
-    deleteButton.title = `删除 ${name}`;
+    deleteButton.innerHTML = "&times;";
+    deleteButton.title = `\u5220\u9664 ${name}`;
     deleteButton.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteGuangdadaCompetitorName(name);
@@ -627,11 +631,6 @@ function renderGuangdadaNamePicker(names, selectedName = "") {
     row.append(nameButton, deleteButton);
     menu.append(row);
   }
-  addRow("+ 新增竞品名称", "create", () => {
-    closeGuangdadaNamePicker();
-    openCompetitorNameModal();
-  });
-
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     els.guangdadaKeywordPicker.classList.toggle("open");
@@ -1903,9 +1902,10 @@ async function deleteGuangdadaCompetitorName(displayName) {
   if (!confirm(`确定删除 ${displayName} 吗？只会删除竞品名称，不会删除竞品素材栏位。`)) return;
   if (els.guangdadaDeleteFolderBtn) els.guangdadaDeleteFolderBtn.disabled = true;
   try {
-    await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
+    const result = await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
     state.guangdadaItems = [];
     state.guangdadaSelectedName = "";
+    if (state.materials) state.materials.competitorNames = result.names || [];
     await loadMaterials();
     els.guangdadaKeyword.value = "";
     updateGuangdadaDeleteButton();

@@ -670,6 +670,23 @@ textarea {
   background: rgba(20, 20, 28, 0.42);
 }
 
+.panel.guangdada-panel {
+  overflow: visible;
+  position: relative;
+  z-index: 120;
+}
+
+.workspace,
+.workspace-main,
+.operation-pane {
+  overflow: visible;
+}
+
+.workspace-main > .panel.wide {
+  position: relative;
+  z-index: 1;
+}
+
 .guangdada-controls {
   display: flex;
   flex-wrap: wrap;
@@ -684,7 +701,7 @@ textarea {
 
 .guangdada-name-label {
   position: relative;
-  z-index: 8;
+  z-index: 80;
 }
 
 .guangdada-name-picker {
@@ -721,12 +738,12 @@ textarea {
 
 .guangdada-name-menu {
   position: absolute;
-  z-index: 40;
+  z-index: 2000;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
   display: none;
-  max-height: 280px;
+  max-height: min(420px, 52vh);
   overflow: auto;
   padding: 6px;
   background: rgba(39, 45, 45, 0.98);
@@ -741,7 +758,7 @@ textarea {
 }
 
 .guangdada-name-row {
-  min-height: 28px;
+  min-height: 36px;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 24px;
@@ -759,7 +776,8 @@ textarea {
 .guangdada-name-row.muted,
 .guangdada-name-row.create {
   display: block;
-  padding: 6px;
+  min-height: 36px;
+  padding: 8px 10px;
   cursor: pointer;
 }
 
