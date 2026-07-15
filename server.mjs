@@ -1145,6 +1145,20 @@ function isBytePlusAssetDownloadFailed(text = "") {
   return isBytePlusAssetUploadRejected(text) && /DownloadFailed|Failed to download media|write to client error/i.test(String(text || ""));
 }
 
+function isSeedanceDailySubmitLimit(text = "") {
+  return /Daily seedance submit limit reached/i.test(String(text || ""));
+}
+
+function formatSeedanceSubmitError(rawError = "", errorPath = "") {
+  const summary = summarizeErrorText(rawError);
+  if (isSeedanceDailySubmitLimit(rawError)) {
+    const match = String(rawError).match(/Daily seedance submit limit reached\s*\((\d+\s*\/\s*\d+)\)\.?\s*Resets\s+tomorrow\.?/i);
+    const usage = match?.[1] ? `（${match[1].replace(/\s+/g, "")}）` : "";
+    return `Seedance 2.0 今日提交次数已用完${usage}，明天会自动重置。请明天再生成，或更换有可用 Seedance 提交额度的账号/API Key。完整错误已保存到 ${errorPath}`;
+  }
+  return `Seedance 2.0 生成提交失败：${summary}。完整错误已保存到 ${errorPath}`;
+}
+
 function sleepWithStop(ms) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -2350,9 +2364,13 @@ async function generateComicVideo(body = {}) {
         await sleepWithStop(5000 * attempt);
         continue;
       }
+      if (isSeedanceDailySubmitLimit(lastRawError)) {
+        throw new Error(formatSeedanceSubmitError(lastRawError, join(workDir, "seedance_error.txt")));
+      }
       throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError || error.message)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
     }
   }
+  if (isSeedanceDailySubmitLimit(lastRawError)) throw new Error(formatSeedanceSubmitError(lastRawError, join(workDir, "seedance_error.txt")));
   if (lastRawError) throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
