@@ -13,6 +13,11 @@ import {
 } from "../../public/competitor-remix/payloads.js";
 import { createRemixStore } from "../../public/competitor-remix/store.js";
 import { createMediaWorkspace } from "../../public/competitor-remix/media-workspace.js";
+import {
+  normalizedBox,
+  normalizedPoint,
+  visibleMediaRect
+} from "../../public/competitor-remix/editors.js";
 
 const urlSource = { mode: "url", url: "https://example.com/source.mp4" };
 
@@ -378,4 +383,31 @@ test("media workspace keeps preview available when lazy file reading fails", asy
   assert.equal(store.getState().source.objectUrl, "blob:broken");
   assert.equal(store.getState().source.status, "error");
   assert.equal(store.getState().source.error, "读取中断");
+});
+
+test("editor geometry excludes object-fit contain letterboxing", () => {
+  const portrait = visibleMediaRect(
+    { left: 0, top: 0, width: 400, height: 300 },
+    { width: 100, height: 200 }
+  );
+  assert.deepEqual(portrait, { left: 125, top: 0, width: 150, height: 300 });
+  assert.deepEqual(normalizedPoint({ clientX: 200, clientY: 150 }, portrait), { x: 0.5, y: 0.5 });
+  assert.equal(normalizedPoint({ clientX: 20, clientY: 150 }, portrait), null);
+
+  const landscape = visibleMediaRect(
+    { left: 10, top: 20, width: 300, height: 400 },
+    { width: 300, height: 100 }
+  );
+  assert.deepEqual(landscape, { left: 10, top: 170, width: 300, height: 100 });
+});
+
+test("editor geometry normalizes reverse drags and rejects tiny boxes", () => {
+  assert.deepEqual(normalizedBox({ x: 0.8, y: 0.7 }, { x: 0.2, y: 0.1 }), {
+    x1: 0.2,
+    y1: 0.1,
+    x2: 0.8,
+    y2: 0.7
+  });
+  assert.equal(normalizedBox({ x: 0.1, y: 0.1 }, { x: 0.105, y: 0.5 }), null);
+  assert.equal(normalizedBox(null, { x: 0.4, y: 0.5 }), null);
 });
