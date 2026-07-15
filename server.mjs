@@ -229,7 +229,9 @@ function maskApiKey(value) {
 
 function publicProfile(username, profile = {}) {
   const viewer = currentUser();
-  const canManageTrialKey = Boolean(viewer?.isAdmin && viewer.username === username);
+  const viewerIsAdmin = Boolean(viewer?.isAdmin || viewer?.role === "admin");
+  const isOwnProfile = !username || viewer?.username === username || viewer?.userId === username;
+  const canManageTrialKey = Boolean(viewerIsAdmin && isOwnProfile);
   return {
     username,
     displayName: String(profile.displayName || "").trim(),

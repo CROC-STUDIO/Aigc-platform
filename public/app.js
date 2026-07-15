@@ -248,7 +248,8 @@ function renderProfileForm(profile = {}) {
         ? "试用账户可以不填写自己的 API Key，将使用管理员配置的试用账户共用 API Key。"
         : "未配置 API Key 时不能开始生图或生视频。";
   }
-  if (els.profileTrialKeyBlock) els.profileTrialKeyBlock.hidden = !profile.canManageTrialKey;
+  const canManageTrialKey = Boolean(profile.canManageTrialKey || state.user?.isAdmin || state.user?.role === "admin");
+  if (els.profileTrialKeyBlock) els.profileTrialKeyBlock.hidden = !canManageTrialKey;
   if (els.profileTrialApiKeyInput) els.profileTrialApiKeyInput.value = "";
   if (els.profileTrialApiKeyHint) {
     els.profileTrialApiKeyHint.textContent = profile.hasTrialApiKey
