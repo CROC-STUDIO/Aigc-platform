@@ -104,6 +104,9 @@ const els = {
   profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
   profileApiKeyInput: document.querySelector("#profileApiKeyInput"),
   profileApiKeyHint: document.querySelector("#profileApiKeyHint"),
+  profileTrialKeyBlock: document.querySelector("#profileTrialKeyBlock"),
+  profileTrialApiKeyInput: document.querySelector("#profileTrialApiKeyInput"),
+  profileTrialApiKeyHint: document.querySelector("#profileTrialApiKeyHint"),
   profileStatus: document.querySelector("#profileStatus"),
   adminUsersBtn: document.querySelector("#adminUsersBtn"),
   adminUsersModal: document.querySelector("#adminUsersModal"),
@@ -238,7 +241,20 @@ function renderProfileForm(profile = {}) {
   if (els.profileDisplayNameInput) els.profileDisplayNameInput.value = profile.displayName || state.user?.displayName || state.user?.username || "";
   if (els.profileAvatarInput) els.profileAvatarInput.value = profile.avatar || "";
   if (els.profileApiKeyInput) els.profileApiKeyInput.value = "";
-  if (els.profileApiKeyHint) els.profileApiKeyHint.textContent = profile.hasApiKey ? `已配置 API Key：${profile.apiKeyPreview}` : "未配置 API Key 时不能开始生图或生视频。";
+  if (els.profileApiKeyHint) {
+    els.profileApiKeyHint.textContent = profile.hasApiKey
+      ? `已配置 API Key：${profile.apiKeyPreview}`
+      : state.user?.isTrial
+        ? "试用账户可以不填写自己的 API Key，将使用管理员配置的试用账户共用 API Key。"
+        : "未配置 API Key 时不能开始生图或生视频。";
+  }
+  if (els.profileTrialKeyBlock) els.profileTrialKeyBlock.hidden = !profile.canManageTrialKey;
+  if (els.profileTrialApiKeyInput) els.profileTrialApiKeyInput.value = "";
+  if (els.profileTrialApiKeyHint) {
+    els.profileTrialApiKeyHint.textContent = profile.hasTrialApiKey
+      ? `已配置试用账户共用 API Key：${profile.trialApiKeyPreview}。试用账户每日限 30 张图、10 个视频。`
+      : "未配置试用账户共用 API Key 时，试用账户不能生成。每天每个试用账户限 30 张图、10 个视频。";
+  }
   setProfilePreviewAvatar(profile.avatar || "", profile.displayName || state.user?.displayName || state.user?.username || "U");
 }
 
@@ -276,7 +292,8 @@ async function saveProfile() {
       body: JSON.stringify({
         displayName: els.profileDisplayNameInput.value,
         avatar: els.profileAvatarInput.value,
-        apiKey: els.profileApiKeyInput.value
+        apiKey: els.profileApiKeyInput.value,
+        trialApiKey: els.profileTrialApiKeyInput?.value || ""
       })
     });
     const profile = data.profile || {};
@@ -351,7 +368,7 @@ async function submitLogin() {
   }
 }
 
-function renderAdminUsers(users = []) {
+function renderAdminUsersLegacy(users = []) {
   if (!els.adminUsersList) return;
   if (!users.length) {
     els.adminUsersList.innerHTML = `<div class="empty-line">暂无账号</div>`;
@@ -368,6 +385,33 @@ function renderAdminUsers(users = []) {
       <select class="admin-role">
         <option value="user" ${user.isAdmin ? "" : "selected"}>普通用户</option>
         <option value="admin" ${user.isAdmin ? "selected" : ""}>管理员</option>
+      </select>
+      <button class="mini ghost admin-save-user" type="button">保存</button>
+      <button class="mini ghost danger admin-delete-user" type="button">删除</button>
+    </div>
+  `).join("");
+}
+
+function renderAdminUsers(users = []) {
+  if (!els.adminUsersList) return;
+  if (!users.length) {
+    els.adminUsersList.innerHTML = `<div class="empty-line">暂无账号</div>`;
+    return;
+  }
+  const roleValue = (user) => user.isAdmin ? "admin" : user.isTrial || user.role === "trial" ? "trial" : "user";
+  const roleLabel = (user) => roleValue(user) === "admin" ? "管理员" : roleValue(user) === "trial" ? "试用用户" : "普通用户";
+  els.adminUsersList.innerHTML = users.map((user) => `
+    <div class="admin-user-row" data-username="${escapeHtml(user.username)}">
+      <div>
+        <strong>${escapeHtml(user.displayName || user.username)}</strong>
+        <small>${escapeHtml(user.username)} · ${roleLabel(user)}</small>
+      </div>
+      <input class="admin-display-name" type="text" value="${escapeHtml(user.displayName || "")}" placeholder="昵称" />
+      <input class="admin-password" type="text" value="" placeholder="新密码，留空不改" />
+      <select class="admin-role">
+        <option value="user" ${roleValue(user) === "user" ? "selected" : ""}>普通用户</option>
+        <option value="trial" ${roleValue(user) === "trial" ? "selected" : ""}>试用用户</option>
+        <option value="admin" ${roleValue(user) === "admin" ? "selected" : ""}>管理员</option>
       </select>
       <button class="mini ghost admin-save-user" type="button">保存</button>
       <button class="mini ghost danger admin-delete-user" type="button">删除</button>
@@ -890,7 +934,11 @@ function renderCompetitors() {
 }
 
 function renderOutputs() {
-  const outputs = state.materials.outputs || [];
+  const outputs = (state.materials.outputs || []).filter((output) => {
+    const batch = String(output.batch || "");
+    const name = String(output.name || "");
+    return (output.module || "ad") === "ad" && !batch.startsWith("comic_") && !batch.startsWith("role_showcase_") && !name.includes("comic_") && !name.includes("role_showcase_");
+  });
   const batches = [...new Set(outputs.map((output) => output.batch || "未分组"))];
   if (!state.batchesInitialized) {
     state.selectedBatches = new Set(batches);
@@ -1841,7 +1889,7 @@ els.exportOutputsBtn.addEventListener("click", async () => {
     const res = await fetch("/api/outputs/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batches })
+      body: JSON.stringify({ batches, module: "ad" })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

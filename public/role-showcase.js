@@ -303,7 +303,7 @@ function showcaseOutputs() {
   return (state.materials.outputs || []).filter((output) => {
     const batch = String(output.batch || "");
     const name = String(output.name || "");
-    return output.type === "video" && (batch.startsWith("role_showcase_") || name.includes("role_showcase_"));
+    return output.type === "video" && (output.module === "role_showcase" || batch.startsWith("role_showcase_") || name.includes("role_showcase_"));
   });
 }
 
@@ -376,7 +376,7 @@ async function downloadSelectedBatches() {
   const res = await fetch("/api/outputs/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batches: [...state.selectedBatches] })
+    body: JSON.stringify({ batches: [...state.selectedBatches], module: "role_showcase" })
   });
   if (!res.ok) {
     let errorText = "下载失败";

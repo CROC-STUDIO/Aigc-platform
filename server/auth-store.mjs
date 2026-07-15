@@ -24,12 +24,14 @@ export function sanitizeSegment(value, fallback = "default") {
 export function publicUser(user) {
   if (!user) return null;
   const permissions = user.permissions && typeof user.permissions === "object" ? user.permissions : {};
+  const role = normalizeRole(user.role);
   return {
     username: user.username,
     displayName: user.displayName,
     userId: user.username,
-    role: user.role,
-    isAdmin: user.role === "admin",
+    role,
+    isAdmin: role === "admin",
+    isTrial: role === "trial",
     permissions
   };
 }
@@ -40,7 +42,7 @@ export function normalizeUsers(items = []) {
   for (const item of items ?? []) {
     const username = sanitizeSegment(item.username, "");
     const password = String(item.password ?? "");
-    const role = String(item.role ?? (username === "admin" ? "admin" : "user")).trim() === "admin" ? "admin" : "user";
+    const role = normalizeRole(item.role ?? (username === "admin" ? "admin" : "user"));
     if (!username || !password || seen.has(username)) continue;
     seen.add(username);
     normalized.push({
@@ -103,7 +105,10 @@ function formatMysqlDate(date) {
 }
 
 function normalizeRole(role) {
-  return role === "admin" ? "admin" : "user";
+  const clean = String(role || "").trim();
+  if (clean === "admin") return "admin";
+  if (clean === "trial") return "trial";
+  return "user";
 }
 
 function userFromDbRow(row) {
@@ -121,7 +126,7 @@ function userFromDbRow(row) {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
-    role: roles.includes("admin") ? "admin" : "user",
+    role: roles.includes("admin") ? "admin" : roles.includes("trial") ? "trial" : "user",
     roles,
     permissions,
     passwordHash: row.password_hash,
@@ -220,7 +225,8 @@ class JsonAuthStore {
       username: user.username,
       displayName: user.displayName,
       role: user.role,
-      isAdmin: user.role === "admin"
+      isAdmin: user.role === "admin",
+      isTrial: user.role === "trial"
     }));
   }
 
@@ -315,6 +321,10 @@ class MysqlAuthStore {
       "INSERT INTO rbac_roles (role_key, display_name, description, is_system) VALUES (?, ?, ?, ?), (?, ?, ?, ?) ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), description = VALUES(description)",
       ["user", "普通用户", "可创建自己的批次、改造任务和模板版本", 1, "admin", "管理员", "拥有账号、模板、审计和项目管理权限", 1]
     );
+    await this.pool.execute(
+      "INSERT INTO rbac_roles (role_key, display_name, description, is_system) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), description = VALUES(description)",
+      ["trial", "试用用户", "使用管理员配置的试用 API Key，并受每日图片/视频额度限制", 1]
+    );
     const permissions = [
       ["wangzhuan:view", "查看网赚素材管线", "查看入口、模板、图库"],
       ["template:create_version", "创建模板版本", "新建、复制、编辑模板为新版本"],
@@ -339,6 +349,14 @@ class MysqlAuthStore {
       FROM rbac_roles r
       CROSS JOIN rbac_permissions p
       WHERE r.role_key = 'user'
+        AND p.permission_key IN ('wangzhuan:view', 'template:create_version', 'batch:create', 'batch:own', 'remix:create', 'remix:own')`
+    );
+    await this.pool.execute(
+      `INSERT IGNORE INTO rbac_role_permissions (role_id, permission_id)
+      SELECT r.id, p.id
+      FROM rbac_roles r
+      CROSS JOIN rbac_permissions p
+      WHERE r.role_key = 'trial'
         AND p.permission_key IN ('wangzhuan:view', 'template:create_version', 'batch:create', 'batch:own', 'remix:create', 'remix:own')`
     );
     await this.pool.execute(
@@ -542,7 +560,8 @@ class MysqlAuthStore {
         username: user.username,
         displayName: user.displayName,
         role: user.role,
-        isAdmin: user.role === "admin"
+        isAdmin: user.role === "admin",
+        isTrial: user.role === "trial"
       };
     });
   }

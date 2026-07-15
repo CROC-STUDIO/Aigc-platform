@@ -309,6 +309,10 @@
           <small>点击头像上传本地图片。</small>
           <label>API Key <input id="profileApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原 Key" /></label>
           <small id="profileApiKeyHint">未配置 API Key 时不能开始生图或生视频。</small>
+          <div id="profileTrialKeyBlock" class="profile-admin-block" hidden>
+            <label>试用账户共用 API Key <input id="profileTrialApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原试用 Key" /></label>
+            <small id="profileTrialApiKeyHint">试用账户不需要自己填 Key，会使用这里配置的 Key；每天每个试用账户限 30 张图、10 个视频。</small>
+          </div>
           <p id="profileStatus" class="login-status"></p>
         </div>
         <div class="modal-actions">
@@ -327,6 +331,7 @@
           <label>权限
             <select id="adminNewRole">
               <option value="user">普通用户</option>
+              <option value="trial">试用用户</option>
               <option value="admin">管理员</option>
             </select>
           </label>

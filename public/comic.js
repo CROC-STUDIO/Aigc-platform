@@ -543,7 +543,7 @@ function comicOutputs() {
   return (state.materials.outputs || []).filter((output) => {
     const batch = String(output.batch || "");
     const name = String(output.name || "");
-    return output.type === "video" && (batch.startsWith("comic_") || name.includes("comic_"));
+    return output.type === "video" && (output.module === "comic" || batch.startsWith("comic_") || name.includes("comic_"));
   });
 }
 
@@ -616,7 +616,7 @@ async function downloadSelectedBatches() {
   const res = await fetch("/api/outputs/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batches: [...state.selectedBatches] })
+    body: JSON.stringify({ batches: [...state.selectedBatches], module: "comic" })
   });
   if (!res.ok) {
     let errorText = "下载失败";

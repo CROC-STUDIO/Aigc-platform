@@ -38,6 +38,7 @@ const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AI
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
 const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
 const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(process.env.AIGC_USER_PROFILES_PATH) : join(__dirname, "user-profiles.json");
+const TRIAL_USAGE_PATH = process.env.AIGC_TRIAL_USAGE_PATH ? resolveAppPath(process.env.AIGC_TRIAL_USAGE_PATH) : join(__dirname, "trial-usage.json");
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
@@ -227,12 +228,17 @@ function maskApiKey(value) {
 }
 
 function publicProfile(username, profile = {}) {
+  const viewer = currentUser();
+  const canManageTrialKey = Boolean(viewer?.isAdmin && viewer.username === username);
   return {
     username,
     displayName: String(profile.displayName || "").trim(),
     avatar: String(profile.avatar || "").trim(),
     hasApiKey: Boolean(String(profile.apiKey || "").trim()),
-    apiKeyPreview: maskApiKey(profile.apiKey)
+    apiKeyPreview: maskApiKey(profile.apiKey),
+    canManageTrialKey,
+    hasTrialApiKey: canManageTrialKey ? Boolean(String(profile.trialApiKey || "").trim()) : false,
+    trialApiKeyPreview: canManageTrialKey ? maskApiKey(profile.trialApiKey) : ""
   };
 }
 
@@ -251,11 +257,13 @@ async function updateMyProfile(body = {}) {
   const displayName = String(body.displayName ?? current.displayName ?? user.displayName ?? user.username).trim().slice(0, 60);
   const avatar = String(body.avatar ?? current.avatar ?? "").trim().slice(0, 3_000_000);
   const apiKeyInput = String(body.apiKey ?? "").trim();
+  const trialApiKeyInput = user.isAdmin ? String(body.trialApiKey ?? "").trim() : "";
   profiles[user.username] = {
     ...current,
     displayName: displayName || user.username,
     avatar,
     apiKey: apiKeyInput ? apiKeyInput : String(current.apiKey || ""),
+    trialApiKey: user.isAdmin && trialApiKeyInput ? trialApiKeyInput : String(current.trialApiKey || ""),
     updatedAt: new Date().toISOString()
   };
   await writeUserProfiles(profiles);
@@ -275,11 +283,76 @@ async function currentUserProfile() {
   return profiles[username] || {};
 }
 
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+async function readTrialUsage() {
+  if (!existsSync(TRIAL_USAGE_PATH)) return {};
+  try {
+    const data = JSON.parse(await readFile(TRIAL_USAGE_PATH, "utf8"));
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeTrialUsage(usage) {
+  await writeFile(TRIAL_USAGE_PATH, `${JSON.stringify(usage, null, 2)}\n`, "utf8");
+}
+
+async function findTrialApiKey() {
+  const profiles = await readUserProfiles();
+  const users = await authStore.listUsers().catch(() => []);
+  const adminNames = users.filter((user) => user.isAdmin || user.role === "admin").map((user) => user.username);
+  for (const username of ["admin", ...adminNames]) {
+    const key = String(profiles[username]?.trialApiKey || "").trim();
+    if (key) return key;
+  }
+  return "";
+}
+
+async function reserveTrialQuota({ images = 0, videos = 0 } = {}) {
+  const user = currentUser();
+  if (!user?.isTrial) return { ok: true, trial: false };
+  const imageCount = Math.max(0, Number(images) || 0);
+  const videoCount = Math.max(0, Number(videos) || 0);
+  if (!imageCount && !videoCount) return { ok: true, trial: true };
+  const day = todayKey();
+  const usage = await readTrialUsage();
+  const byDay = usage[day] && typeof usage[day] === "object" ? usage[day] : {};
+  const current = byDay[user.username] && typeof byDay[user.username] === "object" ? byDay[user.username] : { images: 0, videos: 0 };
+  const usedImages = Number(current.images || 0);
+  const usedVideos = Number(current.videos || 0);
+  const nextImages = usedImages + imageCount;
+  const nextVideos = usedVideos + videoCount;
+  if (nextImages > 30 || nextVideos > 10) {
+    const error = new Error(`试用账户每日额度不足：今天已用图片 ${usedImages}/30、视频 ${usedVideos}/10；本次需要图片 ${imageCount}、视频 ${videoCount}。请减少生成数量，或明天重置后再试。`);
+    error.status = 400;
+    throw error;
+  }
+  usage[day] = {
+    ...byDay,
+    [user.username]: {
+      images: nextImages,
+      videos: nextVideos,
+      updatedAt: new Date().toISOString()
+    }
+  };
+  await writeTrialUsage(usage);
+  return { ok: true, trial: true, day, images: nextImages, videos: nextVideos };
+}
+
 async function requireUserApiKeyForModel(model, label = "模型") {
+  const user = currentUser();
   const profile = await currentUserProfile();
-  const apiKey = String(profile.apiKey || "").trim();
+  let apiKey = String(profile.apiKey || "").trim();
+  if (!apiKey && user?.isTrial) apiKey = await findTrialApiKey();
   if (!apiKey) {
-    const error = new Error(`请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}`);
+    const error = new Error(user?.isTrial
+      ? `试用账户尚未配置共用 API Key。请联系管理员在头像里的个人信息中配置“试用账户共用 API Key”后再使用 ${label}。`
+      : `请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}。`);
     error.status = 400;
     throw error;
   }
@@ -390,6 +463,7 @@ function dirs() {
   const sharedRoot = currentBaseProjectRoot();
   const recordDir = join(root, "\u6279\u5904\u7406\u8bb0\u5f55");
   const sharedRecordDir = join(sharedRoot, "\u6279\u5904\u7406\u8bb0\u5f55");
+  const outputDir = join(root, "\u6548\u679c\u56fe");
   return {
     projectRoot: root,
     sharedProjectRoot: sharedRoot,
@@ -398,7 +472,10 @@ function dirs() {
     sceneDir: join(sharedRoot, "\u573a\u666f\u56fe"),
     referenceVideoDir: join(sharedRoot, "\u53c2\u8003\u89c6\u9891"),
     logoDir: join(sharedRoot, "\u4ea7\u54c1logo"),
-    outputDir: join(root, "\u6548\u679c\u56fe"),
+    outputDir,
+    adOutputDir: join(outputDir, "广告素材工作台"),
+    comicOutputDir: join(outputDir, "漫剧工作台"),
+    roleShowcaseOutputDir: join(outputDir, "角色展示视频"),
     recordDir,
     guangdadaCacheDir: join(recordDir, "guangdada_cache"),
     globalRequirementPath: join(recordDir, "\u901a\u7528\u63d0\u793a\u8bcd.txt"),
@@ -1226,22 +1303,36 @@ async function listImageFiles(dir) {
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
 
+function outputModuleFromPath(fullPath, fileName = "") {
+  const normalized = String(fullPath || "").replace(/\\/g, "/");
+  const name = String(fileName || basename(fullPath || "") || "");
+  const batch = inferBatchFromOutputName(name);
+  if (normalized.includes("/角色展示视频/") || batch.startsWith("role_showcase_") || name.includes("role_showcase_")) return "role_showcase";
+  if (normalized.includes("/漫剧工作台/") || batch.startsWith("comic_") || name.includes("comic_") || name.includes("_游戏漫剧")) return "comic";
+  return "ad";
+}
+
 async function listOutputFiles(dir) {
   if (!existsSync(dir)) return [];
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listOutputFiles(fullPath));
+      continue;
+    }
     if (!entry.isFile()) continue;
     const ext = extname(entry.name).toLowerCase();
     const type = IMAGE_EXTS.has(ext) ? "image" : VIDEO_EXTS.has(ext) ? "video" : "";
     if (!type) continue;
-    const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
     if (type === "video") {
       const head = await readFile(fullPath).then((buffer) => buffer.subarray(0, 64)).catch(() => Buffer.alloc(0));
       if (!isLikelyVideoBuffer(head)) continue;
     }
-    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
+    const batch = inferBatchFromOutputName(entry.name);
+    files.push({ name: entry.name, path: fullPath, type, module: outputModuleFromPath(fullPath, entry.name), batch, size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -1430,9 +1521,10 @@ async function saveCompetitorSettings(body = {}) {
 async function selectedOutputsForBatches(body = {}) {
   const batches = Array.isArray(body.batches) ? body.batches.map((item) => String(item)) : [];
   if (!batches.length) throw new Error("请先勾选至少一个结果批次");
+  const moduleFilter = ["ad", "comic", "role_showcase"].includes(String(body.module || "")) ? String(body.module) : "";
   const outputs = await listOutputFiles(dirs().outputDir);
   const batchSet = new Set(batches);
-  const selected = outputs.filter((output) => batchSet.has(output.batch || "未分组"));
+  const selected = outputs.filter((output) => (!moduleFilter || output.module === moduleFilter) && batchSet.has(output.batch || "未分组"));
   if (!selected.length) throw new Error("当前勾选批次中没有可下载的图片或视频");
   return selected;
 }
@@ -1533,6 +1625,9 @@ async function loadMaterials() {
   await ensureProjectStructure(dirs().projectRoot);
   await ensureProjectStructure(dirs().sharedProjectRoot);
   await mkdir(dirs().outputDir, { recursive: true });
+  await mkdir(dirs().adOutputDir, { recursive: true });
+  await mkdir(dirs().comicOutputDir, { recursive: true });
+  await mkdir(dirs().roleShowcaseOutputDir, { recursive: true });
   await mkdir(dirs().recordDir, { recursive: true });
   await mkdir(dirs().upscaledDir, { recursive: true });
   await mkdir(dirs().roleDir, { recursive: true });
@@ -2088,8 +2183,8 @@ function buildJobs({ roles, monsters, scenes = [], logos = [], competitors, sele
             prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, scenes: chosenScenes, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
             images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-            output: join(dirs().outputDir, `${outputBase}.png`),
-            videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
+            output: join(dirs().adOutputDir, `${outputBase}.png`),
+            videoOutput: join(dirs().adOutputDir, `${outputBase}.mp4`)
           });
         }
       }
@@ -2119,8 +2214,8 @@ function buildJobs({ roles, monsters, scenes = [], logos = [], competitors, sele
           prompt: singleRolePrompt(role, promptCompetitor, jobLogos, chosenScenes),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
           images: [role.sourcePath, ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-          output: join(dirs().outputDir, `${outputBase}.png`),
-          videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
+          output: join(dirs().adOutputDir, `${outputBase}.png`),
+          videoOutput: join(dirs().adOutputDir, `${outputBase}.mp4`)
         });
       }
     }
@@ -2306,11 +2401,14 @@ async function generateComicVideo(body = {}) {
   if (!prompt) throw new Error("请先生成或填写 Seedance 提示词");
   const ratio = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"].includes(String(body.ratio)) ? String(body.ratio) : "9:16";
   const videoModelInfo = resolveVideoModel(body.videoModel || "dreamina-seedance-2-0-mini");
+  const apiKey = await requireUserApiKeyForModel(videoModelInfo.model, videoModelInfo.label);
+  await reserveTrialQuota({ videos: 1 });
   const duration = Math.max(4, Math.min(15, Number.parseInt(String(body.duration ?? "15"), 10) || 15));
   const batchTag = sanitizeSegment(body.batchTag || new Date().toISOString().slice(0, 19).replace(/\D/g, ""));
   const workDir = join(dirs().recordDir, `comic_${batchTag}`);
   await mkdir(workDir, { recursive: true });
-  await mkdir(dirs().outputDir, { recursive: true });
+  const outputDir = String(batchTag).startsWith("role_showcase_") ? dirs().roleShowcaseOutputDir : dirs().comicOutputDir;
+  await mkdir(outputDir, { recursive: true });
   const refs = Array.isArray(body.refs) ? body.refs.slice(0, 8) : [];
   const assetPaths = Array.isArray(body.assetPaths) ? body.assetPaths.slice(0, 8) : [];
   const imageArgs = [];
@@ -2350,7 +2448,7 @@ async function generateComicVideo(body = {}) {
   let lastRawError = "";
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const result = await execTai(args);
+      const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
       stdout = result.stdout;
       stderr = result.stderr;
       lastRawError = "";
@@ -2374,7 +2472,7 @@ async function generateComicVideo(body = {}) {
   if (lastRawError) throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const output = nextAvailableFilePath(join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
+  const output = nextAvailableFilePath(join(outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
   const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`, output) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   if (!taskId) await downloadVerifiedVideo(videoUrl, output, `comic_${batchTag}`);
@@ -2531,11 +2629,17 @@ async function startBatch(options = {}) {
     if (needsLogo && !selectedLogoNames.length) throw new Error("没有可生成任务：已选竞品勾选了 Logo，但没有勾选产品 Logo 图。请勾选产品 Logo，或取消该竞品的 Logo。");
     throw new Error("没有可生成任务：请检查竞品素材、角色数量、怪物数量和素材勾选状态。");
   }
+  await requireUserApiKeyForModel(imageModelInfo.model, imageModelInfo.label);
+  if (outputMode === "video") await requireUserApiKeyForModel(videoModelInfo.model, videoModelInfo.label);
+  await reserveTrialQuota({
+    images: jobs.length,
+    videos: outputMode === "video" ? jobs.length : 0
+  });
   const safeImageModel = imageModelInfo.model.replace(/[^a-zA-Z0-9_-]/g, "_");
   const promptDir = join(dirs().recordDir, `prompts_${batchTag}_${safeImageModel}`);
   const logPath = join(dirs().recordDir, `batch_${batchTag}_${safeImageModel}_${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   await mkdir(promptDir, { recursive: true });
-  await mkdir(dirs().outputDir, { recursive: true });
+  await mkdir(dirs().adOutputDir, { recursive: true });
 
   runState = setRunState({
     running: true,
