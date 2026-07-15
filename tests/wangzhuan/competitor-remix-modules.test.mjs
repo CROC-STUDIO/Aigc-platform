@@ -18,6 +18,7 @@ import {
   normalizedPoint,
   visibleMediaRect
 } from "../../public/competitor-remix/editors.js";
+import { createJobRunner } from "../../public/competitor-remix/job-runner.js";
 
 const urlSource = { mode: "url", url: "https://example.com/source.mp4" };
 
@@ -410,4 +411,98 @@ test("editor geometry normalizes reverse drags and rejects tiny boxes", () => {
   });
   assert.equal(normalizedBox({ x: 0.1, y: 0.1 }, { x: 0.105, y: 0.5 }), null);
   assert.equal(normalizedBox(null, { x: 0.4, y: 0.5 }), null);
+});
+
+test("job runner keeps concurrent submissions and timers independent", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  const timers = new Map();
+  const requests = [];
+  let timerSequence = 0;
+  const responses = [
+    { jobId: "job-a", status: "queued", remixId: "remix-a" },
+    { jobId: "job-b", status: "queued", remixId: "remix-b" }
+  ];
+  const runner = createJobRunner({
+    store,
+    request: async (url, options) => {
+      requests.push({ url, options });
+      return responses.shift();
+    },
+    createRunId: (() => { let value = 0; return () => `run-${++value}`; })(),
+    setTimer(callback, delay) {
+      const id = ++timerSequence;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimer(id) {
+      timers.delete(id);
+    },
+    isVisible: () => true,
+    pollMs: 3000
+  });
+
+  await runner.submit({ capabilityId: "remove", modeId: "automatic", payload: { job_type: "ai_remove", input: { source: "secret" } } });
+  await runner.submit({ capabilityId: "ending", modeId: "detect_trim", payload: { job_type: "end_trim_detection", input: { source: "secret" } } });
+
+  assert.equal(store.getState().runs.length, 2);
+  assert.deepEqual(store.getState().runs.map((run) => run.providerJobId).sort(), ["job-a", "job-b"]);
+  assert.equal(timers.size, 2);
+  assert.equal(requests[0].url, "/api/wangzhuan/video-ops/jobs");
+  assert.equal(store.getState().runs[0].requestSnapshot.input.source, "<redacted>");
+});
+
+test("job runner isolates transient polling errors and terminal results", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  store.upsertRun({ runId: "run-a", providerJobId: "job-a", status: "running", errorCount: 0 });
+  store.upsertRun({ runId: "run-b", providerJobId: "job-b", status: "running", errorCount: 0 });
+  const scheduled = [];
+  const runner = createJobRunner({
+    store,
+    request: async (url) => {
+      if (url.includes("job-a") && !url.endsWith("/result?include_model_calls=true")) throw new Error("network down");
+      if (url.endsWith("/result?include_model_calls=true")) return { download_url: "https://example.com/out.mp4" };
+      return { job_id: "job-b", status: "succeeded" };
+    },
+    setTimer(callback, delay) {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
+    clearTimer() {},
+    isVisible: () => true,
+    pollMs: 3000
+  });
+
+  await runner.refresh("run-a");
+  assert.equal(store.getState().runs.find((run) => run.runId === "run-a").status, "running");
+  assert.equal(store.getState().runs.find((run) => run.runId === "run-a").connectionError, "network down");
+  assert.equal(store.getState().runs.find((run) => run.runId === "run-b").connectionError, undefined);
+  assert.equal(scheduled.at(-1).delay, 6000);
+
+  await runner.refresh("run-b");
+  const completed = store.getState().runs.find((run) => run.runId === "run-b");
+  assert.equal(completed.status, "succeeded");
+  assert.equal(completed.result.download_url, "https://example.com/out.mp4");
+});
+
+test("job runner cancel and retry target the original provider job", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  store.upsertRun({ runId: "run-a", providerJobId: "job-a", status: "failed", requestSnapshot: { job_type: "ai_remove" } });
+  const urls = [];
+  const runner = createJobRunner({
+    store,
+    request: async (url) => {
+      urls.push(url);
+      return { job_id: "job-a", status: url.endsWith("/retry") ? "queued" : "canceled" };
+    },
+    setTimer: () => 1,
+    clearTimer() {},
+    isVisible: () => true
+  });
+
+  await runner.retry("run-a");
+  assert.equal(urls.at(-1), "/api/wangzhuan/video-ops/jobs/job-a/retry");
+  assert.equal(store.getState().runs[0].status, "queued");
+  await runner.cancel("run-a");
+  assert.equal(urls.at(-1), "/api/wangzhuan/video-ops/jobs/job-a/cancel");
+  assert.equal(store.getState().runs[0].status, "canceled");
 });
