@@ -52,6 +52,7 @@ test("competitor remix stylesheet owns responsive capability and run rails", asy
   assert.match(css, /@media \(max-width: 760px\)/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(css, /\.remix-file-row\[hidden\][^{]*\{[^}]*display:\s*none/);
+  assert.match(css, /\.remix-advanced:not\(\[open\]\)\s*>\s*\.remix-form-grid\s*\{[^}]*display:\s*none/);
 });
 
 test("competitor remix view exposes drop, editor, submit, and per-run actions", async () => {
@@ -66,4 +67,14 @@ test("competitor remix view exposes drop, editor, submit, and per-run actions", 
   assert.match(js, /runner\.retry/);
   assert.match(js, /runner\.loadResult/);
   assert.match(js, /buildManualMaskDataUrl/);
+});
+
+test("competitor remix keeps provider and tuning parameters in collapsed advanced settings", async () => {
+  const js = await readText("public/competitor-remix/view.js");
+
+  assert.match(js, /function advanced\(content\)[\s\S]*<details class="remix-advanced">/);
+  assert.doesNotMatch(js, /<details class="remix-advanced" open/);
+  assert.match(js, /modeId === "seedance"\) \{[\s\S]*?return `<div class="remix-form">\$\{advanced\(`/);
+  assert.match(js, /if \(capabilityId === "ending"\) \{[\s\S]*?return `<div class="remix-form">\$\{advanced\(`/);
+  assert.match(js, /\$\{advanced\(`\$\{field\("模糊强度"/);
 });

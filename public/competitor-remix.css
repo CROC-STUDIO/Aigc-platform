@@ -375,6 +375,14 @@
   margin-top: 12px;
 }
 
+.remix-advanced:not([open]) > .remix-form-grid {
+  display: none;
+}
+
+.remix-field-wide {
+  grid-column: 1 / -1;
+}
+
 .remix-editor-layout {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(230px, 300px);
