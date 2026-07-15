@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Touka AI素材中台 - 游戏漫剧</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=1.0.40" />
   </head>
   <body>
     <header class="platform-topbar">
@@ -28,6 +28,10 @@
           <span>⌂</span>
           <b>广告素材工作台</b>
         </a>
+        <a class="platform-nav-item" href="/role-showcase.html">
+          <span>◆</span>
+          <b>角色展示视频</b>
+        </a>
         <a class="platform-nav-item active" href="/comic.html">
           <span>✦</span>
           <b>漫剧工作台</b>
@@ -43,7 +47,7 @@
       </nav>
       <div class="sidebar-foot">
         <span>Touka AI素材中台</span>
-        <small>v1.0.30</small>
+        <small>v1.0.40</small>
       </div>
     </aside>
 
@@ -51,7 +55,7 @@
       <section class="operation-pane">
         <section class="topbar">
           <div>
-            <h1>游戏漫剧工作台 <span class="app-version">v1.0.31</span></h1>
+            <h1>游戏漫剧工作台 <span class="app-version">v1.0.40</span></h1>
             <div class="path-editor">
               <select id="comicProjectSelect" title="切换项目"></select>
               <button id="comicRenameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
@@ -230,10 +234,15 @@
       <section class="result-pane comic-result-pane">
         <section class="panel comic-result-panel">
           <div class="panel-head">
-            <h2>结果区</h2>
+            <h2>结果图库</h2>
+            <span id="comicOutputCount">0 / 0 个</span>
+          </div>
+          <div class="export-bar">
+            <button id="comicExportOutputsBtn" class="export-primary" type="button">下载选中批次</button>
             <span id="comicGenerateStatus">未生成</span>
           </div>
-          <div id="comicVideoResult" class="comic-video-result">
+          <div id="comicBatchFilters" class="batch-filters"></div>
+          <div id="comicOutputGrid" class="output-grid comic-output-grid">
             <div class="empty-output">暂无视频结果</div>
           </div>
           <div class="panel-subhead">
@@ -278,19 +287,20 @@
         <div class="modal-title-row">
           <div>
             <h2>更新日志</h2>
-            <p>Touka AI素材中台 <strong>v1.0.30</strong></p>
+            <p>Touka AI素材中台 <strong>v1.0.40</strong></p>
           </div>
           <button id="comicChangelogCloseBtn" class="mini ghost" type="button">关闭</button>
         </div>
         <div class="changelog-list">
           <section>
-            <h3>v1.0.30</h3>
+            <h3>v1.0.40</h3>
             <ul>
               <li>顶部固定导航栏：加入网站 Logo、更新日志入口和账号系统。</li>
               <li>广告素材工作台和漫剧工作台支持项目下拉切换、新增项目、管理员改名和删除。</li>
               <li>通用提示词改为按项目独立保存，默认提示词改为更通用的广告素材规则。</li>
               <li>竞品素材特殊提示词升级为 JSON 反推格式，视频会生成 Seedance 2.0 专用提示词。</li>`n              <li>视频素材反推接入 Gemini 多模态和 ASR 台词提取，生成视频会保留原台词语种。</li>`n              <li>非战斗参考视频不再被旧攻击/升级提示词误判为战斗模板。</li>`n              <li>上传竞品素材时仅锁定当前栏位，其他竞品栏位仍可继续操作。</li>`n              <li>竞品素材默认生成尺寸调整为 1024x1024，仍支持用户手动修改。</li>
               <li>角色图、怪物图、产品 Logo 图库按项目共享，竞品素材和结果图库按用户项目隔离。</li>
+              <li>漫剧工作台右侧结果区统一为批次结果图库，可预览视频并下载选中批次。</li>
             </ul>
           </section>
           <section>
@@ -306,7 +316,7 @@
       </div>
     </div>
 
-    <script src="/comic.js" type="module"></script>
+    <script src="/comic.js?v=1.0.40" type="module"></script>
   </body>
 </html>
 

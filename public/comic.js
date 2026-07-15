@@ -4,6 +4,10 @@ const state = {
   selectedMonsters: new Set(),
   selectedScenes: new Set(),
   selectedRefVideos: new Set(),
+  selectedBatches: new Set(),
+  batchesInitialized: false,
+  batchFilterTouched: false,
+  activeBatchTag: "",
   user: null
 };
 
@@ -60,7 +64,10 @@ const els = {
   copyPromptBtn: document.querySelector("#copyPromptBtn"),
   downloadPromptBtn: document.querySelector("#downloadPromptBtn"),
   generateStatus: document.querySelector("#comicGenerateStatus"),
-  videoResult: document.querySelector("#comicVideoResult"),
+  outputGrid: document.querySelector("#comicOutputGrid"),
+  batchFilters: document.querySelector("#comicBatchFilters"),
+  outputCount: document.querySelector("#comicOutputCount"),
+  exportOutputsBtn: document.querySelector("#comicExportOutputsBtn"),
   promptOutput: document.querySelector("#comicPromptOutput"),
   promptLength: document.querySelector("#promptLength"),
   runLog: document.querySelector("#comicRunLog")
@@ -225,6 +232,7 @@ async function loadMaterials() {
   renderAssetGrid({ items: materials.referenceVideos || [], grid: els.refVideoGrid, selected: state.selectedRefVideos, toggle: els.toggleRefVideos, kind: "referenceVideo" });
   refreshShotReferenceVideoOptions();
   updateMetrics();
+  renderOutputs();
   buildPrompt();
 }
 
@@ -479,13 +487,113 @@ function clearRunLog() {
   els.runLog.innerHTML = '<div class="log-line">等待生成任务...</div>';
 }
 
+function comicOutputs() {
+  return (state.materials.outputs || []).filter((output) => {
+    const batch = String(output.batch || "");
+    const name = String(output.name || "");
+    return output.type === "video" && (batch.startsWith("comic_") || name.includes("comic_"));
+  });
+}
+
+function renderOutputs() {
+  if (!els.outputGrid || !els.batchFilters || !els.outputCount) return;
+  const outputs = comicOutputs();
+  const batches = [...new Set(outputs.map((output) => output.batch || "未分组"))];
+  if (!state.batchesInitialized) {
+    state.selectedBatches = state.activeBatchTag && batches.includes(state.activeBatchTag) ? new Set([state.activeBatchTag]) : new Set(batches);
+    state.batchesInitialized = true;
+  } else if (!state.batchFilterTouched && state.activeBatchTag) {
+    state.selectedBatches = batches.includes(state.activeBatchTag) ? new Set([state.activeBatchTag]) : new Set();
+  } else {
+    state.selectedBatches = new Set([...state.selectedBatches].filter((batch) => batches.includes(batch)));
+  }
+  renderBatchFilters(batches);
+  const visibleOutputs = outputs.filter((output) => state.selectedBatches.has(output.batch || "未分组"));
+  els.outputCount.textContent = `${visibleOutputs.length} / ${outputs.length} 个`;
+  if (els.exportOutputsBtn) {
+    els.exportOutputsBtn.disabled = visibleOutputs.length <= 0 || state.selectedBatches.size <= 0;
+    els.exportOutputsBtn.title = els.exportOutputsBtn.disabled ? "请先勾选要下载的结果批次" : "";
+  }
+  els.outputGrid.innerHTML = "";
+  if (!visibleOutputs.length) {
+    els.outputGrid.innerHTML = `<div class="empty-output">未勾选批次或暂无漫剧视频</div>`;
+    return;
+  }
+  for (const output of visibleOutputs.slice(0, 120)) {
+    const card = document.createElement("article");
+    card.className = "output-card comic-output-card";
+    card.innerHTML = `
+      <video src="${escapeHtml(output.url)}" muted controls preload="metadata" playsinline></video>
+      <em>${escapeHtml(output.batch || "未分组")}</em>
+      <b>${escapeHtml(output.name)}</b>
+      <a class="mini ghost showcase-download-link" href="${escapeHtml(output.url)}" download>下载</a>
+    `;
+    els.outputGrid.append(card);
+  }
+}
+
+function renderBatchFilters(batches) {
+  els.batchFilters.innerHTML = "";
+  if (!batches.length) {
+    els.batchFilters.textContent = "暂无结果";
+    return;
+  }
+  const allLabel = document.createElement("label");
+  allLabel.innerHTML = `<input type="checkbox" ${state.selectedBatches.size === batches.length ? "checked" : ""} /> 全部批次`;
+  allLabel.querySelector("input").addEventListener("change", (event) => {
+    state.batchFilterTouched = true;
+    state.selectedBatches = event.target.checked ? new Set(batches) : new Set();
+    renderOutputs();
+  });
+  els.batchFilters.append(allLabel);
+  for (const batch of batches) {
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="checkbox" ${state.selectedBatches.has(batch) ? "checked" : ""} /> ${escapeHtml(batch)}`;
+    label.querySelector("input").addEventListener("change", (event) => {
+      state.batchFilterTouched = true;
+      if (event.target.checked) state.selectedBatches.add(batch);
+      else state.selectedBatches.delete(batch);
+      renderOutputs();
+    });
+    els.batchFilters.append(label);
+  }
+}
+
+async function downloadSelectedBatches() {
+  if (!state.selectedBatches.size) return alert("请先勾选要下载的批次。");
+  const res = await fetch("/api/outputs/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batches: [...state.selectedBatches] })
+  });
+  if (!res.ok) {
+    let errorText = "下载失败";
+    try {
+      const data = await res.json();
+      errorText = data.error || errorText;
+    } catch {}
+    throw new Error(errorText);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `comic-results-${Date.now()}.zip`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function generateVideo() {
   if (!els.promptOutput.value.trim()) buildPrompt();
   if (!confirm("确定调用 Seedance 2.0 生成视频吗？这会消耗视频额度，生成可能需要几分钟。")) return;
   els.batchTag.value = defaultBatchTag();
+  const batchTag = `comic_${els.batchTag.value}`;
+  state.activeBatchTag = batchTag;
+  state.batchFilterTouched = false;
   els.generateVideoBtn.disabled = true;
   els.generateStatus.textContent = "正在提交 Seedance 2.0...";
-  els.videoResult.innerHTML = `<div class="empty-output">正在生成视频，请稍等...</div>`;
   clearRunLog();
   appendRunLog(`开始生成漫剧视频，批次 ${els.batchTag.value}`, "start");
   try {
@@ -506,13 +614,13 @@ async function generateVideo() {
         prompt: els.promptOutput.value,
         ratio: els.aspect.value,
         duration: Number.parseInt(els.duration.value, 10) || 15,
-        batchTag: `comic_${els.batchTag.value}`,
+        batchTag,
         assetPaths: els.generateMode.value === "text" ? [] : selected.map((item) => item.path)
       })
     });
     els.generateStatus.textContent = `生成完成：${result.model}`;
     appendRunLog(`生成完成：${result.model}，任务 ${result.taskId || "unknown"}`, "done");
-    els.videoResult.innerHTML = `<video src="${result.url}" controls playsinline></video><a class="export-primary nav-link" href="${result.url}" download>下载视频</a>`;
+    await loadMaterials();
   } catch (error) {
     els.generateStatus.textContent = `生成失败：${error.message}`;
     appendRunLog(`生成失败：${error.message}`, "error");
@@ -641,6 +749,19 @@ els.addShotBtn.addEventListener("click", () => createShotCard({ time: "新增时
 els.addDialogueBtn.addEventListener("click", () => createDialogueCard({ speaker: "角色", gender: "不指定", personality: "", text: "台词", timing: "出现时机", style: "只播放人声对白，不出现字幕、气泡或屏幕文字" }));
 els.buildPromptBtn.addEventListener("click", buildPrompt);
 els.generateVideoBtn.addEventListener("click", generateVideo);
+els.exportOutputsBtn?.addEventListener("click", async () => {
+  try {
+    els.exportOutputsBtn.disabled = true;
+    els.generateStatus.textContent = "正在打包选中批次...";
+    await downloadSelectedBatches();
+    els.generateStatus.textContent = "选中批次已开始下载";
+  } catch (error) {
+    els.generateStatus.textContent = `下载失败：${error.message}`;
+    alert(error.message);
+  } finally {
+    renderOutputs();
+  }
+});
 els.copyPromptBtn.addEventListener("click", async () => {
   if (!els.promptOutput.value.trim()) buildPrompt();
   await navigator.clipboard.writeText(els.promptOutput.value);

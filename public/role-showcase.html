@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touka AI素材中台 - 角色展示视频</title>
+    <link rel="stylesheet" href="/styles.css?v=1.0.41" />
+  </head>
+  <body>
+    <header class="platform-topbar">
+      <a class="platform-brand nav-link" href="/" aria-label="Touka AI素材中台">
+        <span class="brand-mark">T</span>
+        <strong>Touka<span>AI</span></strong>
+      </a>
+      <nav class="topbar-links" aria-label="顶部导航">
+        <button id="showcaseChangelogBtn" class="topbar-link" type="button">更新日志</button>
+      </nav>
+      <div class="topbar-account">
+        <a class="topbar-account-link" href="/wangzhuan-tasks.html">任务管理</a>
+        <span id="showcaseCurrentUserBadge">未登录</span>
+        <button id="showcaseLogoutBtn" class="mini ghost" type="button" hidden>退出</button>
+      </div>
+    </header>
+
+    <aside class="platform-sidebar">
+      <nav class="platform-nav" aria-label="工作台导航">
+        <a class="platform-nav-item" href="/">
+          <span>⌂</span>
+          <b>广告素材工作台</b>
+        </a>
+        <a class="platform-nav-item active" href="/role-showcase.html">
+          <span>◆</span>
+          <b>角色展示视频</b>
+        </a>
+        <a class="platform-nav-item" href="/comic.html">
+          <span>✦</span>
+          <b>漫剧工作台</b>
+        </a>
+        <a class="platform-nav-item" href="/wangzhuan-v2.html">
+          <span>▣</span>
+          <b>网赚素材管线</b>
+        </a>
+        <a class="platform-nav-item" href="/competitor-remix.html">
+          <span>◇</span>
+          <b>竞品素材改造</b>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span>Touka AI素材中台</span>
+        <small>v1.0.41</small>
+      </div>
+    </aside>
+
+    <main class="app showcase-app">
+      <section class="operation-pane">
+        <section class="topbar">
+          <div>
+            <h1>角色展示视频 <span class="app-version">v1.0.41</span></h1>
+            <div class="path-editor">
+              <select id="showcaseProjectSelect" title="切换项目"></select>
+              <button id="showcaseRenameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
+              <button id="showcaseDeleteProjectBtn" class="mini ghost danger admin-project-action" type="button" hidden>删除</button>
+              <span class="page-hint">基于 Seedance Ad Video 的角色 CG 展示规则</span>
+            </div>
+          </div>
+          <div class="status">
+            <span>Seedance 2.0</span>
+            <span id="showcaseRefCount">0 个参考</span>
+          </div>
+        </section>
+
+        <section class="metrics">
+          <div><strong id="showcaseRoleCount">0</strong><span>角色</span></div>
+          <div><strong id="showcaseMonsterCount">0</strong><span>怪物</span></div>
+          <div><strong id="showcaseLogoCount">0</strong><span>Logo</span></div>
+          <div><strong>8s</strong><span>竖屏</span></div>
+        </section>
+
+        <section class="workspace showcase-workspace">
+          <div class="asset-column">
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>角色图</h2>
+                <div class="head-actions">
+                  <button id="showcaseUploadRoleBtn" class="mini" type="button">上传角色</button>
+                  <label><input id="showcaseToggleRoles" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="showcaseRoleGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>怪物图</h2>
+                <div class="head-actions">
+                  <button id="showcaseUploadMonsterBtn" class="mini" type="button">上传怪物</button>
+                  <label><input id="showcaseToggleMonsters" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="showcaseMonsterGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <h2>产品 Logo</h2>
+                <div class="head-actions">
+                  <button id="showcaseUploadLogoBtn" class="mini" type="button">上传 Logo</button>
+                  <label><input id="showcaseToggleLogos" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="showcaseLogoGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+          </div>
+
+          <div class="workspace-main">
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>生成设定</h2>
+                <span>8秒 9:16</span>
+              </div>
+              <div class="showcase-form-grid">
+                <label>角色名称/身份
+                  <input id="showcaseRoleDesc" type="text" placeholder="可选：填写角色身份、性格、说话气质；留空时由模型根据角色图判断" />
+                </label>
+              </div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>通用提示词</h2>
+                <button id="showcaseResetPromptBtn" class="mini ghost" type="button">恢复默认</button>
+              </div>
+              <textarea id="showcaseGeneralPrompt" class="requirement-text showcase-general-prompt" spellcheck="false"></textarea>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>特殊提示词</h2>
+                <span>可留空</span>
+              </div>
+              <textarea id="showcaseSpecialPrompt" class="requirement-text showcase-special-prompt" spellcheck="false" placeholder="可选：填写本次特殊要求。留空时，模型会根据已选角色、怪物、Logo 和通用提示词自动生成。"></textarea>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-head">
+                <h2>最终 Seedance 提示词</h2>
+                <span id="showcasePromptLength">0 字</span>
+              </div>
+              <div class="comic-actions">
+                <button id="showcaseBuildPromptBtn" class="export-primary" type="button">生成提示词</button>
+                <button id="showcaseCopyPromptBtn" class="mini ghost" type="button">复制</button>
+              </div>
+              <textarea id="showcasePromptOutput" class="requirement-text comic-output" spellcheck="false" placeholder="这里默认留空。选好角色和怪物后，点击“生成提示词”才会重新生成最终 Seedance 提示词。"></textarea>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="result-pane comic-result-pane">
+        <section class="panel comic-result-panel">
+          <div class="panel-head">
+            <h2>结果图库</h2>
+            <span id="showcaseOutputCount">0 / 0 个</span>
+          </div>
+          <div class="export-bar">
+            <button id="showcaseExportOutputsBtn" class="export-primary" type="button">下载选中批次</button>
+            <span id="showcaseGenerateStatus">未生成</span>
+          </div>
+          <div id="showcaseBatchFilters" class="batch-filters"></div>
+          <div id="showcaseOutputGrid" class="output-grid showcase-output-grid">
+            <div class="empty-output">暂无视频结果</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>运行日志</h2>
+            <span>Seedance 2.0</span>
+          </div>
+          <div id="showcaseRunLog" class="log-list comic-run-log"></div>
+        </section>
+      </section>
+    </main>
+
+    <section class="control-band showcase-control-band">
+      <div class="batch-box">
+        <label for="showcaseBatchTag">批次名</label>
+        <input id="showcaseBatchTag" type="text" />
+      </div>
+      <div class="batch-box">
+        <label for="showcaseRepeatCount">生成次数</label>
+        <input id="showcaseRepeatCount" type="number" min="1" max="20" step="1" value="1" />
+      </div>
+      <div class="batch-box">
+        <label for="showcaseOutputMode">生成模式</label>
+        <select id="showcaseOutputMode" disabled>
+          <option value="video" selected>视频</option>
+        </select>
+      </div>
+      <div class="batch-box">
+        <label for="showcaseVideoModel">视频模型</label>
+        <select id="showcaseVideoModel">
+          <option value="dreamina-seedance-2-0-mini" selected>Dreamina Seedance 2.0 Mini</option>
+          <option value="dreamina-seedance-2-0-fast-260128">Seedance 2.0 Fast</option>
+          <option value="dreamina-seedance-2-0-260128">dreamina-seedance-2-0-260128</option>
+        </select>
+      </div>
+      <button id="showcaseGenerateVideoBtn" class="icon-action" type="button" title="生成视频" aria-label="生成视频">▶</button>
+    </section>
+
+    <div id="showcaseChangelogModal" class="modal-backdrop" hidden>
+      <div class="modal-panel changelog-panel">
+        <div class="modal-title-row">
+          <div>
+            <h2>更新日志</h2>
+            <p>Touka AI素材中台 <strong>v1.0.41</strong></p>
+          </div>
+          <button id="showcaseChangelogCloseBtn" class="mini ghost" type="button">关闭</button>
+        </div>
+        <div class="changelog-list">
+          <section>
+            <h3>v1.0.41</h3>
+            <ul>
+              <li>最终 Seedance 提示词默认留空，点击“生成提示词”时才重新生成。</li>
+              <li>生成提示词改为后端调用模型，根据已选角色、怪物、Logo 外观与性格描述自动生成。</li>
+              <li>角色名称/身份默认清空，用户可自行补充，不再预置固定战斗角色。</li>
+              <li>角色展示视频结果改为批次图库，可按批次筛选、预览视频并下载选中批次。</li>
+              <li>底部悬浮生成栏增加生成次数和视频模型选择，多次生成会进入同一个批次。</li>
+              <li>生成提示词按钮增加即时状态反馈，避免点击后看不到响应。</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script src="/role-showcase.js?v=1.0.41" type="module"></script>
+  </body>
+</html>

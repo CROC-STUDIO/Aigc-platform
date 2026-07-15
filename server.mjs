@@ -65,6 +65,7 @@ const VIDEO_MODEL_OPTIONS = {
   "dreamina-seedance-2-0-mini": { model: "dreamina-seedance-2-0-260128", label: "Dreamina Seedance 2.0 Mini" }
 };
 const REVERSE_PROMPT_MODEL = process.env.REVERSE_PROMPT_MODEL || "gemini-3-flash-preview";
+const ROLE_SHOWCASE_PROMPT_MODEL = process.env.ROLE_SHOWCASE_PROMPT_MODEL || "gpt-5.5";
 const REVERSE_PROMPT_ENDPOINT = process.env.REVERSE_PROMPT_ENDPOINT || process.env.OPENAI_BASE_URL || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || process.env.REVERSE_PROMPT_API_KEY || "";
 const DEFAULT_OUTPUT_SIZE = "1024x1024";
@@ -863,6 +864,134 @@ function extractResponseText(response) {
   return parts.join("\n").trim();
 }
 
+function roleShowcaseEndpoint() {
+  return String(process.env.ROLE_SHOWCASE_PROMPT_ENDPOINT || process.env.SKYLINK_ENDPOINT || process.env.TAI_ENDPOINT || process.env.OPENAI_BASE_URL || "https://skylink-gateway.com/api/v1").trim();
+}
+
+function normalizeShowcaseAssetList(value, kind) {
+  return (Array.isArray(value) ? value : []).slice(0, kind === "role" ? 4 : 6).map((item) => ({
+    kind,
+    name: String(item?.title || item?.name || "").trim(),
+    traits: String(item?.traits || "").trim(),
+    path: String(item?.path || "").trim()
+  })).filter((item) => item.path);
+}
+
+async function showcaseImagePart(asset, index) {
+  const full = safeInsideProject(asset.path);
+  const buffer = await readFile(full);
+  const mime = contentTypeForFile(full).startsWith("image/") ? contentTypeForFile(full) : detectImageContentType(buffer);
+  return {
+    label: `${asset.kind}-${index + 1}`,
+    name: asset.name || basename(full),
+    traits: asset.traits,
+    contentType: mime,
+    dataUrl: `data:${mime};base64,${buffer.toString("base64")}`
+  };
+}
+
+function cleanGeneratedPrompt(text) {
+  return String(text || "")
+    .replace(/^```(?:\w+)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+async function generateRoleShowcasePrompt(body = {}) {
+  const apiKey = await requireUserApiKeyForModel(ROLE_SHOWCASE_PROMPT_MODEL, ROLE_SHOWCASE_PROMPT_MODEL);
+  const roles = normalizeShowcaseAssetList(body.roles, "role");
+  const monsters = normalizeShowcaseAssetList(body.monsters, "monster");
+  const logos = normalizeShowcaseAssetList(body.logos, "logo");
+  if (!roles.length) {
+    const error = new Error("请先勾选至少 1 张角色图后再生成提示词。");
+    error.status = 400;
+    throw error;
+  }
+  const images = [];
+  for (const [index, asset] of [...roles, ...monsters, ...logos].entries()) {
+    images.push(await showcaseImagePart(asset, index));
+  }
+  const assetLines = [
+    ...roles.map((item, index) => `角色图${index + 1}：${item.name || "未命名"}。${item.traits || ""}`),
+    ...monsters.map((item, index) => `怪物图${index + 1}：${item.name || "未命名"}。${item.traits || ""}`),
+    ...logos.map((item, index) => `产品Logo${index + 1}：${item.name || "未命名"}。${item.traits || ""}`)
+  ].join("\n");
+  const instruction = `你是 Seedance 2.0 手游广告视频导演和提示词专家。请参考用户上传的角色图、怪物图、产品 Logo 的真实外观，生成一段可以直接交给 Seedance 2.0 的中文最终提示词。
+
+硬性要求：
+1. 最终提示词必须是完整可执行的视频生成提示词，不要输出 JSON、Markdown、解释、标题或代码块。
+2. 自动分析角色外观、怪物外观、性格气质、动作方式和镜头节奏。若用户填写了角色名称/身份，则结合用户填写；若为空，则根据角色图自行判断，不要套用固定角色。
+3. 唯一核心主角必须是已选角色图中的角色。不要改变主角外观，不要新增第二个主角，不要把怪物或 Logo 当主角。
+4. 若选了怪物图，怪物只能作为压迫感敌人或展示互动对象，外观参考上传怪物图，不要抢主角戏份。
+5. 若选了产品 Logo，Logo 只放在结尾下载引导区或安全角落，不能遮挡角色脸、武器或关键动作。
+6. 默认生成 8 秒竖屏 9:16 Q版手游角色展示广告，节奏短促、有强动作、有强反馈、有结尾角色近景或胜利 pose。
+7. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走站桩。
+8. 每次都根据本次选择的素材重新生成，不要沿用历史提示词或固定模板。
+
+用户通用提示词：
+${sanitizeRequirementText(body.generalPrompt || "")}
+
+用户特殊提示词：
+${sanitizeRequirementText(body.specialPrompt || "") || "无"}
+
+用户填写的角色名称/身份/性格：
+${sanitizeRequirementText(body.roleDesc || "") || "未填写，请根据角色图自动判断。"}
+
+已选素材清单：
+${assetLines}`;
+
+  const responsePayload = {
+    model: ROLE_SHOWCASE_PROMPT_MODEL,
+    input: [{
+      role: "user",
+      content: [
+        { type: "input_text", text: instruction },
+        ...images.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
+      ]
+    }]
+  };
+  const endpoint = roleShowcaseEndpoint().replace(/\/$/, "");
+  let res = await fetch(`${endpoint}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(responsePayload)
+  });
+  let raw = await res.text();
+  if (!res.ok) {
+    const chatPayload = {
+      model: ROLE_SHOWCASE_PROMPT_MODEL,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: instruction },
+          ...images.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } }))
+        ]
+      }]
+    };
+    res = await fetch(`${endpoint}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(chatPayload)
+    });
+    raw = await res.text();
+  }
+  if (!res.ok) {
+    const error = new Error(`生成提示词失败 HTTP ${res.status}: ${raw.slice(0, 500)}`);
+    error.status = res.status;
+    throw error;
+  }
+  const json = JSON.parse(raw);
+  const prompt = cleanGeneratedPrompt(extractResponseText(json));
+  if (!prompt) throw new Error("模型没有返回最终 Seedance 提示词。");
+  return { ok: true, model: ROLE_SHOWCASE_PROMPT_MODEL, prompt };
+}
+
 async function analyzeImageWithPython(imagePath) {
   const script = `
 import json, sys
@@ -1105,7 +1234,7 @@ function inferBatchFromOutputName(name) {
   const stem = parse(name).name;
   const timeBatch = stem.match(/^(\d{8}_\d{4,6}|\d{12,14})(?:_|$)/);
   if (timeBatch) return timeBatch[1];
-  const markers = ["_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
+  const markers = ["_\u6e38\u620f\u6f2b\u5267", "_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
   const indexes = markers.map((marker) => stem.indexOf(marker)).filter((index) => index > 0);
   if (!indexes.length) return "ungrouped";
   return stem.slice(0, Math.min(...indexes));
@@ -2126,6 +2255,16 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   return { videoTaskId: taskIds.filter(Boolean).join(",") };
 }
 
+function nextAvailableFilePath(targetPath) {
+  if (!existsSync(targetPath)) return targetPath;
+  const parsed = parse(targetPath);
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = join(parsed.dir, `${parsed.name}_${index}${parsed.ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  return join(parsed.dir, `${parsed.name}_${Date.now()}${parsed.ext}`);
+}
+
 async function generateComicVideo(body = {}) {
   const prompt = String(body.prompt ?? "").trim();
   if (!prompt) throw new Error("请先生成或填写 Seedance 提示词");
@@ -2185,7 +2324,7 @@ async function generateComicVideo(body = {}) {
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
   const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
-  const output = join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`);
+  const output = nextAvailableFilePath(join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
   await downloadBinary(videoUrl, output);
   const storage = await syncProjectAssetToObjectStorage(output, "comic_video_output");
   const promptPath = join(workDir, "seedance_prompt.txt");
@@ -3906,6 +4045,9 @@ async function handleRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/outputs/export") {
       return await sendOutputsZip(res, await readJson(req));
+    }
+    if (req.method === "POST" && url.pathname === "/api/role-showcase/generate-prompt") {
+      return sendJson(res, await generateRoleShowcasePrompt(await readJson(req)));
     }
     if (req.method === "POST" && url.pathname === "/api/comic/generate-video") {
       return sendJson(res, await generateComicVideo(await readJson(req)));
