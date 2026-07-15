@@ -16,6 +16,7 @@ import { createMediaWorkspace } from "../../public/competitor-remix/media-worksp
 import {
   normalizedBox,
   normalizedPoint,
+  selectionForPrompt,
   visibleMediaRect
 } from "../../public/competitor-remix/editors.js";
 import { createJobRunner } from "../../public/competitor-remix/job-runner.js";
@@ -411,6 +412,16 @@ test("editor geometry normalizes reverse drags and rejects tiny boxes", () => {
   });
   assert.equal(normalizedBox({ x: 0.1, y: 0.1 }, { x: 0.105, y: 0.5 }), null);
   assert.equal(normalizedBox(null, { x: 0.4, y: 0.5 }), null);
+});
+
+test("editor displays only the selection used by the active prompt type", () => {
+  const draft = {
+    promptType: "point",
+    box: { x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 },
+    points: [{ x: 0.5, y: 0.6, label: "positive" }]
+  };
+  assert.deepEqual(selectionForPrompt(draft), { box: null, points: draft.points });
+  assert.deepEqual(selectionForPrompt({ ...draft, promptType: "box" }), { box: draft.box, points: [] });
 });
 
 test("job runner keeps concurrent submissions and timers independent", async () => {

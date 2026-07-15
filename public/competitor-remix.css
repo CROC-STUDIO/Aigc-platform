@@ -258,6 +258,13 @@
   margin-top: 12px;
 }
 
+.remix-file-row[hidden],
+#remixVideoSourceControls[hidden],
+#remixReportSource[hidden],
+.remix-editor-empty[hidden] {
+  display: none;
+}
+
 .remix-source-row label {
   flex: 0 0 auto;
   color: var(--remix-muted);
@@ -708,6 +715,15 @@
 }
 
 @media (max-width: 760px) {
+  .remix-page .platform-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-inline: 10px;
+  }
+
+  .remix-page .topbar-links {
+    display: none;
+  }
+
   .remix-shell {
     margin-top: 64px;
   }

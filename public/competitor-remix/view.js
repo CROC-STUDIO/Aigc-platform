@@ -1,7 +1,7 @@
 import { escapeHtml, showToast, taskSpaceHref } from "../wangzhuan-common.js";
 import { CAPABILITIES, getCapability, getMode } from "./capability-catalog.js";
 import { buildPayload, validateDraft } from "./payloads.js";
-import { createRegionEditor, visibleMediaRect } from "./editors.js";
+import { createRegionEditor, selectionForPrompt, visibleMediaRect } from "./editors.js";
 
 const ACTIVE_STATUSES = new Set(["pending", "queued", "running", "processing"]);
 
@@ -242,9 +242,10 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     overlay.style.top = `${rect.top - surfaceRect.top}px`;
     overlay.style.width = `${rect.width}px`;
     overlay.style.height = `${rect.height}px`;
-    const box = draft.box;
+    const visibleSelection = Object.hasOwn(draft, "promptType") ? selectionForPrompt(draft) : draft;
+    const box = visibleSelection.box;
     const boxHtml = box ? `<div class="remix-selection-box" style="left:${box.x1 * 100}%;top:${box.y1 * 100}%;width:${(box.x2 - box.x1) * 100}%;height:${(box.y2 - box.y1) * 100}%"></div>` : "";
-    const pointsHtml = (draft.points || []).map((point) => `<span class="remix-selection-point ${point.label === "negative" ? "negative" : "positive"}" style="left:${point.x * 100}%;top:${point.y * 100}%"></span>`).join("");
+    const pointsHtml = (visibleSelection.points || []).map((point) => `<span class="remix-selection-point ${point.label === "negative" ? "negative" : "positive"}" style="left:${point.x * 100}%;top:${point.y * 100}%"></span>`).join("");
     overlay.innerHTML = boxHtml + pointsHtml;
     const summary = root.querySelector("#remixCoordinateSummary");
     if (summary) summary.textContent = coordinateSummary(draft);

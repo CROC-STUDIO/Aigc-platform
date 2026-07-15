@@ -53,6 +53,13 @@ export function normalizedBox(start, end, minSize = 0.01) {
   return { x1: rounded(x1), y1: rounded(y1), x2: rounded(x2), y2: rounded(y2) };
 }
 
+export function selectionForPrompt(draft = {}) {
+  if (draft.promptType === "point") {
+    return { box: null, points: Array.isArray(draft.points) ? draft.points : [] };
+  }
+  return { box: draft.box || null, points: [] };
+}
+
 export function createRegionEditor({ surface, getMediaSize, onChange } = {}) {
   if (!surface?.addEventListener) throw new Error("区域编辑器需要可交互画布");
   let mode = "box";

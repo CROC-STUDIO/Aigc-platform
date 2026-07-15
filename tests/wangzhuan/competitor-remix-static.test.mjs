@@ -51,6 +51,7 @@ test("competitor remix stylesheet owns responsive capability and run rails", asy
   assert.match(css, /\.remix-runs/);
   assert.match(css, /@media \(max-width: 760px\)/);
   assert.match(css, /touch-action:\s*none/);
+  assert.match(css, /\.remix-file-row\[hidden\][^{]*\{[^}]*display:\s*none/);
 });
 
 test("competitor remix view exposes drop, editor, submit, and per-run actions", async () => {
