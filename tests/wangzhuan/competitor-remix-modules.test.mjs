@@ -119,7 +119,15 @@ test("payload builder preserves every video-ops execution contract", () => {
     draft: { box: { x1: 0.2, y1: 0.3, x2: 0.8, y2: 0.9 }, blurSigma: 44, maskThreshold: 1, fillColor: "#112233", fillOpacity: 0.7 }
   });
   assert.equal(region.job_type, "mask_edit");
-  assert.deepEqual(region.params.region_spec, [{ type: "box", x1: 0.2, y1: 0.3, x2: 0.8, y2: 0.9, coordinate_space: "normalized" }]);
+  assert.deepEqual(region.params.region_spec, [{
+    shape: "rectangle",
+    x: 0.2,
+    y: 0.3,
+    width: 0.6,
+    height: 0.6,
+    coordinate_space: "normalized",
+    time_ranges: []
+  }]);
 
   const sticker = buildPayload({
     capabilityId: "mask",

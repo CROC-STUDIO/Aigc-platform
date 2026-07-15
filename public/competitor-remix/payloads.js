@@ -116,8 +116,17 @@ function interactionPrompt(values) {
 }
 
 function regionParams(values) {
+  const box = normalizedBox(values.box);
   return {
-    region_spec: [{ type: "box", ...normalizedBox(values.box), coordinate_space: "normalized" }],
+    region_spec: [{
+      shape: "rectangle",
+      x: box.x1,
+      y: box.y1,
+      width: Number((box.x2 - box.x1).toFixed(6)),
+      height: Number((box.y2 - box.y1).toFixed(6)),
+      coordinate_space: "normalized",
+      time_ranges: []
+    }],
     blur_sigma: clampNumber(values.blurSigma, 0, 200, 40, { integer: true }),
     mask_threshold: clampNumber(values.maskThreshold, 0, 255, 1, { integer: true }),
     fill_color: cleanString(values.fillColor, "#000000"),
