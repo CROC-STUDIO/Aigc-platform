@@ -12,6 +12,7 @@ import {
   validateDraft
 } from "../../public/competitor-remix/payloads.js";
 import { createRemixStore } from "../../public/competitor-remix/store.js";
+import { createMediaWorkspace } from "../../public/competitor-remix/media-workspace.js";
 
 const urlSource = { mode: "url", url: "https://example.com/source.mp4" };
 
@@ -303,4 +304,78 @@ test("reset current draft leaves shared source, other drafts, and runs intact", 
   assert.equal(store.getDraft("remove", "automatic").maskThreshold, 9);
   assert.equal(store.getState().source.url, "https://example.com/a.mp4");
   assert.equal(store.getState().runs.length, 1);
+});
+
+test("media workspace previews a file immediately and reads base64 only on submit", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  let objectUrlCalls = 0;
+  let readCalls = 0;
+  const media = createMediaWorkspace({
+    store,
+    createObjectURL(file) {
+      objectUrlCalls += 1;
+      return `blob:${file.name}`;
+    },
+    revokeObjectURL() {},
+    async readAsDataURL() {
+      readCalls += 1;
+      return "data:video/mp4;base64,AAAA";
+    }
+  });
+  const file = { name: "creative.mp4", type: "video/mp4", size: 1024, lastModified: 7 };
+
+  media.selectFile(file);
+  assert.equal(objectUrlCalls, 1);
+  assert.equal(readCalls, 0);
+  assert.equal(store.getState().source.objectUrl, "blob:creative.mp4");
+  assert.equal(store.getState().source.status, "ready");
+
+  const first = await media.prepareInput();
+  const second = await media.prepareInput();
+  assert.equal(readCalls, 1);
+  assert.equal(first.dataUrl, "data:video/mp4;base64,AAAA");
+  assert.equal(second.dataUrl, first.dataUrl);
+  assert.equal(store.getState().source.status, "ready");
+});
+
+test("media workspace validates type and size before replacing the current preview", () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  let revoked = "";
+  const media = createMediaWorkspace({
+    store,
+    createObjectURL: (file) => `blob:${file.name}`,
+    revokeObjectURL: (url) => { revoked = url; },
+    readAsDataURL: async () => "data:video/mp4;base64,AAAA"
+  });
+  media.selectFile({ name: "first.mp4", type: "video/mp4", size: 10, lastModified: 1 });
+
+  assert.throws(
+    () => media.selectFile({ name: "notes.txt", type: "text/plain", size: 10, lastModified: 2 }),
+    /只支持视频文件/
+  );
+  assert.equal(store.getState().source.fileName, "first.mp4");
+  assert.throws(
+    () => media.selectFile({ name: "huge.mp4", type: "video/mp4", size: 314572801, lastModified: 3 }),
+    /超过 300 MB/
+  );
+
+  media.selectFile({ name: "second.webm", type: "video/webm", size: 20, lastModified: 4 });
+  assert.equal(revoked, "blob:first.mp4");
+  assert.equal(store.getState().source.fileName, "second.webm");
+});
+
+test("media workspace keeps preview available when lazy file reading fails", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  const media = createMediaWorkspace({
+    store,
+    createObjectURL: () => "blob:broken",
+    revokeObjectURL() {},
+    readAsDataURL: async () => { throw new Error("读取中断"); }
+  });
+  media.selectFile({ name: "broken.mp4", type: "video/mp4", size: 20, lastModified: 1 });
+
+  await assert.rejects(media.prepareInput(), /读取中断/);
+  assert.equal(store.getState().source.objectUrl, "blob:broken");
+  assert.equal(store.getState().source.status, "error");
+  assert.equal(store.getState().source.error, "读取中断");
 });
