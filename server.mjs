@@ -901,6 +901,7 @@ async function generateRoleShowcasePrompt(body = {}) {
   const apiKey = await requireUserApiKeyForModel(ROLE_SHOWCASE_PROMPT_MODEL, ROLE_SHOWCASE_PROMPT_MODEL);
   const roles = normalizeShowcaseAssetList(body.roles, "role");
   const monsters = normalizeShowcaseAssetList(body.monsters, "monster");
+  const scenes = normalizeShowcaseAssetList(body.scenes, "scene");
   const logos = normalizeShowcaseAssetList(body.logos, "logo");
   if (!roles.length) {
     const error = new Error("请先勾选至少 1 张角色图后再生成提示词。");
@@ -908,7 +909,7 @@ async function generateRoleShowcasePrompt(body = {}) {
     throw error;
   }
   const images = [];
-  for (const [index, asset] of [...roles, ...monsters, ...logos].entries()) {
+  for (const [index, asset] of [...roles, ...monsters, ...scenes, ...logos].entries()) {
     images.push(await showcaseImagePart(asset, index));
   }
   const assetLines = [
@@ -924,9 +925,13 @@ async function generateRoleShowcasePrompt(body = {}) {
 3. 唯一核心主角必须是已选角色图中的角色。不要改变主角外观，不要新增第二个主角，不要把怪物或 Logo 当主角。
 4. 若选了怪物图，怪物只能作为压迫感敌人或展示互动对象，外观参考上传怪物图，不要抢主角戏份。
 5. 若选了产品 Logo，Logo 只放在结尾下载引导区或安全角落，不能遮挡角色脸、武器或关键动作。
-6. 默认生成 8 秒竖屏 9:16 Q版手游角色展示广告，节奏短促、有强动作、有强反馈、有结尾角色近景或胜利 pose。
-7. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走站桩。
-8. 每次都根据本次选择的素材重新生成，不要沿用历史提示词或固定模板。
+6. 默认生成 15 秒竖屏 9:16 Q版手游角色展示广告，必须像爆款买量广告：开头强钩子，中段连续爽点，最后 2 秒角色记忆点和下载引导区域。
+7. 必须写清 15 秒节奏：0-2秒强钩子，主角从阴影、森林、传送门、舞台边缘或危机场景突然登场，指尖、武器或核心道具瞬间爆发强光效；2-10秒爽快动作展示，主角连续释放技能或招式，火焰弹、雷电、魔法刃、冲击波、召唤物或能量残影连续命中敌群/障碍/目标，必须有震屏、快速推拉镜头、击飞反馈、粒子爆发和清晰因果；10-13秒高潮大招，主角站在魔法阵、能量场或标志性场景中央释放终结技，画面形成大范围能量爆发；13-15秒结尾定格，给主角脸部近景、胜利pose、俏皮邪笑或酷炫凝视，核心道具和产品Logo/下载引导区域清晰出现。
+8. 如果用户没有填写特殊提示词，也要自动生成类似“火焰女巫从森林阴影中踏出、指尖火苗爆燃、甩动道具召唤连环技能、敌群被击飞、结尾站在燃烧魔法阵中央”的强钩子和爽感结构，但必须把具体造型、技能、道具替换成上传角色图真实外观，不要套死某个黑红火焰女巫。
+9. 战斗/技能/互动段必须有合理分镜和视线方向：0-2秒钩子可以短暂看镜头；2-13秒主角必须面向怪物、敌群、能量靶或技能目标，身体、眼神、武器/法杖/道具指向都要朝向目标，不要一边打斗一边持续正脸看镜头；用远景交代主角和怪物位置，用侧面中景表现出手方向，用反打镜头表现怪物被击中，近景只用于手部、道具或表情瞬间；13-15秒结尾才允许回到脸部近景、胜利pose或看镜头定格。
+10. 画面要求：Q版卡通手游美术，强技能特效，震屏，快速推拉镜头，火焰/雷电/魔法/能量残影，连续命中反馈，适合短视频广告投放。
+11. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走站桩，不要让主角在战斗过程中一直盯着镜头。
+12. 每次都根据本次选择的素材重新生成，不要沿用历史提示词或固定模板。
 
 用户通用提示词：
 ${sanitizeRequirementText(body.generalPrompt || "")}
@@ -1212,6 +1217,10 @@ async function listOutputFiles(dir) {
     if (!type) continue;
     const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
+    if (type === "video") {
+      const head = await readFile(fullPath).then((buffer) => buffer.subarray(0, 64)).catch(() => Buffer.alloc(0));
+      if (!isLikelyVideoBuffer(head)) continue;
+    }
     files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
@@ -1922,7 +1931,13 @@ function sanitizeRequirementText(text) {
     .slice(0, 1600);
 }
 
-function singleRolePrompt(role, competitor, logos = []) {
+function sceneReferenceBlock(scenes = []) {
+  if (!scenes.length) return "";
+  const lines = scenes.map((scene, index) => `Scene reference ${index + 1}: ${scene.traits || scene.name}.`).join("\n");
+  return `\nOptional uploaded scene references: use these only to guide original environment style, lighting, mood, materials, and world flavor. Do not copy the scene image verbatim. Blend the competitor layout with the uploaded scene style so the final ad belongs to the user's own game world.\n${lines}\n`;
+}
+
+function singleRolePrompt(role, competitor, logos = [], scenes = []) {
   const sizeText = (competitor.layout ?? layoutFromDimensions()).promptSize;
 
   return `${sizeText} mobile game advertising picture, fully original. Use the provided user-owned character as identity reference and the competitor image only as composition reference.
@@ -1989,9 +2004,10 @@ function nextNamedOutputBase(batchTag, roleLabel, competitorName, counters) {
   ].join("_");
 }
 
-function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
+function buildJobs({ roles, monsters, scenes = [], logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedSceneNames = [], selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
   const chosenRoles = roles.filter((role) => selectedRoleNames.includes(role.name));
   const chosenMonsters = monsters.filter((monster) => selectedMonsterNames.includes(monster.name));
+  const chosenScenes = scenes.filter((scene) => selectedSceneNames.includes(scene.name));
   const chosenLogos = logos.filter((logo) => selectedLogoNames.includes(logo.name));
   const chosenCompetitors = competitors.filter((item) => selectedCompetitorNames.includes(item.name));
   const repeats = Math.max(1, Math.min(50, Number(repeatCount || 1)));
@@ -2049,9 +2065,9 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             videoSize,
             referenceVideoPath: competitor.referenceVideoPath || "",
             referenceVideoDuration: competitor.referenceVideoDuration || 0,
-            prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, logos: jobLogos, competitor: promptCompetitor, groupName }),
+            prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, scenes: chosenScenes, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
-            images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
+            images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
             output: join(dirs().outputDir, `${outputBase}.png`),
             videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
           });
@@ -2080,9 +2096,9 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           videoSize,
           referenceVideoPath: competitor.referenceVideoPath || "",
           referenceVideoDuration: competitor.referenceVideoDuration || 0,
-          prompt: singleRolePrompt(role, promptCompetitor, jobLogos),
+          prompt: singleRolePrompt(role, promptCompetitor, jobLogos, chosenScenes),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
-          images: [role.sourcePath, ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
+          images: [role.sourcePath, ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
           output: join(dirs().outputDir, `${outputBase}.png`),
           videoOutput: join(dirs().outputDir, `${outputBase}.mp4`)
         });
@@ -2322,10 +2338,10 @@ async function generateComicVideo(body = {}) {
   }
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`) : parseSeedanceVideoUrl(raw);
-  if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   const output = nextAvailableFilePath(join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
-  await downloadBinary(videoUrl, output);
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`, output) : parseSeedanceVideoUrl(raw);
+  if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
+  if (!taskId) await downloadVerifiedVideo(videoUrl, output, `comic_${batchTag}`);
   const storage = await syncProjectAssetToObjectStorage(output, "comic_video_output");
   const promptPath = join(workDir, "seedance_prompt.txt");
   await writeFile(promptPath, prompt, "utf8");
@@ -2376,7 +2392,8 @@ function parseSeedanceVideoUrl(raw) {
     /(Output|Result|Generated|Preview|Video\s*(URL|Output|Result)|视频结果|生成结果|输出)/i.test(line) &&
     !/(Upload|Uploaded|Input|Source|Reference|Asset|--video|source-video|参考|输入|上传)/i.test(line)
   );
-  return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
+  const fallbackUrl = cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
+  return isLikelyVideoUrl(fallbackUrl) ? fallbackUrl : "";
 }
 
 async function pollSeedanceVideoUrl(taskId, jobName, targetPath = "") {
@@ -2432,6 +2449,7 @@ async function startBatch(options = {}) {
   const materials = await loadMaterials();
   const selectedRoleNames = options.roles?.length ? options.roles : materials.roles.map((role) => role.name);
   const selectedMonsterNames = options.monsters?.length ? options.monsters : [];
+  const selectedSceneNames = options.scenes?.length ? options.scenes : [];
   const selectedLogoNames = options.logos?.length ? options.logos : [];
   const selectedCompetitorNames = options.competitors?.length ? options.competitors : materials.competitors.map((item) => item.name);
   const batchTag = options.batchTag?.trim() || new Date().toISOString().slice(0, 16).replace(/\D/g, "");
@@ -2447,10 +2465,12 @@ async function startBatch(options = {}) {
   const jobs = buildJobs({
     roles: materials.roles,
     monsters: materials.monsters,
+    scenes: materials.scenes || [],
     logos: materials.logos,
     competitors: materials.competitors,
     selectedRoleNames,
     selectedMonsterNames,
+    selectedSceneNames,
     selectedLogoNames,
     selectedCompetitorNames,
     competitorSettings: options.competitorSettings ?? {},
@@ -2581,7 +2601,7 @@ async function stopBatch() {
   return runState;
 }
 
-function comboPrompt({ roles, monsters, logos = [], competitor, groupName }) {
+function comboPrompt({ roles, monsters, scenes = [], logos = [], competitor, groupName }) {
   const roleLines = roles.map((role, index) => `Hero ${index + 1}: ${role.traits}.`).join("\n");
   const monsterLines = monsters.map((monster, index) => `Creature ${index + 1}: ${monster.traits}.`).join("\n");
   const hasMonsters = monsters.length > 0;
@@ -2968,7 +2988,7 @@ async function deleteSharedMaterial(body = {}) {
   if (runState.running) throw new Error("正在生成中，不能删除素材，请先停止或等待完成");
   const kind = String(body.kind ?? "");
   const name = sanitizeFileName(body.name ?? "");
-  const targetDir = kind === "monster" ? dirs().monsterDir : kind === "logo" ? dirs().logoDir : kind === "role" ? dirs().roleDir : kind === "referenceVideo" ? dirs().referenceVideoDir : "";
+  const targetDir = kind === "monster" ? dirs().monsterDir : kind === "logo" ? dirs().logoDir : kind === "scene" ? dirs().sceneDir : kind === "role" ? dirs().roleDir : kind === "referenceVideo" ? dirs().referenceVideoDir : "";
   if (!targetDir) throw new Error("只能删除角色图、怪物图、产品 Logo 或参考视频素材");
   if (!name) throw new Error("缺少要删除的素材名称");
   const target = safeInsideProject(join(targetDir, name));
@@ -2985,16 +3005,18 @@ async function deleteSharedMaterial(body = {}) {
 function sharedMaterialTargetDir(kind) {
   return kind === "monster" ? dirs().monsterDir
     : kind === "logo" ? dirs().logoDir
-      : kind === "role" ? dirs().roleDir
-        : kind === "referenceVideo" ? dirs().referenceVideoDir
-          : "";
+      : kind === "scene" ? dirs().sceneDir
+        : kind === "role" ? dirs().roleDir
+          : kind === "referenceVideo" ? dirs().referenceVideoDir
+            : "";
 }
 
 function sharedMaterialAssetKind(kind) {
   return kind === "referenceVideo" ? "reference_video"
     : kind === "monster" ? "monster_image"
       : kind === "logo" ? "product_logo"
-        : "role_image";
+        : kind === "scene" ? "scene_image"
+          : "role_image";
 }
 
 async function renameSharedMaterial(body = {}) {

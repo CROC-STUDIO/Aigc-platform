@@ -173,34 +173,87 @@ async function pickAndUpload(kind) {
   picker.click();
 }
 
+function materialKindLabel(kind) {
+  return kind === "monster" ? "\u602a\u7269\u56fe"
+    : kind === "scene" ? "\u573a\u666f\u56fe"
+      : kind === "referenceVideo" ? "\u53c2\u8003\u89c6\u9891"
+        : "\u89d2\u8272\u56fe";
+}
+
 function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
-  for (const item of items) {
-    const canDelete = Boolean(state.user?.isAdmin && ["role", "monster", "referenceVideo"].includes(kind));
+  for (const item of items || []) {
+    const canAdminManage = Boolean(state.user?.isAdmin && ["role", "monster", "scene", "referenceVideo"].includes(kind));
     const isVideo = kind === "referenceVideo";
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
     card.innerHTML = `
       <input type="checkbox" ${selected.has(item.name) ? "checked" : ""} />
-      ${canDelete ? '<button class="delete-material" type="button" title="删除素材" aria-label="删除素材">×</button>' : ""}
+      ${canAdminManage ? `
+        <button class="material-settings" type="button" title="\u7d20\u6750\u8bbe\u7f6e" aria-label="\u7d20\u6750\u8bbe\u7f6e">&#9881;</button>
+        <div class="material-menu" hidden>
+          <button class="rename-material" type="button">\u91cd\u547d\u540d</button>
+          <button class="delete-material danger" type="button">\u5220\u9664</button>
+        </div>
+      ` : ""}
       ${isVideo ? `<video src="${item.url}" muted controls preload="metadata" playsinline></video>` : `<img src="${item.url}" alt="${escapeHtml(item.title || item.name)}" />`}
       <b>${escapeHtml(item.title || item.name)}</b>
     `;
     const checkbox = card.querySelector("input");
+    const settingsBtn = card.querySelector(".material-settings");
+    const menu = card.querySelector(".material-menu");
+    const renameBtn = card.querySelector(".rename-material");
     const deleteBtn = card.querySelector(".delete-material");
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) selected.add(item.name);
       else selected.delete(item.name);
       card.classList.toggle("selected", checkbox.checked);
-      toggle.checked = items.length > 0 && selected.size === items.length;
+      toggle.checked = (items || []).length > 0 && selected.size === (items || []).length;
       updateMetrics();
       buildPrompt();
     });
+
+    settingsBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelectorAll(".material-menu").forEach((itemMenu) => {
+        if (itemMenu !== menu) itemMenu.hidden = true;
+      });
+      if (menu) menu.hidden = !menu.hidden;
+    });
+
+    menu?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    renameBtn?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu) menu.hidden = true;
+      const ext = item.name.includes(".") ? `.${item.name.split(".").pop()}` : "";
+      const currentBase = ext ? item.name.slice(0, -ext.length) : item.name;
+      const nextName = prompt("\u8bf7\u8f93\u5165\u65b0\u7684\u7d20\u6750\u540d\u79f0", item.title || currentBase);
+      if (nextName == null) return;
+      const cleanName = nextName.trim();
+      if (!cleanName) return alert("\u7d20\u6750\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a");
+      renameBtn.disabled = true;
+      try {
+        await api("/api/materials/rename", { method: "POST", body: JSON.stringify({ kind, name: item.name, newName: cleanName }) });
+        selected.delete(item.name);
+        await loadMaterials();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        renameBtn.disabled = false;
+      }
+    });
+
     deleteBtn?.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const label = kind === "monster" ? "怪物图" : "角色图";
-      if (!confirm(`确定删除这个${label}吗？\n${item.name}`)) return;
+      if (menu) menu.hidden = true;
+      if (!confirm(`\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a${materialKindLabel(kind)}\u5417\uff1f\n${item.name}`)) return;
       deleteBtn.disabled = true;
       try {
         await api("/api/materials/delete", { method: "POST", body: JSON.stringify({ kind, name: item.name }) });
@@ -214,9 +267,8 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
     });
     grid.append(card);
   }
-  toggle.checked = items.length > 0 && selected.size === items.length;
+  toggle.checked = (items || []).length > 0 && selected.size === (items || []).length;
 }
-
 async function loadMaterials() {
   const materials = await api("/api/materials");
   const keep = (set, items) => new Set(items.map((item) => item.name).filter((name) => set.has(name)));
@@ -789,6 +841,13 @@ els.downloadPromptBtn.addEventListener("click", () => {
 [els.projectName, els.mode, els.aspect, els.duration, els.style, els.audio, els.roleSource, els.characterIdentity, els.characterPersonality, els.characterOutfit, els.hero, els.villain, els.hook, els.scene].filter(Boolean).forEach((input) => input.addEventListener("input", buildPrompt));
 els.roleSource?.addEventListener("change", buildPrompt);
 els.dimensionRadios.forEach((input) => input.addEventListener("change", buildPrompt));
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".material-settings") || event.target.closest?.(".material-menu")) return;
+  document.querySelectorAll(".material-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
+});
 
 const toneList = document.createElement("datalist");
 toneList.id = "dialogueToneOptions";

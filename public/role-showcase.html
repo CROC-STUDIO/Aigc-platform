@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Touka AI素材中台 - 角色展示视频</title>
-    <link rel="stylesheet" href="/styles.css?v=1.0.41" />
+    <link rel="stylesheet" href="/styles.css?v=1.0.42" />
   </head>
   <body>
     <header class="platform-topbar">
@@ -47,7 +47,7 @@
       </nav>
       <div class="sidebar-foot">
         <span>Touka AI素材中台</span>
-        <small>v1.0.41</small>
+        <small>v1.0.42</small>
       </div>
     </aside>
 
@@ -55,7 +55,7 @@
       <section class="operation-pane">
         <section class="topbar">
           <div>
-            <h1>角色展示视频 <span class="app-version">v1.0.41</span></h1>
+            <h1>角色展示视频 <span class="app-version">v1.0.42</span></h1>
             <div class="path-editor">
               <select id="showcaseProjectSelect" title="切换项目"></select>
               <button id="showcaseRenameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
@@ -72,6 +72,7 @@
         <section class="metrics">
           <div><strong id="showcaseRoleCount">0</strong><span>角色</span></div>
           <div><strong id="showcaseMonsterCount">0</strong><span>怪物</span></div>
+          <div><strong id="showcaseSceneCount">0</strong><span>&#22330;&#26223;</span></div>
           <div><strong id="showcaseLogoCount">0</strong><span>Logo</span></div>
           <div><strong>8s</strong><span>竖屏</span></div>
         </section>
@@ -102,6 +103,17 @@
 
             <aside class="panel">
               <div class="panel-head">
+                <h2>&#22330;&#26223;&#22270;</h2>
+                <div class="head-actions">
+                  <button id="showcaseUploadSceneBtn" class="mini" type="button">&#19978;&#20256;&#22330;&#26223;</button>
+                  <label><input id="showcaseToggleScenes" type="checkbox" /> &#20840;&#36873;</label>
+                </div>
+              </div>
+              <div id="showcaseSceneGrid" class="thumb-grid comic-ref-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
                 <h2>产品 Logo</h2>
                 <div class="head-actions">
                   <button id="showcaseUploadLogoBtn" class="mini" type="button">上传 Logo</button>
@@ -116,7 +128,7 @@
             <section class="panel wide">
               <div class="panel-head">
                 <h2>生成设定</h2>
-                <span>8秒 9:16</span>
+                <span>15秒 9:16</span>
               </div>
               <div class="showcase-form-grid">
                 <label>角色名称/身份
@@ -213,13 +225,13 @@
         <div class="modal-title-row">
           <div>
             <h2>更新日志</h2>
-            <p>Touka AI素材中台 <strong>v1.0.41</strong></p>
+            <p>Touka AI素材中台 <strong>v1.0.42</strong></p>
           </div>
           <button id="showcaseChangelogCloseBtn" class="mini ghost" type="button">关闭</button>
         </div>
         <div class="changelog-list">
           <section>
-            <h3>v1.0.41</h3>
+            <h3>v1.0.42</h3>
             <ul>
               <li>最终 Seedance 提示词默认留空，点击“生成提示词”时才重新生成。</li>
               <li>生成提示词改为后端调用模型，根据已选角色、怪物、Logo 外观与性格描述自动生成。</li>
@@ -227,12 +239,13 @@
               <li>角色展示视频结果改为批次图库，可按批次筛选、预览视频并下载选中批次。</li>
               <li>底部悬浮生成栏增加生成次数和视频模型选择，多次生成会进入同一个批次。</li>
               <li>生成提示词按钮增加即时状态反馈，避免点击后看不到响应。</li>
+              <li>角色展示视频默认改为 15 秒，并强化前置钩子、连续爽点和结尾下载引导。</li>
             </ul>
           </section>
         </div>
       </div>
     </div>
 
-    <script src="/role-showcase.js?v=1.0.41" type="module"></script>
+    <script src="/role-showcase.js?v=1.0.42" type="module"></script>
   </body>
 </html>

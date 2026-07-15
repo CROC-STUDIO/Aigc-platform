@@ -1,14 +1,17 @@
-const DEFAULT_GENERAL_PROMPT = `生成 8 秒竖屏 9:16 Q版手游角色展示广告。
-整体要求：高质量 2.5D/3D-ish Q版角色 CG，玩具感渲染，材质高光，电影式镜头，短促高爽感动作节奏。
-角色展示规则来自 Seedance Ad Video：唯一核心主角必须保持上传角色的身份、轮廓、发型、眼睛、角/耳/翅膀/尾巴、服装、武器、颜色、表情和关键道具一致。
-怪物图只作为压迫感敌人参考，不要抢主角戏份。产品 Logo 只用于结尾下载引导区或安全角落，不要变成竞品 logo。
-全片不要出现血条、伤害数字、按钮、卡牌、技能范围框、字幕、屏幕文字、竞品 logo、水印或乱码。`;
+const DEFAULT_GENERAL_PROMPT = `生成 15 秒竖屏 9:16 Q版手游角色展示广告，节奏像爆款买量短视频：开头必须有强钩子，中段必须有连续爽点，结尾必须有角色记忆点和下载引导区域。
+唯一主角必须使用上传角色图中的角色，保持角色外观完全一致：发型、脸型、眼睛、表情、头饰/王冠/角/耳朵、服装、武器、手持道具、漂浮道具、主色系和关键轮廓都不能变形或消失。
+默认叙事结构：0-2秒强钩子，主角可以短暂看向镜头或侧身定格建立记忆点；2-10秒爽快展示，主角必须转身、侧身或背身面向怪物、敌群、能量靶或技能目标，视线、身体朝向、武器/法杖/道具指向都要朝向目标，不要一边打斗一边持续看镜头；10-13秒高潮大招，镜头可以绕拍或切反打，但主角动作仍要对准怪物/目标，表现清楚攻击方向、命中反馈和空间关系；13-15秒结尾记忆点，才允许回到脸部近景、胜利pose、俏皮邪笑或酷炫凝视，角色核心道具和产品Logo或下载引导区域清晰出现。
+分镜和镜头规则：战斗/技能/互动段要用远景交代主角与怪物位置、侧面中景表现出手方向、反打镜头表现怪物被击中、近景只用于手部/道具/表情瞬间，不要连续正脸看镜头。主角朝向必须跟随目标移动，怪物在画面上方/前方/侧前方时，主角就朝对应方向出手。
+如果勾选怪物图，怪物只作为敌群、压迫感目标或被击飞对象，外观参考上传怪物图，但不能抢主角戏份；如果没有怪物图，可以生成原创通用小怪或能量靶作为爽感反馈对象。
+画面要求：Q版卡通手游美术，强技能特效，震屏，快速推拉镜头，残影，能量爆发，适合短视频广告投放。
+负向要求：不要竞品logo，不要竞品角色，不要竞品UI，不要真实品牌，不要水印，不要文字乱码，不要字幕，不要血条、伤害数字、按钮、卡牌或技能范围框，不要改变主角外观，不要让主角在战斗过程中一直盯着镜头，不要让王冠、火球、武器、铃铛、裙子、发型、漂浮物或关键道具变形或消失。`;
 
 const state = {
   user: null,
-  materials: { roles: [], monsters: [], logos: [] },
+  materials: { roles: [], monsters: [], scenes: [], logos: [] },
   selectedRoles: new Set(),
   selectedMonsters: new Set(),
+  selectedScenes: new Set(),
   selectedLogos: new Set(),
   selectedBatches: new Set(),
   batchesInitialized: false,
@@ -30,15 +33,19 @@ const els = {
   refCount: $("#showcaseRefCount"),
   roleCount: $("#showcaseRoleCount"),
   monsterCount: $("#showcaseMonsterCount"),
+  sceneCount: $("#showcaseSceneCount"),
   logoCount: $("#showcaseLogoCount"),
   uploadRoleBtn: $("#showcaseUploadRoleBtn"),
   uploadMonsterBtn: $("#showcaseUploadMonsterBtn"),
+  uploadSceneBtn: $("#showcaseUploadSceneBtn"),
   uploadLogoBtn: $("#showcaseUploadLogoBtn"),
   roleGrid: $("#showcaseRoleGrid"),
   monsterGrid: $("#showcaseMonsterGrid"),
+  sceneGrid: $("#showcaseSceneGrid"),
   logoGrid: $("#showcaseLogoGrid"),
   toggleRoles: $("#showcaseToggleRoles"),
   toggleMonsters: $("#showcaseToggleMonsters"),
+  toggleScenes: $("#showcaseToggleScenes"),
   toggleLogos: $("#showcaseToggleLogos"),
   batchTag: $("#showcaseBatchTag"),
   repeatCount: $("#showcaseRepeatCount"),
@@ -120,6 +127,7 @@ function selectedPayload() {
   return {
     roles: selectedItems(state.materials.roles, state.selectedRoles),
     monsters: selectedItems(state.materials.monsters, state.selectedMonsters),
+    scenes: selectedItems(state.materials.scenes, state.selectedScenes),
     logos: selectedItems(state.materials.logos, state.selectedLogos)
   };
 }
@@ -153,20 +161,40 @@ function updateProjectAdminActions() {
 function resetProjectState() {
   state.selectedRoles = new Set();
   state.selectedMonsters = new Set();
+  state.selectedScenes = new Set();
   state.selectedLogos = new Set();
 }
 
-function renderAssetGrid({ items, grid, selected, toggle }) {
+function materialKindLabel(kind) {
+  return kind === "monster" ? "\u602a\u7269\u56fe"
+    : kind === "scene" ? "\u573a\u666f\u56fe"
+    : kind === "logo" ? "\u4ea7\u54c1 Logo"
+      : "\u89d2\u8272\u56fe";
+}
+
+function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
   for (const item of items || []) {
+    const canAdminManage = Boolean(state.user?.isAdmin && ["role", "monster", "scene", "logo"].includes(kind));
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
     card.innerHTML = `
       <input type="checkbox" ${selected.has(item.name) ? "checked" : ""} />
+      ${canAdminManage ? `
+        <button class="material-settings" type="button" title="\u7d20\u6750\u8bbe\u7f6e" aria-label="\u7d20\u6750\u8bbe\u7f6e">&#9881;</button>
+        <div class="material-menu" hidden>
+          <button class="rename-material" type="button">\u91cd\u547d\u540d</button>
+          <button class="delete-material danger" type="button">\u5220\u9664</button>
+        </div>
+      ` : ""}
       <img src="${item.url}" alt="${escapeHtml(item.title || item.name)}" />
       <b>${escapeHtml(item.title || item.name)}</b>
     `;
     const checkbox = card.querySelector("input");
+    const settingsBtn = card.querySelector(".material-settings");
+    const menu = card.querySelector(".material-menu");
+    const renameBtn = card.querySelector(".rename-material");
+    const deleteBtn = card.querySelector(".delete-material");
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) selected.add(item.name);
       else selected.delete(item.name);
@@ -175,11 +203,63 @@ function renderAssetGrid({ items, grid, selected, toggle }) {
       updateMetrics();
       clearGeneratedPrompt();
     });
+
+    settingsBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelectorAll(".material-menu").forEach((itemMenu) => {
+        if (itemMenu !== menu) itemMenu.hidden = true;
+      });
+      if (menu) menu.hidden = !menu.hidden;
+    });
+
+    menu?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    renameBtn?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu) menu.hidden = true;
+      const ext = item.name.includes(".") ? `.${item.name.split(".").pop()}` : "";
+      const currentBase = ext ? item.name.slice(0, -ext.length) : item.name;
+      const nextName = prompt("\u8bf7\u8f93\u5165\u65b0\u7684\u7d20\u6750\u540d\u79f0", item.title || currentBase);
+      if (nextName == null) return;
+      const cleanName = nextName.trim();
+      if (!cleanName) return alert("\u7d20\u6750\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a");
+      renameBtn.disabled = true;
+      try {
+        await api("/api/materials/rename", { method: "POST", body: JSON.stringify({ kind, name: item.name, newName: cleanName }) });
+        selected.delete(item.name);
+        await loadMaterials();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        renameBtn.disabled = false;
+      }
+    });
+
+    deleteBtn?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu) menu.hidden = true;
+      if (!confirm(`\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a${materialKindLabel(kind)}\u5417\uff1f\n${item.name}`)) return;
+      deleteBtn.disabled = true;
+      try {
+        await api("/api/materials/delete", { method: "POST", body: JSON.stringify({ kind, name: item.name }) });
+        selected.delete(item.name);
+        await loadMaterials();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
     grid.append(card);
   }
   toggle.checked = (items || []).length > 0 && selected.size === (items || []).length;
 }
-
 async function checkAuth() {
   const auth = await api("/api/auth");
   state.user = auth.authenticated ? auth.user : null;
@@ -199,20 +279,23 @@ async function loadMaterials() {
   renderProjectSelect(materials.projects || []);
   state.selectedRoles = keep(state.selectedRoles, materials.roles || []);
   state.selectedMonsters = keep(state.selectedMonsters, materials.monsters || []);
+  state.selectedScenes = keep(state.selectedScenes, materials.scenes || []);
   state.selectedLogos = keep(state.selectedLogos, materials.logos || []);
-  renderAssetGrid({ items: materials.roles || [], grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles });
-  renderAssetGrid({ items: materials.monsters || [], grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters });
-  renderAssetGrid({ items: materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos });
+  renderAssetGrid({ items: materials.roles || [], grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles, kind: "role" });
+  renderAssetGrid({ items: materials.monsters || [], grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters, kind: "monster" });
+  renderAssetGrid({ items: materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
+  renderAssetGrid({ items: materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos, kind: "logo" });
   updateMetrics();
   renderOutputs();
   clearGeneratedPrompt();
 }
 
 function updateMetrics() {
-  const total = state.selectedRoles.size + state.selectedMonsters.size + state.selectedLogos.size;
+  const total = state.selectedRoles.size + state.selectedMonsters.size + state.selectedScenes.size + state.selectedLogos.size;
   els.refCount.textContent = `${total} 个参考`;
   els.roleCount.textContent = state.selectedRoles.size;
   els.monsterCount.textContent = state.selectedMonsters.size;
+  if (els.sceneCount) els.sceneCount.textContent = state.selectedScenes.size;
   els.logoCount.textContent = state.selectedLogos.size;
 }
 
@@ -350,6 +433,7 @@ async function buildPrompt() {
         specialPrompt: els.specialPrompt.value.trim(),
         roles: selected.roles.map((item) => ({ name: item.name, title: item.title, traits: item.traits, path: item.sourcePath || item.path })),
         monsters: selected.monsters.map((item) => ({ name: item.name, title: item.title, traits: item.traits, path: item.sourcePath || item.path })),
+        scenes: selected.scenes.map((item) => ({ name: item.name, title: item.title, traits: item.traits, path: item.sourcePath || item.path })),
         logos: selected.logos.map((item) => ({ name: item.name, title: item.title, traits: item.traits, path: item.sourcePath || item.path }))
       })
     });
@@ -393,6 +477,7 @@ async function generateVideo() {
     const selected = [
       ...selectedItems(state.materials.roles, state.selectedRoles),
       ...selectedItems(state.materials.monsters, state.selectedMonsters),
+      ...selectedItems(state.materials.scenes, state.selectedScenes),
       ...selectedItems(state.materials.logos, state.selectedLogos)
     ];
     let lastResult = null;
@@ -404,7 +489,7 @@ async function generateVideo() {
         body: JSON.stringify({
           prompt,
           ratio: "9:16",
-          duration: 8,
+          duration: 15,
           videoModel: els.videoModel.value,
           batchTag,
           assetPaths: selected.map((item) => item.sourcePath || item.path).filter(Boolean)
@@ -430,25 +515,33 @@ els.runLog.innerHTML = '<div class="log-line">等待生成任务...</div>';
 
 els.uploadRoleBtn.addEventListener("click", () => pickAndUpload("role"));
 els.uploadMonsterBtn.addEventListener("click", () => pickAndUpload("monster"));
+els.uploadSceneBtn?.addEventListener("click", () => pickAndUpload("scene"));
 els.uploadLogoBtn.addEventListener("click", () => pickAndUpload("logo"));
 
 els.toggleRoles.addEventListener("change", () => {
   state.selectedRoles = new Set(els.toggleRoles.checked ? (state.materials.roles || []).map((item) => item.name) : []);
-  renderAssetGrid({ items: state.materials.roles || [], grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles });
+  renderAssetGrid({ items: state.materials.roles || [], grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles, kind: "role" });
   updateMetrics();
   clearGeneratedPrompt();
 });
 
 els.toggleMonsters.addEventListener("change", () => {
   state.selectedMonsters = new Set(els.toggleMonsters.checked ? (state.materials.monsters || []).map((item) => item.name) : []);
-  renderAssetGrid({ items: state.materials.monsters || [], grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters });
+  renderAssetGrid({ items: state.materials.monsters || [], grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters, kind: "monster" });
+  updateMetrics();
+  clearGeneratedPrompt();
+});
+
+els.toggleScenes?.addEventListener("change", () => {
+  state.selectedScenes = new Set(els.toggleScenes.checked ? (state.materials.scenes || []).map((item) => item.name) : []);
+  renderAssetGrid({ items: state.materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
   updateMetrics();
   clearGeneratedPrompt();
 });
 
 els.toggleLogos.addEventListener("change", () => {
   state.selectedLogos = new Set(els.toggleLogos.checked ? (state.materials.logos || []).map((item) => item.name) : []);
-  renderAssetGrid({ items: state.materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos });
+  renderAssetGrid({ items: state.materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos, kind: "logo" });
   updateMetrics();
   clearGeneratedPrompt();
 });
@@ -549,6 +642,13 @@ els.changelogModal.addEventListener("click", (event) => {
 els.logoutBtn.addEventListener("click", async () => {
   await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
   location.href = "/";
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".material-settings") || event.target.closest?.(".material-menu")) return;
+  document.querySelectorAll(".material-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
 });
 
 clearGeneratedPrompt();

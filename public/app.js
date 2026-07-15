@@ -3,6 +3,7 @@ const state = {
   user: null,
   selectedRoles: new Set(),
   selectedMonsters: new Set(),
+  selectedScenes: new Set(),
   selectedLogos: new Set(),
   selectedCompetitors: new Set(),
   selectedBatches: new Set(),
@@ -49,13 +50,16 @@ const els = {
   failCount: document.querySelector("#failCount"),
   roleGrid: document.querySelector("#roleGrid"),
   monsterGrid: document.querySelector("#monsterGrid"),
+  sceneGrid: document.querySelector("#sceneGrid"),
   logoGrid: document.querySelector("#logoGrid"),
   roleUploader: document.querySelector("#roleUploader"),
   uploadRoleBtn: document.querySelector("#uploadRoleBtn"),
   uploadMonsterBtn: document.querySelector("#uploadMonsterBtn"),
+  uploadSceneBtn: document.querySelector("#uploadSceneBtn"),
   uploadLogoBtn: document.querySelector("#uploadLogoBtn"),
   toggleRoles: document.querySelector("#toggleRoles"),
   toggleMonsters: document.querySelector("#toggleMonsters"),
+  toggleScenes: document.querySelector("#toggleScenes"),
   toggleLogos: document.querySelector("#toggleLogos"),
   competitorList: document.querySelector("#competitorList"),
   globalRequirementText: document.querySelector("#globalRequirementText"),
@@ -466,6 +470,7 @@ function friendlyError(message) {
 async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSettings = false } = {}) {
   const previousRoles = new Set(state.selectedRoles);
   const previousMonsters = new Set(state.selectedMonsters);
+  const previousScenes = new Set(state.selectedScenes);
   const previousLogos = new Set(state.selectedLogos);
   const previousCompetitors = new Set(state.selectedCompetitors);
   const hadMaterials = Boolean(state.materials) && !resetSelection;
@@ -478,10 +483,12 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
 
   const roleNames = materials.roles.map((role) => role.name);
   const monsterNames = materials.monsters.map((monster) => monster.name);
+  const sceneNames = (materials.scenes || []).map((scene) => scene.name);
   const logoNames = (materials.logos || []).map((logo) => logo.name);
   const competitorNames = materials.competitors.map((item) => item.name);
   state.selectedRoles = hadMaterials ? new Set(roleNames.filter((name) => previousRoles.has(name))) : new Set();
   state.selectedMonsters = hadMaterials ? new Set(monsterNames.filter((name) => previousMonsters.has(name))) : new Set();
+  state.selectedScenes = hadMaterials ? new Set(sceneNames.filter((name) => previousScenes.has(name))) : new Set();
   state.selectedLogos = hadMaterials ? new Set(logoNames.filter((name) => previousLogos.has(name))) : new Set();
   state.selectedCompetitors = hadMaterials ? new Set(competitorNames.filter((name) => previousCompetitors.has(name))) : new Set();
   if (!competitorNames.includes(state.guangdadaTargetFolder)) {
@@ -508,6 +515,7 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
 function renderAll() {
   renderAssetGrid({ items: state.materials.roles, grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles, kind: "role" });
   renderAssetGrid({ items: state.materials.monsters, grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters, kind: "monster" });
+  renderAssetGrid({ items: state.materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
   renderAssetGrid({ items: state.materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos, kind: "logo" });
   renderGuangdadaCompetitorSelect();
   renderCompetitors();
@@ -662,6 +670,7 @@ function resetProjectState() {
   state.materials = null;
   state.selectedRoles = new Set();
   state.selectedMonsters = new Set();
+  state.selectedScenes = new Set();
   state.selectedLogos = new Set();
   state.selectedCompetitors = new Set();
   state.selectedBatches = new Set();
@@ -676,7 +685,7 @@ function resetProjectState() {
 function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
   for (const item of items) {
-    const canManage = ["role", "monster", "logo"].includes(kind);
+    const canManage = ["role", "monster", "scene", "logo"].includes(kind);
     const canAdminManage = Boolean(state.user?.isAdmin && canManage);
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
@@ -746,7 +755,7 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
       event.preventDefault();
       event.stopPropagation();
       if (menu) menu.hidden = true;
-      const label = kind === "monster" ? "怪物图" : kind === "logo" ? "产品 Logo" : "角色图";
+      const label = kind === "monster" ? "怪物图" : kind === "scene" ? "场景图" : kind === "logo" ? "产品 Logo" : "角色图";
       if (!confirm(`确定删除这个${label}吗？\n${item.name}`)) return;
       deleteBtn.disabled = true;
       try {
@@ -1575,6 +1584,10 @@ els.uploadMonsterBtn.addEventListener("click", () => {
   pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "monster", mode: "add" }, successText: "怪物图已上传" });
 });
 
+els.uploadSceneBtn?.addEventListener("click", () => {
+  pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "scene", mode: "add" }, successText: "\u573a\u666f\u56fe\u5df2\u4e0a\u4f20" });
+});
+
 els.uploadLogoBtn.addEventListener("click", () => {
   pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "logo", mode: "add" }, successText: "产品 Logo 已上传" });
 });
@@ -1714,6 +1727,12 @@ els.toggleRoles.addEventListener("change", () => {
 els.toggleMonsters.addEventListener("change", () => {
   state.selectedMonsters = new Set(els.toggleMonsters.checked ? state.materials.monsters.map((monster) => monster.name) : []);
   renderAssetGrid({ items: state.materials.monsters, grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters, kind: "monster" });
+  updateTaskPreview();
+});
+
+els.toggleScenes?.addEventListener("change", () => {
+  state.selectedScenes = new Set(els.toggleScenes.checked ? (state.materials.scenes || []).map((scene) => scene.name) : []);
+  renderAssetGrid({ items: state.materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
   updateTaskPreview();
 });
 
@@ -1957,6 +1976,7 @@ els.startBtn.addEventListener("click", async () => {
         videoModel,
         roles: [...state.selectedRoles],
         monsters: [...state.selectedMonsters],
+        scenes: [...state.selectedScenes],
         logos: [...state.selectedLogos],
         competitors: [...state.selectedCompetitors],
         globalRequirement: els.globalRequirementText.value,
