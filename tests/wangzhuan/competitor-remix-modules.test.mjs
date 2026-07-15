@@ -11,6 +11,7 @@ import {
   redactPayload,
   validateDraft
 } from "../../public/competitor-remix/payloads.js";
+import { createRemixStore } from "../../public/competitor-remix/store.js";
 
 const urlSource = { mode: "url", url: "https://example.com/source.mp4" };
 
@@ -206,4 +207,100 @@ test("payload clamps shared priority and redacts source and mask content", () =>
     input: { ...payload.input, source: "<redacted>" },
     params: { ...payload.params, mask_source: "<redacted>" }
   });
+});
+
+function createMemoryStorage() {
+  const values = new Map();
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    }
+  };
+}
+
+test("store keeps drafts isolated while capability and mode selections change", () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  store.updateDraft("remove", "kframe", { frameIndex: 42, points: [{ x: 0.2, y: 0.3, label: "positive" }] });
+  store.selectMode("remove", "automatic");
+  store.updateDraft("remove", "automatic", { maskThreshold: 8 });
+  store.selectCapability("mask");
+
+  assert.equal(store.getDraft("remove", "kframe").frameIndex, 42);
+  assert.equal(store.getDraft("remove", "automatic").maskThreshold, 8);
+  assert.equal(store.getDraft("mask", "region").maskThreshold, 1);
+  assert.equal(store.getState().selectedCapabilityId, "mask");
+});
+
+test("replacing shared media clears visual coordinates but preserves ordinary parameters", () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  store.updateDraft("remove", "kframe", {
+    frameIndex: 42,
+    frameTime: 1.4,
+    box: { x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 },
+    points: [{ x: 0.2, y: 0.3, label: "positive" }],
+    sampleFps: 2
+  });
+  store.updateDraft("mask", "region", {
+    box: { x1: 0.2, y1: 0.2, x2: 0.8, y2: 0.8 },
+    blurSigma: 55
+  });
+
+  store.replaceSource({ mode: "file", file: { name: "next.mp4" }, objectUrl: "blob:next", identity: "next.mp4:1" });
+
+  assert.deepEqual(store.getDraft("remove", "kframe").points, []);
+  assert.equal(store.getDraft("remove", "kframe").box, null);
+  assert.equal(store.getDraft("remove", "kframe").frameIndex, 0);
+  assert.equal(store.getDraft("remove", "kframe").sampleFps, 2);
+  assert.equal(store.getDraft("mask", "region").box, null);
+  assert.equal(store.getDraft("mask", "region").blurSigma, 55);
+});
+
+test("store tracks concurrent runs and persists only serializable non-secret state", () => {
+  const storage = createMemoryStorage();
+  const store = createRemixStore({ storage });
+  store.setUser({ username: "lucy", token: "secret" });
+  store.replaceSource({
+    mode: "file",
+    file: { name: "source.mp4" },
+    fileName: "source.mp4",
+    objectUrl: "blob:source",
+    dataUrl: "data:video/mp4;base64,SECRET",
+    identity: "source.mp4:100"
+  });
+  store.upsertRun({ runId: "run-1", providerJobId: "job-1", status: "running", requestSnapshot: { input: { source: "<redacted>" } } });
+  store.upsertRun({ runId: "run-2", providerJobId: "job-2", status: "queued" });
+  store.setActiveRun("run-2");
+
+  assert.equal(store.getState().runs.length, 2);
+  assert.equal(store.getState().activeRunId, "run-2");
+
+  const persisted = storage.getItem("competitor-remix:v2");
+  assert.doesNotMatch(persisted, /SECRET|blob:source|token|lucy/);
+  assert.match(persisted, /source\.mp4/);
+  assert.match(persisted, /job-1/);
+
+  const restored = createRemixStore({ storage });
+  assert.equal(restored.getState().runs.length, 2);
+  assert.equal(restored.getState().source.needsFile, true);
+  assert.equal(restored.getState().source.file, null);
+});
+
+test("reset current draft leaves shared source, other drafts, and runs intact", () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  store.replaceSource({ mode: "url", url: "https://example.com/a.mp4", identity: "url:a" });
+  store.updateDraft("remove", "seedance", { segmentSeconds: 30 });
+  store.updateDraft("remove", "automatic", { maskThreshold: 9 });
+  store.upsertRun({ runId: "run-1", status: "running" });
+  store.resetCurrentDraft();
+
+  assert.equal(store.getDraft("remove", "seedance").segmentSeconds, 15);
+  assert.equal(store.getDraft("remove", "automatic").maskThreshold, 9);
+  assert.equal(store.getState().source.url, "https://example.com/a.mp4");
+  assert.equal(store.getState().runs.length, 1);
 });
