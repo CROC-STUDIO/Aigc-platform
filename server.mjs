@@ -2388,12 +2388,14 @@ function parseSeedanceVideoUrl(raw) {
       // CLI output often contains non-JSON progress lines.
     }
   }
-  const outputLine = lines.find((line) =>
+  const outputLines = lines.filter((line) =>
     /(Output|Result|Generated|Preview|Video\s*(URL|Output|Result)|视频结果|生成结果|输出)/i.test(line) &&
     !/(Upload|Uploaded|Input|Source|Reference|Asset|--video|source-video|参考|输入|上传)/i.test(line)
   );
-  const fallbackUrl = cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
-  return isLikelyVideoUrl(fallbackUrl) ? fallbackUrl : "";
+  const fallbackUrls = outputLines
+    .map((line) => cleanUrl(line.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || ""))
+    .filter(Boolean);
+  return fallbackUrls.find(isLikelyVideoUrl) || "";
 }
 
 async function pollSeedanceVideoUrl(taskId, jobName, targetPath = "") {
