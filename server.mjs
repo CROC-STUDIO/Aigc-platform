@@ -924,13 +924,13 @@ async function generateRoleShowcasePrompt(body = {}) {
 2. 自动分析角色外观、怪物外观、性格气质、动作方式和镜头节奏。若用户填写了角色名称/身份，则结合用户填写；若为空，则根据角色图自行判断，不要套用固定角色。
 3. 唯一核心主角必须是已选角色图中的角色。不要改变主角外观，不要新增第二个主角，不要把怪物或 Logo 当主角。
 4. 若选了怪物图，怪物只能作为压迫感敌人或展示互动对象，外观参考上传怪物图，不要抢主角戏份。
-5. 若选了产品 Logo，Logo 只放在结尾下载引导区或安全角落，不能遮挡角色脸、武器或关键动作。
-6. 默认生成 15 秒竖屏 9:16 Q版手游角色展示广告，必须像爆款买量广告：开头强钩子，中段连续爽点，最后 2 秒角色记忆点和下载引导区域。
-7. 必须写清 15 秒节奏：0-2秒强钩子，主角从阴影、森林、传送门、舞台边缘或危机场景突然登场，指尖、武器或核心道具瞬间爆发强光效；2-10秒爽快动作展示，主角连续释放技能或招式，火焰弹、雷电、魔法刃、冲击波、召唤物或能量残影连续命中敌群/障碍/目标，必须有震屏、快速推拉镜头、击飞反馈、粒子爆发和清晰因果；10-13秒高潮大招，主角站在魔法阵、能量场或标志性场景中央释放终结技，画面形成大范围能量爆发；13-15秒结尾定格，给主角脸部近景、胜利pose、俏皮邪笑或酷炫凝视，核心道具和产品Logo/下载引导区域清晰出现。
-8. 如果用户没有填写特殊提示词，也要自动生成类似“火焰女巫从森林阴影中踏出、指尖火苗爆燃、甩动道具召唤连环技能、敌群被击飞、结尾站在燃烧魔法阵中央”的强钩子和爽感结构，但必须把具体造型、技能、道具替换成上传角色图真实外观，不要套死某个黑红火焰女巫。
-9. 战斗/技能/互动段必须有合理分镜和视线方向：0-2秒钩子可以短暂看镜头；2-13秒主角必须面向怪物、敌群、能量靶或技能目标，身体、眼神、武器/法杖/道具指向都要朝向目标，不要一边打斗一边持续正脸看镜头；用远景交代主角和怪物位置，用侧面中景表现出手方向，用反打镜头表现怪物被击中，近景只用于手部、道具或表情瞬间；13-15秒结尾才允许回到脸部近景、胜利pose或看镜头定格。
-10. 画面要求：Q版卡通手游美术，强技能特效，震屏，快速推拉镜头，火焰/雷电/魔法/能量残影，连续命中反馈，适合短视频广告投放。
-11. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走站桩，不要让主角在战斗过程中一直盯着镜头。
+5. 若选了产品 Logo，Logo 只能作为角色展示素材中的附属品牌元素或角落点缀，不能遮挡角色脸、武器或关键动作；结尾不要做游戏下载引导、下载按钮、下载区域或额外广告文案。
+6. 默认生成 15 秒竖屏 9:16 Q版手游角色展示广告，必须像高爽感买量广告：开头 0.5 秒内有爆点，中段每 1-1.5 秒都有动作爽点或镜头变化，最后 2 秒只做角色记忆点近景展示。不要慢铺垫、不要长时间走路、不要站桩展示、不要单一长镜头。
+7. 必须写清 15 秒快节奏：0-1秒强钩子，主角从阴影、森林、传送门、舞台边缘或危机场景突然登场，指尖、武器或核心道具瞬间爆光、冲入、落地震屏或点燃；1-3秒第一段动作爽点，主角立刻转身面向怪物/目标出手，出现第一次击飞、破防、压制或强反馈；3-6秒第二段连击爽点，快速切 2-3 个短镜头，连续命中、弹飞、追击、残影或连环技能；6-9秒第三段升级爽点，技能规模明显变大，镜头推拉、环绕、震屏、粒子爆发，不能停顿；9-13秒高潮大招，必须有大范围能量爆发、怪物群被清场或目标被压制，动作仍要对准怪物/目标，表现清楚攻击方向、命中反馈和空间关系；13-15秒结尾拉近镜头展示角色脸部/半身，根据角色性格和形象设计表情与小动作，例如俏皮坏笑、自信挑眉、冷酷凝视、害羞眨眼、骄傲扬头、温柔微笑或战后喘息，突出眼神、脸、头饰、武器或核心道具，不出现游戏下载引导。
+8. 如果用户没有填写特殊提示词，也要自动生成高爽感结构：0.5秒爆点、连续三段技能爽点、逐级增强的特效规模、明确击飞/震屏/清场反馈、最后角色近景表情展示。必须把具体造型、技能、道具替换成上传角色图真实外观，不要套死某个固定模板。
+9. 战斗/技能/互动段必须有合理分镜和视线方向：0-1秒钩子可以短暂看镜头；1-13秒主角必须面向怪物、敌群、能量靶或技能目标，身体、眼神、武器/法杖/道具指向都要朝向目标，不要一边打斗一边持续正脸看镜头；平均每 1 秒必须有动作变化或镜头变化，用快切、推近、拉远、侧跟、反打、冲击定格、0.2秒慢动作后立刻加速制造爽感；用远景交代主角和怪物位置，用侧面中景表现出手方向，用反打镜头表现怪物被击中，近景只用于手部、道具或表情瞬间；13-15秒结尾才允许回到脸部/半身近景，根据角色性格做表情展示，不要下载引导。
+10. 画面要求：Q版卡通手游美术，强技能特效，强震屏，快速推拉镜头，冲击波，残影拖尾，粒子爆发，短促音效点，连击反馈，火焰/雷电/魔法/能量残影，适合短视频广告投放。
+11. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走、站桩、长时间摆 pose、空镜头、慢节奏铺垫、连续 2 秒没有动作变化，不要让主角在战斗过程中一直盯着镜头，不要生成游戏下载引导、下载按钮、下载文案或下载区域。
 12. 每次都根据本次选择的素材重新生成，不要沿用历史提示词或固定模板。
 
 用户通用提示词：
@@ -1099,10 +1099,12 @@ function updateJobState(jobName, patch) {
 }
 
 function summarizeErrorText(text) {
-  return String(text ?? "")
+  const lines = String(text ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter(Boolean);
+  const important = lines.filter((line) => /^\[error\]/i.test(line) || /Asset upload rejected|CreateAsset|InvalidParameter|DownloadFailed|HTTP\s+\d{3}|RequestId|quota|unauthorized|forbidden|permission|failed|timeout|429/i.test(line));
+  return (important.length ? important : lines)
     .slice(-4)
     .join(" | ")
     .slice(0, 700);
@@ -1137,6 +1139,10 @@ function isImageQuotaError(text = "") {
 
 function isBytePlusAssetUploadRejected(text = "") {
   return /Asset upload rejected|CreateAsset HTTP 400|BytePlus Asset API/i.test(String(text || ""));
+}
+
+function isBytePlusAssetDownloadFailed(text = "") {
+  return isBytePlusAssetUploadRejected(text) && /DownloadFailed|Failed to download media|write to client error/i.test(String(text || ""));
 }
 
 function sleepWithStop(ms) {
@@ -2327,15 +2333,27 @@ async function generateComicVideo(body = {}) {
   args.push(prompt);
   let stdout = "";
   let stderr = "";
-  try {
-    const result = await execTai(args);
-    stdout = result.stdout;
-    stderr = result.stderr;
-  } catch (error) {
-    const rawError = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`.trim();
-    await writeFile(join(workDir, "seedance_error.txt"), rawError || String(error), "utf8");
-    throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(rawError || error.message)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
+  let lastRawError = "";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const result = await execTai(args);
+      stdout = result.stdout;
+      stderr = result.stderr;
+      lastRawError = "";
+      break;
+    } catch (error) {
+      const rawError = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`.trim();
+      lastRawError = rawError || String(error);
+      await writeFile(join(workDir, "seedance_error.txt"), lastRawError, "utf8");
+      if (attempt < 3 && isBytePlusAssetDownloadFailed(lastRawError)) {
+        addLog("retry", `SEEDANCE_ASSET_RETRY attempt=${attempt + 1}/3 ${summarizeErrorText(lastRawError)}`);
+        await sleepWithStop(5000 * attempt);
+        continue;
+      }
+      throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError || error.message)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
+    }
   }
+  if (lastRawError) throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
   const output = nextAvailableFilePath(join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
