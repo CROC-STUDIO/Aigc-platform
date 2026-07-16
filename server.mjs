@@ -781,13 +781,13 @@ function normalizeDialogueAnalysis(value) {
 function dialogueInstructionBlock(dialogue) {
   if (!dialogue?.has_dialogue || !dialogue.original_lines?.length) {
     return [
-      "音频规则：生成视频必须包含自然环境音、动作音效和人物语音/口播，不要生成完全静音视频。",
-      "台词规则：当前系统未能从原视频自动识别出明确台词时，也要参考原视频是否存在人物口型、口播节奏、字幕或对白气口；如画面明显有人说话，请生成同语种、极短、自然的人物语音或口播。不要添加背景音乐，除非用户特别要求。",
-      "如果用户在特殊提示词中补充了台词，以用户补充为准；否则使用与参考视频一致的语种和广告语气，不要把英文改成中文，也不要把中文改成英文。"
+      "音频规则：当前未识别到明确台词时，默认只生成自然环境音和动作/道具音效，不要生成人物语音、口播、旁白、可识别姓名、联系方式、账号、地址或其他敏感个人信息。",
+      "台词规则：不要根据口型、字幕样式或广告节奏自行补写新台词；只有用户在特殊提示词中明确补充台词时，才按用户台词生成同语种、极短、自然的人声。",
+      "不要添加背景音乐，除非用户特别要求；如果音频可能触发审核，请优先输出无人物语音的安全音效轨。"
     ].join("\n");
   }
   return [
-    "音频规则：生成视频必须包含自然环境音、动作音效和人物语音，不要生成完全静音视频；不要添加背景音乐，除非用户特别要求。",
+    "音频规则：原视频存在明确台词时才生成人物语音；同时包含自然环境音和动作音效。人物语音必须极短、只表达剧情功能，不得包含姓名、联系方式、账号、地址、隐私、引导加群或其他敏感个人信息；不要添加背景音乐，除非用户特别要求。",
     `台词规则：原视频存在台词，必须保留原台词语种：${dialogue.language || "原语种"}。除非用户在特殊要求中明确要求翻译或改语种，否则新视频不能改变台词语种。`,
     "原视频台词/可见字幕参考：",
     ...dialogue.original_lines.slice(0, 8).map((line, index) => `${index + 1}. ${line}`),
@@ -1178,6 +1178,11 @@ function updateJobState(jobName, patch) {
 }
 
 function summarizeErrorText(text) {
+  const raw = String(text ?? "");
+  if (/output audio may contain sensitive information/i.test(raw)) {
+    const requestId = raw.match(/Request id:\s*([^\s|]+)/i)?.[1] || "";
+    return `Seedance 音频审核失败：输出音频可能包含敏感信息。建议去掉人物语音/口播，只保留环境音和动作音效后重试。${requestId ? `Request id: ${requestId}` : ""}`;
+  }
   const lines = String(text ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -2835,7 +2840,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
 11-15秒：形成结尾记忆点，保持参考的结尾停留逻辑，例如角色满意/震惊/开心/无奈定格，产品Logo露出，场景成果展示，或轻微镜头拉远展示完整构图。不能突然切入怪物、攻击、爆炸、升级或胜利战斗结算。
 
 视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
-音频总规则：必须生成音频轨道，包含自然环境音、动作/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
+音频总规则：生成安全音频轨道，默认只包含自然环境音和动作/道具音效；没有明确台词时不要生成人物语音、口播或旁白。除非用户明确要求，否则不要添加背景音乐；不得生成姓名、联系方式、账号、地址、隐私或其他敏感个人信息。
 ${dialoguePrompt}
 
 当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
@@ -2863,7 +2868,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
 11-15秒：出现SS阶终极升级，释放大范围但因果清晰的终结技能：蓄力、发射、覆盖目标、敌人反应、奖励回流，最后胜利定格。
 
 视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
-音频总规则：必须生成音频轨道，包含自然环境音、攻击/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
+音频总规则：生成安全音频轨道，默认只包含自然环境音和攻击/道具音效；没有明确台词时不要生成人物语音、口播或旁白。除非用户明确要求，否则不要添加背景音乐；不得生成姓名、联系方式、账号、地址、隐私或其他敏感个人信息。
 ${dialoguePrompt}
 
 当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
@@ -3304,8 +3309,8 @@ function transcriptToDialogue(transcript = {}) {
     original_lines: [],
     preserve_language: true,
     instruction: transcript.error
-      ? `ASR未识别到明确台词：${transcript.error}。如果原视频画面有人物口型、口播节奏、字幕或对白气口，新视频仍需生成同语种、极短、自然的人物语音；不要生成完全静音视频。`
-      : "未检测到明确台词；如参考视频明显有人说话，新视频仍需生成同语种、极短、自然的人物语音，不要完全静音。"
+      ? `ASR未识别到明确台词：${transcript.error}。默认不要生成人物语音或口播，只生成自然环境音和动作/道具音效；只有用户明确补充台词时才生成同语种短人声。`
+      : "未检测到明确台词；默认不要生成人物语音或口播，只生成自然环境音和动作/道具音效；只有用户明确补充台词时才生成同语种短人声。"
   };
   const lines = text.split(/\r?\n|(?<=[.!?。！？])\s+/).map((line) => line.trim()).filter(Boolean).slice(0, 12);
   const language = transcript.language || detectDialogueLanguage(text);
