@@ -58,10 +58,13 @@ test("CTA and Ending images are submitted as references only for final Seedance 
   assert.deepEqual(media.map((item) => item.assetId), ["asset_icon", "asset_cta", "asset_ending"]);
 });
 
-test("Seedance payload duration is rounded up to an integer for upstream validation", () => {
+test("Seedance payload duration is rounded up and clamped to the 4-15s upstream contract", () => {
   assert.equal(normalizeSeedancePayloadDuration(11.398), 12);
   assert.equal(normalizeSeedancePayloadDuration("8.1"), 9);
   assert.equal(normalizeSeedancePayloadDuration(15), 15);
+  assert.equal(normalizeSeedancePayloadDuration(17), 15);
+  assert.equal(normalizeSeedancePayloadDuration(18.681), 15);
+  assert.equal(normalizeSeedancePayloadDuration(3), 4);
   assert.equal(normalizeSeedancePayloadDuration("bad"), 15);
 
   const payload = buildSeedanceGenerationPayload({
@@ -70,4 +73,9 @@ test("Seedance payload duration is rounded up to an integer for upstream validat
     duration: 11.398
   });
   assert.equal(payload.duration, 12);
+  assert.equal(buildSeedanceGenerationPayload({
+    model: "dreamina-seedance-2-0-fast-260128",
+    prompt: "test prompt",
+    duration: 18.681
+  }).duration, 15);
 });

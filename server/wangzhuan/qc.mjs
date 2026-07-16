@@ -748,7 +748,14 @@ async function deterministicVideoChecks(context, batch, output) {
 }
 
 function videoSpecCheck(context, output) {
-  if (!(Number(output.durationSec) > 0) || !output.kind) {
+  const durationSec = Number(
+    output?.durationSec
+    ?? output?.duration_sec
+    ?? output?.actualDurationSec
+    ?? 0
+  );
+  const kind = cleanText(output?.kind || output?.outputKind || output?.output_kind || "", 64);
+  if (!(durationSec > 0) || !kind) {
     return check("video_spec", "fail", "输出缺少时长或类型记录", "output");
   }
   const localPath = tryResolveUserPath(context, output.filePath);
@@ -968,7 +975,6 @@ function buildGeneratedVideoQcMessages(batch, output, tasks, scripts, llmConfig,
     userContent.push({
       type: "file",
       file: {
-        filename: visionInputs.fileName || `${output.outputId}.mp4`,
         file_url: visionInputs.fileUrl
       }
     });
@@ -1284,10 +1290,10 @@ function qcStatusFromChecks(checks) {
 }
 
 function downloadEligibility(batch, output, qcStatus) {
-  if (qcStatus !== "pass") return false;
   if (output.sourceType !== "pipeline") return false;
   if (output.kind === "stitched_video" && Number(output.durationSec) > 0) return true;
   if (output.kind === "expanded_video" && output.parentOutputId && Number(output.durationSec) > 0) return true;
+  if (qcStatus !== "pass") return false;
   if (Number(batch.estimate?.durationSec) !== 30 && output.kind === "segment_video" && Number(output.durationSec) > 0) return true;
   return false;
 }

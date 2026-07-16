@@ -875,7 +875,7 @@ export function buildSeedancePlanMessages({
     "",
     "网赚出量模板规则：",
 	    "1. 出量模板由参考视频拆解决定：优先复用 wholeVideoConversion、storySegments、当前 currentSlice 的转化基调、段落转化风格、节奏、结构骨架、转化信号和变量分层；不要因为前端枚举值强行改成固定三段式或短剧高光模板。",
-	    "2. 切片策略由参考视频剧情段落决定：优先按已有 seedanceSlices 执行；若拆解只提供 storySegments + sliceSplitHints，则由后端按 startSec、endSec、sliceDurationSec 自动派生当前切片；只有同一剧情段过长时才按剧情节点拆成 5-30s 相邻 Seedance 切片。",
+	    "2. 切片策略由参考视频剧情段落决定：优先按已有 seedanceSlices 执行；若拆解只提供 storySegments + sliceSplitHints，则由后端按 startSec、endSec、sliceDurationSec 自动派生当前切片；只有同一剧情段过长时才按剧情节点拆成 5-15s 相邻 Seedance 切片。",
 	    "3. 如果 targetSegmentCount 是 1-5 的数字，必须在不改变参考视频核心转化基调的前提下，将参考视频剧情段落合并或拆分成用户选择的目标段数；每个 Seedance prompt 只写当前 currentSlice 对应的那一段，不要继续按原始拆解段数生成。",
 	    "4. 如果 targetSegmentCount=follow_decomposition，则跟随拆解段落，并由系统优先复用 seedanceSlices、否则基于 storySegments + sliceSplitHints 自动切片后按顺序执行。",
 	    "5. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",

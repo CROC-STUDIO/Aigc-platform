@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>生成前后处理设置 - 页面初稿</title>
+    <style>
+      :root {
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --soft: #f8fafc;
+        --text: #17202a;
+        --muted: #667085;
+        --line: #d9e1ea;
+        --accent: #176b5d;
+        --accent-soft: #e3f3ef;
+        --warn: #9b5c00;
+        --warn-soft: #fff4dc;
+        --ok: #16794c;
+        --ok-soft: #e8f6ef;
+        --danger: #b42318;
+        --danger-soft: #fff0ee;
+        --shadow: 0 18px 44px rgba(20, 33, 48, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        color: var(--text);
+        background: var(--bg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      button, input, select, textarea { font: inherit; }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 22px;
+        min-height: 58px;
+        padding: 0 24px;
+        background: rgba(255, 255, 255, 0.94);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(12px);
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 800;
+      }
+      .brand-mark {
+        display: inline-grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 8px;
+        color: #fff;
+        background: #111827;
+      }
+      .topnav {
+        display: flex;
+        gap: 10px;
+        min-width: 0;
+      }
+      .topnav a, .account {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .topnav a.active {
+        color: var(--accent);
+        font-weight: 760;
+      }
+
+      .page {
+        display: grid;
+        grid-template-columns: minmax(210px, 0.22fr) minmax(0, 1fr) minmax(260px, 0.28fr);
+        gap: 16px;
+        min-height: calc(100dvh - 58px);
+        padding: 18px;
+      }
+
+      .panel {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .steps {
+        padding: 12px;
+      }
+      .step {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px;
+        border-radius: 11px;
+        color: #475467;
+      }
+      .step b {
+        display: inline-grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--soft);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .step strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      .step small {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .step.done b,
+      .step.active b {
+        background: var(--accent);
+        color: #fff;
+      }
+      .step.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .main {
+        display: grid;
+        gap: 14px;
+      }
+      .hero {
+        padding: 18px;
+      }
+      .hero-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: start;
+      }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 {
+        margin-bottom: 8px;
+        font-size: 26px;
+        letter-spacing: 0;
+      }
+      h2 {
+        margin-bottom: 4px;
+        font-size: 18px;
+      }
+      h3 {
+        margin-bottom: 4px;
+        font-size: 15px;
+      }
+      p {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--soft);
+        color: #475467;
+        font-size: 12px;
+        font-weight: 720;
+        white-space: nowrap;
+      }
+      .badge.ok { background: var(--ok-soft); border-color: rgba(22, 121, 76, .22); color: var(--ok); }
+      .badge.warn { background: var(--warn-soft); border-color: rgba(155, 92, 0, .22); color: var(--warn); }
+      .badge.danger { background: var(--danger-soft); border-color: rgba(180, 35, 24, .22); color: var(--danger); }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      button {
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 9px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 760;
+      }
+      .primary { color: #fff; background: var(--accent); }
+      .ghost { color: #344054; background: #fff; border-color: var(--line); }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+        gap: 14px;
+      }
+      .section {
+        padding: 16px;
+      }
+      .section-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: start;
+        margin-bottom: 12px;
+      }
+
+      .kv-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .kv {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--soft);
+      }
+      .kv span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .kv strong {
+        display: block;
+        margin-top: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .prompt-card {
+        display: grid;
+        gap: 8px;
+      }
+      .prompt-row {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+      }
+      .prompt-row strong {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 13px;
+      }
+
+      .launch-card {
+        padding: 16px;
+        border: 2px solid rgba(23, 107, 93, .24);
+        background: linear-gradient(180deg, #fbfffd, #ffffff);
+      }
+      .launch-card .section-head {
+        align-items: center;
+      }
+
+      .recipe-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .recipe {
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #fff;
+      }
+      .recipe.on {
+        border-color: rgba(23, 107, 93, .36);
+        background: #fbfffd;
+      }
+      .recipe-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: start;
+        margin-bottom: 10px;
+      }
+      .switch {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        border-radius: 999px;
+        background: #cbd5e1;
+      }
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff;
+      }
+      .on .switch { background: var(--accent); }
+      .on .switch::after { left: 19px; }
+
+      label {
+        display: grid;
+        gap: 5px;
+        color: #475467;
+        font-size: 12px;
+        font-weight: 680;
+      }
+      select, input, textarea {
+        width: 100%;
+        min-width: 0;
+        padding: 8px 9px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        font-size: 13px;
+      }
+      textarea {
+        min-height: 74px;
+        resize: vertical;
+      }
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: #344054;
+        font-size: 12px;
+        font-weight: 720;
+      }
+      .pill.selected {
+        color: var(--accent);
+        border-color: rgba(23, 107, 93, .34);
+        background: var(--accent-soft);
+      }
+
+      .preview {
+        display: grid;
+        grid-template-columns: 170px minmax(0, 1fr);
+        gap: 12px;
+        align-items: stretch;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--soft);
+      }
+      .phone {
+        display: grid;
+        place-items: center;
+        min-height: 260px;
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(23, 107, 93, .14), transparent 45%), #e9eef3;
+      }
+      .phone-shape {
+        width: 98px;
+        height: 174px;
+        border: 6px solid #1f2937;
+        border-radius: 18px;
+        background: linear-gradient(#cfe9df 0 42px, #fff 42px);
+        position: relative;
+      }
+      .phone-shape::after {
+        content: "";
+        position: absolute;
+        left: 25px;
+        top: 82px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: #e7b948;
+      }
+      .preview-list {
+        display: grid;
+        gap: 8px;
+      }
+      .preview-row {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 9px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--line);
+        justify-self: center;
+      }
+      .preview-row.done .dot { background: var(--ok); }
+      .preview-row.next .dot { background: var(--accent); box-shadow: 0 0 0 5px rgba(23, 107, 93, .12); }
+      .preview-row strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .confirm-box {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px solid rgba(155, 92, 0, .22);
+        border-radius: 11px;
+        background: var(--warn-soft);
+      }
+      .check {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 8px;
+        color: #6a4300;
+        font-size: 13px;
+      }
+
+      .side {
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+      .side .panel {
+        padding: 14px;
+      }
+      .queue {
+        display: grid;
+        gap: 8px;
+      }
+      .queue-item {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--soft);
+      }
+      .queue-item strong {
+        display: block;
+        font-size: 13px;
+      }
+      .bar {
+        height: 6px;
+        margin-top: 8px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        overflow: hidden;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        width: var(--p);
+        background: var(--accent);
+      }
+
+      @media (max-width: 1180px) {
+        .page {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .steps {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .side {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .topbar,
+        .hero-row,
+        .grid-2,
+        .recipe-grid,
+        .field-grid,
+        .preview,
+        .side {
+          grid-template-columns: 1fr;
+        }
+        .page { padding: 12px; }
+        .steps { grid-template-columns: 1fr; }
+        .actions { justify-content: flex-start; }
+        .kv-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/wangzhuan-v2.html">
+        <span class="brand-mark">T</span>
+        <span>Touka AI</span>
+      </a>
+      <nav class="topnav" aria-label="顶部导航">
+        <a class="active" href="/wangzhuan-v2.html">网赚素材管线</a>
+        <a href="/wangzhuan-tasks.html">任务管理</a>
+        <a href="/competitor-remix.html">竞品素材改造</a>
+      </nav>
+      <span class="account">lucy · 管理员</span>
+    </header>
+
+    <main class="page">
+      <aside class="panel steps" aria-label="流程步骤">
+        <div class="step done"><b>1</b><span><strong>输入参考视频</strong><small>已拆解</small></span></div>
+        <div class="step done"><b>2</b><span><strong>产品与素材</strong><small>已确认资产审核</small></span></div>
+        <div class="step active"><b>3</b><span><strong>生成批次</strong><small>确认 prompt 和最终交付设置</small></span></div>
+        <div class="step"><b>4</b><span><strong>生成与质检</strong><small>自动排队执行</small></span></div>
+      </aside>
+
+      <section class="main">
+        <article class="panel hero">
+          <div class="hero-row">
+            <div>
+              <span class="badge warn">生成前确认</span>
+              <h1>确认 prompt 并生成视频</h1>
+              <p>用户在点击生成前一次性确认两件事：Seedance 怎么生成，以及生成完成后要自动套哪些最终交付处理。后处理不再是任务完成后的补救动作，而是本次批次的交付设置。</p>
+            </div>
+            <div class="actions">
+              <button class="ghost" type="button">保存草稿</button>
+              <button class="ghost" type="button">只生成 Seedance 原片</button>
+              <button class="primary" type="button">确认并生成最终投放版</button>
+            </div>
+          </div>
+        </article>
+
+        <div class="grid-2">
+          <section class="panel section">
+            <div class="section-head">
+              <div>
+                <h2>生成范围</h2>
+                <p>沿用当前第 3 步的模型、段数、比例和裂变数量。</p>
+              </div>
+              <span class="badge ok">prompt 已生成</span>
+            </div>
+            <div class="kv-grid">
+              <div class="kv"><span>Seedance 模型</span><strong>dreamina-seedance-2-0-fast</strong></div>
+              <div class="kv"><span>目标段数</span><strong>跟随拆解段落</strong></div>
+              <div class="kv"><span>尺寸</span><strong>9:16 竖版</strong></div>
+              <div class="kv"><span>裂变数量</span><strong>3 个变体</strong></div>
+              <div class="kv"><span>预计任务</span><strong>6 个 Seedance 子任务</strong></div>
+              <div class="kv"><span>预计交付</span><strong>18 个最终视频</strong></div>
+            </div>
+          </section>
+
+          <section class="panel section">
+            <div class="section-head">
+              <div>
+                <h2>Prompt 摘要</h2>
+                <p>完整 prompt 仍在下方编辑区，这里只保留确认前的摘要。</p>
+              </div>
+              <button class="ghost" type="button">展开编辑</button>
+            </div>
+            <div class="prompt-card">
+              <div class="prompt-row"><strong>Prompt 1 · CashDramaRewardEarn</strong><p>UGC phone scene, reward feedback, no burned subtitles, no dense UI text.</p></div>
+              <div class="prompt-row"><strong>后处理字幕</strong><p>Watch clips and earn rewards. Cash feedback appears instantly.</p></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel launch-card">
+          <div class="section-head">
+            <div>
+              <span class="badge warn">新增：最终交付设置</span>
+              <h2>生成完成后自动处理</h2>
+              <p>这些设置随“确认 prompt 并生成视频”一起提交。Seedance 原片生成完成后，系统自动执行赚钱模板、Ending、字幕和扩展尺寸，最终输出进入 QC 和下载包。</p>
+            </div>
+            <button class="primary" type="button">确认并生成最终投放版</button>
+          </div>
+
+          <div class="recipe-grid">
+            <article class="recipe on">
+              <div class="recipe-top">
+                <div>
+                  <h3>赚钱模板</h3>
+                  <p>生成后自动在画面上覆盖钞票/收益反馈视频贴纸。</p>
+                </div>
+                <span class="switch" aria-hidden="true"></span>
+              </div>
+              <div class="field-grid">
+                <label>模板
+                  <select>
+                    <option>EN / 赚钱模板-EN.mp4</option>
+                    <option>EN / 美元模板.mp4</option>
+                    <option>不使用赚钱模板</option>
+                  </select>
+                </label>
+                <label>叠加模式
+                  <select>
+                    <option>screen · 去黑底叠加</option>
+                    <option>chroma key · 去纯色底</option>
+                  </select>
+                </label>
+              </div>
+            </article>
+
+            <article class="recipe on">
+              <div class="recipe-top">
+                <div>
+                  <h3>Ending</h3>
+                  <p>每支视频尾部自动追加 CTA 或 Ending 素材。</p>
+                </div>
+                <span class="switch" aria-hidden="true"></span>
+              </div>
+              <div class="field-grid">
+                <label>来源
+                  <select>
+                    <option>使用当前 endingAsset</option>
+                    <option>使用 ctaAsset + endingAsset</option>
+                    <option>本批不加尾部</option>
+                  </select>
+                </label>
+                <label>尾部时长
+                  <input value="2s" />
+                </label>
+              </div>
+            </article>
+
+            <article class="recipe on">
+              <div class="recipe-top">
+                <div>
+                  <h3>字幕</h3>
+                  <p>按 prompt 中的后处理字幕脚本自动烧录。</p>
+                </div>
+                <span class="switch" aria-hidden="true"></span>
+              </div>
+              <label>字幕来源
+                <select>
+                  <option>使用每条 prompt 的 subtitleWorkflow.subtitleScript</option>
+                  <option>使用统一字幕脚本</option>
+                  <option>不加字幕</option>
+                </select>
+              </label>
+              <label>统一字幕脚本
+                <textarea>Watch clips and earn rewards.
+Cash feedback appears instantly.</textarea>
+              </label>
+            </article>
+
+            <article class="recipe on">
+              <div class="recipe-top">
+                <div>
+                  <h3>多尺寸交付</h3>
+                  <p>自动生成投放常用尺寸，原片仍保留。</p>
+                </div>
+                <span class="switch" aria-hidden="true"></span>
+              </div>
+              <label>目标尺寸</label>
+              <div class="pills">
+                <span class="pill selected">720x1280 原版</span>
+                <span class="pill selected">800x800 方版</span>
+                <span class="pill selected">1280x720 横版</span>
+              </div>
+            </article>
+          </div>
+
+          <div class="confirm-box">
+            <label class="check">
+              <input type="checkbox" checked />
+              <span>已确认：本批会先生成 Seedance 原片，再自动生成最终投放版；QC 和下载默认使用最终投放版，原片保留在任务详情中。</span>
+            </label>
+            <div class="actions">
+              <button class="ghost" type="button">保存为默认交付预设</button>
+              <button class="ghost" type="button">预览 3 秒合成效果</button>
+              <button class="primary" type="button">确认并生成最终投放版</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel section">
+          <div class="section-head">
+            <div>
+              <h2>本次批次会生成什么</h2>
+              <p>把用户最关心的结果前置展示，避免误以为只生成 Seedance 原片。</p>
+            </div>
+            <span class="badge ok">交付计划已就绪</span>
+          </div>
+          <div class="preview">
+            <div class="phone"><div class="phone-shape" aria-hidden="true"></div></div>
+            <div class="preview-list">
+              <div class="preview-row done"><span class="dot" aria-hidden="true"></span><strong>6 支 Seedance 原始成片</strong><span class="badge ok">保留</span></div>
+              <div class="preview-row next"><span class="dot" aria-hidden="true"></span><strong>6 支套赚钱模板 + Ending + 字幕的母版</strong><span class="badge warn">自动处理</span></div>
+              <div class="preview-row"><span class="dot" aria-hidden="true"></span><strong>18 支最终投放尺寸视频</strong><span class="badge">进入 QC</span></div>
+              <div class="preview-row"><span class="dot" aria-hidden="true"></span><strong>下载包默认选择最终投放版</strong><span class="badge">可改</span></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="side" aria-label="后台状态">
+        <section class="panel">
+          <h2>后台任务队列</h2>
+          <p>确认后队列会多出“最终处理”阶段。</p>
+          <div class="queue">
+            <div class="queue-item"><strong>AI 拆解视频</strong><span class="badge ok">完成</span><div class="bar"><i style="--p:100%"></i></div></div>
+            <div class="queue-item"><strong>Seedance prompt</strong><span class="badge ok">完成</span><div class="bar"><i style="--p:100%"></i></div></div>
+            <div class="queue-item"><strong>Seedance 生成</strong><span class="badge warn">等待确认</span><div class="bar"><i style="--p:0%"></i></div></div>
+            <div class="queue-item"><strong>最终处理</strong><span class="badge">排队</span><div class="bar"><i style="--p:0%"></i></div></div>
+            <div class="queue-item"><strong>QC 与下载</strong><span class="badge">排队</span><div class="bar"><i style="--p:0%"></i></div></div>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>关键提醒</h2>
+          <p>赚钱模板只影响最终投放版，不会写进 Seedance prompt；字幕仍要求 Seedance 原片不要烧录。</p>
+          <span class="badge warn">需要确认消耗</span>
+        </section>
+      </aside>
+    </main>
+  </body>
+</html>

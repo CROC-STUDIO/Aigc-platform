@@ -34,7 +34,7 @@ test("competitor remix exposes five capabilities backed by ten existing executio
       ["remove", "kframe", "auto_ai_remove"],
       ["remove", "fixed_region", "ai_remove"],
       ["mask", "region", "mask_edit"],
-      ["mask", "sticker", "sticker_blur"],
+      ["mask", "sticker", "local_sticker_overlay"],
       ["ending", "detect_trim", "end_trim_detection"],
       ["language", "subtitle_translate", "video_copy_translate"],
       ["language", "rewrite", "language_rewrite"],
@@ -70,6 +70,7 @@ test("catalog returns isolated default drafts", () => {
   const second = getMode("remove", "kframe").createDraft();
   assert.deepEqual(second.points, []);
   assert.equal(second.sampleFps, 1);
+  assert.equal(getMode("mask", "sticker").createDraft().stickerScaleMode, "short_side");
 });
 
 test("payload builder preserves every video-ops execution contract", () => {
@@ -129,6 +130,7 @@ test("payload builder preserves every video-ops execution contract", () => {
   });
   assert.deepEqual(manual.params, {
     mode: "manual",
+    mask_source_type: "base64_data_url",
     mask_source: "data:image/png;base64,AAAA",
     time_ranges: [{ start_ms: 100, end_ms: 2200 }],
     mask_threshold: 4
@@ -157,7 +159,34 @@ test("payload builder preserves every video-ops execution contract", () => {
     source: urlSource,
     draft: { box: { x1: 0.05, y1: 0.05, x2: 0.3, y2: 0.2 } }
   });
-  assert.equal(sticker.job_type, "sticker_blur");
+  assert.equal(sticker.job_type, "local_sticker_overlay");
+  assert.deepEqual(sticker.params, {
+    region_spec: [{
+      shape: "rectangle",
+      x: 0.05,
+      y: 0.05,
+      width: 0.25,
+      height: 0.15,
+      coordinate_space: "normalized",
+      time_ranges: []
+    }],
+    sticker_scale_mode: "short_side"
+  });
+
+  const stickerWithImage = buildPayload({
+    capabilityId: "mask",
+    modeId: "sticker",
+    source: urlSource,
+    draft: {
+      box: { x1: 0.05, y1: 0.05, x2: 0.3, y2: 0.2 },
+      stickerScaleMode: "long_side",
+      stickerDataUrl: "data:image/png;base64,AAAA"
+    }
+  });
+  assert.equal(stickerWithImage.params.sticker_scale_mode, "long_side");
+  assert.equal(stickerWithImage.params.sticker_source_type, "base64_data_url");
+  assert.equal(stickerWithImage.params.sticker_source, "data:image/png;base64,AAAA");
+  assert.equal(redactPayload(stickerWithImage).params.sticker_source, "<redacted>");
 
   const ending = buildPayload({
     capabilityId: "ending",
@@ -538,6 +567,36 @@ test("job runner keeps concurrent submissions and timers independent", async () 
   assert.equal(timers.size, 2);
   assert.equal(requests[0].url, "/api/wangzhuan/video-ops/jobs");
   assert.equal(store.getState().runs[0].requestSnapshot.input.source, "<redacted>");
+});
+
+test("job runner routes local sticker jobs through the local video edit API", async () => {
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  const urls = [];
+  const runner = createJobRunner({
+    store,
+    request: async (url) => {
+      urls.push(url);
+      if (url.endsWith("/result")) return { download_url: "/file?path=output.mp4" };
+      if (url.includes("local-job")) return { job_id: "local-job", status: "succeeded", provider: "local_ffmpeg" };
+      return { job_id: "local-job", status: "queued", provider: "local_ffmpeg" };
+    },
+    createRunId: () => "local-run",
+    setTimer: () => 1,
+    clearTimer() {},
+    isVisible: () => true
+  });
+
+  const submitted = await runner.submit({
+    capabilityId: "mask",
+    modeId: "sticker",
+    payload: { job_type: "local_sticker_overlay", input: { source: "secret" } }
+  });
+  assert.equal(urls.at(-1), "/api/wangzhuan/local-video-edits/jobs");
+  assert.equal(submitted.transport, "local");
+
+  await runner.refresh("local-run");
+  assert.equal(urls.at(-2), "/api/wangzhuan/local-video-edits/jobs/local-job");
+  assert.equal(urls.at(-1), "/api/wangzhuan/local-video-edits/jobs/local-job/result");
 });
 
 test("job runner isolates transient polling errors and terminal results", async () => {

@@ -68,7 +68,7 @@ bash .release/upload-code-only.sh
 
 产物：`.release/ad-picture-web-codex-code-only-YYYYMMDD-HHMMSS.tar.gz`
 
-默认只打运行时白名单：`public/`、`server/`、`database/`、`scripts/`、`server.mjs`、`package.json`、`package-lock.json`、`config.default.json`、`README.md`。
+默认只打运行时白名单：`public/`、`server/`、`database/`、`product_info/`、`scripts/`、`server.mjs`、`package.json`、`package-lock.json`、`config.default.json`、`README.md`。
 
 **不会**打进包：`.env`、`config.json`、`users.json`、`mysql-data/`、`Dockerfile`、`docker-compose.yml`、`node_modules/`、`.git/`、`.release/*.tar.gz`、`.tmp/`、`output/`、`docs/`、`批处理记录/`、`project-data/`
 
@@ -92,7 +92,7 @@ macOS `tar` 可能打印 `LIBARCHIVE.xattr...` 扩展属性提示；只要包内
 ```bash
 TS=$(date +%Y%m%d-%H%M%S)
 PKG=".release/ad-picture-web-codex-code-only-slim-${TS}.tar.gz"
-tar -czf "$PKG" public server database scripts server.mjs package.json package-lock.json config.default.json README.md
+tar -czf "$PKG" public server database product_info scripts server.mjs package.json package-lock.json config.default.json README.md
 bash .release/upload-code-only.sh "$PKG"
 
 set -a

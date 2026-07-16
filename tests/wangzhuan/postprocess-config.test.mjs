@@ -10,7 +10,7 @@ import {
 test("batch post-process defaults to subtitle generation with no Ending or expansion sizes", () => {
   assert.deepEqual(normalizeBatchPostProcess(), {
     ending: null,
-    subtitles: { enabled: true, fontSize: 30, centerY: 1140 },
+    subtitles: { enabled: true, fontSize: 36, centerY: 960, textColor: "white" },
     expansionSizes: []
   });
 });
@@ -18,16 +18,18 @@ test("batch post-process defaults to subtitle generation with no Ending or expan
 test("batch post-process lets the user disable default subtitle generation", () => {
   assert.deepEqual(normalizeBatchPostProcess({ subtitles: { enabled: false } }).subtitles, {
     enabled: false,
-    fontSize: 30,
-    centerY: 1140
+    fontSize: 36,
+    centerY: 960,
+    textColor: "white"
   });
 });
 
 test("batch post-process validates user subtitle font size and center Y", () => {
-  assert.deepEqual(normalizeBatchPostProcess({ subtitles: { fontSize: 48, centerY: 960 } }).subtitles, {
+  assert.deepEqual(normalizeBatchPostProcess({ subtitles: { fontSize: 48, centerY: 960, textColor: "yellow" } }).subtitles, {
     enabled: true,
     fontSize: 48,
-    centerY: 960
+    centerY: 960,
+    textColor: "yellow"
   });
   for (const subtitles of [
     { fontSize: 11 },
@@ -35,7 +37,8 @@ test("batch post-process validates user subtitle font size and center Y", () => 
     { fontSize: 30.5 },
     { centerY: -1 },
     { centerY: 1281 },
-    { centerY: 100.5 }
+    { centerY: 100.5 },
+    { textColor: "blue" }
   ]) {
     assert.throws(
       () => normalizeBatchPostProcess({ subtitles }),

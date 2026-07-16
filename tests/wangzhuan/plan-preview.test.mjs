@@ -331,7 +331,7 @@ test("Seedance plan prompt includes Feishu wangzhuan output-template rules", () 
   assert.match(text, /切片策略由参考视频剧情段落决定/);
   assert.match(text, /优先按已有 seedanceSlices 执行/);
   assert.match(text, /storySegments \+ sliceSplitHints/);
-  assert.match(text, /5-30s/);
+  assert.match(text, /5-15s/);
   assert.match(text, /不要因为前端枚举值强行改成固定三段式或短剧高光模板/);
   assert.match(text, /人物、场景、服装.*变化/);
   assert.match(text, /主要依据参考视频拆解中该段是否存在对应结构/);

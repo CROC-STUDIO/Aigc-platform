@@ -134,6 +134,27 @@ function regionParams(values) {
   };
 }
 
+function stickerParams(values) {
+  const box = normalizedBox(values.box);
+  const stickerSource = cleanString(values.stickerDataUrl);
+  return {
+    region_spec: [{
+      shape: "rectangle",
+      x: box.x1,
+      y: box.y1,
+      width: Number((box.x2 - box.x1).toFixed(6)),
+      height: Number((box.y2 - box.y1).toFixed(6)),
+      coordinate_space: "normalized",
+      time_ranges: []
+    }],
+    sticker_scale_mode: values.stickerScaleMode === "long_side" ? "long_side" : "short_side",
+    ...(stickerSource ? {
+      sticker_source_type: "base64_data_url",
+      sticker_source: stickerSource
+    } : {})
+  };
+}
+
 function buildParams(capabilityId, modeId, values, maskSource) {
   if (capabilityId === "remove" && modeId === "seedance") {
     return {
@@ -159,6 +180,7 @@ function buildParams(capabilityId, modeId, values, maskSource) {
     if (!cleanString(maskSource).startsWith("data:image/png")) throw new Error("框选区域尚未生成 mask");
     return {
       mode: "manual",
+      mask_source_type: "base64_data_url",
       mask_source: maskSource,
       time_ranges: [{
         start_ms: clampNumber(values.startMs, 0, Number.MAX_SAFE_INTEGER, 0, { integer: true }),
@@ -167,6 +189,7 @@ function buildParams(capabilityId, modeId, values, maskSource) {
       mask_threshold: clampNumber(values.maskThreshold, 0, 255, 1, { integer: true })
     };
   }
+  if (capabilityId === "mask" && modeId === "sticker") return stickerParams(values);
   if (capabilityId === "mask") return regionParams(values);
   if (capabilityId === "ending") {
     return {
@@ -211,5 +234,6 @@ export function redactPayload(payload = {}) {
   const copy = JSON.parse(JSON.stringify(payload));
   if (copy.input?.source) copy.input.source = "<redacted>";
   if (copy.params?.mask_source) copy.params.mask_source = "<redacted>";
+  if (copy.params?.sticker_source) copy.params.sticker_source = "<redacted>";
   return copy;
 }

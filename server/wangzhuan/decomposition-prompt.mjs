@@ -32,7 +32,7 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   conversionEffectOpportunities: "裂变分析：可裂变放大的特效/反馈机会，与已观察到的 conversionSignals 分开记录",
   openingHookIntensity: "裂变分析：前三秒吸引力强度，必须判断是否有强冲突、提现成功感、收益数字增长、金币/现金雨、金币爆发、满屏撒钱/撒金币、人物惊讶反应；如果参考视频开头偏慢，也要标注可裂变增强机会",
   voiceoverPerformance: "裂变分析：人物口播的情绪、语速、感染力、能量水平和节奏；必须明确是高亢快节奏、平稳说明、疑虑转化还是弱口播，并说明后续裂变是否应增强",
-  sliceSplitHints: "裂变分析：Seedance 5-30s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现；当某个 storySegment 超过 15 秒时，必须给出可执行 splitSec 建议，供后端优先按较短相邻切片派生",
+  sliceSplitHints: "裂变分析：Seedance 5-15s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现；当某个 storySegment 超过 15 秒时，必须给出可执行 splitSec 建议，供后端优先按较短相邻切片派生",
   seedanceSlices: "裂变分析：可选输出的 Seedance 子段；如果模型能稳定给出可执行切片，则按 storySegments 顺序输出 seedanceSliceIndex/storySegmentIndex/startSec/endSec/durationSec/sliceDurationSec，单片 5-30 秒；若未输出，将由后端基于 storySegments + sliceSplitHints 自动派生；字幕不烧录，字幕文本进入 subtitleWorkflow.subtitleScript 或 subtitles 供后处理"
 });
 
@@ -136,7 +136,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "storySegments timing is mandatory: each segment must include numeric startSec, endSec, durationSec in source-video seconds; segments must be chronological and non-overlapping.",
     "storySegments are mandatory when using fission analysis: each segment must be executable on the source-video timeline.",
     "If a storySegment is longer than 15 seconds, sliceSplitHints are mandatory: provide exact narrative splitSec suggestions such as claim -> proof, proof -> CTA, or setup -> payoff; never split only because UI/subtitle/effect appears.",
-    "seedanceSlices are optional: if you can output high-quality executable 5-30s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
+    "seedanceSlices are optional: if you can output high-quality executable 5-15s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
     "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
     "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
     "Voiceover energy analysis: if there is human speaking, record emotion, speaking speed, rhythm, and infectiousness; mark whether fission should upgrade it to high-energy, fast-paced, emotionally expressive delivery.",
@@ -220,7 +220,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "7. protagonist/voiceover/onscreenText 能判断时必须填写；人物要有职业，口播要按段写功能与节奏。",
     "8. phoneUi/rewardFeedback/ctaMoment/endingMoment 能判断时必须填写具体 UI、按钮、数字、触发画面。",
     "9. continuityAnchors 必须总结后续裂变应保持一致的主角职业/外观、服装、地点、手机 UI 状态和最后关键帧。",
-    "10. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-30s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
+    "10. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-15s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
     "11. 只返回 JSON 对象。"
   ].join("\n");
 }

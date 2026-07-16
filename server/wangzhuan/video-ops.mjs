@@ -207,8 +207,13 @@ function validateParams(jobType, params = {}) {
       }
       const maskSource = cleanString(params.mask_source || params.maskSource);
       if (!maskSource) validation("ai_remove manual 需要 mask_source", { field: "params.mask_source" });
+      const maskSourceType = cleanString(params.mask_source_type || params.maskSourceType, "local_path");
+      if (!["local_path", "base64_data_url"].includes(maskSourceType)) {
+        validation("mask_source_type 只支持 local_path 或 base64_data_url", { field: "params.mask_source_type" });
+      }
       return {
         mode,
+        mask_source_type: maskSourceType,
         mask_source: maskSource,
         time_ranges: validateTimeRanges(params.time_ranges || params.timeRanges),
         mask_threshold: numberInRange(params.mask_threshold, { min: 0, max: 255, fallback: 1, integer: true })

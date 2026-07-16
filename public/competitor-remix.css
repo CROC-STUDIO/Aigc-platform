@@ -476,6 +476,35 @@
   overflow-wrap: anywhere;
 }
 
+.remix-sticker-control,
+.remix-sticker-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.remix-sticker-preview[hidden] {
+  display: none;
+}
+
+.remix-sticker-preview img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border: 1px solid var(--remix-line);
+  background: #fff;
+}
+
+.remix-sticker-preview span {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--remix-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remix-submit-panel,
 .remix-run-panel {
   padding: 18px;

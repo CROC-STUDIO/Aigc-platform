@@ -507,6 +507,32 @@ test("reference video check accepts multipart upload payloads", async () => {
   assert.equal(payload.data.referenceVideo.bufferLength, Buffer.byteLength("video-bytes"));
 });
 
+test("reference video check can run as a background job after multipart upload", async () => {
+  const context = await contextFor({});
+  const req = { method: "POST", headers: { "content-type": "multipart/form-data; boundary=test" } };
+  const res = new TestResponse();
+  await handleWangzhuanRequest(
+    req,
+    res,
+    new URL("http://127.0.0.1/api/wangzhuan/reference-videos/check-jobs"),
+    context
+  );
+  const payload = JSON.parse(res.body);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(payload.code, "ok");
+  assert.match(payload.data.referenceVideoCheckJobId, /^refcheckjob_/);
+
+  const polled = await waitForStatusWithContext(
+    `/api/wangzhuan/reference-videos/check-jobs/${payload.data.referenceVideoCheckJobId}`,
+    "succeeded",
+    context
+  );
+
+  assert.equal(polled.payload.data.referenceVideo.referenceVideoId, "ref_20260630_001");
+  assert.equal(polled.payload.data.referenceVideo.bufferLength, Buffer.byteLength("video-bytes"));
+});
+
 test("reference video reuse check returns existing hash match before upload", async () => {
   const response = await call("POST", "/api/wangzhuan/reference-videos/reuse-check", {
     fileHash: "a".repeat(64),

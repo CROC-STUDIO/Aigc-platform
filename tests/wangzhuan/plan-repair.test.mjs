@@ -127,7 +127,7 @@ test("repairFormalPlanContract keeps subtitles in subtitleWorkflow", () => {
   assert.match(repaired.seedancePrompt, /no burned subtitles/i);
 });
 
-test("repairFormalPlanContract clamps slice duration to 5-30 seconds", () => {
+test("repairFormalPlanContract clamps slice duration to 5-15 seconds", () => {
   const basePlan = {
     hook: "Hook",
     body: "Body",
@@ -138,5 +138,6 @@ test("repairFormalPlanContract clamps slice duration to 5-30 seconds", () => {
 
   assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 4 }, {}).sliceDurationSec, 5);
   assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 7.2 }, {}).sliceDurationSec, 7.2);
-  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 31 }, {}).sliceDurationSec, 30);
+  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 31 }, {}).sliceDurationSec, 15);
+  assert.equal(repairFormalPlanContract({ ...basePlan, sliceDurationSec: 17 }, {}).sliceDurationSec, 15);
 });

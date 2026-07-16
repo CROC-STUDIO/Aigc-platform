@@ -28,6 +28,7 @@ function cleanRunForStorage(run = {}) {
   const copy = cloneJson(run);
   if (copy.requestSnapshot?.input?.source) copy.requestSnapshot.input.source = "<redacted>";
   if (copy.requestSnapshot?.params?.mask_source) copy.requestSnapshot.params.mask_source = "<redacted>";
+  if (copy.requestSnapshot?.params?.sticker_source) copy.requestSnapshot.params.sticker_source = "<redacted>";
   return copy;
 }
 

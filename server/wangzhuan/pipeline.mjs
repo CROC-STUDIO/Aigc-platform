@@ -335,22 +335,64 @@ function splitOneSlice(slice = {}, index = 0) {
   return [first, second];
 }
 
-export function adjustSlicePlanToTargetCount(slices = [], targetSegmentCount = null) {
+function clampSliceDuration(slice = {}, maxDuration = 15) {
+  const startSec = Number(slice.startSec || 0);
+  const capped = Math.max(1, Number(maxDuration) || 15);
+  const endSec = Math.round((startSec + capped) * 100) / 100;
+  return {
+    ...slice,
+    startSec,
+    endSec,
+    durationSec: capped,
+    sliceDurationSec: capped,
+    targetSegmentClamped: true
+  };
+}
+
+export function adjustSlicePlanToTargetCount(slices = [], targetSegmentCount = null, {
+  maxSliceSec = 15,
+  // Slightly over-budget slices are truncated to maxSliceSec; only longer ones are bisected.
+  splitAboveSec = 19
+} = {}) {
   const targetCount = normalizeTargetSegmentCount(targetSegmentCount);
-  if (!targetCount || !Array.isArray(slices) || slices.length === 0 || slices.length === targetCount) {
+  const maxDuration = Math.max(1, Number(maxSliceSec) || 15);
+  const splitThreshold = Math.max(maxDuration, Number(splitAboveSec) || 19);
+  if (!Array.isArray(slices) || slices.length === 0) {
     return normalizeSliceIndexes(slices);
   }
   let nextSlices = normalizeSliceIndexes(slices);
+  // Normalize over-budget slices to Seedance's ceiling:
+  // - (max, splitThreshold]: clamp to maxSliceSec
+  // - > splitThreshold: keep bisecting until every part is within splitThreshold, then clamp leftovers
+  for (let index = 0; index < nextSlices.length; index += 1) {
+    while (Number(nextSlices[index]?.durationSec || 0) > splitThreshold) {
+      const parts = splitOneSlice(nextSlices[index], index);
+      if (parts.every((part) => Number(part.durationSec || 0) >= Number(nextSlices[index]?.durationSec || 0))) {
+        break;
+      }
+      nextSlices.splice(index, 1, ...parts);
+      nextSlices = normalizeSliceIndexes(nextSlices);
+    }
+    if (Number(nextSlices[index]?.durationSec || 0) > maxDuration) {
+      nextSlices[index] = clampSliceDuration(nextSlices[index], maxDuration);
+    }
+  }
+  if (!targetCount || nextSlices.length === targetCount) {
+    return normalizeSliceIndexes(nextSlices);
+  }
   while (nextSlices.length > targetCount) {
-    let mergeIndex = 0;
+    let mergeIndex = -1;
     let smallestDuration = Infinity;
     for (let index = 0; index < nextSlices.length - 1; index += 1) {
       const combined = Number(nextSlices[index]?.durationSec || 0) + Number(nextSlices[index + 1]?.durationSec || 0);
+      // Never merge past Seedance's per-request duration ceiling.
+      if (combined > maxDuration) continue;
       if (combined < smallestDuration) {
         smallestDuration = combined;
         mergeIndex = index;
       }
     }
+    if (mergeIndex < 0) break;
     nextSlices.splice(mergeIndex, 2, mergeAdjacentSlices(nextSlices[mergeIndex], nextSlices[mergeIndex + 1], mergeIndex));
     nextSlices = normalizeSliceIndexes(nextSlices);
   }
@@ -364,6 +406,7 @@ export function adjustSlicePlanToTargetCount(slices = [], targetSegmentCount = n
         splitIndex = index;
       }
     }
+    if (longestDuration <= 1) break;
     nextSlices.splice(splitIndex, 1, ...splitOneSlice(nextSlices[splitIndex], splitIndex));
     nextSlices = normalizeSliceIndexes(nextSlices);
   }

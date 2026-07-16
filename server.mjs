@@ -359,6 +359,7 @@ process.on("unhandledRejection", (error) => {
 });
 
 process.on("uncaughtException", (error) => {
+  if (error?.code === "EPIPE") return;
   console.error("Uncaught exception:", error);
 });
 

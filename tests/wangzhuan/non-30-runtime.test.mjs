@@ -121,6 +121,76 @@ function buildMixedOutcomeBatch(root) {
   };
 }
 
+function buildTwoVariantPartialBatch(root) {
+  const batch = buildMixedOutcomeBatch(root);
+  return {
+    ...batch,
+    scripts: [
+      ...batch.scripts,
+      {
+        ...batch.scripts[0],
+        scriptId: "scr_abcd_003",
+        variantIndex: 3,
+        segmentIndex: 1,
+        branchVariantIndex: 2,
+        durationSec: 12,
+        promptPath: "prompts/gen_abcd_003_seedance.txt",
+        scriptPath: "scripts/scr_abcd_003.json"
+      },
+      {
+        ...batch.scripts[1],
+        scriptId: "scr_abcd_004",
+        variantIndex: 4,
+        segmentIndex: 2,
+        branchVariantIndex: 2,
+        durationSec: 12,
+        promptPath: "prompts/gen_abcd_004_seedance.txt",
+        scriptPath: "scripts/scr_abcd_004.json"
+      }
+    ],
+    tasks: [
+      {
+        ...batch.tasks[0],
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_001.mp4"
+      },
+      {
+        ...batch.tasks[1],
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_002.mp4",
+        errorCode: undefined,
+        errorMessage: undefined
+      },
+      {
+        ...batch.tasks[0],
+        generationTaskId: "gen_abcd_003",
+        seedanceTaskId: "seedance_remote_003",
+        scriptId: "scr_abcd_003",
+        segmentIndex: 1,
+        branchVariantIndex: 2,
+        durationSec: 12,
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_001.mp4",
+        promptPath: "prompts/gen_abcd_003_seedance.txt"
+      },
+      {
+        ...batch.tasks[1],
+        generationTaskId: "gen_abcd_004",
+        seedanceTaskId: "seedance_remote_004",
+        scriptId: "scr_abcd_004",
+        segmentIndex: 2,
+        branchVariantIndex: 2,
+        durationSec: 12,
+        status: "failed",
+        outputPath: "",
+        errorCode: "upstream_failed",
+        errorMessage: "Seedance failed",
+        promptPath: "prompts/gen_abcd_004_seedance.txt"
+      }
+    ]
+  };
+}
+
 async function writeBatchFiles(root, batch) {
   await mkdir(join(root, "upstream"), { recursive: true });
   await mkdir(join(root, "prompts"), { recursive: true });
@@ -277,7 +347,24 @@ test("QC accepts passing non-30 stitched output as downloadable final output", (
     durationSec: 56
   };
   assert.equal(downloadEligibility(batch, output, "pass"), true);
-  assert.equal(downloadEligibility(batch, output, "fail"), false);
+  assert.equal(downloadEligibility(batch, output, "fail"), true);
+});
+
+test("QC keeps stitched delivery outputs eligible even when content QC fails", () => {
+  const batch = {
+    estimate: {
+      durationSec: 30,
+      request: { outputRatio: "9:16" }
+    }
+  };
+  const output = {
+    sourceType: "pipeline",
+    kind: "stitched_video",
+    durationSec: 30,
+    outputId: "out_abcd_010"
+  };
+  assert.equal(downloadEligibility(batch, output, "manual_required"), true);
+  assert.equal(downloadEligibility(batch, output, "fail"), true);
 });
 
 test("non-30 mixed outcome materializes successful slices and settles partial_failed", async () => {
@@ -312,6 +399,33 @@ test("non-30 multi-slice batch becomes stitch-ready only after every slice is do
     };
 
     assert.equal(isBatchReadyForStitch(state.batch), true);
+  });
+});
+
+test("non-30 multi-variant batch stitches complete variants even when another variant failed", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const state = { batch: buildTwoVariantPartialBatch(root) };
+      await writeBatchFiles(root, state.batch);
+
+      assert.equal(isBatchReadyForStitch(state.batch), true);
+
+      const detail = await stitchBatchSegments(testContext(root, state), state.batch.batchId);
+      const stitched = detail.batch.outputs.filter((output) => output.kind === "stitched_video");
+      const segmentOutputs = detail.batch.outputs.filter((output) => output.kind === "segment_video");
+      const reports = detail.batch.stitchReports || [];
+
+      assert.equal(detail.batch.status, "partial_failed");
+      assert.equal(stitched.length, 1);
+      assert.deepEqual(stitched[0].generationTaskIds, ["gen_abcd_001", "gen_abcd_002"]);
+      assert.equal(segmentOutputs.length, 3);
+      assert.equal(reports.filter((report) => report.status === "succeeded").length, 1);
+      assert.equal(reports.filter((report) => report.status === "failed").length, 1);
+      assert.equal(reports.find((report) => report.status === "failed")?.errorCode, "partial_segments_unavailable");
+    } finally {
+      restorePath();
+    }
   });
 });
 
@@ -507,7 +621,7 @@ test("missing source during segment materialization settles batch as partial_fai
       assert.equal(state.batch.status, "partial_failed");
       assert.equal(detail.batch.outputs.length, 0);
       assert.equal(report.status, "failed");
-      assert.equal(report.errorCode, "stitch_failed");
+      assert.equal(report.errorCode, "missing_required_file");
       assert.match(report.errorMessage, /分段视频文件缺失/);
     } finally {
       restorePath();

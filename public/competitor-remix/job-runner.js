@@ -19,6 +19,16 @@ function runById(store, runId) {
   return store.getState().runs.find((item) => item.runId === runId) || null;
 }
 
+function transportForPayload(payload = {}) {
+  return payload.job_type === "local_sticker_overlay" ? "local" : "video_ops";
+}
+
+function jobsBase(transport = "video_ops") {
+  return transport === "local"
+    ? "/api/wangzhuan/local-video-edits/jobs"
+    : "/api/wangzhuan/video-ops/jobs";
+}
+
 export function createJobRunner({
   store,
   request,
@@ -54,7 +64,8 @@ export function createJobRunner({
 
   async function submit({ capabilityId, modeId, capabilityLabel = "", modeLabel = "", payload } = {}) {
     if (!payload?.job_type) throw new Error("任务请求尚未准备完成");
-    const response = await request("/api/wangzhuan/video-ops/jobs", {
+    const transport = transportForPayload(payload);
+    const response = await request(jobsBase(transport), {
       method: "POST",
       body: JSON.stringify(payload)
     });
@@ -71,6 +82,7 @@ export function createJobRunner({
       capabilityLabel,
       modeLabel,
       jobType: response.jobType || response.job_type || payload.job_type,
+      transport,
       status: providerStatus(response),
       providerJob: response.providerJob || response,
       requestSnapshot: redactPayload(payload),
@@ -90,7 +102,8 @@ export function createJobRunner({
     const run = runById(store, runId);
     if (!run?.providerJobId) return null;
     try {
-      const result = await request(`/api/wangzhuan/video-ops/jobs/${encodeURIComponent(run.providerJobId)}/result?include_model_calls=true`);
+      const suffix = run.transport === "local" ? "/result" : "/result?include_model_calls=true";
+      const result = await request(`${jobsBase(run.transport)}/${encodeURIComponent(run.providerJobId)}${suffix}`);
       store.patchRun(runId, { result, resultError: "", updatedAt: now() });
       return result;
     } catch (error) {
@@ -103,7 +116,8 @@ export function createJobRunner({
     const run = runById(store, runId);
     if (!run?.providerJobId) return null;
     try {
-      const job = await request(`/api/wangzhuan/video-ops/jobs/${encodeURIComponent(run.providerJobId)}?include_model_calls=true`);
+      const query = run.transport === "local" ? "" : "?include_model_calls=true";
+      const job = await request(`${jobsBase(run.transport)}/${encodeURIComponent(run.providerJobId)}${query}`);
       const status = providerStatus(job, run.status);
       store.patchRun(runId, {
         status,
@@ -143,7 +157,8 @@ export function createJobRunner({
   async function cancel(runId) {
     const run = runById(store, runId);
     if (!run?.providerJobId) return null;
-    const job = await request(`/api/wangzhuan/video-ops/jobs/${encodeURIComponent(run.providerJobId)}/cancel`, {
+    if (run.transport === "local") throw new Error("本地任务暂不支持取消");
+    const job = await request(`${jobsBase(run.transport)}/${encodeURIComponent(run.providerJobId)}/cancel`, {
       method: "POST",
       body: "{}"
     });
@@ -160,7 +175,8 @@ export function createJobRunner({
   async function retry(runId) {
     const run = runById(store, runId);
     if (!run?.providerJobId) return null;
-    const job = await request(`/api/wangzhuan/video-ops/jobs/${encodeURIComponent(run.providerJobId)}/retry`, {
+    if (run.transport === "local") throw new Error("本地任务请重新提交");
+    const job = await request(`${jobsBase(run.transport)}/${encodeURIComponent(run.providerJobId)}/retry`, {
       method: "POST",
       body: "{}"
     });

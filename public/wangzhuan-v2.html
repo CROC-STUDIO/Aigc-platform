@@ -362,15 +362,22 @@
                   <div class="wz-subtitle-style-controls">
                     <label class="wz-subtitle-style-row" for="wzSubtitleFontSizeNumber">
                       <span>字幕字号</span>
-                      <input id="wzSubtitleFontSizeRange" type="range" min="12" max="96" step="1" value="30" />
-                      <input id="wzSubtitleFontSizeNumber" type="number" min="12" max="96" step="1" value="30" />
+                      <input id="wzSubtitleFontSizeRange" type="range" min="12" max="96" step="1" value="36" />
+                      <input id="wzSubtitleFontSizeNumber" type="number" min="12" max="96" step="1" value="36" />
                       <span class="wz-unit">px</span>
                     </label>
                     <label class="wz-subtitle-style-row" for="wzSubtitleCenterYNumber">
                       <span>中心 Y</span>
-                      <input id="wzSubtitleCenterYRange" type="range" min="0" max="1280" step="1" value="1140" />
-                      <input id="wzSubtitleCenterYNumber" type="number" min="0" max="1280" step="1" value="1140" />
+                      <input id="wzSubtitleCenterYRange" type="range" min="0" max="1280" step="1" value="960" />
+                      <input id="wzSubtitleCenterYNumber" type="number" min="0" max="1280" step="1" value="960" />
                       <span class="wz-unit">px</span>
+                    </label>
+                    <label class="wz-subtitle-style-row" for="wzSubtitleTextColor">
+                      <span>字幕颜色</span>
+                      <select id="wzSubtitleTextColor">
+                        <option value="white" selected>白字黑边</option>
+                        <option value="yellow">黄字黑边</option>
+                      </select>
                     </label>
                   </div>
                 </div>

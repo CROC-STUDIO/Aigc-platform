@@ -85,6 +85,7 @@ const els = {
   subtitleFontSizeNumber: $("#wzSubtitleFontSizeNumber"),
   subtitleCenterYRange: $("#wzSubtitleCenterYRange"),
   subtitleCenterYNumber: $("#wzSubtitleCenterYNumber"),
+  subtitleTextColor: $("#wzSubtitleTextColor"),
   postProcessEndingRemove: $("#wzPostProcessEndingRemove"),
   postProcessEndingPreview: $("#wzPostProcessEndingPreview"),
   expansionCustomWidth: $("#wzExpansionCustomWidth"),
@@ -128,6 +129,7 @@ const els = {
 
 const state = {
   referenceVideo: null,
+  referenceVideoCheckJob: null,
   decompositionJob: null,
   decompositionDraft: null,
   estimate: null,
@@ -245,6 +247,7 @@ const PLAN_UPSTREAM_LOCK_SELECTOR = [
   "#wzSubtitleFontSizeNumber",
   "#wzSubtitleCenterYRange",
   "#wzSubtitleCenterYNumber",
+  "#wzSubtitleTextColor",
   "#wzConfirmLimits",
   "#wzPlanBatchBtn",
   "#wzProductIconFile",
@@ -986,8 +989,9 @@ function postProcessRequestFields() {
     ending: state.postProcessEndingAsset ? { ...state.postProcessEndingAsset, enabled: true, imageDurationSec: 1 } : null,
     subtitles: {
       enabled: els.postProcessSubtitles?.checked !== false,
-      fontSize: Number(els.subtitleFontSizeNumber?.value || 30),
-      centerY: Number(els.subtitleCenterYNumber?.value || 1140)
+      fontSize: Number(els.subtitleFontSizeNumber?.value || 36),
+      centerY: Number(els.subtitleCenterYNumber?.value || 960),
+      textColor: els.subtitleTextColor?.value || "white"
     },
     expansionSizes: state.expansionSizes.map(({ targetWidth, targetHeight }) => ({ targetWidth, targetHeight }))
   };
@@ -1002,20 +1006,22 @@ function subtitleControlValue(value, min, max, fallback) {
 function syncSubtitleStyleControls(settings = {}, changed = null) {
   const fontSource = changed === els.subtitleFontSizeRange || changed === els.subtitleFontSizeNumber
     ? changed.value
-    : settings.fontSize ?? els.subtitleFontSizeNumber?.value ?? 30;
+    : settings.fontSize ?? els.subtitleFontSizeNumber?.value ?? 36;
   const centerYSource = changed === els.subtitleCenterYRange || changed === els.subtitleCenterYNumber
     ? changed.value
-    : settings.centerY ?? els.subtitleCenterYNumber?.value ?? 1140;
-  const fontSize = subtitleControlValue(fontSource, 12, 96, 30);
-  const centerY = subtitleControlValue(centerYSource, 0, 1280, 1140);
+    : settings.centerY ?? els.subtitleCenterYNumber?.value ?? 960;
+  const fontSize = subtitleControlValue(fontSource, 12, 96, 36);
+  const centerY = subtitleControlValue(centerYSource, 0, 1280, 960);
+  const textColor = settings.textColor || els.subtitleTextColor?.value || "white";
   for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber]) {
     if (control) control.value = String(fontSize);
   }
   for (const control of [els.subtitleCenterYRange, els.subtitleCenterYNumber]) {
     if (control) control.value = String(centerY);
   }
+  if (els.subtitleTextColor) els.subtitleTextColor.value = textColor === "yellow" ? "yellow" : "white";
   const disabled = els.postProcessSubtitles?.checked === false;
-  for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber, els.subtitleCenterYRange, els.subtitleCenterYNumber]) {
+  for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber, els.subtitleCenterYRange, els.subtitleCenterYNumber, els.subtitleTextColor]) {
     if (control) control.disabled = disabled;
   }
 }
@@ -1378,8 +1384,9 @@ function restoreV2FromBatchDetail(detail = {}) {
   state.postProcessEndingAsset = postProcess.ending || null;
   if (els.postProcessSubtitles) els.postProcessSubtitles.checked = postProcess.subtitles?.enabled !== false;
   syncSubtitleStyleControls({
-    fontSize: postProcess.subtitles?.fontSize ?? 30,
-    centerY: postProcess.subtitles?.centerY ?? 1140
+    fontSize: postProcess.subtitles?.fontSize ?? 36,
+    centerY: postProcess.subtitles?.centerY ?? 960,
+    textColor: postProcess.subtitles?.textColor ?? "white"
   });
   state.expansionSizes = [];
   for (const item of Array.isArray(postProcess.expansionSizes) ? postProcess.expansionSizes : []) {
@@ -1978,6 +1985,66 @@ function collectEditablePlans() {
   });
 }
 
+async function pollReferenceVideoCheckJob(jobId, localPreviewUrl = "") {
+  if (!jobId) throw new Error("参考视频检查任务缺少 jobId");
+  let consecutivePollFailures = 0;
+  return new Promise((resolve, reject) => {
+    let stopped = false;
+    let timer = null;
+    const stop = () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+    };
+    const schedule = (delay) => {
+      if (stopped) return;
+      timer = window.setTimeout(tick, delay);
+    };
+    async function tick() {
+      if (stopped) return;
+      try {
+        const job = await api(`/api/wangzhuan/reference-videos/check-jobs/${encodeURIComponent(jobId)}`);
+        state.referenceVideoCheckJob = job;
+        if (consecutivePollFailures > 0) {
+          log("参考视频检查查询已恢复");
+          consecutivePollFailures = 0;
+        }
+        const progressText = Number.isFinite(Number(job.progress)) ? `（${job.progress}%）` : "";
+        els.referenceUploadStatus.textContent = job.message
+          ? `${job.message}${progressText}`
+          : `参考视频后台检查中${progressText}`;
+        if (job.status === "succeeded") {
+          stop();
+          const referenceVideo = job.referenceVideo || job.result?.referenceVideo;
+          if (!referenceVideo?.referenceVideoId) {
+            reject(new Error("参考视频检查完成但缺少 referenceVideoId"));
+            return;
+          }
+          resolve(referenceVideo);
+          return;
+        }
+        if (job.status === "failed") {
+          stop();
+          reject(new Error(job.error?.message || "参考视频检查失败"));
+          return;
+        }
+        schedule(POLL_INTERVAL_MS);
+      } catch (error) {
+        consecutivePollFailures += 1;
+        if (consecutivePollFailures >= 3) {
+          stop();
+          reject(error);
+          return;
+        }
+        els.referenceUploadStatus.textContent = `参考视频检查查询失败，正在重试：${error.message}`;
+        schedule(pollRetryDelayMs(consecutivePollFailures));
+      }
+    }
+    els.referenceUploadStatus.textContent = "视频已上传，正在后台检查参考视频...";
+    renderVideoPreview(localPreviewUrl);
+    schedule(300);
+  });
+}
+
 async function uploadReferenceVideo() {
   const file = els.referenceFile?.files?.[0];
   if (!file) return;
@@ -2024,21 +2091,24 @@ async function uploadReferenceVideo() {
     form.append("mimeType", file.type || "application/octet-stream");
     form.append("fileHash", fileHash);
     form.append("sizeBytes", String(file.size || 0));
-    els.referenceUploadStatus.textContent = "正在上传并检查参考视频...";
-    const data = await api("/api/wangzhuan/reference-videos/check", {
+    els.referenceUploadStatus.textContent = "正在上传参考视频，上传完成后将转入后台检查...";
+    const job = await api("/api/wangzhuan/reference-videos/check-jobs", {
       method: "POST",
       headers: {},
       body: form
     });
-    state.referenceVideo = data.referenceVideo;
+    state.referenceVideoCheckJob = job;
+    log("参考视频上传完成，后台检查任务已提交");
+    const referenceVideo = await pollReferenceVideoCheckJob(job.referenceVideoCheckJobId || job.id, localUrl);
+    state.referenceVideo = referenceVideo;
     resetDecompositionDraft({ clearForm: true });
     ensureBatchName();
     renderVideoPreview(state.referenceVideo.previewUrl || localUrl);
-    els.referenceUploadStatus.textContent = "参考视频已上传";
+    els.referenceUploadStatus.textContent = "参考视频已上传并检查完成";
     els.referenceBox.textContent = `${state.referenceVideo.referenceVideoId} · ${state.referenceVideo.durationSec || "-"}s · ${state.referenceVideo.ratio || "-"}`;
     els.draftDecompositionBtn.disabled = false;
     renderTasks();
-    log("参考视频上传完成");
+    log("参考视频检查完成");
     startDecompositionJob().catch((error) => {
       els.decompositionStatus.hidden = false;
       els.decompositionStatus.textContent = `自动启动拆解失败：${error.message}`;
@@ -3435,7 +3505,7 @@ function startNewTask() {
   state.loggedTaskFailures = new Set();
   state.postProcessEndingAsset = null;
   if (els.postProcessSubtitles) els.postProcessSubtitles.checked = true;
-  syncSubtitleStyleControls({ fontSize: 30, centerY: 1140 });
+  syncSubtitleStyleControls({ fontSize: 36, centerY: 960, textColor: "white" });
   state.expansionSizes = [];
   $("#wzBatchName").value = generatedBatchName();
   els.referenceFile.value = "";
@@ -3585,6 +3655,7 @@ els.stopBatchBtn?.addEventListener("click", () => stopBatch().catch((error) => s
 els.runQcBtn?.addEventListener("click", () => runVideoQc().catch((error) => showError(error, "视频质检失败")));
 els.saveDraftBtn?.addEventListener("click", () => saveDraftBatch().catch((error) => showError(error, "草稿保存失败")));
 els.postProcessSubtitles?.addEventListener("change", () => syncSubtitleStyleControls());
+els.subtitleTextColor?.addEventListener("change", () => syncSubtitleStyleControls());
 for (const control of [
   els.subtitleFontSizeRange,
   els.subtitleFontSizeNumber,
@@ -3712,7 +3783,7 @@ renderAssetReviewState();
 renderPlanEditors([]);
 renderDisclaimerOverlayPreview();
 renderPostProcessEndingPreview();
-syncSubtitleStyleControls({ fontSize: 30, centerY: 1140 });
+syncSubtitleStyleControls({ fontSize: 36, centerY: 960, textColor: "white" });
 renderExpansionSizes();
 renderTasks();
 renderLogs();

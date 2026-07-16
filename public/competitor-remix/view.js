@@ -57,9 +57,10 @@ function coordinateSummary(draft) {
 
 function visualEditorTemplate(capabilityId, modeId, draft) {
   const isKframe = capabilityId === "remove" && modeId === "kframe";
+  const isSticker = capabilityId === "mask" && modeId === "sticker";
   const controls = isKframe
     ? `<div class="remix-form-grid">${selectField("选择工具", "promptType", draft.promptType, [["box", "框选"], ["point", "点选"]])}${selectField("点类型", "pointLabel", draft.pointLabel, [["positive", "目标点"], ["negative", "排除点"]])}${field("当前时间（秒）", "frameTime", draft.frameTime, { type: "number", min: 0, step: 0.01 })}${field("换算帧号（30 fps）", "frameIndex", draft.frameIndex, { type: "number", min: 0, step: 1 })}</div><input id="remixFrameSlider" type="range" min="0" max="0" step="1" value="${valueAttr(draft.frameIndex)}" aria-label="K 帧位置" /><div class="remix-actions"><button type="button" class="ghost" data-editor-action="use-current-frame">使用播放器当前帧</button><button type="button" class="ghost" data-editor-action="undo-point">撤销点</button><button type="button" class="ghost" data-editor-action="clear">清除选择</button></div><div id="remixCoordinateSummary" class="remix-coordinate-summary">${escapeHtml(coordinateSummary(draft))}</div>${advanced(`${field("sample_fps", "sampleFps", draft.sampleFps, { type: "number", min: 0, max: 10, step: 0.1 })}${field("max_frames", "maxFrames", draft.maxFrames, { type: "number", min: 1, max: 1000, step: 1 })}${selectField("removal_engine", "removalEngine", draft.removalEngine, [["configured", "configured"], ["lama", "lama"], ["fallback_blur", "fallback_blur"]])}${field("mask_threshold", "maskThreshold", draft.maskThreshold, { type: "number", min: 0, max: 255, step: 1 })}${priorityField(draft)}`)}`
-    : `<div class="remix-actions"><button type="button" class="ghost" data-editor-action="sync-source-time">同步播放器时间</button><button type="button" class="ghost" data-editor-action="clear">清除区域</button></div><div id="remixCoordinateSummary" class="remix-coordinate-summary">${escapeHtml(coordinateSummary(draft))}</div>${capabilityId === "remove" ? `<div class="remix-form-grid">${field("开始时间（毫秒）", "startMs", draft.startMs, { type: "number", min: 0, step: 1 })}${field("结束时间（毫秒）", "endMs", draft.endMs, { type: "number", min: 1, step: 1 })}</div>${advanced(`${field("mask_threshold", "maskThreshold", draft.maskThreshold, { type: "number", min: 0, max: 255, step: 1 })}${priorityField(draft)}`)}` : `${advanced(`${field("模糊强度", "blurSigma", draft.blurSigma, { type: "number", min: 0, max: 200, step: 1 })}${field("填充颜色", "fillColor", draft.fillColor, { type: "color" })}${field("填充透明度", "fillOpacity", draft.fillOpacity, { type: "number", min: 0, max: 1, step: 0.05 })}${field("mask_threshold", "maskThreshold", draft.maskThreshold, { type: "number", min: 0, max: 255, step: 1 })}${priorityField(draft)}`)}`}`;
+    : `<div class="remix-actions"><button type="button" class="ghost" data-editor-action="sync-source-time">同步播放器时间</button><button type="button" class="ghost" data-editor-action="clear">清除区域</button></div><div id="remixCoordinateSummary" class="remix-coordinate-summary">${escapeHtml(coordinateSummary(draft))}</div>${capabilityId === "remove" ? `<div class="remix-form-grid">${field("开始时间（毫秒）", "startMs", draft.startMs, { type: "number", min: 0, step: 1 })}${field("结束时间（毫秒）", "endMs", draft.endMs, { type: "number", min: 1, step: 1 })}</div>${advanced(`${field("mask_threshold", "maskThreshold", draft.maskThreshold, { type: "number", min: 0, max: 255, step: 1 })}${priorityField(draft)}`)}` : isSticker ? `<div class="remix-sticker-control"><input id="remixStickerFile" type="file" accept="image/png,image/jpeg,image/webp" hidden /><button type="button" class="ghost" data-editor-action="choose-sticker">选择贴纸</button><div id="remixStickerPreview" class="remix-sticker-preview" hidden><img alt="贴纸预览" /><span></span><button type="button" class="ghost" data-editor-action="remove-sticker">移除</button></div></div><div class="remix-form-grid">${selectField("贴纸缩放", "stickerScaleMode", draft.stickerScaleMode, [["short_side", "小边对齐（默认）"], ["long_side", "大边对齐"]])}</div>${advanced(priorityField(draft))}` : `${advanced(`${field("模糊强度", "blurSigma", draft.blurSigma, { type: "number", min: 0, max: 200, step: 1 })}${field("填充颜色", "fillColor", draft.fillColor, { type: "color" })}${field("填充透明度", "fillOpacity", draft.fillOpacity, { type: "number", min: 0, max: 1, step: 0.05 })}${field("mask_threshold", "maskThreshold", draft.maskThreshold, { type: "number", min: 0, max: 255, step: 1 })}${priorityField(draft)}`)}`}`;
   return `<div class="remix-editor-layout">${editorStageTemplate()}<div class="remix-editor-controls">${controls}</div></div>`;
 }
 
@@ -145,6 +146,53 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
   let editorKey = "";
   let regionEditor = null;
   let submitting = false;
+  let stickerFile = null;
+  let stickerObjectUrl = "";
+  let stickerDataUrl = "";
+
+  function renderStickerPreview() {
+    const preview = root.querySelector("#remixStickerPreview");
+    if (!preview) return;
+    preview.hidden = !stickerFile;
+    const image = preview.querySelector("img");
+    const name = preview.querySelector("span");
+    if (image) image.src = stickerFile ? stickerObjectUrl : "";
+    if (name) name.textContent = stickerFile?.name || "";
+  }
+
+  function clearSticker() {
+    if (stickerObjectUrl) globalThis.URL?.revokeObjectURL?.(stickerObjectUrl);
+    stickerFile = null;
+    stickerObjectUrl = "";
+    stickerDataUrl = "";
+    const input = root.querySelector("#remixStickerFile");
+    if (input) input.value = "";
+    renderStickerPreview();
+  }
+
+  function selectSticker(file) {
+    if (!file) return;
+    if (!new Set(["image/png", "image/jpeg", "image/webp"]).has(String(file.type || "").toLowerCase())) {
+      throw new Error("贴纸仅支持 PNG、JPG 或 WebP 图片");
+    }
+    if (Number(file.size || 0) > 10 * 1024 * 1024) throw new Error("贴纸文件不能超过 10 MB");
+    clearSticker();
+    stickerFile = file;
+    stickerObjectUrl = globalThis.URL?.createObjectURL?.(file) || "";
+    renderStickerPreview();
+  }
+
+  async function prepareStickerDataUrl() {
+    if (!stickerFile) return "";
+    if (stickerDataUrl) return stickerDataUrl;
+    stickerDataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("贴纸读取失败"));
+      reader.readAsDataURL(stickerFile);
+    });
+    return stickerDataUrl;
+  }
 
   function selection(state = store.getState()) {
     const capability = getCapability(state.selectedCapabilityId) || CAPABILITIES[0];
@@ -310,6 +358,7 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
       regionEditor?.destroy();
       regionEditor = null;
       elements.editorContent.innerHTML = formTemplate(capability.id, mode.id, draft);
+      renderStickerPreview();
       if (["kframe", "region"].includes(mode.editor)) bindVisualEditor(capability, mode);
     }
     if (["kframe", "region"].includes(mode.editor)) configureEditor(state, capability, mode, draft);
@@ -319,7 +368,10 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     const validation = validateDraft({ capabilityId: capability.id, modeId: mode.id, source: state.source, draft });
     elements.readiness.innerHTML = validation.requirements.map((item) => `<div class="remix-ready-item ${item.ready ? "ready" : ""}"><span class="remix-ready-mark">${item.ready ? "✓" : "×"}</span><span>${escapeHtml(item.label)}</span></div>`).join("");
     elements.submit.disabled = submitting || !validation.ok || !state.user;
-    elements.submit.textContent = submitting ? (state.source.status === "preparing" ? "准备视频中" : "提交中") : "提交任务";
+    const stickerMode = capability.id === "mask" && mode.id === "sticker";
+    elements.submit.textContent = submitting
+      ? (state.source.status === "preparing" ? "准备视频中" : "提交中")
+      : stickerMode ? (stickerFile ? "去除并覆盖贴纸" : "仅去除框选区域") : "提交任务";
     elements.submit.title = !state.user ? "请先登录" : validation.ok ? "" : Object.values(validation.errors)[0];
   }
 
@@ -334,7 +386,8 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     const failure = failureMessage(run);
     const download = outputUrl(run);
     const archive = run.taskManagementUrl || (run.remixId ? taskSpaceHref("remix", run.remixId) : "/wangzhuan-tasks.html");
-    elements.runDetail.innerHTML = `<dl><dt>状态</dt><dd>${escapeHtml(statusLabel(run.status))}</dd><dt>排队</dt><dd>${escapeHtml(queueLabel(run))}</dd><dt>任务 ID</dt><dd>${escapeHtml(run.providerJobId)}</dd>${run.connectionError ? `<dt>连接</dt><dd>${escapeHtml(run.connectionError)}</dd>` : ""}${failure && !run.connectionError ? `<dt>失败原因</dt><dd>${escapeHtml(String(failure))}</dd>` : ""}</dl><div class="remix-run-actions"><button type="button" class="ghost" data-run-action="refresh" data-run-id="${escapeHtml(run.runId)}">刷新</button>${ACTIVE_STATUSES.has(run.status) ? `<button type="button" class="ghost" data-run-action="cancel" data-run-id="${escapeHtml(run.runId)}">取消</button>` : ""}${["failed", "canceled", "stopped"].includes(run.status) ? `<button type="button" class="ghost" data-run-action="retry" data-run-id="${escapeHtml(run.runId)}">重试</button>` : ""}${["succeeded", "review_required"].includes(run.status) ? `<button type="button" class="ghost" data-run-action="result" data-run-id="${escapeHtml(run.runId)}">读取结果</button>` : ""}${download ? `<a class="mini ghost" href="${escapeHtml(download)}" target="_blank" rel="noopener">下载输出</a>` : ""}<a class="mini ghost" href="${escapeHtml(archive)}">任务管理</a></div>${run.result ? `<pre class="remix-result-data">${escapeHtml(JSON.stringify(run.result, null, 2))}</pre>` : run.resultError ? `<div class="remix-inline-error">${escapeHtml(run.resultError)}</div>` : ""}`;
+    const remoteActions = run.transport !== "local";
+    elements.runDetail.innerHTML = `<dl><dt>状态</dt><dd>${escapeHtml(statusLabel(run.status))}</dd><dt>排队</dt><dd>${escapeHtml(queueLabel(run))}</dd><dt>任务 ID</dt><dd>${escapeHtml(run.providerJobId)}</dd>${run.connectionError ? `<dt>连接</dt><dd>${escapeHtml(run.connectionError)}</dd>` : ""}${failure && !run.connectionError ? `<dt>失败原因</dt><dd>${escapeHtml(String(failure))}</dd>` : ""}</dl><div class="remix-run-actions"><button type="button" class="ghost" data-run-action="refresh" data-run-id="${escapeHtml(run.runId)}">刷新</button>${remoteActions && ACTIVE_STATUSES.has(run.status) ? `<button type="button" class="ghost" data-run-action="cancel" data-run-id="${escapeHtml(run.runId)}">取消</button>` : ""}${remoteActions && ["failed", "canceled", "stopped"].includes(run.status) ? `<button type="button" class="ghost" data-run-action="retry" data-run-id="${escapeHtml(run.runId)}">重试</button>` : ""}${["succeeded", "review_required"].includes(run.status) ? `<button type="button" class="ghost" data-run-action="result" data-run-id="${escapeHtml(run.runId)}">读取结果</button>` : ""}${download ? `<a class="mini ghost" href="${escapeHtml(download)}" target="_blank" rel="noopener">下载输出</a>` : ""}<a class="mini ghost" href="${escapeHtml(archive)}">任务管理</a></div>${run.result ? `<pre class="remix-result-data">${escapeHtml(JSON.stringify(run.result, null, 2))}</pre>` : run.resultError ? `<div class="remix-inline-error">${escapeHtml(run.resultError)}</div>` : ""}`;
   }
 
   function render(state = store.getState()) {
@@ -388,7 +441,14 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
       const maskSource = capability.id === "remove" && mode.id === "fixed_region"
         ? buildManualMaskDataUrl(draft.box, source)
         : "";
-      const payload = buildPayload({ capabilityId: capability.id, modeId: mode.id, source, draft, maskSource });
+      const stickerSource = capability.id === "mask" && mode.id === "sticker" ? await prepareStickerDataUrl() : "";
+      const payload = buildPayload({
+        capabilityId: capability.id,
+        modeId: mode.id,
+        source,
+        draft: stickerSource ? { ...draft, stickerDataUrl: stickerSource } : draft,
+        maskSource
+      });
       const run = await runner.submit({
         capabilityId: capability.id,
         modeId: mode.id,
@@ -461,6 +521,15 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     if (["promptType", "pointLabel"].includes(input.dataset.field)) configureEditor(store.getState(), capability, mode, store.getDraft(capability.id, mode.id));
   });
   elements.editorContent.addEventListener("change", (event) => {
+    if (event.target.matches("#remixStickerFile")) {
+      try {
+        selectSticker(event.target.files?.[0]);
+        renderReadiness(store.getState(), selection().capability, selection().mode, selection().draft);
+      } catch (error) {
+        showFormError(error?.message || "贴纸文件不可用");
+      }
+      return;
+    }
     const input = event.target.closest("[data-field]");
     if (!input || !["frameTime", "frameIndex"].includes(input.dataset.field)) return;
     const { capability, mode, draft } = selection();
@@ -473,6 +542,11 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     if (!button) return;
     const { capability, mode } = selection();
     if (button.dataset.editorAction === "clear") regionEditor?.clear();
+    if (button.dataset.editorAction === "choose-sticker") root.querySelector("#remixStickerFile")?.click();
+    if (button.dataset.editorAction === "remove-sticker") {
+      clearSticker();
+      renderReadiness(store.getState(), capability, mode, store.getDraft(capability.id, mode.id));
+    }
     if (button.dataset.editorAction === "undo-point") regionEditor?.undoPoint();
     if (button.dataset.editorAction === "use-current-frame") {
       const time = Number(elements.sourceVideo.currentTime || 0);
@@ -491,6 +565,7 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
     store.updateDraft(capability.id, mode.id, { frameIndex, frameTime: frameIndex / 30 });
   });
   elements.resetDraft.addEventListener("click", () => {
+    clearSticker();
     editorKey = "";
     store.resetCurrentDraft();
     showFormError("");
@@ -523,6 +598,7 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
   function destroy() {
     unsubscribe();
     regionEditor?.destroy();
+    clearSticker();
   }
 
   return { render, destroy, buildManualMaskDataUrl };

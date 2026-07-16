@@ -293,10 +293,17 @@ export function buildSeedanceGenerationPayload({
   return payload;
 }
 
+/** Seedance upstream accepts integer durations in [4, 15] only. */
+export const SEEDANCE_DURATION_MIN_SEC = 4;
+export const SEEDANCE_DURATION_MAX_SEC = 15;
+
 export function normalizeSeedancePayloadDuration(duration = 15) {
   const numericDuration = Number(duration);
   if (!Number.isFinite(numericDuration) || numericDuration <= 0) return 15;
-  return Math.max(1, Math.ceil(numericDuration));
+  return Math.max(
+    SEEDANCE_DURATION_MIN_SEC,
+    Math.min(SEEDANCE_DURATION_MAX_SEC, Math.ceil(numericDuration))
+  );
 }
 
 function configuredProvider(context = {}, capability = {}) {

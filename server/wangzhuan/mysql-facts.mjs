@@ -205,6 +205,8 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "running", "qc", "stitch_progress", null, 0],
   ["workflow_run", "stitching", "partial_failed", "stitch_progress", null, 1],
   ["workflow_run", "partial_failed", "stitching", "stitch_progress", null, 0],
+  ["workflow_run", "qc", "stitching", "stitch_progress", null, 0],
+  ["workflow_run", "failed", "stitching", "stitch_progress", null, 0],
   ["workflow_run", "partial_failed", "qc", "stitch_progress", null, 0],
   ["workflow_run", "partial_failed", "qc", "stitch_completed", null, 0],
   ["workflow_run", "stitching", "qc", "stitch_completed", null, 0],
@@ -3724,6 +3726,11 @@ function shouldScheduleUpstreamPoll(batch = {}) {
   const durationSec = Number(batch.estimate?.durationSec || 15);
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   if (durationSec === 15) {
+    if (schedulerBatchNeedsStitch(batch)) {
+      return !outputs.some((output) => output.kind === "stitched_video")
+        && tasks.some((task) => task.status === "downloaded")
+        && !tasks.some((task) => task.status === "waiting_upstream" || task.status === "pending");
+    }
     return !outputs.some((output) => output.kind === "segment_video")
       && tasks.some((task) => task.status === "downloaded");
   }
@@ -3733,6 +3740,45 @@ function shouldScheduleUpstreamPoll(batch = {}) {
       && !tasks.some((task) => task.status === "waiting_upstream" || task.status === "pending");
   }
   return false;
+}
+
+function schedulerPostProcessConfig(batch = {}) {
+  const candidates = [
+    batch.request?.postProcess,
+    batch.estimate?.request?.postProcess,
+    batch.templateSnapshot?.draft?.postProcess,
+    batch.templateSnapshot?.draft?.branches?.[0]?.postProcess
+  ];
+  return candidates.find((item) => item && typeof item === "object" && !Array.isArray(item)) || {};
+}
+
+function schedulerRequiresPostProcess(batch = {}) {
+  const postProcess = schedulerPostProcessConfig(batch);
+  const subtitles = postProcess.subtitles;
+  return Boolean(
+    postProcess.ending
+    || (subtitles && subtitles.enabled !== false)
+    || (Array.isArray(postProcess.expansionSizes) && postProcess.expansionSizes.length)
+  );
+}
+
+function schedulerBatchHasMultiSliceGroups(batch = {}) {
+  const scriptsById = new Map((Array.isArray(batch.scripts) ? batch.scripts : []).map((script) => [script.scriptId, script]));
+  const groups = new Map();
+  for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
+    const script = scriptsById.get(task.scriptId);
+    if (!script) continue;
+    const key = `${script.branchId || "default"}:${script.branchVariantIndex || script.variantIndex || 1}`;
+    groups.set(key, (groups.get(key) || 0) + 1);
+  }
+  if ([...groups.values()].some((count) => count > 1)) return true;
+  return Array.isArray(batch.scripts) && batch.scripts.some((script) => {
+    return Number(script.segmentIndex || 1) > 1 || Number(script.seedanceSliceIndex || 1) > 1;
+  });
+}
+
+function schedulerBatchNeedsStitch(batch = {}) {
+  return schedulerRequiresPostProcess(batch) || schedulerBatchHasMultiSliceGroups(batch);
 }
 
 async function syncUpstreamPollJob(conn, batch, runId) {

@@ -70,12 +70,9 @@ export const CAPABILITIES = Object.freeze([
         fillOpacity: 1,
         priority: 0
       }),
-      mode("sticker", "贴纸或水印模糊", "sticker_blur", "region", {
+      mode("sticker", "贴纸或水印模糊", "local_sticker_overlay", "region", {
         box: null,
-        blurSigma: 40,
-        maskThreshold: 1,
-        fillColor: "#000000",
-        fillOpacity: 1,
+        stickerScaleMode: "short_side",
         priority: 0
       })
     ])
