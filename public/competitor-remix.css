@@ -1,0 +1,805 @@
+:root {
+  --remix-bg: #101114;
+  --remix-surface: #18191d;
+  --remix-surface-2: #202126;
+  --remix-line: rgba(255, 255, 255, 0.1);
+  --remix-line-strong: rgba(255, 255, 255, 0.18);
+  --remix-text: #f5f5f2;
+  --remix-muted: #9b9da5;
+  --remix-accent: #65c78d;
+  --remix-accent-soft: rgba(101, 199, 141, 0.14);
+  --remix-danger: #ef7f78;
+  --remix-warning: #dfb25d;
+}
+
+.remix-page {
+  overflow: hidden;
+  background: var(--remix-bg);
+}
+
+.remix-shell {
+  display: grid;
+  grid-template-columns: minmax(210px, 250px) minmax(0, 1fr) minmax(280px, 340px);
+  width: calc(100% - 226px);
+  height: calc(100dvh - 64px);
+  margin: 64px 0 0 226px;
+  color: var(--remix-text);
+  background: var(--remix-bg);
+}
+
+.remix-capabilities,
+.remix-runs {
+  min-width: 0;
+  overflow: auto;
+  background: #141518;
+}
+
+.remix-capabilities {
+  border-right: 1px solid var(--remix-line);
+}
+
+.remix-runs {
+  border-left: 1px solid var(--remix-line);
+}
+
+.remix-workspace {
+  min-width: 0;
+  overflow: auto;
+  padding: 24px clamp(18px, 2.5vw, 36px) 56px;
+}
+
+.remix-rail-head,
+.remix-workspace-head,
+.remix-section-head,
+.remix-run-heading,
+.remix-source-row,
+.remix-file-row,
+.remix-actions,
+.remix-run-actions {
+  display: flex;
+  align-items: center;
+}
+
+.remix-rail-head {
+  min-height: 88px;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 18px;
+  border-bottom: 1px solid var(--remix-line);
+}
+
+.remix-rail-head span,
+.remix-workspace-head span,
+.remix-section-head > div > span,
+.remix-status-text,
+.remix-capability-copy small,
+.remix-run-card small,
+.remix-field-hint,
+.remix-file-row span {
+  color: var(--remix-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.remix-rail-head strong {
+  font-size: 16px;
+}
+
+.remix-capability-list {
+  display: grid;
+  padding: 10px;
+}
+
+.remix-capability {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--remix-text);
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
+}
+
+.remix-capability:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.remix-capability[aria-current="true"] {
+  background: var(--remix-accent-soft);
+}
+
+.remix-capability[aria-current="true"]::before {
+  position: absolute;
+  inset: 10px auto 10px 0;
+  width: 3px;
+  content: "";
+  background: var(--remix-accent);
+}
+
+.remix-capability-index {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--remix-line);
+  border-radius: 6px;
+  color: var(--remix-muted);
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.remix-capability-copy {
+  min-width: 0;
+}
+
+.remix-capability-copy strong,
+.remix-capability-copy small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.remix-capability-copy strong {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.remix-capability-count {
+  min-width: 22px;
+  padding-top: 2px;
+  color: var(--remix-accent);
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: right;
+}
+
+.remix-workspace-head {
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 66px;
+  margin-bottom: 18px;
+}
+
+.remix-workspace-head h1 {
+  margin: 3px 0 0;
+  font-size: clamp(22px, 2vw, 30px);
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.remix-workspace-head span {
+  color: var(--remix-accent);
+}
+
+.remix-source,
+.remix-editor,
+.remix-submit-panel,
+.remix-run-panel {
+  min-width: 0;
+}
+
+.remix-source,
+.remix-editor {
+  padding: 18px 0 24px;
+  border-top: 1px solid var(--remix-line);
+}
+
+.remix-editor {
+  margin-top: 4px;
+}
+
+.remix-drop-active {
+  outline: 2px solid var(--remix-accent);
+  outline-offset: -6px;
+  background: var(--remix-accent-soft);
+}
+
+.remix-section-head {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.remix-section-head > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.remix-section-head h2,
+.remix-run-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.remix-section-head.compact {
+  margin-bottom: 12px;
+}
+
+.remix-segments,
+.remix-mode-tabs {
+  display: inline-flex;
+  max-width: 100%;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--remix-line);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.remix-segments button,
+.remix-mode-tabs button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--remix-muted);
+  background: transparent;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.remix-segments button[aria-pressed="true"],
+.remix-mode-tabs button[aria-selected="true"] {
+  color: var(--remix-text);
+  background: var(--remix-surface-2);
+}
+
+.remix-source-row,
+.remix-file-row {
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.remix-file-row[hidden],
+#remixVideoSourceControls[hidden],
+#remixReportSource[hidden],
+.remix-editor-empty[hidden] {
+  display: none;
+}
+
+.remix-source-row label {
+  flex: 0 0 auto;
+  color: var(--remix-muted);
+  font-size: 12px;
+}
+
+.remix-source-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.remix-file-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.remix-page input,
+.remix-page select,
+.remix-page textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--remix-line-strong);
+  border-radius: 6px;
+  color: var(--remix-text);
+  background: #121316;
+  box-shadow: none;
+}
+
+.remix-page textarea {
+  padding: 10px 11px;
+  resize: vertical;
+}
+
+.remix-page input:focus,
+.remix-page select:focus,
+.remix-page textarea:focus,
+.remix-page button:focus-visible,
+.remix-editor-stage:focus-visible {
+  outline: 2px solid rgba(101, 199, 141, 0.8);
+  outline-offset: 2px;
+}
+
+.remix-source-video {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  margin-top: 14px;
+  border: 1px solid var(--remix-line);
+  border-radius: 6px;
+  background: #050505;
+}
+
+.remix-source-video[hidden] {
+  display: none;
+}
+
+.remix-mode-tabs {
+  display: flex;
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+.remix-form {
+  display: grid;
+  gap: 14px;
+}
+
+.remix-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.remix-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--remix-muted);
+  font-size: 12px;
+}
+
+.remix-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--remix-text);
+  font-size: 13px;
+}
+
+.remix-check input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.remix-advanced {
+  border-top: 1px solid var(--remix-line);
+  padding-top: 10px;
+}
+
+.remix-advanced summary {
+  color: var(--remix-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.remix-advanced .remix-form-grid {
+  margin-top: 12px;
+}
+
+.remix-advanced:not([open]) > .remix-form-grid {
+  display: none;
+}
+
+.remix-field-wide {
+  grid-column: 1 / -1;
+}
+
+.remix-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(230px, 300px);
+  gap: 16px;
+  align-items: start;
+}
+
+.remix-editor-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 380px;
+  aspect-ratio: 9 / 16;
+  max-height: 620px;
+  border: 1px solid var(--remix-line-strong);
+  border-radius: 6px;
+  background: #050505;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.remix-editor-stage video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.remix-overlay-content {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.remix-selection-box {
+  position: absolute;
+  border: 2px solid var(--remix-accent);
+  background: rgba(101, 199, 141, 0.18);
+}
+
+.remix-selection-point {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--remix-accent);
+  transform: translate(-50%, -50%);
+}
+
+.remix-selection-point.negative {
+  background: var(--remix-danger);
+}
+
+.remix-editor-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  color: var(--remix-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  pointer-events: none;
+}
+
+.remix-editor-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.remix-actions,
+.remix-run-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remix-actions button,
+.remix-run-actions button,
+.remix-run-actions a {
+  min-height: 34px;
+}
+
+.remix-coordinate-summary {
+  min-height: 48px;
+  padding: 10px;
+  border-left: 2px solid var(--remix-line-strong);
+  color: var(--remix-muted);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.remix-sticker-control,
+.remix-sticker-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.remix-sticker-preview[hidden] {
+  display: none;
+}
+
+.remix-sticker-preview img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border: 1px solid var(--remix-line);
+  background: #fff;
+}
+
+.remix-sticker-preview span {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--remix-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remix-submit-panel,
+.remix-run-panel {
+  padding: 18px;
+}
+
+.remix-submit-panel {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--remix-line);
+  background: #141518;
+}
+
+.remix-readiness {
+  display: grid;
+  gap: 8px;
+}
+
+.remix-ready-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--remix-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.remix-ready-mark {
+  color: var(--remix-danger);
+  font-weight: 700;
+}
+
+.remix-ready-item.ready .remix-ready-mark {
+  color: var(--remix-accent);
+}
+
+.remix-inline-error {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--remix-danger);
+  color: #ffd1ce;
+  background: rgba(239, 127, 120, 0.08);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remix-submit {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 6px;
+  color: #0a1a10;
+  background: var(--remix-accent);
+  box-shadow: none;
+  font-weight: 700;
+}
+
+.remix-submit:hover:not(:disabled) {
+  background: #7bd6a0;
+}
+
+.remix-submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.remix-submit:disabled {
+  color: #85888d;
+  background: #2a2b30;
+}
+
+.remix-run-heading {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.remix-run-heading span {
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--remix-muted);
+}
+
+.remix-run-list {
+  display: grid;
+  gap: 6px;
+}
+
+.remix-run-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--remix-text);
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
+}
+
+.remix-run-card:hover,
+.remix-run-card.active {
+  border-color: var(--remix-line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.remix-run-card strong,
+.remix-run-card small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.remix-run-status {
+  color: var(--remix-muted);
+  font-size: 11px;
+}
+
+.remix-run-status.running,
+.remix-run-status.queued,
+.remix-run-status.pending {
+  color: var(--remix-warning);
+}
+
+.remix-run-status.succeeded {
+  color: var(--remix-accent);
+}
+
+.remix-run-status.failed,
+.remix-run-status.canceled {
+  color: var(--remix-danger);
+}
+
+.remix-run-detail {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--remix-line);
+}
+
+.remix-run-detail:empty,
+.remix-run-list:empty {
+  display: block;
+  min-height: 72px;
+}
+
+.remix-run-list:empty::after {
+  content: "提交任务后，作业会显示在这里";
+  color: var(--remix-muted);
+  font-size: 12px;
+  line-height: 72px;
+}
+
+.remix-run-detail dl {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 7px 10px;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.remix-run-detail dt {
+  color: var(--remix-muted);
+}
+
+.remix-run-detail dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.remix-result-data {
+  overflow: auto;
+  max-height: 280px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--remix-line);
+  border-radius: 6px;
+  color: #cacbd0;
+  background: #0c0d0f;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .remix-shell {
+    grid-template-columns: 190px minmax(0, 1fr) 280px;
+  }
+
+  .remix-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .remix-editor-stage {
+    width: min(100%, 440px);
+  }
+}
+
+@media (max-width: 980px) {
+  .remix-page {
+    overflow: auto;
+  }
+
+  .remix-shell {
+    grid-template-columns: 1fr;
+    width: 100%;
+    height: auto;
+    min-height: calc(100dvh - 64px);
+    margin-left: 0;
+  }
+
+  .remix-capabilities,
+  .remix-runs {
+    overflow: visible;
+    border: 0;
+  }
+
+  .remix-capabilities {
+    border-bottom: 1px solid var(--remix-line);
+  }
+
+  .remix-rail-head {
+    min-height: 58px;
+    padding: 10px 16px;
+  }
+
+  .remix-capability-list {
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+
+  .remix-capability {
+    flex: 0 0 210px;
+  }
+
+  .remix-runs {
+    border-top: 1px solid var(--remix-line);
+  }
+
+  .remix-submit-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .remix-page .platform-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-inline: 10px;
+  }
+
+  .remix-page .topbar-links {
+    display: none;
+  }
+
+  .remix-shell {
+    margin-top: 64px;
+  }
+
+  .remix-workspace {
+    padding: 14px 14px 34px;
+  }
+
+  .remix-workspace-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .remix-source-row,
+  .remix-file-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .remix-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .remix-editor-stage {
+    width: 100%;
+    min-height: 320px;
+  }
+
+  .remix-mode-tabs {
+    width: 100%;
+  }
+
+  .remix-mode-tabs button {
+    flex: 0 0 auto;
+  }
+
+  .remix-submit-panel,
+  .remix-run-panel {
+    padding: 16px 14px;
+  }
+}

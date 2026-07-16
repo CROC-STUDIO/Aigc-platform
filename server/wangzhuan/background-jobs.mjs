@@ -130,11 +130,13 @@ function clampProgress(value, ceiling = 99) {
 
 export function createBackgroundJob(type, runner, options = {}) {
   const idPrefix = {
+    reference_video_check: "refcheckjob",
     decomposition: "decompjob",
     seedance_plan: "planjob",
     codex_seedance_prompt: "codexpromptjob",
     auto_seedance_prompt: "autopromptjob",
-    output_expansion: "expandjob"
+    output_expansion: "expandjob",
+    local_sticker_overlay: "localeditjob"
   }[type] || "bgjob";
   const context = options.context || null;
   const job = {
@@ -167,6 +169,7 @@ export function createBackgroundJob(type, runner, options = {}) {
 
     try {
       const result = await runner({
+        jobId: job.id,
         log(message, data) {
           const safeMessage = String(message || job.message);
           pushEvent(job, { type: "log", message: safeMessage, data });

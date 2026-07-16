@@ -212,7 +212,7 @@ test("prepareBatchForPipeline keeps 30s three-slice requests on two 15s tasks", 
   assert.deepEqual(prepared.tasks.map((task) => task.segmentRole), ["hook_slice", "proof_slice"]);
 });
 
-test("prepareBatchForPipeline fallback prompt uses coherent 16s slice duration", async () => {
+test("prepareBatchForPipeline clamps 16s fallback to 15s without splitting", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-16s-fallback-"));
   const prepared = await prepareBatchForPipeline(testContext(root), testBatch({
     durationSec: 16,
@@ -221,11 +221,11 @@ test("prepareBatchForPipeline fallback prompt uses coherent 16s slice duration",
 
   assert.equal(prepared.scripts.length, 1);
   assert.equal(prepared.tasks.length, 1);
-  assert.equal(prepared.scripts[0].durationSec, 16);
-  assert.equal(prepared.tasks[0].durationSec, 16);
+  assert.equal(prepared.scripts[0].durationSec, 15);
+  assert.equal(prepared.tasks[0].durationSec, 15);
   const prompt = await readFile(join(root, prepared.scripts[0].promptPath), "utf8");
-  assert.match(prompt, /Task: create a 16 second 9:16 Seedance image-to-video prompt\./);
-  assert.doesNotMatch(prompt, /Task: create a 15 second 9:16 Seedance image-to-video prompt\./);
+  assert.match(prompt, /Task: create a 15 second 9:16 Seedance image-to-video prompt\./);
+  assert.doesNotMatch(prompt, /Task: create a 16 second 9:16 Seedance image-to-video prompt\./);
 });
 
 test("prepareBatchForPipeline prefers decomposition seedanceSlices over mechanical slice plan", async () => {
@@ -319,11 +319,11 @@ test("targetSegmentCount overrides decomposition slice count", async () => {
     ]
   };
 
-  assert.equal(planSegmentMultiplier(batch), 1);
+  // targetSegmentCount=1 cannot merge 11+13 past Seedance's 15s ceiling.
+  assert.equal(planSegmentMultiplier(batch), 2);
   const prepared = await prepareBatchForPipeline(testContext(root), batch);
-  assert.equal(prepared.scripts.length, 1);
-  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [24]);
-  assert.equal(prepared.scripts[0].targetSegmentMerge, true);
+  assert.equal(prepared.scripts.length, 2);
+  assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [11, 13]);
 });
 
 test("adjustSlicePlanToTargetCount can split into selected segment count", () => {
@@ -335,6 +335,43 @@ test("adjustSlicePlanToTargetCount can split into selected segment count", () =>
   assert.deepEqual(adjusted.map((slice) => slice.segmentIndex), [1, 2]);
   assert.equal(adjusted[0].targetSegmentSplit, true);
   assert.equal(adjusted[1].targetSegmentSplit, true);
+});
+
+test("adjustSlicePlanToTargetCount refuses merges that exceed Seedance 15s max", () => {
+  const adjusted = adjustSlicePlanToTargetCount([
+    { segmentIndex: 1, startSec: 0, endSec: 12, durationSec: 12, segmentRole: "hook_slice" },
+    { segmentIndex: 2, startSec: 12, endSec: 24, durationSec: 12, segmentRole: "proof_slice" },
+    { segmentIndex: 3, startSec: 24, endSec: 41, durationSec: 17, segmentRole: "proof_slice" },
+    { segmentIndex: 4, startSec: 41, endSec: 59.681, durationSec: 18.681, segmentRole: "cta_slice" }
+  ], 2);
+
+  assert.deepEqual(adjusted.map((slice) => slice.durationSec), [12, 12, 15, 15]);
+  assert.equal(adjusted.length, 4);
+  assert.equal(adjusted[2].targetSegmentClamped, true);
+  assert.equal(adjusted[3].targetSegmentClamped, true);
+});
+
+test("adjustSlicePlanToTargetCount clamps 16-19s slices to 15s without splitting", () => {
+  const adjusted = adjustSlicePlanToTargetCount([
+    { segmentIndex: 1, startSec: 0, endSec: 17, durationSec: 17, segmentRole: "hook_slice" },
+    { segmentIndex: 2, startSec: 17, endSec: 35.681, durationSec: 18.681, segmentRole: "cta_slice" }
+  ], 2);
+
+  assert.deepEqual(adjusted.map((slice) => slice.durationSec), [15, 15]);
+  assert.equal(adjusted.length, 2);
+  assert.equal(adjusted[0].endSec, 15);
+  assert.equal(adjusted[1].startSec, 17);
+  assert.equal(adjusted[1].endSec, 32);
+});
+
+test("adjustSlicePlanToTargetCount splits slices above 19s then clamps leftovers", () => {
+  const adjusted = adjustSlicePlanToTargetCount([
+    { segmentIndex: 1, startSec: 0, endSec: 25, durationSec: 25, segmentRole: "hook_slice" }
+  ], null);
+
+  assert.equal(adjusted.length, 2);
+  assert.ok(adjusted.every((slice) => Number(slice.durationSec) <= 15));
+  assert.deepEqual(adjusted.map((slice) => slice.durationSec), [12, 13]);
 });
 
 test("prepareBatchForPipeline derives slices from storySegments when seedanceSlices are absent", async () => {

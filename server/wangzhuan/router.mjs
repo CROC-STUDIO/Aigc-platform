@@ -54,6 +54,7 @@ import {
 } from "./video-ops.mjs";
 import {
   archiveVideoOpsSubmission,
+  resolveVideoOpsArchive,
   syncVideoOpsJobArchive
 } from "./video-ops-archive.mjs";
 import { createBackgroundJob, getBackgroundJob, isPlanSignatureStale, listBackgroundJobs, planDraftSignature } from "./background-jobs.mjs";
@@ -63,6 +64,10 @@ import {
   normalizeExpansionRequest,
   runOutputExpansion
 } from "./output-expansion.mjs";
+import {
+  normalizeLocalStickerRequest,
+  runLocalStickerOverlayJob
+} from "./local-sticker-overlay.mjs";
 import {
   loadCodexPromptDraftFact,
   loadBatchDetailFromMysql,
@@ -133,6 +138,40 @@ function videoOpsRoute(pathname) {
   return { jobId: match[1] ? decodeURIComponent(match[1]) : "", action: match[2] || (match[1] ? "detail" : "collection") };
 }
 
+function localVideoEditRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/local-video-edits\/jobs(?:\/([^/]+)(?:\/(result))?)?$/);
+  if (!match) return null;
+  return { jobId: match[1] ? decodeURIComponent(match[1]) : "", action: match[2] || (match[1] ? "detail" : "collection") };
+}
+
+function localProviderJob(job = {}) {
+  return {
+    ...job,
+    job_id: job.id,
+    job_type: "local_sticker_overlay",
+    provider: "local_ffmpeg",
+    created_at: job.createdAt,
+    updated_at: job.updatedAt,
+    finished_at: ["succeeded", "failed"].includes(job.status) ? job.updatedAt : null
+  };
+}
+
+function localArchivePayload(payload, normalized) {
+  return {
+    job_type: "local_sticker_overlay",
+    input: {
+      source_type: normalized.sourceType,
+      ...(normalized.sourceType === "url" ? { source: normalized.source } : {})
+    },
+    params: {
+      region_spec: [{ ...normalized.region, coordinate_space: "normalized", time_ranges: [] }],
+      sticker_scale_mode: normalized.stickerScaleMode,
+      has_sticker: normalized.hasSticker
+    },
+    options: { priority: Number(payload.options?.priority || 0) }
+  };
+}
+
 function referenceVideoRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/(ref_\d{8}_\d{3})\/workflow-state$/);
   if (!match) return null;
@@ -141,6 +180,12 @@ function referenceVideoRoute(pathname) {
 
 function decompositionJobRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/decomposition-jobs\/([^/]+)$/);
+  if (!match) return null;
+  return { jobId: decodeURIComponent(match[1]) };
+}
+
+function referenceVideoCheckJobRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/reference-videos\/check-jobs\/([^/]+)$/);
   if (!match) return null;
   return { jobId: decodeURIComponent(match[1]) };
 }
@@ -332,6 +377,23 @@ export async function handleWangzhuanRequest(req, res, url, context) {
       const runCheck = scoped.checkReferenceVideo || context.checkReferenceVideo || checkReferenceVideo;
       return sendOk(res, await runCheck(scoped, await readReferenceVideoCheckRequest(context, req)), requestId);
     }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/check-jobs") {
+      const body = await readReferenceVideoCheckRequest(context, req);
+      const job = createBackgroundJob("reference_video_check", async ({ log, progress }) => {
+        log("参考视频后台检查已开始");
+        progress(12, "正在写入文件并读取视频基础信息");
+        const runCheck = scoped.checkReferenceVideo || context.checkReferenceVideo || checkReferenceVideo;
+        progress(35, "正在检查视频规格，必要时生成拆解代理视频");
+        const result = await runCheck(scoped, body);
+        progress(95, "正在保存参考视频状态");
+        return result;
+      }, {
+        context: scoped,
+        subjectType: "reference_video_upload",
+        subjectId: String(body.fileHash || body.fileName || body.name || "")
+      });
+      return sendOk(res, { ...job, referenceVideoCheckJobId: job.id }, requestId);
+    }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/draft-decomposition/stream") {
       const body = await context.readJson(req);
       initWangzhuanSse(res, requestId);
@@ -395,6 +457,16 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         ...job,
         decompositionJobId: job.id,
         decomposition: job.result?.decomposition || job.result?.draft?.decomposition || job.result?.draft || null
+      }, requestId);
+    }
+    const referenceCheckJob = referenceVideoCheckJobRoute(url.pathname);
+    if (referenceCheckJob && req.method === "GET") {
+      const job = await getBackgroundJob(scoped, referenceCheckJob.jobId);
+      if (!job) throw new WangzhuanError("job_not_found", "参考视频检查任务不存在或已过期", { jobId: referenceCheckJob.jobId }, 404);
+      return sendOk(res, {
+        ...job,
+        referenceVideoCheckJobId: job.id,
+        referenceVideo: job.result?.referenceVideo || null
       }, requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/decompose") {
@@ -773,6 +845,89 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (videoOps && req.method === "POST" && videoOps.action === "retry") {
       const job = await retryVideoOpsJob(scoped, videoOps.jobId);
       return sendOk(res, await syncVideoOpsJobArchive(scoped, job, { triggerName: "scheduler_retry" }), requestId);
+    }
+    const localVideoEdit = localVideoEditRoute(url.pathname);
+    if (localVideoEdit && req.method === "POST" && localVideoEdit.action === "collection") {
+      const payload = await context.readJson(req);
+      const normalized = normalizeLocalStickerRequest(payload);
+      const archivePayload = localArchivePayload(payload, normalized);
+      const archiveSubmission = context.archiveVideoOpsSubmission || archiveVideoOpsSubmission;
+      const syncArchive = context.syncVideoOpsJobArchive || syncVideoOpsJobArchive;
+      const runEdit = context.runLocalStickerOverlayJob || runLocalStickerOverlayJob;
+      let releaseArchive;
+      let rejectArchive;
+      const archiveReady = new Promise((resolve, reject) => {
+        releaseArchive = resolve;
+        rejectArchive = reject;
+      });
+      const job = createBackgroundJob("local_sticker_overlay", async ({ jobId, log, progress }) => {
+        await archiveReady;
+        log("本地视频区域处理已开始");
+        progress(15, "正在准备视频和贴纸素材");
+        const rendered = await runEdit(payload, { jobId });
+        progress(85, "正在校验并归档输出视频");
+        const completedJob = localProviderJob({
+          ...job,
+          id: jobId,
+          status: "succeeded",
+          updatedAt: new Date().toISOString()
+        });
+        const archived = await syncArchive(scoped, completedJob, {
+          payload: archivePayload,
+          outputBuffer: rendered.outputBuffer,
+          result: rendered.result,
+          triggerName: "remix_write"
+        });
+        progress(98, "输出视频已归档");
+        return {
+          ...rendered.result,
+          remixId: archived.remixId || "",
+          remix_id: archived.remixId || "",
+          taskManagementUrl: archived.taskManagementUrl || ""
+        };
+      }, {
+        context: scoped,
+        subjectType: "remix",
+        subjectId: "local_sticker_overlay"
+      });
+      try {
+        const archived = await archiveSubmission(scoped, archivePayload, localProviderJob(job));
+        releaseArchive();
+        return sendOk(res, { ...localProviderJob(job), ...archived }, requestId);
+      } catch (error) {
+        rejectArchive(error);
+        throw error;
+      }
+    }
+    if (localVideoEdit && req.method === "GET" && ["detail", "result"].includes(localVideoEdit.action)) {
+      const job = await getBackgroundJob(scoped, localVideoEdit.jobId);
+      if (!job || job.type !== "local_sticker_overlay") {
+        throw new WangzhuanError("job_not_found", "本地视频处理任务不存在或已过期", { jobId: localVideoEdit.jobId }, 404);
+      }
+      const archive = await (context.resolveVideoOpsArchive || resolveVideoOpsArchive)(scoped, job.id).catch(() => null);
+      const publicJob = {
+        ...localProviderJob(job),
+        ...(archive?.remixId ? {
+          remixId: archive.remixId,
+          remix_id: archive.remixId,
+          taskManagementUrl: `/wangzhuan-tasks.html?remixId=${encodeURIComponent(archive.remixId)}`
+        } : {})
+      };
+      if (localVideoEdit.action === "result") {
+        if (job.status !== "succeeded") {
+          throw new WangzhuanError("invalid_state_transition", "本地视频处理尚未完成", { jobId: job.id, status: job.status }, 409);
+        }
+        const output = archive?.outputs?.[0] || {};
+        return sendOk(res, {
+          ...(job.result || {}),
+          download_url: output.previewUrl || output.storageUrl || "",
+          outputs: archive?.outputs || [],
+          remixId: archive?.remixId || job.result?.remixId || "",
+          remix_id: archive?.remixId || job.result?.remix_id || "",
+          taskManagementUrl: publicJob.taskManagementUrl || job.result?.taskManagementUrl || ""
+        }, requestId);
+      }
+      return sendOk(res, publicJob, requestId);
     }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {

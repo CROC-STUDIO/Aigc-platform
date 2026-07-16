@@ -294,7 +294,7 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
   const rawSliceDurationSec = Number.isFinite(Number(plan.sliceDurationSec))
     ? Number(plan.sliceDurationSec)
     : Number(context.sliceDurationSec || sourceSlice.durationSec || 15);
-  const sliceDurationSec = Math.max(5, Math.min(30, rawSliceDurationSec));
+  const sliceDurationSec = Math.max(5, Math.min(15, rawSliceDurationSec));
   const repairedOpportunities = normalizeConversionEffectOpportunities([
     ...sourceOpportunities,
     ...moneyVisuals.map((effect) => ({

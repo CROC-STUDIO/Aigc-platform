@@ -19,6 +19,7 @@ test("expanded videos skip repeated model QC and become downloadable after passi
 
   assert.equal(qcPathHelpers.shouldRunModelVideoQc(context, batch, output), false);
   assert.equal(qcPathHelpers.downloadEligibility(batch, output, "pass"), true);
+  assert.equal(qcPathHelpers.downloadEligibility(batch, output, "fail"), true);
 });
 
 test("expanded video parent eligibility is explicit", () => {

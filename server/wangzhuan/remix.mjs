@@ -40,6 +40,8 @@ import {
   syncRemixSourceFact
 } from "./mysql-facts.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
+import { downloadVideoOpsJob, getVideoOpsJob } from "./video-ops.mjs";
+import { getBackgroundJob } from "./background-jobs.mjs";
 
 const MATERIAL_EXTS = new Set([".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg"]);
 const MATERIAL_MIME_TYPES = new Set([
@@ -571,8 +573,44 @@ function providerJobSnapshot(job, capability) {
   };
 }
 
+function isVideoOpsRemix(remix = {}) {
+  return String(remix.providerJob?.provider || "").toLowerCase() === "video_ops"
+    || Boolean(remix.request?.videoOpsPayload);
+}
+
+function isLocalFfmpegRemix(remix = {}) {
+  return String(remix.providerJob?.provider || "").toLowerCase() === "local_ffmpeg";
+}
+
+function providerAccessForRemix(context, remix) {
+  if (isLocalFfmpegRemix(remix)) {
+    return {
+      async getJob(jobId) {
+        const job = await (context.getBackgroundJob || getBackgroundJob)(context, jobId);
+        if (!job) throw new WangzhuanError("job_not_found", "本地视频处理任务不存在或已过期", { jobId }, 404);
+        return {
+          ...job,
+          job_id: job.id,
+          job_type: "local_sticker_overlay",
+          provider: "local_ffmpeg"
+        };
+      },
+      async downloadJob() {
+        throw new WangzhuanError("output_not_found", "本地视频输出尚未归档", {}, 404);
+      }
+    };
+  }
+  if (isVideoOpsRemix(remix)) {
+    return {
+      getJob: (jobId) => getVideoOpsJob(context, jobId),
+      downloadJob: (jobId) => downloadVideoOpsJob(context, jobId)
+    };
+  }
+  return createRemixProviderClient(context, remix.capability || {});
+}
+
 function remixStatusFromProvider(status) {
-  if (status === "failed") return "failed";
+  if (status === "failed" || status === "dead_letter") return "failed";
   if (status === "canceled") return "stopped";
   if (status === "review_required") return "preview_required";
   if (status === "running") return "running";
@@ -1214,7 +1252,7 @@ export async function startRemix(context, request = {}) {
 export async function getRemixDetail(context, remixId) {
   const remix = await readRemix(context, remixId);
   if (remix.providerJob?.jobId && ["queued", "running"].includes(remix.status)) {
-    const client = createRemixProviderClient(context, remix.capability || {});
+    const client = providerAccessForRemix(context, remix);
     if (client) {
       const job = await client.getJob(remix.providerJob.jobId);
       const jobSnapshot = providerJobSnapshot(job, remix.capability || {});
@@ -1289,6 +1327,11 @@ export async function getRemixDetail(context, remixId) {
     downloadSummary: downloadSummary(remix)
   };
 }
+
+export const __remixTestHooks = {
+  providerAccessForRemix,
+  remixStatusFromProvider
+};
 
 export async function getActiveRemix(context) {
   const detail = await loadActiveRemixFromMysql(context);

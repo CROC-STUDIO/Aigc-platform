@@ -11,7 +11,31 @@ test("Volcengine ASR uses the new-console API key header without IAM AK/SK", () 
   assert.equal("Authorization" in headers, false);
 });
 
-test("Volcengine ASR submits an S3 audio URL and polls until word timestamps are ready", async () => {
+test("Volcengine ASR enables automatic language detection by default", async () => {
+  const calls = [];
+  const responses = [
+    new Response(null, { headers: { "X-Api-Status-Code": "20000000" } }),
+    new Response(JSON.stringify({ result: { utterances: [{ text: "subtitle", start_time: 0, end_time: 500, words: [{ text: "subtitle", start_time: 0, end_time: 500 }] }] } }), { headers: { "X-Api-Status-Code": "20000000" } })
+  ];
+  const result = await transcribeVolcengineAudio({
+    audioUrl: "https://assets.test/subtitles.mp3",
+    config: { apiKey: "test-api-key", resourceId: "volc.seedasr.auc", enableAutoLang: true, pollIntervalMs: 0, timeoutMs: 1000 },
+    requestId: "request-1",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return responses.shift();
+    }
+  });
+
+  assert.equal(calls.length, 2);
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(body.audio, { url: "https://assets.test/subtitles.mp3", format: "mp3" });
+  assert.equal(body.request.enable_auto_lang, true);
+  assert.equal(body.request.show_utterances, true);
+  assert.equal(result.result.utterances[0].words[0].end_time, 500);
+});
+
+test("Volcengine ASR can submit an explicit language override", async () => {
   const calls = [];
   const responses = [
     new Response(null, { headers: { "X-Api-Status-Code": "20000000" } }),
@@ -31,6 +55,8 @@ test("Volcengine ASR submits an S3 audio URL and polls until word timestamps are
   assert.equal(calls.length, 2);
   assert.match(calls[0].url, /\/submit$/);
   assert.match(calls[1].url, /\/query$/);
-  assert.deepEqual(JSON.parse(calls[0].init.body).audio, { url: "https://assets.test/subtitles.mp3", format: "mp3", language: "zh-CN" });
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(body.audio, { url: "https://assets.test/subtitles.mp3", format: "mp3", language: "zh-CN" });
+  assert.equal("enable_auto_lang" in body.request, false);
   assert.equal(result.result.utterances[0].words[0].end_time, 500);
 });

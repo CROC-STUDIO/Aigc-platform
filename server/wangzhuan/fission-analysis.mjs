@@ -15,7 +15,7 @@ export const FISSION_ANALYSIS_PROMPT_REQUIREMENTS = Object.freeze([
   "Keep app UI, subtitle overlays, withdrawal screens, reward effects, cash/coin feedback, sound cues, and CTA overlays inside timelineItems unless they change the narrative beat.",
   "Every storySegment must include numeric startSec, endSec, and durationSec in source-video seconds; never omit timing and never default every segment to 0-15s.",
   "Every story segment must include scene, subject, action, camera, lighting, style, quality, coreHook, explosivePoint, segmentPurpose, segmentConversionStyle, segmentRhythm, segmentStructureSkeleton, timelineItems, conversionSignals, conversionEffectOpportunities, voiceoverObserved, variableLayers, and sliceSplitHints.",
-  "Output seedanceSlices as executable generation slices in source-video order; each seedanceSlice must include numeric startSec, endSec, durationSec, and sliceDurationSec. Keep every generated slice between 5 and 30 seconds, splitting longer story beats by narrative turning points.",
+  "Output seedanceSlices as executable generation slices in source-video order; each seedanceSlice must include numeric startSec, endSec, durationSec, and sliceDurationSec. Keep every generated slice between 5 and 15 seconds, splitting longer story beats by narrative turning points.",
   "Observed conversionSignals must distinguish withdrawalSuccess, earningsNumber, emotionalVoiceover, cashCoinFeedback, and fastRewardCue.",
   "conversionEffectOpportunities are allowed fission placements; keep them separate from observed conversionSignals.",
   "Seedance prompts must use no burned subtitles, no captions, and no dense text blocks; subtitle text belongs in subtitleWorkflow.subtitleScript."
@@ -219,7 +219,7 @@ function normalizeSeedanceSlice(slice, index = 0) {
   };
 }
 
-function assertSupportedSeedanceSliceDuration(slice, { minSliceSec = 5, maxSliceSec = 30 } = {}) {
+function assertSupportedSeedanceSliceDuration(slice, { minSliceSec = 5, maxSliceSec = 15 } = {}) {
   const sliceDurationSec = numberOrFallback(slice?.sliceDurationSec || slice?.durationSec, 0);
   if (sliceDurationSec < minSliceSec || sliceDurationSec > maxSliceSec) {
     throw new Error(`seedanceSliceIndex=${slice?.seedanceSliceIndex || ""} duration must be ${minSliceSec}-${maxSliceSec}s`);

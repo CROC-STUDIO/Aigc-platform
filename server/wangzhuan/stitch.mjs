@@ -430,7 +430,8 @@ async function applyVolcengineSubtitles(context, batch, outputId, sourcePath, { 
     width: subtitleCanvas.width,
     height: subtitleCanvas.height,
     fontSize: subtitleSettings.fontSize,
-    centerY: subtitleSettings.centerY
+    centerY: subtitleSettings.centerY,
+    textColor: subtitleSettings.textColor
   });
   const workDir = await mkdtemp(join(dirname(sourcePath), ".wz-subtitles-"));
   const tempPath = join(workDir, "subtitled.mp4");
@@ -650,6 +651,7 @@ function takeOutputId(batch, sequenceState) {
 
 async function materializeSegmentOutputs(context, batch, groups, sequenceState) {
   const existing = Array.isArray(batch.outputs) ? batch.outputs.filter((output) => output.kind === "segment_video") : [];
+  const subtitleSettings = resolveBatchPostProcess(batch).subtitles;
   const existingByTask = new Map();
   for (const output of existing) {
     for (const taskId of output.generationTaskIds || []) existingByTask.set(taskId, output);
@@ -661,6 +663,27 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
       if (existingOutput) {
         const existingPath = join(context.userProjectRoot, existingOutput.filePath || "");
         const media = await probeVideoStreamHealth(existingPath);
+        if (subtitleSettings.enabled && existingOutput.subtitlePostProcess?.status !== "succeeded" && existsSync(existingPath)) {
+          const durationSec = Number(entry.task.durationSec || entry.script.durationSec || existingOutput.durationSec || 0);
+          try {
+            existingOutput.subtitlePostProcess = await applyVolcengineSubtitles(context, batch, existingOutput.outputId, existingPath, {
+              timeoutMs: postProcessTimeoutMs(durationSec)
+            });
+            const storage = await syncWangzhuanAsset(context, existingPath, "pipeline_segment_video", { required: true });
+            existingOutput.previewUrl = storage.storageUrl;
+            existingOutput.storageKey = storage.storageKey;
+            existingOutput.storageUrl = storage.storageUrl;
+          } catch (error) {
+            existingOutput.subtitlePostProcess = {
+              enabled: true,
+              status: "failed",
+              errorCode: error?.code || "subtitle_postprocess_failed",
+              errorMessage: safeErrorMessage(error)
+            };
+          }
+        }
+        existingOutput.kind = existingOutput.kind || "segment_video";
+        existingOutput.durationSec = Number(entry.task.durationSec || entry.script.durationSec || existingOutput.durationSec || 0);
         existingOutput.displayFileName = buildOutputDisplayName({
           batch,
           script: entry.script,
@@ -698,8 +721,23 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
           outputPath: filePath
         });
       }
-      const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video", { required: true });
+      let subtitlePostProcess = subtitleSettings.enabled ? { enabled: true, status: "pending" } : { enabled: false, status: "disabled" };
       const durationSec = Number(entry.task.durationSec || entry.script.durationSec || batch.estimate?.durationSec || 15);
+      if (subtitleSettings.enabled) {
+        try {
+          subtitlePostProcess = await applyVolcengineSubtitles(context, batch, outputId, target, {
+            timeoutMs: postProcessTimeoutMs(durationSec)
+          });
+        } catch (error) {
+          subtitlePostProcess = {
+            enabled: true,
+            status: "failed",
+            errorCode: error?.code || "subtitle_postprocess_failed",
+            errorMessage: safeErrorMessage(error)
+          };
+        }
+      }
+      const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_video", { required: true });
       const media = await probeVideoStreamHealth(target);
       outputs.push({
         outputId,
@@ -727,6 +765,7 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         downloadEligible: false,
         visualPreviewRequired: false,
         previewConfirmed: false,
+        subtitlePostProcess,
         disclaimerOverlay
       });
     }
@@ -740,11 +779,17 @@ function hasCompleteSubmittedSegments(group, { requiresPostProcess = false } = {
   });
 }
 
+function groupHasTerminalTasks(group) {
+  return group.entries.every(({ task }) => {
+    return STITCH_READY_TASK_STATUSES.has(task.status) || FAILED_TASK_STATUSES.has(task.status);
+  });
+}
+
 export function isBatchReadyForStitch(batch = {}) {
   const groups = groupTasksByVariant(batch);
   const postProcess = resolveBatchPostProcess(batch);
   const requiresPostProcess = Boolean(postProcess.ending || postProcess.subtitles.enabled || postProcess.expansionSizes.length);
-  return groups.length > 0 && groups.every((group) => hasCompleteSubmittedSegments(group, { requiresPostProcess }));
+  return groups.length > 0 && groups.some((group) => hasCompleteSubmittedSegments(group, { requiresPostProcess }));
 }
 
 function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null, tailSegments = [], postProcessEnding = null, subtitlePostProcess = null }) {
@@ -781,7 +826,7 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
     segmentOutputIds: segmentOutputs.map((output) => output.outputId),
     preflight,
     status: "failed",
-    errorCode: "stitch_failed",
+    errorCode: error?.code || "stitch_failed",
     errorMessage: safeErrorMessage(error)
   });
   const reportPath = await writeReport(context, batch.batchId, report);
@@ -1009,7 +1054,7 @@ async function deriveExpandedOutputs(context, batch, originalOutput, sequenceSta
           storageKey: storage.storageKey,
           storageUrl: storage.storageUrl,
           qcStatus: "not_started",
-          downloadEligible: false,
+          downloadEligible: true,
           visualPreviewRequired: false,
           previewConfirmed: false
         });
@@ -1035,7 +1080,6 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
   const outputId = takeOutputId(batch, sequenceState);
   const target = stitchedOutputPath(context, batch.batchId, outputId);
   const postProcessEnding = resolveBatchPostProcess(batch).ending;
-  const subtitleSettings = resolveBatchPostProcess(batch).subtitles;
   const segmentPaths = segmentOutputs.map((output) => join(context.userProjectRoot, output.filePath));
   const canvas = await probeVideoStreamHealth(segmentPaths[0]);
   const endingSegment = postProcessEnding
@@ -1054,7 +1098,18 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
   });
   if (endingSegment) segmentPaths.push(endingSegment.fullPath);
   const disclaimerOverlay = resolveDisclaimerOverlay(batch, group.entries[0]?.script?.branchDraft);
-  let subtitlePostProcess = subtitleSettings.enabled ? { enabled: true, status: "pending" } : { enabled: false, status: "disabled" };
+  const segmentSubtitleStatuses = segmentOutputs
+    .map((output) => output.subtitlePostProcess)
+    .filter((item) => item?.enabled);
+  const subtitlePostProcess = segmentSubtitleStatuses.length
+    ? {
+        enabled: true,
+        status: segmentSubtitleStatuses.every((item) => item.status === "succeeded") ? "succeeded" : "partial_failed",
+        mode: "segment_before_stitch",
+        segmentCount: segmentSubtitleStatuses.length,
+        failedCount: segmentSubtitleStatuses.filter((item) => item.status !== "succeeded").length
+      }
+    : { enabled: false, status: "disabled", mode: "segment_before_stitch" };
   const postProcessFailures = [];
   const timeoutMs = postProcessTimeoutMs(totalDurationSec);
   try {
@@ -1070,21 +1125,13 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       }
       await applyDisclaimerOverlay(context, target, target, disclaimerOverlay, { timeoutMs });
     }
-    if (subtitleSettings.enabled) {
-      try {
-        subtitlePostProcess = await applyVolcengineSubtitles(context, batch, outputId, target, { timeoutMs });
-      } catch (error) {
-        subtitlePostProcess = {
-          enabled: true,
-          status: "failed",
-          errorCode: error?.code || "subtitle_postprocess_failed",
-          errorMessage: safeErrorMessage(error)
-        };
+    for (const segmentOutput of segmentOutputs) {
+      if (segmentOutput.subtitlePostProcess?.enabled && segmentOutput.subtitlePostProcess.status !== "succeeded") {
         postProcessFailures.push({
-          parentOutputId: outputId,
+          parentOutputId: segmentOutput.outputId,
           kind: "subtitles",
-          code: subtitlePostProcess.errorCode,
-          message: subtitlePostProcess.errorMessage
+          code: segmentOutput.subtitlePostProcess.errorCode || "subtitle_postprocess_failed",
+          message: segmentOutput.subtitlePostProcess.errorMessage || "分段字幕生成失败"
         });
       }
     }
@@ -1139,7 +1186,7 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
       storageKey: storage.storageKey,
       storageUrl: storage.storageUrl,
       qcStatus: "not_started",
-      downloadEligible: false,
+      downloadEligible: true,
       visualPreviewRequired: false,
       previewConfirmed: false,
       stitchReportPath: reportPath,
@@ -1273,6 +1320,32 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
 
   for (const group of groups) {
     const groupSegments = group.entries.map((entry) => segmentByTask.get(entry.task.generationTaskId)).filter(Boolean);
+    const groupReady = hasCompleteSubmittedSegments(group, { requiresPostProcess: true });
+    if (!groupReady) {
+      const missingIds = group.entries
+        .filter((entry) => !segmentByTask.has(entry.task.generationTaskId))
+        .map((entry) => entry.task.generationTaskId);
+      const hasTerminalTasks = groupHasTerminalTasks(group);
+      const report = await createFailedReport(
+        context,
+        { ...withStitchingStatus, outputs: nextOutputs },
+        group,
+        groupSegments,
+        preflight,
+        new WangzhuanError(
+          hasTerminalTasks ? "partial_segments_unavailable" : "segments_not_ready",
+          hasTerminalTasks ? "该分组存在失败分片，无法生成完整成片" : "该分组分片尚未全部就绪",
+          {
+            batchId,
+            missingGenerationTaskIds: missingIds
+          }
+        ),
+        sequenceState
+      );
+      stitchReports.push(report);
+      currentFailedCount += 1;
+      continue;
+    }
     if (options.forceFail) {
       const report = await createFailedReport(
         context,

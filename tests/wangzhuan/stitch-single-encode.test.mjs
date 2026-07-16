@@ -46,19 +46,23 @@ async function createTinyOverlay(target) {
   ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
 }
 
-test("stitch applies Volcengine subtitles before deriving expansion outputs", async () => {
+test("stitch applies segment subtitles before creating stitched outputs", async () => {
   const source = await readFile(new URL("../../server/wangzhuan/stitch.mjs", import.meta.url), "utf8");
-  const subtitleIndex = source.indexOf("applyVolcengineSubtitles");
-  const expansionIndex = source.indexOf("deriveExpandedOutputs");
+  const segmentSubtitleIndex = source.indexOf("applyVolcengineSubtitles(context, batch, outputId, target");
+  const stitchOutputIndex = source.indexOf("async function createSucceededStitchOutput");
+  const stitchedOutputSource = source.slice(stitchOutputIndex, source.indexOf("export async function materializeBatchSegmentOutputs", stitchOutputIndex));
 
-  assert.ok(subtitleIndex >= 0, "subtitle post-processing should be present");
-  assert.ok(expansionIndex > subtitleIndex, "subtitle post-processing must precede expansion output derivation");
+  assert.ok(segmentSubtitleIndex >= 0, "segment ASR subtitle post-processing should be present");
+  assert.ok(stitchOutputIndex > segmentSubtitleIndex, "segment subtitles must be applied before stitched output creation");
+  assert.doesNotMatch(stitchedOutputSource, /applyVolcengineSubtitles/);
+  assert.doesNotMatch(source, /subtitleScriptFromPlan|applyScriptSubtitles/);
 });
 
 test("stitch refreshes display names when existing segment outputs are reused", async () => {
   const source = await readFile(new URL("../../server/wangzhuan/stitch.mjs", import.meta.url), "utf8");
   assert.match(source, /if \(existingOutput\) \{/);
   assert.match(source, /existingOutput\.displayFileName = buildOutputDisplayName/);
+  assert.match(source, /existingOutput\.durationSec = Number\(entry\.task\.durationSec/);
 });
 
 test("post-process ffmpeg timeout has a five minute floor and scales with duration", () => {

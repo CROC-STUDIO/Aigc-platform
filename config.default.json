@@ -64,6 +64,7 @@
       "apiKeyEnv": "VOLCENGINE_ASR_API_KEY",
       "appIdEnv": "VOLCENGINE_ASR_APP_ID",
       "accessTokenEnv": "VOLCENGINE_ASR_ACCESS_TOKEN",
+      "enableAutoLang": true,
       "timeoutMs": 600000,
       "pollIntervalMs": 2000
     },

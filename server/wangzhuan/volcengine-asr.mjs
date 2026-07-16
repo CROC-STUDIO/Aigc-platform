@@ -14,6 +14,10 @@ function positiveNumber(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function booleanValue(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 export function resolveVolcengineAsrConfig(context = {}) {
   const source = context.config?.wangzhuan?.volcengineAsr || {};
   const apiKeyEnv = cleanString(source.apiKeyEnv, "VOLCENGINE_ASR_API_KEY");
@@ -28,6 +32,7 @@ export function resolveVolcengineAsrConfig(context = {}) {
     apiKey: cleanString(source.apiKey, cleanString(process.env[apiKeyEnv])),
     appId: cleanString(source.appId, cleanString(process.env[appIdEnv])),
     accessToken: cleanString(source.accessToken, cleanString(process.env[accessTokenEnv])),
+    enableAutoLang: booleanValue(source.enableAutoLang, true),
     timeoutMs: positiveNumber(source.timeoutMs, 600000),
     pollIntervalMs: positiveNumber(source.pollIntervalMs, 2000)
   };
@@ -92,10 +97,18 @@ export async function transcribeVolcengineAudio({
     throw new WangzhuanError("upstream_failed", "火山语音识别需要可访问的 HTTPS 音频 URL");
   }
   const resolved = { ...config };
+  const requestedLanguage = cleanString(language);
+  const requestOptions = {
+    model_name: "bigmodel",
+    enable_itn: true,
+    enable_punc: true,
+    show_utterances: true
+  };
+  if (!requestedLanguage && resolved.enableAutoLang !== false) requestOptions.enable_auto_lang = true;
   const submit = await invoke(fetchImpl, `${resolved.endpoint}/submit`, buildVolcengineAsrHeaders(resolved, requestId, true), {
     user: { uid },
-    audio: { url: audioUrl, format: "mp3", ...(cleanString(language) ? { language: cleanString(language) } : {}) },
-    request: { model_name: "bigmodel", enable_itn: true, enable_punc: true, show_utterances: true }
+    audio: { url: audioUrl, format: "mp3", ...(requestedLanguage ? { language: requestedLanguage } : {}) },
+    request: requestOptions
   }, resolved.timeoutMs);
   const submitCode = responseCode(submit);
   if (submitCode !== "20000000") {

@@ -118,6 +118,9 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /globalThis\.crypto\?\.subtle\?\.digest/);
   assert.match(js, /const fileHash = await fileSha256Hex\(file\)/);
   assert.match(js, /\/api\/wangzhuan\/reference-videos\/reuse-check/);
+  assert.match(js, /\/api\/wangzhuan\/reference-videos\/check-jobs/);
+  assert.match(js, /function pollReferenceVideoCheckJob\(jobId, localPreviewUrl = ""\)/);
+  assert.doesNotMatch(js, /api\("\/api\/wangzhuan\/reference-videos\/check",/);
   assert.match(js, /form\.append\("fileHash", fileHash\)/);
   assert.match(js, /已复用已有参考视频/);
   assert.match(js, /参考视频已选择，正在上传/);

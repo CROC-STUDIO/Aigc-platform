@@ -380,7 +380,7 @@ test("buildSeedanceSlicesFromAnalysis ignores invalid suggested seedance slices 
   assert.equal(slices[0].coreHook, "valid story hook");
 });
 
-test("buildSeedanceSlicesFromAnalysis accepts explicit slices up to 30 seconds", () => {
+test("buildSeedanceSlicesFromAnalysis rejects overlong explicit slices and falls back to storySegments", () => {
   const slices = buildSeedanceSlicesFromAnalysis({
     storySegments: [
       {
@@ -406,11 +406,11 @@ test("buildSeedanceSlicesFromAnalysis accepts explicit slices up to 30 seconds",
     ]
   });
 
-  assert.equal(slices.length, 1);
+  assert.equal(slices.length, 2);
+  assert.ok(slices.every((slice) => slice.durationSec <= 15));
   assert.equal(slices[0].startSec, 40);
-  assert.equal(slices[0].endSec, 56);
-  assert.equal(slices[0].sliceDurationSec, 16);
-  assert.equal(slices[0].coreHook, "bad overlong slice");
+  assert.equal(slices[1].endSec, 56);
+  assert.equal(slices[0].coreHook, "final payoff");
 });
 
 test("buildSeedanceSlicesFromAnalysis derives multi-slice output from long story segment", () => {
@@ -521,7 +521,7 @@ test("deriveSeedanceSlicesForGeneration falls back to storySegments when explici
   assert.deepEqual(slices.map((slice) => slice.durationSec), [8, 8]);
 });
 
-test("Seedance generation slices accept the full 5-30 second range", () => {
+test("Seedance generation slices accept the full 5-15 second range", () => {
   const slices = deriveSeedanceSlicesForGeneration({
     seedanceSlices: [
       {
@@ -537,15 +537,15 @@ test("Seedance generation slices accept the full 5-30 second range", () => {
         storySegmentIndex: 2,
         seedanceSliceIndex: 2,
         startSec: 5,
-        endSec: 35,
-        durationSec: 30,
-        sliceDurationSec: 30,
+        endSec: 20,
+        durationSec: 15,
+        sliceDurationSec: 15,
         ...sevenDimensions
       }
     ]
   });
 
-  assert.deepEqual(slices.map((slice) => slice.durationSec), [5, 30]);
+  assert.deepEqual(slices.map((slice) => slice.durationSec), [5, 15]);
   assert.throws(
     () => deriveSeedanceSlicesForGeneration({
       seedanceSlices: [{
@@ -558,11 +558,25 @@ test("Seedance generation slices accept the full 5-30 second range", () => {
         ...sevenDimensions
       }]
     }),
-    /duration must be 5-30s/
+    /duration must be 5-15s/
+  );
+  assert.throws(
+    () => deriveSeedanceSlicesForGeneration({
+      seedanceSlices: [{
+        storySegmentIndex: 1,
+        seedanceSliceIndex: 1,
+        startSec: 0,
+        endSec: 17,
+        durationSec: 17,
+        sliceDurationSec: 17,
+        ...sevenDimensions
+      }]
+    }),
+    /duration must be 5-15s/
   );
 });
 
-test("story segments can opt into a 30 second maximum", () => {
+test("story segments can opt into a 30 second maximum for non-Seedance planning", () => {
   const slices = splitStorySegmentIntoSeedanceSlices({
     storySegmentIndex: 1,
     startSec: 0,
@@ -607,7 +621,7 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /seedanceSlices are optional/i);
   assert.match(prompt, /sliceSplitHints are mandatory/i);
   assert.match(prompt, /backend will derive generation slices from storySegments plus sliceSplitHints/i);
-  assert.match(prompt, /5-30s slices/i);
+  assert.match(prompt, /5-15s slices/i);
   assert.match(prompt, /timelineItems/);
   assert.match(prompt, /conversionSignals/);
   assert.match(prompt, /conversionEffectOpportunities/);

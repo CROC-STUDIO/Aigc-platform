@@ -32,12 +32,12 @@ function providerStatus(job) {
 }
 
 function terminalStatus(status = "") {
-  return ["succeeded", "review_required", "failed", "canceled", "stopped"].includes(status);
+  return ["succeeded", "review_required", "failed", "dead_letter", "canceled", "stopped"].includes(status);
 }
 
 function remixStatusFromProvider(status = "") {
   if (status === "succeeded" || status === "review_required") return "preview_required";
-  if (status === "failed") return "failed";
+  if (status === "failed" || status === "dead_letter") return "failed";
   if (status === "canceled" || status === "stopped") return "stopped";
   if (status === "running" || status === "processing") return "running";
   return "queued";
@@ -476,3 +476,8 @@ export async function resolveVideoOpsArchive(context, jobId) {
 export function videoOpsArchiveSummary(remix) {
   return remix ? { remix, downloadSummary: downloadSummary(remix) } : null;
 }
+
+export const __videoOpsArchiveTestHooks = {
+  remixStatusFromProvider,
+  terminalStatus
+};
