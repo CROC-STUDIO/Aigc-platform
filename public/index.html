@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Touka AI素材中台</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=1.0.34" />
   </head>
   <body>
     <header class="platform-topbar">
@@ -32,6 +32,10 @@
           <span>⌂</span>
           <b>广告素材工作台</b>
         </a>
+        <a class="platform-nav-item" href="/role-showcase.html">
+          <span>◆</span>
+          <b>角色展示视频</b>
+        </a>
         <a class="platform-nav-item" href="/comic.html">
           <span>✦</span>
           <b>漫剧工作台</b>
@@ -55,7 +59,7 @@
       <section class="operation-pane">
         <section class="topbar">
           <div>
-            <h1>广告素材工作台 <span class="app-version">v1.0.30</span></h1>
+            <h1>广告素材工作台 <span class="app-version">v1.0.34</span></h1>
             <div class="path-editor">
               <select id="projectSelect" title="切换项目"></select>
               <button id="renameProjectBtn" class="mini ghost admin-project-action" type="button" hidden>改名</button>
@@ -139,6 +143,17 @@
 
             <aside class="panel">
               <div class="panel-head">
+                <h2>场景图</h2>
+                <div class="head-actions">
+                  <button id="uploadSceneBtn" class="mini" type="button">上传场景</button>
+                  <label><input id="toggleScenes" type="checkbox" /> 全选</label>
+                </div>
+              </div>
+              <div id="sceneGrid" class="thumb-grid compact-grid"></div>
+            </aside>
+
+            <aside class="panel">
+              <div class="panel-head">
                 <h2>产品 Logo</h2>
                 <div class="head-actions">
                   <button id="uploadLogoBtn" class="mini" type="button">上传 Logo</button>
@@ -157,7 +172,10 @@
               </div>
               <div class="guangdada-box">
               <div class="guangdada-controls">
-                <label>竞品 <select id="guangdadaKeyword"></select></label>
+                <label class="guangdada-name-label">竞品
+                  <div id="guangdadaKeywordPicker" class="guangdada-name-picker"></div>
+                  <select id="guangdadaKeyword" hidden></select>
+                </label>
                 <label>人气值大于 <input id="guangdadaMinPopularity" type="number" min="0" value="100000" /></label>
                 <label>数量 <input id="guangdadaTopN" type="number" min="1" max="10" value="3" /></label>
                 <label>类型
@@ -180,7 +198,6 @@
                   </select>
                 </label>
                 <button id="guangdadaSearchBtn" class="ghost compact-action" type="button">抓取</button>
-                <button id="guangdadaDeleteFolderBtn" class="ghost danger compact-action" type="button">删除</button>
               </div>
               <div id="guangdadaGrid" class="guangdada-grid"><div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div></div>
               </div>
@@ -292,6 +309,10 @@
           <small>点击头像上传本地图片。</small>
           <label>API Key <input id="profileApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原 Key" /></label>
           <small id="profileApiKeyHint">未配置 API Key 时不能开始生图或生视频。</small>
+          <div id="profileTrialKeyBlock" class="profile-admin-block" hidden>
+            <label>试用账户共用 API Key <input id="profileTrialApiKeyInput" type="password" autocomplete="off" placeholder="留空则保留原试用 Key" /></label>
+            <small id="profileTrialApiKeyHint">试用账户不需要自己填 Key，会使用这里配置的 Key；每天每个试用账户限 30 张图、10 个视频。</small>
+          </div>
           <p id="profileStatus" class="login-status"></p>
         </div>
         <div class="modal-actions">
@@ -310,6 +331,7 @@
           <label>权限
             <select id="adminNewRole">
               <option value="user">普通用户</option>
+              <option value="trial">试用用户</option>
               <option value="admin">管理员</option>
             </select>
           </label>
@@ -334,9 +356,10 @@
       </div>
     </div>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/app.js?v=1.0.34" type="module"></script>
   </body>
 </html>
+
 
 
 

@@ -4,6 +4,10 @@ const state = {
   selectedMonsters: new Set(),
   selectedScenes: new Set(),
   selectedRefVideos: new Set(),
+  selectedBatches: new Set(),
+  batchesInitialized: false,
+  batchFilterTouched: false,
+  activeBatchTag: "",
   user: null
 };
 
@@ -60,7 +64,10 @@ const els = {
   copyPromptBtn: document.querySelector("#copyPromptBtn"),
   downloadPromptBtn: document.querySelector("#downloadPromptBtn"),
   generateStatus: document.querySelector("#comicGenerateStatus"),
-  videoResult: document.querySelector("#comicVideoResult"),
+  outputGrid: document.querySelector("#comicOutputGrid"),
+  batchFilters: document.querySelector("#comicBatchFilters"),
+  outputCount: document.querySelector("#comicOutputCount"),
+  exportOutputsBtn: document.querySelector("#comicExportOutputsBtn"),
   promptOutput: document.querySelector("#comicPromptOutput"),
   promptLength: document.querySelector("#promptLength"),
   runLog: document.querySelector("#comicRunLog")
@@ -166,34 +173,87 @@ async function pickAndUpload(kind) {
   picker.click();
 }
 
+function materialKindLabel(kind) {
+  return kind === "monster" ? "\u602a\u7269\u56fe"
+    : kind === "scene" ? "\u573a\u666f\u56fe"
+      : kind === "referenceVideo" ? "\u53c2\u8003\u89c6\u9891"
+        : "\u89d2\u8272\u56fe";
+}
+
 function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
-  for (const item of items) {
-    const canDelete = Boolean(state.user?.isAdmin && ["role", "monster", "referenceVideo"].includes(kind));
+  for (const item of items || []) {
+    const canAdminManage = Boolean(state.user?.isAdmin && ["role", "monster", "scene", "referenceVideo"].includes(kind));
     const isVideo = kind === "referenceVideo";
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
     card.innerHTML = `
       <input type="checkbox" ${selected.has(item.name) ? "checked" : ""} />
-      ${canDelete ? '<button class="delete-material" type="button" title="删除素材" aria-label="删除素材">×</button>' : ""}
+      ${canAdminManage ? `
+        <button class="material-settings" type="button" title="\u7d20\u6750\u8bbe\u7f6e" aria-label="\u7d20\u6750\u8bbe\u7f6e">&#9881;</button>
+        <div class="material-menu" hidden>
+          <button class="rename-material" type="button">\u91cd\u547d\u540d</button>
+          <button class="delete-material danger" type="button">\u5220\u9664</button>
+        </div>
+      ` : ""}
       ${isVideo ? `<video src="${item.url}" muted controls preload="metadata" playsinline></video>` : `<img src="${item.url}" alt="${escapeHtml(item.title || item.name)}" />`}
       <b>${escapeHtml(item.title || item.name)}</b>
     `;
     const checkbox = card.querySelector("input");
+    const settingsBtn = card.querySelector(".material-settings");
+    const menu = card.querySelector(".material-menu");
+    const renameBtn = card.querySelector(".rename-material");
     const deleteBtn = card.querySelector(".delete-material");
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) selected.add(item.name);
       else selected.delete(item.name);
       card.classList.toggle("selected", checkbox.checked);
-      toggle.checked = items.length > 0 && selected.size === items.length;
+      toggle.checked = (items || []).length > 0 && selected.size === (items || []).length;
       updateMetrics();
       buildPrompt();
     });
+
+    settingsBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelectorAll(".material-menu").forEach((itemMenu) => {
+        if (itemMenu !== menu) itemMenu.hidden = true;
+      });
+      if (menu) menu.hidden = !menu.hidden;
+    });
+
+    menu?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    renameBtn?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu) menu.hidden = true;
+      const ext = item.name.includes(".") ? `.${item.name.split(".").pop()}` : "";
+      const currentBase = ext ? item.name.slice(0, -ext.length) : item.name;
+      const nextName = prompt("\u8bf7\u8f93\u5165\u65b0\u7684\u7d20\u6750\u540d\u79f0", item.title || currentBase);
+      if (nextName == null) return;
+      const cleanName = nextName.trim();
+      if (!cleanName) return alert("\u7d20\u6750\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a");
+      renameBtn.disabled = true;
+      try {
+        await api("/api/materials/rename", { method: "POST", body: JSON.stringify({ kind, name: item.name, newName: cleanName }) });
+        selected.delete(item.name);
+        await loadMaterials();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        renameBtn.disabled = false;
+      }
+    });
+
     deleteBtn?.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const label = kind === "monster" ? "怪物图" : "角色图";
-      if (!confirm(`确定删除这个${label}吗？\n${item.name}`)) return;
+      if (menu) menu.hidden = true;
+      if (!confirm(`\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a${materialKindLabel(kind)}\u5417\uff1f\n${item.name}`)) return;
       deleteBtn.disabled = true;
       try {
         await api("/api/materials/delete", { method: "POST", body: JSON.stringify({ kind, name: item.name }) });
@@ -207,9 +267,8 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
     });
     grid.append(card);
   }
-  toggle.checked = items.length > 0 && selected.size === items.length;
+  toggle.checked = (items || []).length > 0 && selected.size === (items || []).length;
 }
-
 async function loadMaterials() {
   const materials = await api("/api/materials");
   const keep = (set, items) => new Set(items.map((item) => item.name).filter((name) => set.has(name)));
@@ -225,6 +284,7 @@ async function loadMaterials() {
   renderAssetGrid({ items: materials.referenceVideos || [], grid: els.refVideoGrid, selected: state.selectedRefVideos, toggle: els.toggleRefVideos, kind: "referenceVideo" });
   refreshShotReferenceVideoOptions();
   updateMetrics();
+  renderOutputs();
   buildPrompt();
 }
 
@@ -479,13 +539,113 @@ function clearRunLog() {
   els.runLog.innerHTML = '<div class="log-line">等待生成任务...</div>';
 }
 
+function comicOutputs() {
+  return (state.materials.outputs || []).filter((output) => {
+    const batch = String(output.batch || "");
+    const name = String(output.name || "");
+    return output.type === "video" && (output.module === "comic" || batch.startsWith("comic_") || name.includes("comic_"));
+  });
+}
+
+function renderOutputs() {
+  if (!els.outputGrid || !els.batchFilters || !els.outputCount) return;
+  const outputs = comicOutputs();
+  const batches = [...new Set(outputs.map((output) => output.batch || "未分组"))];
+  if (!state.batchesInitialized) {
+    state.selectedBatches = state.activeBatchTag && batches.includes(state.activeBatchTag) ? new Set([state.activeBatchTag]) : new Set(batches);
+    state.batchesInitialized = true;
+  } else if (!state.batchFilterTouched && state.activeBatchTag) {
+    state.selectedBatches = batches.includes(state.activeBatchTag) ? new Set([state.activeBatchTag]) : new Set();
+  } else {
+    state.selectedBatches = new Set([...state.selectedBatches].filter((batch) => batches.includes(batch)));
+  }
+  renderBatchFilters(batches);
+  const visibleOutputs = outputs.filter((output) => state.selectedBatches.has(output.batch || "未分组"));
+  els.outputCount.textContent = `${visibleOutputs.length} / ${outputs.length} 个`;
+  if (els.exportOutputsBtn) {
+    els.exportOutputsBtn.disabled = visibleOutputs.length <= 0 || state.selectedBatches.size <= 0;
+    els.exportOutputsBtn.title = els.exportOutputsBtn.disabled ? "请先勾选要下载的结果批次" : "";
+  }
+  els.outputGrid.innerHTML = "";
+  if (!visibleOutputs.length) {
+    els.outputGrid.innerHTML = `<div class="empty-output">未勾选批次或暂无漫剧视频</div>`;
+    return;
+  }
+  for (const output of visibleOutputs.slice(0, 120)) {
+    const card = document.createElement("article");
+    card.className = "output-card comic-output-card";
+    card.innerHTML = `
+      <video src="${escapeHtml(output.url)}" muted controls preload="metadata" playsinline></video>
+      <em>${escapeHtml(output.batch || "未分组")}</em>
+      <b>${escapeHtml(output.name)}</b>
+      <a class="mini ghost showcase-download-link" href="${escapeHtml(output.url)}" download>下载</a>
+    `;
+    els.outputGrid.append(card);
+  }
+}
+
+function renderBatchFilters(batches) {
+  els.batchFilters.innerHTML = "";
+  if (!batches.length) {
+    els.batchFilters.textContent = "暂无结果";
+    return;
+  }
+  const allLabel = document.createElement("label");
+  allLabel.innerHTML = `<input type="checkbox" ${state.selectedBatches.size === batches.length ? "checked" : ""} /> 全部批次`;
+  allLabel.querySelector("input").addEventListener("change", (event) => {
+    state.batchFilterTouched = true;
+    state.selectedBatches = event.target.checked ? new Set(batches) : new Set();
+    renderOutputs();
+  });
+  els.batchFilters.append(allLabel);
+  for (const batch of batches) {
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="checkbox" ${state.selectedBatches.has(batch) ? "checked" : ""} /> ${escapeHtml(batch)}`;
+    label.querySelector("input").addEventListener("change", (event) => {
+      state.batchFilterTouched = true;
+      if (event.target.checked) state.selectedBatches.add(batch);
+      else state.selectedBatches.delete(batch);
+      renderOutputs();
+    });
+    els.batchFilters.append(label);
+  }
+}
+
+async function downloadSelectedBatches() {
+  if (!state.selectedBatches.size) return alert("请先勾选要下载的批次。");
+  const res = await fetch("/api/outputs/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batches: [...state.selectedBatches], module: "comic" })
+  });
+  if (!res.ok) {
+    let errorText = "下载失败";
+    try {
+      const data = await res.json();
+      errorText = data.error || errorText;
+    } catch {}
+    throw new Error(errorText);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `comic-results-${Date.now()}.zip`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function generateVideo() {
   if (!els.promptOutput.value.trim()) buildPrompt();
   if (!confirm("确定调用 Seedance 2.0 生成视频吗？这会消耗视频额度，生成可能需要几分钟。")) return;
   els.batchTag.value = defaultBatchTag();
+  const batchTag = `comic_${els.batchTag.value}`;
+  state.activeBatchTag = batchTag;
+  state.batchFilterTouched = false;
   els.generateVideoBtn.disabled = true;
   els.generateStatus.textContent = "正在提交 Seedance 2.0...";
-  els.videoResult.innerHTML = `<div class="empty-output">正在生成视频，请稍等...</div>`;
   clearRunLog();
   appendRunLog(`开始生成漫剧视频，批次 ${els.batchTag.value}`, "start");
   try {
@@ -506,13 +666,13 @@ async function generateVideo() {
         prompt: els.promptOutput.value,
         ratio: els.aspect.value,
         duration: Number.parseInt(els.duration.value, 10) || 15,
-        batchTag: `comic_${els.batchTag.value}`,
+        batchTag,
         assetPaths: els.generateMode.value === "text" ? [] : selected.map((item) => item.path)
       })
     });
     els.generateStatus.textContent = `生成完成：${result.model}`;
     appendRunLog(`生成完成：${result.model}，任务 ${result.taskId || "unknown"}`, "done");
-    els.videoResult.innerHTML = `<video src="${result.url}" controls playsinline></video><a class="export-primary nav-link" href="${result.url}" download>下载视频</a>`;
+    await loadMaterials();
   } catch (error) {
     els.generateStatus.textContent = `生成失败：${error.message}`;
     appendRunLog(`生成失败：${error.message}`, "error");
@@ -641,6 +801,19 @@ els.addShotBtn.addEventListener("click", () => createShotCard({ time: "新增时
 els.addDialogueBtn.addEventListener("click", () => createDialogueCard({ speaker: "角色", gender: "不指定", personality: "", text: "台词", timing: "出现时机", style: "只播放人声对白，不出现字幕、气泡或屏幕文字" }));
 els.buildPromptBtn.addEventListener("click", buildPrompt);
 els.generateVideoBtn.addEventListener("click", generateVideo);
+els.exportOutputsBtn?.addEventListener("click", async () => {
+  try {
+    els.exportOutputsBtn.disabled = true;
+    els.generateStatus.textContent = "正在打包选中批次...";
+    await downloadSelectedBatches();
+    els.generateStatus.textContent = "选中批次已开始下载";
+  } catch (error) {
+    els.generateStatus.textContent = `下载失败：${error.message}`;
+    alert(error.message);
+  } finally {
+    renderOutputs();
+  }
+});
 els.copyPromptBtn.addEventListener("click", async () => {
   if (!els.promptOutput.value.trim()) buildPrompt();
   await navigator.clipboard.writeText(els.promptOutput.value);
@@ -668,6 +841,13 @@ els.downloadPromptBtn.addEventListener("click", () => {
 [els.projectName, els.mode, els.aspect, els.duration, els.style, els.audio, els.roleSource, els.characterIdentity, els.characterPersonality, els.characterOutfit, els.hero, els.villain, els.hook, els.scene].filter(Boolean).forEach((input) => input.addEventListener("input", buildPrompt));
 els.roleSource?.addEventListener("change", buildPrompt);
 els.dimensionRadios.forEach((input) => input.addEventListener("change", buildPrompt));
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".material-settings") || event.target.closest?.(".material-menu")) return;
+  document.querySelectorAll(".material-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
+});
 
 const toneList = document.createElement("datalist");
 toneList.id = "dialogueToneOptions";

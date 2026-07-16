@@ -670,6 +670,23 @@ textarea {
   background: rgba(20, 20, 28, 0.42);
 }
 
+.panel.guangdada-panel {
+  overflow: visible;
+  position: relative;
+  z-index: 120;
+}
+
+.workspace,
+.workspace-main,
+.operation-pane {
+  overflow: visible;
+}
+
+.workspace-main > .panel.wide {
+  position: relative;
+  z-index: 1;
+}
+
 .guangdada-controls {
   display: flex;
   flex-wrap: wrap;
@@ -680,6 +697,123 @@ textarea {
 .guangdada-controls label:first-child {
   flex: 1 1 220px;
   min-width: 220px;
+}
+
+.guangdada-name-label {
+  position: relative;
+  z-index: 80;
+}
+
+.guangdada-name-picker {
+  position: relative;
+}
+
+.guangdada-name-trigger {
+  width: 100%;
+  height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  text-align: left;
+  background: rgba(4, 10, 14, 0.82);
+  border: 1px solid rgba(168, 112, 255, 0.72);
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.guangdada-name-trigger span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guangdada-name-trigger .chevron {
+  color: var(--muted);
+  text-align: right;
+}
+
+.guangdada-name-menu {
+  position: absolute;
+  z-index: 2000;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: none;
+  max-height: min(420px, 52vh);
+  overflow: auto;
+  padding: 6px;
+  background: rgba(39, 45, 45, 0.98);
+  border: 1px solid rgba(168, 112, 255, 0.42);
+  border-radius: 8px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.38);
+}
+
+.guangdada-name-picker.open .guangdada-name-menu {
+  display: grid;
+  gap: 2px;
+}
+
+.guangdada-name-row {
+  min-height: 36px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  font-size: 13px;
+}
+
+.guangdada-name-row.muted,
+.guangdada-name-row.create {
+  display: block;
+  min-height: 36px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.guangdada-name-row:hover,
+.guangdada-name-row.active {
+  background: rgba(126, 179, 255, 0.34);
+}
+
+.guangdada-name-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.guangdada-name-delete {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 210, 220, 0.86);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.guangdada-name-delete:hover {
+  background: rgba(255, 88, 116, 0.18);
+  color: #ff8ca0;
 }
 
 .guangdada-controls label {
@@ -737,6 +871,49 @@ textarea {
 
 .comic-control-band {
   grid-template-columns: 128px 116px 34px;
+}
+
+.showcase-app {
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 24vw, 560px);
+  gap: 18px;
+}
+
+.showcase-workspace {
+  grid-template-columns: clamp(280px, 16vw, 340px) minmax(0, 1fr);
+}
+
+.showcase-workspace .asset-column {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.showcase-control-band {
+  grid-template-columns: 160px 90px 118px 230px 34px;
+}
+
+.showcase-control-band .batch-box select:disabled {
+  opacity: 0.78;
+  cursor: default;
+}
+
+.showcase-form-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr);
+  gap: 12px;
+}
+
+.showcase-form-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.showcase-general-prompt {
+  min-height: 170px;
+}
+
+.showcase-special-prompt {
+  min-height: 190px;
 }
 
 .comic-form-grid {
@@ -1941,10 +2118,44 @@ button.mini {
   overflow: hidden;
 }
 
+.showcase-output-grid {
+  min-height: 720px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.showcase-output-card {
+  display: grid;
+  gap: 6px;
+}
+
+.showcase-output-card video {
+  aspect-ratio: 9 / 16;
+}
+
+.comic-output-grid {
+  min-height: 520px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.comic-output-card {
+  display: grid;
+  gap: 6px;
+}
+
+.comic-output-card video {
+  aspect-ratio: 9 / 16;
+}
+
+.showcase-download-link {
+  justify-self: start;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 4000;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -2019,7 +2230,7 @@ button.mini {
   position: fixed;
   right: 24px;
   top: 88px;
-  z-index: 120;
+  z-index: 3900;
   max-width: min(420px, calc(100vw - 32px));
   padding: 12px 14px;
   border: 1px solid rgba(169, 112, 255, 0.42);
@@ -2032,7 +2243,7 @@ button.mini {
 }
 
 .login-backdrop {
-  z-index: 40;
+  z-index: 4100;
 }
 
 .login-panel {

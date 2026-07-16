@@ -3,6 +3,7 @@ const state = {
   user: null,
   selectedRoles: new Set(),
   selectedMonsters: new Set(),
+  selectedScenes: new Set(),
   selectedLogos: new Set(),
   selectedCompetitors: new Set(),
   selectedBatches: new Set(),
@@ -13,6 +14,7 @@ const state = {
   uploadingCompetitors: new Set(),
   guangdadaItems: [],
   guangdadaTargetFolder: "",
+  guangdadaSelectedName: "",
   pollTimer: null,
   appVersion: "",
   versionUpdateHandled: false
@@ -48,13 +50,16 @@ const els = {
   failCount: document.querySelector("#failCount"),
   roleGrid: document.querySelector("#roleGrid"),
   monsterGrid: document.querySelector("#monsterGrid"),
+  sceneGrid: document.querySelector("#sceneGrid"),
   logoGrid: document.querySelector("#logoGrid"),
   roleUploader: document.querySelector("#roleUploader"),
   uploadRoleBtn: document.querySelector("#uploadRoleBtn"),
   uploadMonsterBtn: document.querySelector("#uploadMonsterBtn"),
+  uploadSceneBtn: document.querySelector("#uploadSceneBtn"),
   uploadLogoBtn: document.querySelector("#uploadLogoBtn"),
   toggleRoles: document.querySelector("#toggleRoles"),
   toggleMonsters: document.querySelector("#toggleMonsters"),
+  toggleScenes: document.querySelector("#toggleScenes"),
   toggleLogos: document.querySelector("#toggleLogos"),
   competitorList: document.querySelector("#competitorList"),
   globalRequirementText: document.querySelector("#globalRequirementText"),
@@ -66,6 +71,7 @@ const els = {
   guangdadaStartDate: document.querySelector("#guangdadaStartDate"),
   guangdadaEndDate: document.querySelector("#guangdadaEndDate"),
   guangdadaRecentRange: document.querySelector("#guangdadaRecentRange"),
+  guangdadaKeywordPicker: document.querySelector("#guangdadaKeywordPicker"),
   guangdadaSearchBtn: document.querySelector("#guangdadaSearchBtn"),
   guangdadaStatus: document.querySelector("#guangdadaStatus"),
   guangdadaGrid: document.querySelector("#guangdadaGrid"),
@@ -98,6 +104,9 @@ const els = {
   profileAvatarPreview: document.querySelector("#profileAvatarPreview"),
   profileApiKeyInput: document.querySelector("#profileApiKeyInput"),
   profileApiKeyHint: document.querySelector("#profileApiKeyHint"),
+  profileTrialKeyBlock: document.querySelector("#profileTrialKeyBlock"),
+  profileTrialApiKeyInput: document.querySelector("#profileTrialApiKeyInput"),
+  profileTrialApiKeyHint: document.querySelector("#profileTrialApiKeyHint"),
   profileStatus: document.querySelector("#profileStatus"),
   adminUsersBtn: document.querySelector("#adminUsersBtn"),
   adminUsersModal: document.querySelector("#adminUsersModal"),
@@ -232,7 +241,21 @@ function renderProfileForm(profile = {}) {
   if (els.profileDisplayNameInput) els.profileDisplayNameInput.value = profile.displayName || state.user?.displayName || state.user?.username || "";
   if (els.profileAvatarInput) els.profileAvatarInput.value = profile.avatar || "";
   if (els.profileApiKeyInput) els.profileApiKeyInput.value = "";
-  if (els.profileApiKeyHint) els.profileApiKeyHint.textContent = profile.hasApiKey ? `已配置 API Key：${profile.apiKeyPreview}` : "未配置 API Key 时不能开始生图或生视频。";
+  if (els.profileApiKeyHint) {
+    els.profileApiKeyHint.textContent = profile.hasApiKey
+      ? `已配置 API Key：${profile.apiKeyPreview}`
+      : state.user?.isTrial
+        ? "试用账户可以不填写自己的 API Key，将使用管理员配置的试用账户共用 API Key。"
+        : "未配置 API Key 时不能开始生图或生视频。";
+  }
+  const canManageTrialKey = Boolean(profile.canManageTrialKey || state.user?.isAdmin || state.user?.role === "admin");
+  if (els.profileTrialKeyBlock) els.profileTrialKeyBlock.hidden = !canManageTrialKey;
+  if (els.profileTrialApiKeyInput) els.profileTrialApiKeyInput.value = "";
+  if (els.profileTrialApiKeyHint) {
+    els.profileTrialApiKeyHint.textContent = profile.hasTrialApiKey
+      ? `已配置试用账户共用 API Key：${profile.trialApiKeyPreview}。试用账户每日限 30 张图、10 个视频。`
+      : "未配置试用账户共用 API Key 时，试用账户不能生成。每天每个试用账户限 30 张图、10 个视频。";
+  }
   setProfilePreviewAvatar(profile.avatar || "", profile.displayName || state.user?.displayName || state.user?.username || "U");
 }
 
@@ -270,7 +293,8 @@ async function saveProfile() {
       body: JSON.stringify({
         displayName: els.profileDisplayNameInput.value,
         avatar: els.profileAvatarInput.value,
-        apiKey: els.profileApiKeyInput.value
+        apiKey: els.profileApiKeyInput.value,
+        trialApiKey: els.profileTrialApiKeyInput?.value || ""
       })
     });
     const profile = data.profile || {};
@@ -345,7 +369,7 @@ async function submitLogin() {
   }
 }
 
-function renderAdminUsers(users = []) {
+function renderAdminUsersLegacy(users = []) {
   if (!els.adminUsersList) return;
   if (!users.length) {
     els.adminUsersList.innerHTML = `<div class="empty-line">暂无账号</div>`;
@@ -362,6 +386,33 @@ function renderAdminUsers(users = []) {
       <select class="admin-role">
         <option value="user" ${user.isAdmin ? "" : "selected"}>普通用户</option>
         <option value="admin" ${user.isAdmin ? "selected" : ""}>管理员</option>
+      </select>
+      <button class="mini ghost admin-save-user" type="button">保存</button>
+      <button class="mini ghost danger admin-delete-user" type="button">删除</button>
+    </div>
+  `).join("");
+}
+
+function renderAdminUsers(users = []) {
+  if (!els.adminUsersList) return;
+  if (!users.length) {
+    els.adminUsersList.innerHTML = `<div class="empty-line">暂无账号</div>`;
+    return;
+  }
+  const roleValue = (user) => user.isAdmin ? "admin" : user.isTrial || user.role === "trial" ? "trial" : "user";
+  const roleLabel = (user) => roleValue(user) === "admin" ? "管理员" : roleValue(user) === "trial" ? "试用用户" : "普通用户";
+  els.adminUsersList.innerHTML = users.map((user) => `
+    <div class="admin-user-row" data-username="${escapeHtml(user.username)}">
+      <div>
+        <strong>${escapeHtml(user.displayName || user.username)}</strong>
+        <small>${escapeHtml(user.username)} · ${roleLabel(user)}</small>
+      </div>
+      <input class="admin-display-name" type="text" value="${escapeHtml(user.displayName || "")}" placeholder="昵称" />
+      <input class="admin-password" type="text" value="" placeholder="新密码，留空不改" />
+      <select class="admin-role">
+        <option value="user" ${roleValue(user) === "user" ? "selected" : ""}>普通用户</option>
+        <option value="trial" ${roleValue(user) === "trial" ? "selected" : ""}>试用用户</option>
+        <option value="admin" ${roleValue(user) === "admin" ? "selected" : ""}>管理员</option>
       </select>
       <button class="mini ghost admin-save-user" type="button">保存</button>
       <button class="mini ghost danger admin-delete-user" type="button">删除</button>
@@ -464,6 +515,7 @@ function friendlyError(message) {
 async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSettings = false } = {}) {
   const previousRoles = new Set(state.selectedRoles);
   const previousMonsters = new Set(state.selectedMonsters);
+  const previousScenes = new Set(state.selectedScenes);
   const previousLogos = new Set(state.selectedLogos);
   const previousCompetitors = new Set(state.selectedCompetitors);
   const hadMaterials = Boolean(state.materials) && !resetSelection;
@@ -476,10 +528,12 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
 
   const roleNames = materials.roles.map((role) => role.name);
   const monsterNames = materials.monsters.map((monster) => monster.name);
+  const sceneNames = (materials.scenes || []).map((scene) => scene.name);
   const logoNames = (materials.logos || []).map((logo) => logo.name);
   const competitorNames = materials.competitors.map((item) => item.name);
   state.selectedRoles = hadMaterials ? new Set(roleNames.filter((name) => previousRoles.has(name))) : new Set();
   state.selectedMonsters = hadMaterials ? new Set(monsterNames.filter((name) => previousMonsters.has(name))) : new Set();
+  state.selectedScenes = hadMaterials ? new Set(sceneNames.filter((name) => previousScenes.has(name))) : new Set();
   state.selectedLogos = hadMaterials ? new Set(logoNames.filter((name) => previousLogos.has(name))) : new Set();
   state.selectedCompetitors = hadMaterials ? new Set(competitorNames.filter((name) => previousCompetitors.has(name))) : new Set();
   if (!competitorNames.includes(state.guangdadaTargetFolder)) {
@@ -506,6 +560,7 @@ async function loadMaterials({ resetSelection = false, forceRefreshCompetitorSet
 function renderAll() {
   renderAssetGrid({ items: state.materials.roles, grid: els.roleGrid, selected: state.selectedRoles, toggle: els.toggleRoles, kind: "role" });
   renderAssetGrid({ items: state.materials.monsters, grid: els.monsterGrid, selected: state.selectedMonsters, toggle: els.toggleMonsters, kind: "monster" });
+  renderAssetGrid({ items: state.materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
   renderAssetGrid({ items: state.materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos, kind: "logo" });
   renderGuangdadaCompetitorSelect();
   renderCompetitors();
@@ -565,7 +620,7 @@ function selectedGuangdadaCompetitor() {
 function renderGuangdadaCompetitorSelect() {
   if (!els.guangdadaKeyword) return;
   const names = competitorNameOptions();
-  const previous = els.guangdadaKeyword.value;
+  const previous = els.guangdadaKeyword.value && !els.guangdadaKeyword.value.startsWith("__") ? els.guangdadaKeyword.value : state.guangdadaSelectedName;
   els.guangdadaKeyword.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -582,12 +637,85 @@ function renderGuangdadaCompetitorSelect() {
   createOption.value = "__create__";
   createOption.textContent = "+ 新增竞品名称";
   els.guangdadaKeyword.append(createOption);
+  if (els.guangdadaKeywordPicker) renderGuangdadaNamePicker(names, previous);
+  updateGuangdadaDeleteButton();
+}
+
+function renderGuangdadaNamePicker(names, selectedName = "") {
+  els.guangdadaKeywordPicker.innerHTML = "";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "guangdada-name-trigger";
+  button.innerHTML = `<span>${escapeHtml(selectedName || "\u8bf7\u9009\u62e9\u7ade\u54c1")}</span><span class="chevron">&#x2304;</span>`;
+  const menu = document.createElement("div");
+  menu.className = "guangdada-name-menu";
+
+  const addRow = (label, className, onClick) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `guangdada-name-row ${className || ""}`.trim();
+    row.textContent = label;
+    row.addEventListener("click", onClick);
+    menu.append(row);
+  };
+
+  addRow("\u8bf7\u9009\u62e9\u7ade\u54c1", "muted", () => selectGuangdadaName(""));
+  addRow("+ \u65b0\u589e\u7ade\u54c1\u540d\u79f0", "create", () => {
+    closeGuangdadaNamePicker();
+    openCompetitorNameModal();
+  });
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = `guangdada-name-row name-row${name === selectedName ? " active" : ""}`;
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "guangdada-name-value";
+    nameButton.textContent = name;
+    nameButton.addEventListener("click", () => selectGuangdadaName(name));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "guangdada-name-delete";
+    deleteButton.innerHTML = "&times;";
+    deleteButton.title = `\u5220\u9664 ${name}`;
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteGuangdadaCompetitorName(name);
+    });
+    row.append(nameButton, deleteButton);
+    menu.append(row);
+  }
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    els.guangdadaKeywordPicker.classList.toggle("open");
+  });
+  els.guangdadaKeywordPicker.append(button, menu);
+}
+
+function closeGuangdadaNamePicker() {
+  els.guangdadaKeywordPicker?.classList.remove("open");
+}
+
+function selectGuangdadaName(name) {
+  state.guangdadaSelectedName = name;
+  els.guangdadaKeyword.value = name;
+  closeGuangdadaNamePicker();
+  renderGuangdadaCompetitorSelect();
+  if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
+}
+
+function updateGuangdadaDeleteButton() {
+  if (!els.guangdadaDeleteFolderBtn || !els.guangdadaKeyword) return;
+  const value = els.guangdadaKeyword.value;
+  const displayName = value && !value.startsWith("__") ? value : state.guangdadaSelectedName;
+  els.guangdadaDeleteFolderBtn.disabled = !displayName || value === "__create__";
+  els.guangdadaDeleteFolderBtn.title = els.guangdadaDeleteFolderBtn.disabled ? "请先选择要删除的竞品名称" : `删除 ${displayName}`;
 }
 
 function resetProjectState() {
   state.materials = null;
   state.selectedRoles = new Set();
   state.selectedMonsters = new Set();
+  state.selectedScenes = new Set();
   state.selectedLogos = new Set();
   state.selectedCompetitors = new Set();
   state.selectedBatches = new Set();
@@ -602,7 +730,7 @@ function resetProjectState() {
 function renderAssetGrid({ items, grid, selected, toggle, kind }) {
   grid.innerHTML = "";
   for (const item of items) {
-    const canManage = ["role", "monster", "logo"].includes(kind);
+    const canManage = ["role", "monster", "scene", "logo"].includes(kind);
     const canAdminManage = Boolean(state.user?.isAdmin && canManage);
     const card = document.createElement("label");
     card.className = `role-card ${selected.has(item.name) ? "selected" : ""}`;
@@ -672,7 +800,7 @@ function renderAssetGrid({ items, grid, selected, toggle, kind }) {
       event.preventDefault();
       event.stopPropagation();
       if (menu) menu.hidden = true;
-      const label = kind === "monster" ? "怪物图" : kind === "logo" ? "产品 Logo" : "角色图";
+      const label = kind === "monster" ? "怪物图" : kind === "scene" ? "场景图" : kind === "logo" ? "产品 Logo" : "角色图";
       if (!confirm(`确定删除这个${label}吗？\n${item.name}`)) return;
       deleteBtn.disabled = true;
       try {
@@ -807,7 +935,11 @@ function renderCompetitors() {
 }
 
 function renderOutputs() {
-  const outputs = state.materials.outputs || [];
+  const outputs = (state.materials.outputs || []).filter((output) => {
+    const batch = String(output.batch || "");
+    const name = String(output.name || "");
+    return (output.module || "ad") === "ad" && !batch.startsWith("comic_") && !batch.startsWith("role_showcase_") && !name.includes("comic_") && !name.includes("role_showcase_");
+  });
   const batches = [...new Set(outputs.map((output) => output.batch || "未分组"))];
   if (!state.batchesInitialized) {
     state.selectedBatches = new Set(batches);
@@ -1299,6 +1431,9 @@ async function confirmCreateCompetitorName() {
     els.competitorNameModal.hidden = true;
     await loadMaterials();
     els.guangdadaKeyword.value = result.displayName || displayName;
+    state.guangdadaSelectedName = els.guangdadaKeyword.value;
+    renderGuangdadaCompetitorSelect();
+    updateGuangdadaDeleteButton();
     if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
   } catch (error) {
     alert(error.message);
@@ -1498,6 +1633,10 @@ els.uploadMonsterBtn.addEventListener("click", () => {
   pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "monster", mode: "add" }, successText: "怪物图已上传" });
 });
 
+els.uploadSceneBtn?.addEventListener("click", () => {
+  pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "scene", mode: "add" }, successText: "\u573a\u666f\u56fe\u5df2\u4e0a\u4f20" });
+});
+
 els.uploadLogoBtn.addEventListener("click", () => {
   pickImageAndUpload({ endpoint: "/api/upload-role", payload: { kind: "logo", mode: "add" }, successText: "产品 Logo 已上传" });
 });
@@ -1640,6 +1779,12 @@ els.toggleMonsters.addEventListener("change", () => {
   updateTaskPreview();
 });
 
+els.toggleScenes?.addEventListener("change", () => {
+  state.selectedScenes = new Set(els.toggleScenes.checked ? (state.materials.scenes || []).map((scene) => scene.name) : []);
+  renderAssetGrid({ items: state.materials.scenes || [], grid: els.sceneGrid, selected: state.selectedScenes, toggle: els.toggleScenes, kind: "scene" });
+  updateTaskPreview();
+});
+
 els.toggleLogos.addEventListener("change", () => {
   state.selectedLogos = new Set(els.toggleLogos.checked ? (state.materials.logos || []).map((logo) => logo.name) : []);
   renderAssetGrid({ items: state.materials.logos || [], grid: els.logoGrid, selected: state.selectedLogos, toggle: els.toggleLogos, kind: "logo" });
@@ -1702,7 +1847,7 @@ els.guangdadaSearchBtn.addEventListener("click", async () => {
     els.guangdadaStatus.textContent = "已禁用";
     return alert("广大大抓取暂时禁用，请自行上传竞品素材。");
   }
-  if (!els.guangdadaKeyword.value || els.guangdadaKeyword.value === "__create__") {
+  if (!els.guangdadaKeyword.value || els.guangdadaKeyword.value.startsWith("__")) {
     alert("请先选择或新增一个竞品名称");
     return;
   }
@@ -1745,7 +1890,7 @@ els.exportOutputsBtn.addEventListener("click", async () => {
     const res = await fetch("/api/outputs/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batches })
+      body: JSON.stringify({ batches, module: "ad" })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -1797,11 +1942,13 @@ els.outputModeSelect?.addEventListener("change", () => {
 });
 
 els.guangdadaKeyword.addEventListener("change", async () => {
-  const selectedOption = els.guangdadaKeyword.options[els.guangdadaKeyword.selectedIndex];
   if (els.guangdadaKeyword.value === "__create__") {
+    updateGuangdadaDeleteButton();
     openCompetitorNameModal();
     return;
   }
+  state.guangdadaSelectedName = els.guangdadaKeyword.value || "";
+  updateGuangdadaDeleteButton();
   if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
 });
 
@@ -1815,21 +1962,39 @@ els.competitorNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeCompetitorNameModal();
 });
 
-els.guangdadaDeleteFolderBtn.addEventListener("click", async () => {
-  const selectedOption = els.guangdadaKeyword.options[els.guangdadaKeyword.selectedIndex];
-  const displayName = selectedOption?.value || "";
-  if (!displayName || displayName === "__create__") return alert("请先选择要删除的竞品名称");
+async function deleteGuangdadaCompetitorName(displayName) {
+  if (!displayName || displayName.startsWith("__")) {
+    renderGuangdadaCompetitorSelect();
+    return alert("请先选择要删除的竞品名称");
+  }
   if (!confirm(`确定删除 ${displayName} 吗？只会删除竞品名称，不会删除竞品素材栏位。`)) return;
-  els.guangdadaDeleteFolderBtn.disabled = true;
+  if (els.guangdadaDeleteFolderBtn) els.guangdadaDeleteFolderBtn.disabled = true;
   try {
-    await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
+    const result = await api("/api/competitors/delete", { method: "POST", body: JSON.stringify({ displayName }) });
+    state.guangdadaItems = [];
+    state.guangdadaSelectedName = "";
+    if (state.materials) state.materials.competitorNames = result.names || [];
     await loadMaterials();
+    els.guangdadaKeyword.value = "";
+    updateGuangdadaDeleteButton();
+    els.guangdadaStatus.textContent = `已删除 ${displayName}`;
+    els.guangdadaGrid.innerHTML = `<div class="disabled-note">通过 ZingAPI 抓取素材，选择竞品名称后点击抓取。</div>`;
     if (state.guangdadaItems.length) renderGuangdadaItems(state.guangdadaItems);
   } catch (error) {
     alert(error.message);
   } finally {
-    els.guangdadaDeleteFolderBtn.disabled = false;
+    updateGuangdadaDeleteButton();
   }
+}
+
+els.guangdadaDeleteFolderBtn?.addEventListener("click", async () => {
+  const value = els.guangdadaKeyword.value;
+  const displayName = value && !value.startsWith("__") ? value : state.guangdadaSelectedName;
+  await deleteGuangdadaCompetitorName(displayName);
+});
+
+document.addEventListener("click", (event) => {
+  if (!els.guangdadaKeywordPicker?.contains(event.target)) closeGuangdadaNamePicker();
 });
 
 els.startBtn.addEventListener("click", async () => {
@@ -1860,6 +2025,7 @@ els.startBtn.addEventListener("click", async () => {
         videoModel,
         roles: [...state.selectedRoles],
         monsters: [...state.selectedMonsters],
+        scenes: [...state.selectedScenes],
         logos: [...state.selectedLogos],
         competitors: [...state.selectedCompetitors],
         globalRequirement: els.globalRequirementText.value,

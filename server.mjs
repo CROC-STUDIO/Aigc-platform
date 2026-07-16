@@ -38,6 +38,7 @@ const CONFIG_PATH = process.env.AIGC_CONFIG_PATH ? resolveAppPath(process.env.AI
 const DEFAULT_CONFIG_PATH = join(__dirname, "config.default.json");
 const USERS_PATH = process.env.AIGC_USERS_PATH ? resolveAppPath(process.env.AIGC_USERS_PATH) : join(__dirname, "users.json");
 const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(process.env.AIGC_USER_PROFILES_PATH) : join(__dirname, "user-profiles.json");
+const TRIAL_USAGE_PATH = process.env.AIGC_TRIAL_USAGE_PATH ? resolveAppPath(process.env.AIGC_TRIAL_USAGE_PATH) : join(__dirname, "trial-usage.json");
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
 const CONFIG_DIR = dirname(CONFIG_PATH);
@@ -65,6 +66,7 @@ const VIDEO_MODEL_OPTIONS = {
   "dreamina-seedance-2-0-mini": { model: "dreamina-seedance-2-0-260128", label: "Dreamina Seedance 2.0 Mini" }
 };
 const REVERSE_PROMPT_MODEL = process.env.REVERSE_PROMPT_MODEL || "gemini-3-flash-preview";
+const ROLE_SHOWCASE_PROMPT_MODEL = process.env.ROLE_SHOWCASE_PROMPT_MODEL || "gpt-5.5";
 const REVERSE_PROMPT_ENDPOINT = process.env.REVERSE_PROMPT_ENDPOINT || process.env.OPENAI_BASE_URL || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || process.env.REVERSE_PROMPT_API_KEY || "";
 const DEFAULT_OUTPUT_SIZE = "1024x1024";
@@ -226,12 +228,19 @@ function maskApiKey(value) {
 }
 
 function publicProfile(username, profile = {}) {
+  const viewer = currentUser();
+  const viewerIsAdmin = Boolean(viewer?.isAdmin || viewer?.role === "admin");
+  const isOwnProfile = !username || viewer?.username === username || viewer?.userId === username;
+  const canManageTrialKey = Boolean(viewerIsAdmin && isOwnProfile);
   return {
     username,
     displayName: String(profile.displayName || "").trim(),
     avatar: String(profile.avatar || "").trim(),
     hasApiKey: Boolean(String(profile.apiKey || "").trim()),
-    apiKeyPreview: maskApiKey(profile.apiKey)
+    apiKeyPreview: maskApiKey(profile.apiKey),
+    canManageTrialKey,
+    hasTrialApiKey: canManageTrialKey ? Boolean(String(profile.trialApiKey || "").trim()) : false,
+    trialApiKeyPreview: canManageTrialKey ? maskApiKey(profile.trialApiKey) : ""
   };
 }
 
@@ -250,11 +259,13 @@ async function updateMyProfile(body = {}) {
   const displayName = String(body.displayName ?? current.displayName ?? user.displayName ?? user.username).trim().slice(0, 60);
   const avatar = String(body.avatar ?? current.avatar ?? "").trim().slice(0, 3_000_000);
   const apiKeyInput = String(body.apiKey ?? "").trim();
+  const trialApiKeyInput = user.isAdmin ? String(body.trialApiKey ?? "").trim() : "";
   profiles[user.username] = {
     ...current,
     displayName: displayName || user.username,
     avatar,
     apiKey: apiKeyInput ? apiKeyInput : String(current.apiKey || ""),
+    trialApiKey: user.isAdmin && trialApiKeyInput ? trialApiKeyInput : String(current.trialApiKey || ""),
     updatedAt: new Date().toISOString()
   };
   await writeUserProfiles(profiles);
@@ -274,11 +285,76 @@ async function currentUserProfile() {
   return profiles[username] || {};
 }
 
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+async function readTrialUsage() {
+  if (!existsSync(TRIAL_USAGE_PATH)) return {};
+  try {
+    const data = JSON.parse(await readFile(TRIAL_USAGE_PATH, "utf8"));
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeTrialUsage(usage) {
+  await writeFile(TRIAL_USAGE_PATH, `${JSON.stringify(usage, null, 2)}\n`, "utf8");
+}
+
+async function findTrialApiKey() {
+  const profiles = await readUserProfiles();
+  const users = await authStore.listUsers().catch(() => []);
+  const adminNames = users.filter((user) => user.isAdmin || user.role === "admin").map((user) => user.username);
+  for (const username of ["admin", ...adminNames]) {
+    const key = String(profiles[username]?.trialApiKey || "").trim();
+    if (key) return key;
+  }
+  return "";
+}
+
+async function reserveTrialQuota({ images = 0, videos = 0 } = {}) {
+  const user = currentUser();
+  if (!user?.isTrial) return { ok: true, trial: false };
+  const imageCount = Math.max(0, Number(images) || 0);
+  const videoCount = Math.max(0, Number(videos) || 0);
+  if (!imageCount && !videoCount) return { ok: true, trial: true };
+  const day = todayKey();
+  const usage = await readTrialUsage();
+  const byDay = usage[day] && typeof usage[day] === "object" ? usage[day] : {};
+  const current = byDay[user.username] && typeof byDay[user.username] === "object" ? byDay[user.username] : { images: 0, videos: 0 };
+  const usedImages = Number(current.images || 0);
+  const usedVideos = Number(current.videos || 0);
+  const nextImages = usedImages + imageCount;
+  const nextVideos = usedVideos + videoCount;
+  if (nextImages > 30 || nextVideos > 10) {
+    const error = new Error(`试用账户每日额度不足：今天已用图片 ${usedImages}/30、视频 ${usedVideos}/10；本次需要图片 ${imageCount}、视频 ${videoCount}。请减少生成数量，或明天重置后再试。`);
+    error.status = 400;
+    throw error;
+  }
+  usage[day] = {
+    ...byDay,
+    [user.username]: {
+      images: nextImages,
+      videos: nextVideos,
+      updatedAt: new Date().toISOString()
+    }
+  };
+  await writeTrialUsage(usage);
+  return { ok: true, trial: true, day, images: nextImages, videos: nextVideos };
+}
+
 async function requireUserApiKeyForModel(model, label = "模型") {
+  const user = currentUser();
   const profile = await currentUserProfile();
-  const apiKey = String(profile.apiKey || "").trim();
+  let apiKey = String(profile.apiKey || "").trim();
+  if (!apiKey && user?.isTrial) apiKey = await findTrialApiKey();
   if (!apiKey) {
-    const error = new Error(`请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}`);
+    const error = new Error(user?.isTrial
+      ? `试用账户尚未配置共用 API Key。请联系管理员在头像里的个人信息中配置“试用账户共用 API Key”后再使用 ${label}。`
+      : `请先点击右上角头像，在个人信息里配置 API Key 后再使用 ${label}。`);
     error.status = 400;
     throw error;
   }
@@ -390,6 +466,7 @@ function dirs() {
   const sharedRoot = currentBaseProjectRoot();
   const recordDir = join(root, "\u6279\u5904\u7406\u8bb0\u5f55");
   const sharedRecordDir = join(sharedRoot, "\u6279\u5904\u7406\u8bb0\u5f55");
+  const outputDir = join(root, "\u6548\u679c\u56fe");
   return {
     projectRoot: root,
     sharedProjectRoot: sharedRoot,
@@ -398,11 +475,14 @@ function dirs() {
     sceneDir: join(sharedRoot, "\u573a\u666f\u56fe"),
     referenceVideoDir: join(sharedRoot, "\u53c2\u8003\u89c6\u9891"),
     logoDir: join(sharedRoot, "\u4ea7\u54c1logo"),
-    outputDir: join(root, "\u6548\u679c\u56fe"),
+    outputDir,
+    adOutputDir: join(outputDir, "广告素材工作台"),
+    comicOutputDir: join(outputDir, "漫剧工作台"),
+    roleShowcaseOutputDir: join(outputDir, "角色展示视频"),
     recordDir,
     guangdadaCacheDir: join(recordDir, "guangdada_cache"),
     globalRequirementPath: join(recordDir, "\u901a\u7528\u63d0\u793a\u8bcd.txt"),
-    competitorNameLibraryPath: join(recordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
+    competitorNameLibraryPath: join(sharedRecordDir, "\u7ade\u54c1\u540d\u79f0\u5e93.json"),
     upscaledDir: join(sharedRecordDir, "upscaled_refs_20260608_b")
   };
 }
@@ -702,13 +782,13 @@ function normalizeDialogueAnalysis(value) {
 function dialogueInstructionBlock(dialogue) {
   if (!dialogue?.has_dialogue || !dialogue.original_lines?.length) {
     return [
-      "音频规则：生成视频必须包含自然环境音、动作音效和人物语音/口播，不要生成完全静音视频。",
-      "台词规则：当前系统未能从原视频自动识别出明确台词时，也要参考原视频是否存在人物口型、口播节奏、字幕或对白气口；如画面明显有人说话，请生成同语种、极短、自然的人物语音或口播。不要添加背景音乐，除非用户特别要求。",
-      "如果用户在特殊提示词中补充了台词，以用户补充为准；否则使用与参考视频一致的语种和广告语气，不要把英文改成中文，也不要把中文改成英文。"
+      "音频规则：当前未识别到明确台词时，默认只生成自然环境音和动作/道具音效，不要生成人物语音、口播、旁白、可识别姓名、联系方式、账号、地址或其他敏感个人信息。",
+      "台词规则：不要根据口型、字幕样式或广告节奏自行补写新台词；只有用户在特殊提示词中明确补充台词时，才按用户台词生成同语种、极短、自然的人声。",
+      "不要添加背景音乐，除非用户特别要求；如果音频可能触发审核，请优先输出无人物语音的安全音效轨。"
     ].join("\n");
   }
   return [
-    "音频规则：生成视频必须包含自然环境音、动作音效和人物语音，不要生成完全静音视频；不要添加背景音乐，除非用户特别要求。",
+    "音频规则：原视频存在明确台词时才生成人物语音；同时包含自然环境音和动作音效。人物语音必须极短、只表达剧情功能，不得包含姓名、联系方式、账号、地址、隐私、引导加群或其他敏感个人信息；不要添加背景音乐，除非用户特别要求。",
     `台词规则：原视频存在台词，必须保留原台词语种：${dialogue.language || "原语种"}。除非用户在特殊要求中明确要求翻译或改语种，否则新视频不能改变台词语种。`,
     "原视频台词/可见字幕参考：",
     ...dialogue.original_lines.slice(0, 8).map((line, index) => `${index + 1}. ${line}`),
@@ -864,6 +944,139 @@ function extractResponseText(response) {
   return parts.join("\n").trim();
 }
 
+function roleShowcaseEndpoint() {
+  return String(process.env.ROLE_SHOWCASE_PROMPT_ENDPOINT || process.env.SKYLINK_ENDPOINT || process.env.TAI_ENDPOINT || process.env.OPENAI_BASE_URL || "https://skylink-gateway.com/api/v1").trim();
+}
+
+function normalizeShowcaseAssetList(value, kind) {
+  return (Array.isArray(value) ? value : []).slice(0, kind === "role" ? 4 : 6).map((item) => ({
+    kind,
+    name: String(item?.title || item?.name || "").trim(),
+    traits: String(item?.traits || "").trim(),
+    path: String(item?.path || "").trim()
+  })).filter((item) => item.path);
+}
+
+async function showcaseImagePart(asset, index) {
+  const full = safeInsideProject(asset.path);
+  const buffer = await readFile(full);
+  const mime = contentTypeForFile(full).startsWith("image/") ? contentTypeForFile(full) : detectImageContentType(buffer);
+  return {
+    label: `${asset.kind}-${index + 1}`,
+    name: asset.name || basename(full),
+    traits: asset.traits,
+    contentType: mime,
+    dataUrl: `data:${mime};base64,${buffer.toString("base64")}`
+  };
+}
+
+function cleanGeneratedPrompt(text) {
+  return String(text || "")
+    .replace(/^```(?:\w+)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+async function generateRoleShowcasePrompt(body = {}) {
+  const apiKey = await requireUserApiKeyForModel(ROLE_SHOWCASE_PROMPT_MODEL, ROLE_SHOWCASE_PROMPT_MODEL);
+  const roles = normalizeShowcaseAssetList(body.roles, "role");
+  const monsters = normalizeShowcaseAssetList(body.monsters, "monster");
+  const scenes = normalizeShowcaseAssetList(body.scenes, "scene");
+  const logos = normalizeShowcaseAssetList(body.logos, "logo");
+  if (!roles.length) {
+    const error = new Error("请先勾选至少 1 张角色图后再生成提示词。");
+    error.status = 400;
+    throw error;
+  }
+  const images = [];
+  for (const [index, asset] of [...roles, ...monsters, ...scenes, ...logos].entries()) {
+    images.push(await showcaseImagePart(asset, index));
+  }
+  const assetLines = [
+    ...roles.map((item, index) => `角色图${index + 1}：${item.name || "未命名"}。${item.traits || ""}`),
+    ...monsters.map((item, index) => `怪物图${index + 1}：${item.name || "未命名"}。${item.traits || ""}`),
+    ...logos.map((item, index) => `产品Logo${index + 1}：${item.name || "未命名"}。${item.traits || ""}`)
+  ].join("\n");
+  const instruction = `你是 Seedance 2.0 手游广告视频导演和提示词专家。请参考用户上传的角色图、怪物图、产品 Logo 的真实外观，生成一段可以直接交给 Seedance 2.0 的中文最终提示词。
+
+硬性要求：
+1. 最终提示词必须是完整可执行的视频生成提示词，不要输出 JSON、Markdown、解释、标题或代码块。
+2. 自动分析角色外观、怪物外观、性格气质、动作方式和镜头节奏。若用户填写了角色名称/身份，则结合用户填写；若为空，则根据角色图自行判断，不要套用固定角色。
+3. 唯一核心主角必须是已选角色图中的角色。不要改变主角外观，不要新增第二个主角，不要把怪物或 Logo 当主角。
+4. 若选了怪物图，怪物只能作为压迫感敌人或展示互动对象，外观参考上传怪物图，不要抢主角戏份。
+5. 若选了产品 Logo，Logo 只能作为角色展示素材中的附属品牌元素或角落点缀，不能遮挡角色脸、武器或关键动作；结尾不要做游戏下载引导、下载按钮、下载区域或额外广告文案。
+6. 默认生成 15 秒竖屏 9:16 Q版手游角色展示广告，必须像高爽感买量广告：开头 0.5 秒内有爆点，中段每 1-1.5 秒都有动作爽点或镜头变化，最后 2 秒只做角色记忆点近景展示。不要慢铺垫、不要长时间走路、不要站桩展示、不要单一长镜头。
+7. 必须写清 15 秒快节奏：0-1秒强钩子，主角从阴影、森林、传送门、舞台边缘或危机场景突然登场，指尖、武器或核心道具瞬间爆光、冲入、落地震屏或点燃；1-3秒第一段动作爽点，主角立刻转身面向怪物/目标出手，出现第一次击飞、破防、压制或强反馈；3-6秒第二段连击爽点，快速切 2-3 个短镜头，连续命中、弹飞、追击、残影或连环技能；6-9秒第三段升级爽点，技能规模明显变大，镜头推拉、环绕、震屏、粒子爆发，不能停顿；9-13秒高潮大招，必须有大范围能量爆发、怪物群被清场或目标被压制，动作仍要对准怪物/目标，表现清楚攻击方向、命中反馈和空间关系；13-15秒结尾拉近镜头展示角色脸部/半身，根据角色性格和形象设计表情与小动作，例如俏皮坏笑、自信挑眉、冷酷凝视、害羞眨眼、骄傲扬头、温柔微笑或战后喘息，突出眼神、脸、头饰、武器或核心道具，不出现游戏下载引导。
+8. 如果用户没有填写特殊提示词，也要自动生成高爽感结构：0.5秒爆点、连续三段技能爽点、逐级增强的特效规模、明确击飞/震屏/清场反馈、最后角色近景表情展示。必须把具体造型、技能、道具替换成上传角色图真实外观，不要套死某个固定模板。
+9. 战斗/技能/互动段必须有合理分镜和视线方向：0-1秒钩子可以短暂看镜头；1-13秒主角必须面向怪物、敌群、能量靶或技能目标，身体、眼神、武器/法杖/道具指向都要朝向目标，不要一边打斗一边持续正脸看镜头；平均每 1 秒必须有动作变化或镜头变化，用快切、推近、拉远、侧跟、反打、冲击定格、0.2秒慢动作后立刻加速制造爽感；用远景交代主角和怪物位置，用侧面中景表现出手方向，用反打镜头表现怪物被击中，近景只用于手部、道具或表情瞬间；13-15秒结尾才允许回到脸部/半身近景，根据角色性格做表情展示，不要下载引导。
+10. 画面要求：Q版卡通手游美术，强技能特效，强震屏，快速推拉镜头，冲击波，残影拖尾，粒子爆发，短促音效点，连击反馈，火焰/雷电/魔法/能量残影，适合短视频广告投放。
+11. 不要竞品 logo、竞品 UI、水印、乱码、字幕、血条、伤害数字、按钮、卡牌、技能范围框。不要写实真人，不要慢走、站桩、长时间摆 pose、空镜头、慢节奏铺垫、连续 2 秒没有动作变化，不要让主角在战斗过程中一直盯着镜头，不要生成游戏下载引导、下载按钮、下载文案或下载区域。
+12. 每次都根据本次选择的素材重新生成，不要沿用历史提示词或固定模板。
+
+用户通用提示词：
+${sanitizeRequirementText(body.generalPrompt || "")}
+
+用户特殊提示词：
+${sanitizeRequirementText(body.specialPrompt || "") || "无"}
+
+用户填写的角色名称/身份/性格：
+${sanitizeRequirementText(body.roleDesc || "") || "未填写，请根据角色图自动判断。"}
+
+已选素材清单：
+${assetLines}`;
+
+  const responsePayload = {
+    model: ROLE_SHOWCASE_PROMPT_MODEL,
+    input: [{
+      role: "user",
+      content: [
+        { type: "input_text", text: instruction },
+        ...images.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
+      ]
+    }]
+  };
+  const endpoint = roleShowcaseEndpoint().replace(/\/$/, "");
+  let res = await fetch(`${endpoint}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(responsePayload)
+  });
+  let raw = await res.text();
+  if (!res.ok) {
+    const chatPayload = {
+      model: ROLE_SHOWCASE_PROMPT_MODEL,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: instruction },
+          ...images.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } }))
+        ]
+      }]
+    };
+    res = await fetch(`${endpoint}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(chatPayload)
+    });
+    raw = await res.text();
+  }
+  if (!res.ok) {
+    const error = new Error(`生成提示词失败 HTTP ${res.status}: ${raw.slice(0, 500)}`);
+    error.status = res.status;
+    throw error;
+  }
+  const json = JSON.parse(raw);
+  const prompt = cleanGeneratedPrompt(extractResponseText(json));
+  if (!prompt) throw new Error("模型没有返回最终 Seedance 提示词。");
+  return { ok: true, model: ROLE_SHOWCASE_PROMPT_MODEL, prompt };
+}
+
 async function analyzeImageWithPython(imagePath) {
   const script = `
 import json, sys
@@ -966,10 +1179,17 @@ function updateJobState(jobName, patch) {
 }
 
 function summarizeErrorText(text) {
-  return String(text ?? "")
+  const raw = String(text ?? "");
+  if (/output audio may contain sensitive information/i.test(raw)) {
+    const requestId = raw.match(/Request id:\s*([^\s|]+)/i)?.[1] || "";
+    return `Seedance 音频审核失败：输出音频可能包含敏感信息。建议去掉人物语音/口播，只保留环境音和动作音效后重试。${requestId ? `Request id: ${requestId}` : ""}`;
+  }
+  const lines = String(text ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter(Boolean);
+  const important = lines.filter((line) => /^\[error\]/i.test(line) || /Asset upload rejected|CreateAsset|InvalidParameter|DownloadFailed|HTTP\s+\d{3}|RequestId|quota|unauthorized|forbidden|permission|failed|timeout|429/i.test(line));
+  return (important.length ? important : lines)
     .slice(-4)
     .join(" | ")
     .slice(0, 700);
@@ -1004,6 +1224,24 @@ function isImageQuotaError(text = "") {
 
 function isBytePlusAssetUploadRejected(text = "") {
   return /Asset upload rejected|CreateAsset HTTP 400|BytePlus Asset API/i.test(String(text || ""));
+}
+
+function isBytePlusAssetDownloadFailed(text = "") {
+  return isBytePlusAssetUploadRejected(text) && /DownloadFailed|Failed to download media|write to client error/i.test(String(text || ""));
+}
+
+function isSeedanceDailySubmitLimit(text = "") {
+  return /Daily seedance submit limit reached/i.test(String(text || ""));
+}
+
+function formatSeedanceSubmitError(rawError = "", errorPath = "") {
+  const summary = summarizeErrorText(rawError);
+  if (isSeedanceDailySubmitLimit(rawError)) {
+    const match = String(rawError).match(/Daily seedance submit limit reached\s*\((\d+\s*\/\s*\d+)\)\.?\s*Resets\s+tomorrow\.?/i);
+    const usage = match?.[1] ? `（${match[1].replace(/\s+/g, "")}）` : "";
+    return `Seedance 2.0 今日提交次数已用完${usage}，明天会自动重置。请明天再生成，或更换有可用 Seedance 提交额度的账号/API Key。完整错误已保存到 ${errorPath}`;
+  }
+  return `Seedance 2.0 生成提交失败：${summary}。完整错误已保存到 ${errorPath}`;
 }
 
 function sleepWithStop(ms) {
@@ -1073,18 +1311,36 @@ async function listImageFiles(dir) {
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
 
+function outputModuleFromPath(fullPath, fileName = "") {
+  const normalized = String(fullPath || "").replace(/\\/g, "/");
+  const name = String(fileName || basename(fullPath || "") || "");
+  const batch = inferBatchFromOutputName(name);
+  if (normalized.includes("/角色展示视频/") || batch.startsWith("role_showcase_") || name.includes("role_showcase_")) return "role_showcase";
+  if (normalized.includes("/漫剧工作台/") || batch.startsWith("comic_") || name.includes("comic_") || name.includes("_游戏漫剧")) return "comic";
+  return "ad";
+}
+
 async function listOutputFiles(dir) {
   if (!existsSync(dir)) return [];
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listOutputFiles(fullPath));
+      continue;
+    }
     if (!entry.isFile()) continue;
     const ext = extname(entry.name).toLowerCase();
     const type = IMAGE_EXTS.has(ext) ? "image" : VIDEO_EXTS.has(ext) ? "video" : "";
     if (!type) continue;
-    const fullPath = join(dir, entry.name);
     const info = await stat(fullPath);
-    files.push({ name: entry.name, path: fullPath, type, batch: inferBatchFromOutputName(entry.name), size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
+    if (type === "video") {
+      const head = await readFile(fullPath).then((buffer) => buffer.subarray(0, 64)).catch(() => Buffer.alloc(0));
+      if (!isLikelyVideoBuffer(head)) continue;
+    }
+    const batch = inferBatchFromOutputName(entry.name);
+    files.push({ name: entry.name, path: fullPath, type, module: outputModuleFromPath(fullPath, entry.name), batch, size: info.size, mtimeMs: info.mtimeMs, url: type === "video" ? localFileUrl(fullPath, Math.round(info.mtimeMs)) : await publicUrlForProjectFile(fullPath, Math.round(info.mtimeMs)) });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
@@ -1106,7 +1362,7 @@ function inferBatchFromOutputName(name) {
   const stem = parse(name).name;
   const timeBatch = stem.match(/^(\d{8}_\d{4,6}|\d{12,14})(?:_|$)/);
   if (timeBatch) return timeBatch[1];
-  const markers = ["_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
+  const markers = ["_\u6e38\u620f\u6f2b\u5267", "_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
   const indexes = markers.map((marker) => stem.indexOf(marker)).filter((index) => index > 0);
   if (!indexes.length) return "ungrouped";
   return stem.slice(0, Math.min(...indexes));
@@ -1143,29 +1399,53 @@ async function writeCompetitorDisplayName(folder, displayName) {
 }
 
 async function loadCompetitorNameLibrary() {
-  await mkdir(dirs().recordDir, { recursive: true });
+  await mkdir(dirname(dirs().competitorNameLibraryPath), { recursive: true });
   let names = [];
-  if (existsSync(dirs().competitorNameLibraryPath)) {
+  const primaryLibraryPath = dirs().competitorNameLibraryPath;
+  const hasPrimaryLibrary = existsSync(primaryLibraryPath);
+  const libraryPaths = hasPrimaryLibrary ? [primaryLibraryPath] : await competitorNameLibraryPaths();
+  let hasLibraryFile = false;
+  for (const libraryPath of libraryPaths) {
+    if (!existsSync(libraryPath)) continue;
+    hasLibraryFile = true;
     try {
-      const data = JSON.parse(await readFile(dirs().competitorNameLibraryPath, "utf8"));
-      names = Array.isArray(data.names) ? data.names : Array.isArray(data) ? data : [];
+      const data = JSON.parse(await readFile(libraryPath, "utf8"));
+      names.push(...(Array.isArray(data.names) ? data.names : Array.isArray(data) ? data : []));
     } catch {
-      names = [];
+      // Ignore malformed legacy libraries and keep any valid names already loaded.
     }
   }
-  const legacyFolders = await competitorFolders().catch(() => []);
-  for (const folder of legacyFolders) {
-    const displayName = await readCompetitorDisplayName(folder).catch(() => folder);
-    if (displayName && displayName !== folder) names.push(displayName);
+  if (!hasLibraryFile) {
+    const legacyFolders = await competitorFolders().catch(() => []);
+    for (const folder of legacyFolders) {
+      const displayName = await readCompetitorDisplayName(folder).catch(() => folder);
+      if (displayName && displayName !== folder) names.push(displayName);
+    }
   }
-  return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
+  const clean = [...new Set(names.map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
+  if (clean.length) await saveCompetitorNameLibrary(clean).catch(() => {});
+  return clean;
 }
 
 async function saveCompetitorNameLibrary(names) {
-  await mkdir(dirs().recordDir, { recursive: true });
+  await mkdir(dirname(dirs().competitorNameLibraryPath), { recursive: true });
   const clean = [...new Set((names ?? []).map((name) => String(name).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true }));
   await writeFile(dirs().competitorNameLibraryPath, JSON.stringify({ names: clean }, null, 2), "utf8");
   return clean;
+}
+
+async function competitorNameLibraryPaths() {
+  const paths = [dirs().competitorNameLibraryPath];
+  const userDataRoot = join(currentBaseProjectRoot(), "\u7528\u6237\u6570\u636e");
+  if (existsSync(userDataRoot)) {
+    const projectFolder = sanitizeSegment(basename(resolve(currentBaseProjectRoot())));
+    const users = await readdir(userDataRoot, { withFileTypes: true }).catch(() => []);
+    for (const user of users) {
+      if (!user.isDirectory()) continue;
+      paths.push(join(userDataRoot, user.name, projectFolder, "\u6279\u5904\u7406\u8bb0\u5f55", "\u7ade\u54c1\u540d\u79f0\u5e93.json"));
+    }
+  }
+  return [...new Set(paths.map((item) => resolve(item)))];
 }
 
 async function createCompetitorFolder(body = {}) {
@@ -1249,9 +1529,10 @@ async function saveCompetitorSettings(body = {}) {
 async function selectedOutputsForBatches(body = {}) {
   const batches = Array.isArray(body.batches) ? body.batches.map((item) => String(item)) : [];
   if (!batches.length) throw new Error("请先勾选至少一个结果批次");
+  const moduleFilter = ["ad", "comic", "role_showcase"].includes(String(body.module || "")) ? String(body.module) : "";
   const outputs = await listOutputFiles(dirs().outputDir);
   const batchSet = new Set(batches);
-  const selected = outputs.filter((output) => batchSet.has(output.batch || "未分组"));
+  const selected = outputs.filter((output) => (!moduleFilter || output.module === moduleFilter) && batchSet.has(output.batch || "未分组"));
   if (!selected.length) throw new Error("当前勾选批次中没有可下载的图片或视频");
   return selected;
 }
@@ -1352,6 +1633,9 @@ async function loadMaterials() {
   await ensureProjectStructure(dirs().projectRoot);
   await ensureProjectStructure(dirs().sharedProjectRoot);
   await mkdir(dirs().outputDir, { recursive: true });
+  await mkdir(dirs().adOutputDir, { recursive: true });
+  await mkdir(dirs().comicOutputDir, { recursive: true });
+  await mkdir(dirs().roleShowcaseOutputDir, { recursive: true });
   await mkdir(dirs().recordDir, { recursive: true });
   await mkdir(dirs().upscaledDir, { recursive: true });
   await mkdir(dirs().roleDir, { recursive: true });
@@ -1770,7 +2054,13 @@ function sanitizeRequirementText(text) {
     .slice(0, 1600);
 }
 
-function singleRolePrompt(role, competitor, logos = []) {
+function sceneReferenceBlock(scenes = []) {
+  if (!scenes.length) return "";
+  const lines = scenes.map((scene, index) => `Scene reference ${index + 1}: ${scene.traits || scene.name}.`).join("\n");
+  return `\nOptional uploaded scene references: use these only to guide original environment style, lighting, mood, materials, and world flavor. Do not copy the scene image verbatim. Blend the competitor layout with the uploaded scene style so the final ad belongs to the user's own game world.\n${lines}\n`;
+}
+
+function singleRolePrompt(role, competitor, logos = [], scenes = []) {
   const sizeText = (competitor.layout ?? layoutFromDimensions()).promptSize;
 
   return `${sizeText} mobile game advertising picture, fully original. Use the provided user-owned character as identity reference and the competitor image only as composition reference.
@@ -1820,15 +2110,34 @@ function repeatSuffix(index, repeatCount) {
   return repeatCount > 1 ? `_第${index}次` : "";
 }
 
-function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
+function roleOutputLabel(roles = []) {
+  const names = roles.map((role) => parse(role.name || role.title || "角色").name).filter(Boolean);
+  return names.length ? names.join("-") : "组合";
+}
+
+function nextNamedOutputBase(batchTag, roleLabel, competitorName, counters) {
+  const counterKey = `${competitorName}\u0000${roleLabel}`;
+  const nextIndex = (counters.get(counterKey) || 0) + 1;
+  counters.set(counterKey, nextIndex);
+  return [
+    sanitizeSegment(batchTag, "batch"),
+    sanitizeSegment(roleLabel, "role"),
+    sanitizeSegment(competitorName, "competitor"),
+    String(nextIndex)
+  ].join("_");
+}
+
+function buildJobs({ roles, monsters, scenes = [], logos = [], competitors, selectedRoleNames, selectedMonsterNames, selectedSceneNames = [], selectedLogoNames = [], selectedCompetitorNames, competitorSettings, globalRequirement, batchTag, outputMode = "image", repeatCount = 1, imageModel = MODEL, videoModel = "dreamina-seedance-2-0-mini" }) {
   const chosenRoles = roles.filter((role) => selectedRoleNames.includes(role.name));
   const chosenMonsters = monsters.filter((monster) => selectedMonsterNames.includes(monster.name));
+  const chosenScenes = scenes.filter((scene) => selectedSceneNames.includes(scene.name));
   const chosenLogos = logos.filter((logo) => selectedLogoNames.includes(logo.name));
   const chosenCompetitors = competitors.filter((item) => selectedCompetitorNames.includes(item.name));
   const repeats = Math.max(1, Math.min(50, Number(repeatCount || 1)));
   const resolvedImageModel = resolveImageModel(imageModel);
   const resolvedVideoModel = resolveVideoModel(videoModel);
   const jobs = [];
+  const outputCounters = new Map();
 
   for (const competitor of chosenCompetitors) {
     const setting = competitorSettings?.[competitor.name] ?? {};
@@ -1866,6 +2175,7 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           const baseGroupName = `组合_${roleCount}角色_${monsterCount}怪物_${groupIndex + 1}`;
           const groupName = `${baseGroupName}${repeatSuffix(repeatIndex, repeats)}`;
           const ref = competitor.images[0]?.path;
+          const outputBase = nextNamedOutputBase(batchTag, roleOutputLabel(groupRoles), competitor.name, outputCounters);
           jobs.push({
             id: `${competitor.name}_${groupName}`,
             name: `${competitor.name}_${groupName}`,
@@ -1878,11 +2188,11 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
             videoSize,
             referenceVideoPath: competitor.referenceVideoPath || "",
             referenceVideoDuration: competitor.referenceVideoDuration || 0,
-            prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, logos: jobLogos, competitor: promptCompetitor, groupName }),
+            prompt: comboPrompt({ roles: groupRoles, monsters: groupMonsters, scenes: chosenScenes, logos: jobLogos, competitor: promptCompetitor, groupName }),
             videoPrompt: seedanceAdVideoPrompt({ roles: groupRoles, monsters: groupMonsters, competitor: promptCompetitor, groupName }),
-            images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-            output: join(dirs().outputDir, `${batchTag}_${competitor.name}_${groupName}.png`),
-            videoOutput: join(dirs().outputDir, `${batchTag}_${competitor.name}_${groupName}.mp4`)
+            images: [...groupRoles.map((role) => role.sourcePath), ...groupMonsters.map((monster) => monster.sourcePath), ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
+            output: join(dirs().adOutputDir, `${outputBase}.png`),
+            videoOutput: join(dirs().adOutputDir, `${outputBase}.mp4`)
           });
         }
       }
@@ -1895,6 +2205,8 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
         const layout = promptCompetitor.layout ?? layoutFromDimensions();
         const baseTypeName = layout.orientation === "wide" ? "参考图横版" : layout.orientation === "tall" ? "参考图竖版" : "参考图构图";
         const typeName = `${baseTypeName}${repeatSuffix(repeatIndex, repeats)}`;
+        const roleLabel = parse(role.name).name;
+        const outputBase = nextNamedOutputBase(batchTag, roleLabel, competitor.name, outputCounters);
         jobs.push({
           id: `${parse(role.name).name}_${competitor.name}_${typeName}`,
           name: `${parse(role.name).name}_${competitor.name}_${typeName}`,
@@ -1907,11 +2219,11 @@ function buildJobs({ roles, monsters, logos = [], competitors, selectedRoleNames
           videoSize,
           referenceVideoPath: competitor.referenceVideoPath || "",
           referenceVideoDuration: competitor.referenceVideoDuration || 0,
-          prompt: singleRolePrompt(role, promptCompetitor, jobLogos),
+          prompt: singleRolePrompt(role, promptCompetitor, jobLogos, chosenScenes),
           videoPrompt: seedanceAdVideoPrompt({ roles: [role], monsters: [], competitor: promptCompetitor, groupName: typeName }),
-          images: [role.sourcePath, ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
-          output: join(dirs().outputDir, `${batchTag}_${parse(role.name).name}_${competitor.name}_${typeName}.png`),
-          videoOutput: join(dirs().outputDir, `${batchTag}_${parse(role.name).name}_${competitor.name}_${typeName}.mp4`)
+          images: [role.sourcePath, ...chosenScenes.map((scene) => scene.sourcePath), ...jobLogos.map((logo) => logo.sourcePath), ref].filter(Boolean),
+          output: join(dirs().adOutputDir, `${outputBase}.png`),
+          videoOutput: join(dirs().adOutputDir, `${outputBase}.mp4`)
         });
       }
     }
@@ -2082,16 +2394,29 @@ async function runSeedanceVideoStage(job, promptDir, logPath) {
   return { videoTaskId: taskIds.filter(Boolean).join(",") };
 }
 
+function nextAvailableFilePath(targetPath) {
+  if (!existsSync(targetPath)) return targetPath;
+  const parsed = parse(targetPath);
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = join(parsed.dir, `${parsed.name}_${index}${parsed.ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  return join(parsed.dir, `${parsed.name}_${Date.now()}${parsed.ext}`);
+}
+
 async function generateComicVideo(body = {}) {
   const prompt = String(body.prompt ?? "").trim();
   if (!prompt) throw new Error("请先生成或填写 Seedance 提示词");
   const ratio = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"].includes(String(body.ratio)) ? String(body.ratio) : "9:16";
   const videoModelInfo = resolveVideoModel(body.videoModel || "dreamina-seedance-2-0-mini");
+  const apiKey = await requireUserApiKeyForModel(videoModelInfo.model, videoModelInfo.label);
+  await reserveTrialQuota({ videos: 1 });
   const duration = Math.max(4, Math.min(15, Number.parseInt(String(body.duration ?? "15"), 10) || 15));
   const batchTag = sanitizeSegment(body.batchTag || new Date().toISOString().slice(0, 19).replace(/\D/g, ""));
   const workDir = join(dirs().recordDir, `comic_${batchTag}`);
   await mkdir(workDir, { recursive: true });
-  await mkdir(dirs().outputDir, { recursive: true });
+  const outputDir = String(batchTag).startsWith("role_showcase_") ? dirs().roleShowcaseOutputDir : dirs().comicOutputDir;
+  await mkdir(outputDir, { recursive: true });
   const refs = Array.isArray(body.refs) ? body.refs.slice(0, 8) : [];
   const assetPaths = Array.isArray(body.assetPaths) ? body.assetPaths.slice(0, 8) : [];
   const imageArgs = [];
@@ -2128,21 +2453,37 @@ async function generateComicVideo(body = {}) {
   args.push(prompt);
   let stdout = "";
   let stderr = "";
-  try {
-    const result = await execTai(args);
-    stdout = result.stdout;
-    stderr = result.stderr;
-  } catch (error) {
-    const rawError = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`.trim();
-    await writeFile(join(workDir, "seedance_error.txt"), rawError || String(error), "utf8");
-    throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(rawError || error.message)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
+  let lastRawError = "";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const result = await execTai(args, { env: taiEnvForApiKey(apiKey) });
+      stdout = result.stdout;
+      stderr = result.stderr;
+      lastRawError = "";
+      break;
+    } catch (error) {
+      const rawError = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`.trim();
+      lastRawError = rawError || String(error);
+      await writeFile(join(workDir, "seedance_error.txt"), lastRawError, "utf8");
+      if (attempt < 3 && isBytePlusAssetDownloadFailed(lastRawError)) {
+        addLog("retry", `SEEDANCE_ASSET_RETRY attempt=${attempt + 1}/3 ${summarizeErrorText(lastRawError)}`);
+        await sleepWithStop(5000 * attempt);
+        continue;
+      }
+      if (isSeedanceDailySubmitLimit(lastRawError)) {
+        throw new Error(formatSeedanceSubmitError(lastRawError, join(workDir, "seedance_error.txt")));
+      }
+      throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError || error.message)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
+    }
   }
+  if (isSeedanceDailySubmitLimit(lastRawError)) throw new Error(formatSeedanceSubmitError(lastRawError, join(workDir, "seedance_error.txt")));
+  if (lastRawError) throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`) : parseSeedanceVideoUrl(raw);
+  const output = nextAvailableFilePath(join(outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
+  const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`, output) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
-  const output = join(dirs().outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`);
-  await downloadBinary(videoUrl, output);
+  if (!taskId) await downloadVerifiedVideo(videoUrl, output, `comic_${batchTag}`);
   const storage = await syncProjectAssetToObjectStorage(output, "comic_video_output");
   const promptPath = join(workDir, "seedance_prompt.txt");
   await writeFile(promptPath, prompt, "utf8");
@@ -2189,11 +2530,14 @@ function parseSeedanceVideoUrl(raw) {
       // CLI output often contains non-JSON progress lines.
     }
   }
-  const outputLine = lines.find((line) =>
+  const outputLines = lines.filter((line) =>
     /(Output|Result|Generated|Preview|Video\s*(URL|Output|Result)|视频结果|生成结果|输出)/i.test(line) &&
     !/(Upload|Uploaded|Input|Source|Reference|Asset|--video|source-video|参考|输入|上传)/i.test(line)
   );
-  return cleanUrl(outputLine?.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || "");
+  const fallbackUrls = outputLines
+    .map((line) => cleanUrl(line.match(/(https?:\/\/\S+|\/v1\/public\/\S+)/i)?.[1] || ""))
+    .filter(Boolean);
+  return fallbackUrls.find(isLikelyVideoUrl) || "";
 }
 
 async function pollSeedanceVideoUrl(taskId, jobName, targetPath = "") {
@@ -2249,6 +2593,7 @@ async function startBatch(options = {}) {
   const materials = await loadMaterials();
   const selectedRoleNames = options.roles?.length ? options.roles : materials.roles.map((role) => role.name);
   const selectedMonsterNames = options.monsters?.length ? options.monsters : [];
+  const selectedSceneNames = options.scenes?.length ? options.scenes : [];
   const selectedLogoNames = options.logos?.length ? options.logos : [];
   const selectedCompetitorNames = options.competitors?.length ? options.competitors : materials.competitors.map((item) => item.name);
   const batchTag = options.batchTag?.trim() || new Date().toISOString().slice(0, 16).replace(/\D/g, "");
@@ -2264,10 +2609,12 @@ async function startBatch(options = {}) {
   const jobs = buildJobs({
     roles: materials.roles,
     monsters: materials.monsters,
+    scenes: materials.scenes || [],
     logos: materials.logos,
     competitors: materials.competitors,
     selectedRoleNames,
     selectedMonsterNames,
+    selectedSceneNames,
     selectedLogoNames,
     selectedCompetitorNames,
     competitorSettings: options.competitorSettings ?? {},
@@ -2290,11 +2637,17 @@ async function startBatch(options = {}) {
     if (needsLogo && !selectedLogoNames.length) throw new Error("没有可生成任务：已选竞品勾选了 Logo，但没有勾选产品 Logo 图。请勾选产品 Logo，或取消该竞品的 Logo。");
     throw new Error("没有可生成任务：请检查竞品素材、角色数量、怪物数量和素材勾选状态。");
   }
+  await requireUserApiKeyForModel(imageModelInfo.model, imageModelInfo.label);
+  if (outputMode === "video") await requireUserApiKeyForModel(videoModelInfo.model, videoModelInfo.label);
+  await reserveTrialQuota({
+    images: jobs.length,
+    videos: outputMode === "video" ? jobs.length : 0
+  });
   const safeImageModel = imageModelInfo.model.replace(/[^a-zA-Z0-9_-]/g, "_");
   const promptDir = join(dirs().recordDir, `prompts_${batchTag}_${safeImageModel}`);
   const logPath = join(dirs().recordDir, `batch_${batchTag}_${safeImageModel}_${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   await mkdir(promptDir, { recursive: true });
-  await mkdir(dirs().outputDir, { recursive: true });
+  await mkdir(dirs().adOutputDir, { recursive: true });
 
   runState = setRunState({
     running: true,
@@ -2398,7 +2751,7 @@ async function stopBatch() {
   return runState;
 }
 
-function comboPrompt({ roles, monsters, logos = [], competitor, groupName }) {
+function comboPrompt({ roles, monsters, scenes = [], logos = [], competitor, groupName }) {
   const roleLines = roles.map((role, index) => `Hero ${index + 1}: ${role.traits}.`).join("\n");
   const monsterLines = monsters.map((monster, index) => `Creature ${index + 1}: ${monster.traits}.`).join("\n");
   const hasMonsters = monsters.length > 0;
@@ -2488,7 +2841,7 @@ function seedanceGeneralVideoPrompt({ roles, monsters, competitor, groupName }) 
 11-15秒：形成结尾记忆点，保持参考的结尾停留逻辑，例如角色满意/震惊/开心/无奈定格，产品Logo露出，场景成果展示，或轻微镜头拉远展示完整构图。不能突然切入怪物、攻击、爆炸、升级或胜利战斗结算。
 
 视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}保持当前参考素材的非战斗类型和情绪，不要把其他竞品图的束缚、危险状态、战斗场景或塔防玩法混入当前视频。
-音频总规则：必须生成音频轨道，包含自然环境音、动作/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
+音频总规则：生成安全音频轨道，默认只包含自然环境音和动作/道具音效；没有明确台词时不要生成人物语音、口播或旁白。除非用户明确要求，否则不要添加背景音乐；不得生成姓名、联系方式、账号、地址、隐私或其他敏感个人信息。
 ${dialoguePrompt}
 
 当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
@@ -2516,7 +2869,7 @@ function seedanceBattleVideoPrompt({ roles, monsters, competitor, groupName }) {
 11-15秒：出现SS阶终极升级，释放大范围但因果清晰的终结技能：蓄力、发射、覆盖目标、敌人反应、奖励回流，最后胜利定格。
 
 视频规则：不要竞品logo、不要竞品角色、不要竞品UI、不要中文文字、不要乱码、不要水印、不要写实真人、不要血腥恐怖。${videoVisualStyleRule(competitor.visualStyleMode)}清晰动作因果，敌人不能在未被击中前凭空消失，不能把其他竞品图的束缚、危险状态或场景混入当前视频。
-音频总规则：必须生成音频轨道，包含自然环境音、攻击/道具音效和人物语音/口播；不要生成完全静音视频。除非用户明确要求，否则不要添加背景音乐。
+音频总规则：生成安全音频轨道，默认只包含自然环境音和攻击/道具音效；没有明确台词时不要生成人物语音、口播或旁白。除非用户明确要求，否则不要添加背景音乐；不得生成姓名、联系方式、账号、地址、隐私或其他敏感个人信息。
 ${dialoguePrompt}
 
 当前分组：${groupName}。特殊要求：${sanitizeRequirementText(specialRequirementForImagePrompt(competitor.specialRequirement) || "无")}`;
@@ -2785,7 +3138,7 @@ async function deleteSharedMaterial(body = {}) {
   if (runState.running) throw new Error("正在生成中，不能删除素材，请先停止或等待完成");
   const kind = String(body.kind ?? "");
   const name = sanitizeFileName(body.name ?? "");
-  const targetDir = kind === "monster" ? dirs().monsterDir : kind === "logo" ? dirs().logoDir : kind === "role" ? dirs().roleDir : kind === "referenceVideo" ? dirs().referenceVideoDir : "";
+  const targetDir = kind === "monster" ? dirs().monsterDir : kind === "logo" ? dirs().logoDir : kind === "scene" ? dirs().sceneDir : kind === "role" ? dirs().roleDir : kind === "referenceVideo" ? dirs().referenceVideoDir : "";
   if (!targetDir) throw new Error("只能删除角色图、怪物图、产品 Logo 或参考视频素材");
   if (!name) throw new Error("缺少要删除的素材名称");
   const target = safeInsideProject(join(targetDir, name));
@@ -2802,16 +3155,18 @@ async function deleteSharedMaterial(body = {}) {
 function sharedMaterialTargetDir(kind) {
   return kind === "monster" ? dirs().monsterDir
     : kind === "logo" ? dirs().logoDir
-      : kind === "role" ? dirs().roleDir
-        : kind === "referenceVideo" ? dirs().referenceVideoDir
-          : "";
+      : kind === "scene" ? dirs().sceneDir
+        : kind === "role" ? dirs().roleDir
+          : kind === "referenceVideo" ? dirs().referenceVideoDir
+            : "";
 }
 
 function sharedMaterialAssetKind(kind) {
   return kind === "referenceVideo" ? "reference_video"
     : kind === "monster" ? "monster_image"
       : kind === "logo" ? "product_logo"
-        : "role_image";
+        : kind === "scene" ? "scene_image"
+          : "role_image";
 }
 
 async function renameSharedMaterial(body = {}) {
@@ -2955,8 +3310,8 @@ function transcriptToDialogue(transcript = {}) {
     original_lines: [],
     preserve_language: true,
     instruction: transcript.error
-      ? `ASR未识别到明确台词：${transcript.error}。如果原视频画面有人物口型、口播节奏、字幕或对白气口，新视频仍需生成同语种、极短、自然的人物语音；不要生成完全静音视频。`
-      : "未检测到明确台词；如参考视频明显有人说话，新视频仍需生成同语种、极短、自然的人物语音，不要完全静音。"
+      ? `ASR未识别到明确台词：${transcript.error}。默认不要生成人物语音或口播，只生成自然环境音和动作/道具音效；只有用户明确补充台词时才生成同语种短人声。`
+      : "未检测到明确台词；默认不要生成人物语音或口播，只生成自然环境音和动作/道具音效；只有用户明确补充台词时才生成同语种短人声。"
   };
   const lines = text.split(/\r?\n|(?<=[.!?。！？])\s+/).map((line) => line.trim()).filter(Boolean).slice(0, 12);
   const language = transcript.language || detectDialogueLanguage(text);
@@ -3862,6 +4217,9 @@ async function handleRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/outputs/export") {
       return await sendOutputsZip(res, await readJson(req));
+    }
+    if (req.method === "POST" && url.pathname === "/api/role-showcase/generate-prompt") {
+      return sendJson(res, await generateRoleShowcasePrompt(await readJson(req)));
     }
     if (req.method === "POST" && url.pathname === "/api/comic/generate-video") {
       return sendJson(res, await generateComicVideo(await readJson(req)));
