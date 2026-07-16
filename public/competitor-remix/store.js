@@ -18,7 +18,10 @@ function initialDrafts() {
 }
 
 function initialSelectedModes() {
-  return Object.fromEntries(CAPABILITIES.map((capability) => [capability.id, capability.modes[0].id]));
+  return Object.fromEntries(CAPABILITIES.map((capability) => [
+    capability.id,
+    (capability.modes.find((mode) => !mode.hidden) || capability.modes[0]).id
+  ]));
 }
 
 function cleanRunForStorage(run = {}) {
@@ -44,7 +47,11 @@ function createInitialState(storage) {
   for (const [key, saved] of Object.entries(persisted.drafts || {})) {
     if (drafts[key] && saved && typeof saved === "object") drafts[key] = { ...drafts[key], ...saved };
   }
-  const selectedModes = { ...initialSelectedModes(), ...(persisted.selectedModes || {}) };
+  const selectedModes = initialSelectedModes();
+  for (const capability of CAPABILITIES) {
+    const restored = capability.modes.find((mode) => mode.id === persisted.selectedModes?.[capability.id] && !mode.hidden);
+    if (restored) selectedModes[capability.id] = restored.id;
+  }
   const selectedCapabilityId = CAPABILITIES.some((item) => item.id === persisted.selectedCapabilityId)
     ? persisted.selectedCapabilityId
     : CAPABILITIES[0].id;
@@ -156,7 +163,8 @@ export function createRemixStore({ storage = globalThis.sessionStorage } = {}) {
   }
 
   function selectMode(capabilityId, modeId) {
-    if (!getMode(capabilityId, modeId)) return;
+    const selected = getMode(capabilityId, modeId);
+    if (!selected || selected.hidden) return;
     state = {
       ...state,
       selectedCapabilityId: capabilityId,

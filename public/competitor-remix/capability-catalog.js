@@ -4,12 +4,13 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function mode(id, label, jobType, editor, defaults) {
+function mode(id, label, jobType, editor, defaults, { hidden = false } = {}) {
   return Object.freeze({
     id,
     label,
     jobType,
     editor,
+    hidden,
     defaults: Object.freeze(clone(defaults)),
     createDraft() {
       return clone(defaults);
@@ -29,7 +30,7 @@ export const CAPABILITIES = Object.freeze([
         resolution: "720p",
         segmentSeconds: 15,
         priority: 0
-      }),
+      }, { hidden: true }),
       mode("automatic", "自动检测", "ai_remove", "none", {
         maskThreshold: 1,
         priority: 0

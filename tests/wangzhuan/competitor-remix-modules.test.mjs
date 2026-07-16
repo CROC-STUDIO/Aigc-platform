@@ -14,6 +14,7 @@ import {
 import { createRemixStore } from "../../public/competitor-remix/store.js";
 import { createMediaWorkspace } from "../../public/competitor-remix/media-workspace.js";
 import {
+  createRegionEditor,
   normalizedBox,
   normalizedPoint,
   selectionForPrompt,
@@ -40,6 +41,27 @@ test("competitor remix exposes five capabilities backed by ten existing executio
       ["analysis", "report", "material_analysis"]
     ]
   );
+});
+
+test("Seedance redraw remains adapted but is hidden from the user workflow", () => {
+  const remove = CAPABILITIES.find((item) => item.id === "remove");
+  assert.equal(getMode("remove", "seedance").hidden, true);
+  assert.deepEqual(remove.modes.filter((item) => !item.hidden).map((item) => item.id), [
+    "automatic",
+    "kframe",
+    "fixed_region"
+  ]);
+
+  const store = createRemixStore({ storage: createMemoryStorage() });
+  assert.equal(store.getState().selectedModes.remove, "automatic");
+  store.selectMode("remove", "seedance");
+  assert.equal(store.getState().selectedModes.remove, "automatic");
+});
+
+test("restored drafts migrate away from the hidden Seedance redraw mode", () => {
+  const persisted = createMemoryStorage();
+  persisted.setItem("competitor-remix:v2", JSON.stringify({ selectedModes: { remove: "seedance" } }));
+  assert.equal(createRemixStore({ storage: persisted }).getState().selectedModes.remove, "automatic");
 });
 
 test("catalog returns isolated default drafts", () => {
@@ -310,13 +332,13 @@ test("store tracks concurrent runs and persists only serializable non-secret sta
 test("reset current draft leaves shared source, other drafts, and runs intact", () => {
   const store = createRemixStore({ storage: createMemoryStorage() });
   store.replaceSource({ mode: "url", url: "https://example.com/a.mp4", identity: "url:a" });
-  store.updateDraft("remove", "seedance", { segmentSeconds: 30 });
   store.updateDraft("remove", "automatic", { maskThreshold: 9 });
+  store.updateDraft("remove", "kframe", { maxFrames: 99 });
   store.upsertRun({ runId: "run-1", status: "running" });
   store.resetCurrentDraft();
 
-  assert.equal(store.getDraft("remove", "seedance").segmentSeconds, 15);
-  assert.equal(store.getDraft("remove", "automatic").maskThreshold, 9);
+  assert.equal(store.getDraft("remove", "automatic").maskThreshold, 1);
+  assert.equal(store.getDraft("remove", "kframe").maxFrames, 99);
   assert.equal(store.getState().source.url, "https://example.com/a.mp4");
   assert.equal(store.getState().runs.length, 1);
 });
@@ -430,6 +452,54 @@ test("editor displays only the selection used by the active prompt type", () => 
   };
   assert.deepEqual(selectionForPrompt(draft), { box: null, points: draft.points });
   assert.deepEqual(selectionForPrompt({ ...draft, promptType: "box" }), { box: draft.box, points: [] });
+});
+
+test("box drag survives same-mode state synchronization and releases pointer capture", () => {
+  const listeners = new Map();
+  const captured = [];
+  const released = [];
+  const surface = {
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type) {
+      listeners.delete(type);
+    },
+    getBoundingClientRect() {
+      return { left: 0, top: 0, width: 200, height: 100 };
+    },
+    setPointerCapture(pointerId) {
+      captured.push(pointerId);
+    },
+    releasePointerCapture(pointerId) {
+      released.push(pointerId);
+    }
+  };
+  const phases = [];
+  let editor;
+  editor = createRegionEditor({
+    surface,
+    getMediaSize: () => ({ width: 200, height: 100 }),
+    onChange(value) {
+      phases.push(value.phase);
+      if (value.phase === "preview") {
+        editor.setMode("box", "positive");
+        editor.setValue(value);
+      }
+    }
+  });
+
+  const drag = (pointerId, start, end) => {
+    listeners.get("pointerdown")({ ...start, pointerId });
+    listeners.get("pointermove")({ ...end, pointerId });
+    listeners.get("pointerup")({ ...end, pointerId });
+  };
+  drag(1, { clientX: 20, clientY: 20 }, { clientX: 100, clientY: 60 });
+  drag(2, { clientX: 40, clientY: 10 }, { clientX: 160, clientY: 80 });
+
+  assert.deepEqual(captured, [1, 2]);
+  assert.deepEqual(released, [1, 2]);
+  assert.deepEqual(phases, ["preview", "complete", "preview", "complete"]);
 });
 
 test("job runner keeps concurrent submissions and timers independent", async () => {

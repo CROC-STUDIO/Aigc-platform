@@ -128,9 +128,11 @@ export function createRegionEditor({ surface, getMediaSize, onChange } = {}) {
   surface.addEventListener("pointercancel", pointerCancel);
 
   function setMode(nextMode, nextPointLabel = pointLabel) {
-    mode = nextMode === "point" ? "point" : "box";
-    pointLabel = nextPointLabel === "negative" ? "negative" : "positive";
-    dragStart = null;
+    const normalizedMode = nextMode === "point" ? "point" : "box";
+    const normalizedPointLabel = nextPointLabel === "negative" ? "negative" : "positive";
+    if (mode !== normalizedMode || pointLabel !== normalizedPointLabel) dragStart = null;
+    mode = normalizedMode;
+    pointLabel = normalizedPointLabel;
   }
 
   function setValue(next = {}) {
@@ -138,7 +140,6 @@ export function createRegionEditor({ surface, getMediaSize, onChange } = {}) {
       box: next.box ? { ...next.box } : null,
       points: Array.isArray(next.points) ? next.points.map((point) => ({ ...point })) : []
     };
-    dragStart = null;
   }
 
   function clear() {

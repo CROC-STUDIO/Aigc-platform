@@ -148,8 +148,10 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
 
   function selection(state = store.getState()) {
     const capability = getCapability(state.selectedCapabilityId) || CAPABILITIES[0];
-    const modeId = state.selectedModes[capability.id] || capability.modes[0].id;
-    const mode = getMode(capability.id, modeId) || capability.modes[0];
+    const visibleModes = capability.modes.filter((item) => !item.hidden);
+    const modeId = state.selectedModes[capability.id] || visibleModes[0].id;
+    const selectedMode = getMode(capability.id, modeId);
+    const mode = selectedMode && !selectedMode.hidden ? selectedMode : visibleModes[0];
     const draft = store.getDraft(capability.id, mode.id);
     return { capability, mode, draft };
   }
@@ -170,7 +172,7 @@ export function createRemixView({ store, media, runner, requireLogin, root = doc
   }
 
   function renderModes(state, capability, mode) {
-    elements.modeTabs.innerHTML = capability.modes.map((item) => `<button type="button" role="tab" data-mode-id="${escapeHtml(item.id)}" aria-selected="${item.id === mode.id}">${escapeHtml(item.label)}</button>`).join("");
+    elements.modeTabs.innerHTML = capability.modes.filter((item) => !item.hidden).map((item) => `<button type="button" role="tab" data-mode-id="${escapeHtml(item.id)}" aria-selected="${item.id === mode.id}">${escapeHtml(item.label)}</button>`).join("");
     elements.capabilityEyebrow.textContent = capability.label;
     elements.workspaceTitle.textContent = mode.label;
   }
