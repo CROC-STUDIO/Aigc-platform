@@ -30,6 +30,8 @@ export const ERROR_HTTP_STATUS = Object.freeze({
   batch_not_found: 404,
   not_running: 409,
   invalid_state_transition: 409,
+  idempotency_conflict: 409,
+  idempotency_in_progress: 409,
   stitcher_unavailable: 503,
   no_segments: 409,
   stitch_failed: 500,

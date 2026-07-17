@@ -52,6 +52,24 @@ function branchHasAssetField(branch = {}, assetKey) {
   );
 }
 
+function assetStorageIdentity(branch = {}, assetKey = "") {
+  return cleanString(branch.assetStorageKeys?.[assetKey])
+    || cleanString(branch.assetStoredPaths?.[assetKey])
+    || cleanString(branch.assetRelativePaths?.[assetKey])
+    || cleanString(branch.assetUrls?.[assetKey]);
+}
+
+function rawAssetChangesInheritedIdentity(raw = {}, base = {}, assetKey = "") {
+  if (!branchHasAssetField(raw, assetKey) || !branchHasAssetField(base, assetKey)) return false;
+  const rawHash = cleanString(raw.assetContentHashes?.[assetKey]);
+  const baseHash = cleanString(base.assetContentHashes?.[assetKey]);
+  if (rawHash && baseHash) return rawHash !== baseHash;
+  if (rawHash && !baseHash) return true;
+  const rawIdentity = assetStorageIdentity(raw, assetKey);
+  const baseIdentity = assetStorageIdentity(base, assetKey);
+  return !rawIdentity || !baseIdentity || rawIdentity !== baseIdentity;
+}
+
 function countBranchMediaFields(branch = {}) {
   let count = 0;
   for (const key of ASSET_KEYS) {
@@ -60,10 +78,27 @@ function countBranchMediaFields(branch = {}) {
   return count;
 }
 
+function pruneAssetContentHashes(hashes = {}, media = {}) {
+  const pruned = {};
+  for (const [key, value] of Object.entries(isObject(hashes) ? hashes : {})) {
+    const contentHash = cleanString(value);
+    if (!contentHash || !branchHasAssetField(media, key)) continue;
+    pruned[key] = contentHash;
+  }
+  return pruned;
+}
+
+function reviewMatchesAssetContent(review = {}, media = {}, assetKey = "") {
+  const assetContentHash = cleanString(media.assetContentHashes?.[assetKey]);
+  const reviewContentHash = cleanString(review?.contentHash);
+  return !assetContentHash || assetContentHash === reviewContentHash;
+}
+
 function pruneAssetReviews(reviews = {}, media = {}) {
   const pruned = {};
   for (const [key, review] of Object.entries(isObject(reviews) ? reviews : {})) {
     if (!branchHasAssetField(media, key)) continue;
+    if (!reviewMatchesAssetContent(review, media, key)) continue;
     pruned[key] = review;
   }
   return pruned;
@@ -76,14 +111,38 @@ export function branchMediaFields(raw = {}, { inheritFrom = null } = {}) {
     assetFileNames: mergeAssetMap(useInheritance ? base.assetFileNames : {}, raw.assetFileNames),
     assetUrls: mergeAssetMap(useInheritance ? base.assetUrls : {}, raw.assetUrls),
     assetStorageKeys: mergeAssetMap(useInheritance ? base.assetStorageKeys : {}, raw.assetStorageKeys),
-    assetStoredPaths: mergeAssetMap(useInheritance ? base.assetStoredPaths : {}, raw.assetStoredPaths)
+    assetStoredPaths: mergeAssetMap(useInheritance ? base.assetStoredPaths : {}, raw.assetStoredPaths),
+    assetContentHashes: mergeAssetMap(useInheritance ? base.assetContentHashes : {}, raw.assetContentHashes)
   };
+  const changedAssetKeys = new Set();
+  if (useInheritance) {
+    const rawAssetKeys = new Set([
+      ...Object.keys(isObject(raw.assetFileNames) ? raw.assetFileNames : {}),
+      ...Object.keys(isObject(raw.assetUrls) ? raw.assetUrls : {}),
+      ...Object.keys(isObject(raw.assetStorageKeys) ? raw.assetStorageKeys : {}),
+      ...Object.keys(isObject(raw.assetStoredPaths) ? raw.assetStoredPaths : {}),
+      ...Object.keys(isObject(raw.assetRelativePaths) ? raw.assetRelativePaths : {}),
+      ...Object.keys(isObject(raw.assetContentHashes) ? raw.assetContentHashes : {})
+    ]);
+    for (const assetKey of rawAssetKeys) {
+      if (rawAssetChangesInheritedIdentity(raw, base, assetKey)) changedAssetKeys.add(assetKey);
+    }
+  }
+  for (const assetKey of changedAssetKeys) {
+    if (!cleanString(raw.assetContentHashes?.[assetKey])) delete media.assetContentHashes[assetKey];
+  }
+  media.assetContentHashes = pruneAssetContentHashes(media.assetContentHashes, media);
   const reviewsSource = useInheritance
     ? {
         ...(isObject(base.assetReviews) ? base.assetReviews : {}),
         ...(isObject(raw.assetReviews) ? raw.assetReviews : {})
       }
     : { ...(isObject(raw.assetReviews) ? raw.assetReviews : {}) };
+  for (const assetKey of changedAssetKeys) {
+    if (!Object.prototype.hasOwnProperty.call(isObject(raw.assetReviews) ? raw.assetReviews : {}, assetKey)) {
+      delete reviewsSource[assetKey];
+    }
+  }
   media.assetReviews = pruneAssetReviews(reviewsSource, media);
   return media;
 }
@@ -94,7 +153,8 @@ function assetFieldSignature(branch = {}, assetKey) {
     cleanString(branch.assetStorageKeys?.[assetKey]),
     cleanString(branch.assetStoredPaths?.[assetKey]),
     cleanString(branch.assetRelativePaths?.[assetKey]),
-    cleanString(branch.assetFileNames?.[assetKey])
+    cleanString(branch.assetFileNames?.[assetKey]),
+    cleanString(branch.assetContentHashes?.[assetKey])
   ].join("|");
 }
 
@@ -107,6 +167,7 @@ function cloneAssetMaps(branch = {}) {
       ...(isObject(branch.assetStoredPaths) ? branch.assetStoredPaths : {}),
       ...(isObject(branch.assetRelativePaths) ? branch.assetRelativePaths : {})
     },
+    assetContentHashes: { ...(isObject(branch.assetContentHashes) ? branch.assetContentHashes : {}) },
     assetReviews: { ...(isObject(branch.assetReviews) ? branch.assetReviews : {}) }
   };
 }
@@ -122,7 +183,7 @@ export function dedupeLeakedBranchAssets(branches = []) {
       const branchSig = assetFieldSignature(branch, key);
       if (!branchSig.replace(/\|/g, "")) continue;
       if (branchSig !== assetFieldSignature(primary, key)) continue;
-      for (const mapName of ["assetFileNames", "assetUrls", "assetStorageKeys", "assetStoredPaths"]) {
+      for (const mapName of ["assetFileNames", "assetUrls", "assetStorageKeys", "assetStoredPaths", "assetContentHashes"]) {
         if (maps[mapName][key]) {
           delete maps[mapName][key];
           changed = true;
@@ -134,6 +195,7 @@ export function dedupeLeakedBranchAssets(branches = []) {
       }
     }
     if (!changed) return branch;
+    maps.assetContentHashes = pruneAssetContentHashes(maps.assetContentHashes, maps);
     maps.assetReviews = pruneAssetReviews(maps.assetReviews, maps);
     return { ...branch, ...maps };
   });
@@ -185,6 +247,7 @@ function stripBranchMeta(raw = {}) {
     assetStorageKeys: _assetStorageKeys,
     assetStoredPaths: _assetStoredPaths,
     assetRelativePaths: _assetRelativePaths,
+    assetContentHashes: _assetContentHashes,
     assetReviews: _assetReviews,
     branchId: _branchId,
     branchIndex: _branchIndex,

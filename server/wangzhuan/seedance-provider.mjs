@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { assetKeyToSlot, branchHasReferenceAsset, countReferencedAssets } from "./asset-review.mjs";
 import { configuredApiKey } from "./llm-config.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { FINAL_TAIL_REFERENCE_ASSET_ORDER, MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER, REFERENCE_VIDEO_ASSET_KEYS } from "./reference-assets.mjs";
+import {
+  isReferenceVideoAssetKey,
+  MAX_SEEDANCE_REFERENCE_ASSETS,
+  orderedReferenceAssetKeys
+} from "./reference-assets.mjs";
 
 export const DEFAULT_SEEDANCE_MODEL = "dreamina-seedance-2-0-260128";
 
@@ -76,7 +80,7 @@ function missingAssetReviewError(branch = {}, assetKey, review = {}) {
 function mediaItemFromReviewedAsset(assetKey, review = {}) {
   const assetId = cleanString(review.assetId);
   if (!assetId) return null;
-  const type = REFERENCE_VIDEO_ASSET_KEYS.has(assetKey) ? "video_asset" : "image_asset";
+  const type = isReferenceVideoAssetKey(assetKey) ? "video_asset" : "image_asset";
   return {
     type,
     assetId,
@@ -97,10 +101,89 @@ function isFinalSeedanceSlice(batch = {}, task = {}) {
   return Number(task.segmentIndex || 1) === maxSegmentIndex;
 }
 
-function seedanceReferenceOrderForTask(batch = {}, task = {}) {
-  return isFinalSeedanceSlice(batch, task)
-    ? [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER]
-    : REFERENCE_ASSET_ORDER;
+function seedanceReferenceOrderForTask(batch = {}, task = {}, branch = {}) {
+  return orderedReferenceAssetKeys(branch, {
+    includeFinalTail: isFinalSeedanceSlice(batch, task),
+    includeUnknown: false
+  });
+}
+
+function objectMap(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function branchHasMediaAsset(branch = {}, assetKey = "") {
+  return Boolean(
+    cleanString(branch.assetFileNames?.[assetKey])
+    || cleanString(branch.assetUrls?.[assetKey])
+    || cleanString(branch.assetStorageKeys?.[assetKey])
+    || cleanString(branch.assetStoredPaths?.[assetKey])
+    || cleanString(branch.assetRelativePaths?.[assetKey])
+  );
+}
+
+function branchAssetContentHash(branch = {}, assetKey = "") {
+  return cleanString(branch.assetContentHashes?.[assetKey]);
+}
+
+function branchAssetStorageIdentity(branch = {}, assetKey = "") {
+  return cleanString(branch.assetStorageKeys?.[assetKey])
+    || cleanString(branch.assetStoredPaths?.[assetKey])
+    || cleanString(branch.assetRelativePaths?.[assetKey])
+    || cleanString(branch.assetUrls?.[assetKey]);
+}
+
+function reviewHasState(review = {}) {
+  return Boolean(review && typeof review === "object" && Object.keys(review).length);
+}
+
+function reviewMatchesBranchContent(review = {}, branch = {}, assetKey = "") {
+  const assetContentHash = branchAssetContentHash(branch, assetKey);
+  const reviewContentHash = cleanString(review.contentHash);
+  return !assetContentHash || assetContentHash === reviewContentHash;
+}
+
+function branchesReferenceSameAsset(latest = {}, base = {}, assetKey = "", baseReview = {}) {
+  const latestHash = branchAssetContentHash(latest, assetKey);
+  const baseHash = branchAssetContentHash(base, assetKey) || cleanString(baseReview.contentHash);
+  if (latestHash || baseHash) return Boolean(latestHash && baseHash && latestHash === baseHash);
+  const latestIdentity = branchAssetStorageIdentity(latest, assetKey);
+  const baseIdentity = branchAssetStorageIdentity(base, assetKey);
+  return Boolean(latestIdentity && baseIdentity && latestIdentity === baseIdentity);
+}
+
+function mergedBranchAssetReviews(latest = {}, base = {}) {
+  const latestReviews = objectMap(latest.assetReviews);
+  const baseReviews = objectMap(base.assetReviews);
+  const keys = new Set([
+    ...Object.keys(objectMap(latest.assetFileNames)),
+    ...Object.keys(objectMap(latest.assetUrls)),
+    ...Object.keys(objectMap(latest.assetStorageKeys)),
+    ...Object.keys(objectMap(latest.assetStoredPaths)),
+    ...Object.keys(objectMap(latest.assetRelativePaths))
+  ]);
+  const merged = {};
+  for (const assetKey of keys) {
+    if (!branchHasMediaAsset(latest, assetKey)) continue;
+    const latestReview = latestReviews[assetKey];
+    if (reviewHasState(latestReview)) {
+      if (!reviewMatchesBranchContent(latestReview, latest, assetKey)) continue;
+      const contentHash = branchAssetContentHash(latest, assetKey);
+      merged[assetKey] = contentHash && !cleanString(latestReview.contentHash)
+        ? { ...latestReview, contentHash }
+        : latestReview;
+      continue;
+    }
+    const baseReview = baseReviews[assetKey];
+    if (!isApprovedAssetReview(baseReview)) continue;
+    if (!branchesReferenceSameAsset(latest, base, assetKey, baseReview)) continue;
+    if (!reviewMatchesBranchContent(baseReview, latest, assetKey)) continue;
+    const contentHash = branchAssetContentHash(latest, assetKey);
+    merged[assetKey] = contentHash && !cleanString(baseReview.contentHash)
+      ? { ...baseReview, contentHash }
+      : baseReview;
+  }
+  return merged;
 }
 
 function latestBranchMediaFields(latest = {}) {
@@ -109,11 +192,11 @@ function latestBranchMediaFields(latest = {}) {
     ...(latest.assetRelativePaths && typeof latest.assetRelativePaths === "object" ? latest.assetRelativePaths : {})
   };
   return {
-    assetFileNames: { ...(latest.assetFileNames && typeof latest.assetFileNames === "object" ? latest.assetFileNames : {}) },
-    assetUrls: { ...(latest.assetUrls && typeof latest.assetUrls === "object" ? latest.assetUrls : {}) },
-    assetStorageKeys: { ...(latest.assetStorageKeys && typeof latest.assetStorageKeys === "object" ? latest.assetStorageKeys : {}) },
+    assetFileNames: { ...objectMap(latest.assetFileNames) },
+    assetUrls: { ...objectMap(latest.assetUrls) },
+    assetStorageKeys: { ...objectMap(latest.assetStorageKeys) },
     assetStoredPaths: storedPaths,
-    assetReviews: { ...(latest.assetReviews && typeof latest.assetReviews === "object" ? latest.assetReviews : {}) }
+    assetContentHashes: { ...objectMap(latest.assetContentHashes) }
   };
 }
 
@@ -121,7 +204,8 @@ export function mergeBranchMediaDraft(latest = {}, base = {}) {
   return {
     ...base,
     ...latest,
-    ...latestBranchMediaFields(latest)
+    ...latestBranchMediaFields(latest),
+    assetReviews: mergedBranchAssetReviews(latest, base)
   };
 }
 
@@ -151,7 +235,7 @@ export function collectSeedanceMedia(batch = {}, task = {}) {
   const storedPaths = branch?.assetStoredPaths && typeof branch.assetStoredPaths === "object" ? branch.assetStoredPaths : {};
   const items = [];
   const seen = new Set();
-  for (const key of seedanceReferenceOrderForTask(batch, task)) {
+  for (const key of seedanceReferenceOrderForTask(batch, task, branch)) {
     const review = reviews[key] || {};
     if (branchHasReferenceAsset(branch, key)) {
       if (!isApprovedAssetReview(review)) {
@@ -340,31 +424,44 @@ function authHeaders(apiKey) {
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
-function upstreamError(message, data = {}) {
-  return new WangzhuanError("upstream_failed", message, data, 502);
+function upstreamError(message, data = {}, code = "upstream_failed") {
+  return new WangzhuanError(code, message, data, 502);
 }
 
 export function seedanceSubmitUrl(endpoint, submitPath = DEFAULT_SUBMIT_PATH) {
   return `${cleanString(endpoint).replace(/\/+$/, "")}/${cleanString(submitPath, DEFAULT_SUBMIT_PATH).replace(/^\/+/, "")}`;
 }
 
-async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, provider) {
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, provider, transportFailureCode = "upstream_failed") {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchImpl(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error?.name === "AbortError") {
-      throw upstreamError("Seedance 上游请求超时", { provider });
+      throw upstreamError("Seedance 上游请求超时，提交结果未知", { provider, submissionUnknown: true }, transportFailureCode);
     }
-    throw upstreamError("Seedance 上游请求失败", { provider });
+    throw upstreamError("Seedance 上游请求失败，提交结果未知", { provider, submissionUnknown: true }, transportFailureCode);
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function readJsonResponse(response, provider, operation) {
-  const text = await response.text();
+async function readJsonResponse(response, provider, operation, options = {}) {
+  const submission = options.submission === true;
+  let text;
+  try {
+    text = await response.text();
+  } catch {
+    throw upstreamError("Seedance 上游响应读取失败，提交结果未知", {
+      provider,
+      operation,
+      status: response.status,
+      ...(submission ? { submissionUnknown: true } : {})
+    }, submission ? "submission_unknown" : "upstream_failed");
+  }
+  const ambiguousSubmission = submission
+    && (response.ok || response.status === 408 || response.status >= 500);
   let payload = {};
   try {
     payload = text ? JSON.parse(text) : {};
@@ -372,20 +469,23 @@ async function readJsonResponse(response, provider, operation) {
     throw upstreamError("Seedance 上游返回了无法解析的数据", {
       provider,
       operation,
-      status: response.status
-    });
+      status: response.status,
+      ...(ambiguousSubmission ? { submissionUnknown: true } : {})
+    }, ambiguousSubmission ? "submission_unknown" : "upstream_failed");
   }
   if (!response.ok) {
+    const submissionUnknown = submission && (response.status === 408 || response.status >= 500);
     throw upstreamError("Seedance 上游返回失败状态", {
       provider,
       operation,
       status: response.status,
+      ...(submissionUnknown ? { submissionUnknown: true } : {}),
       upstreamCode: payload.code || payload.error || payload.status || "",
       upstreamMessage: typeof payload.detail === "string"
         ? payload.detail
         : payload.message || payload.error_message || "",
       upstreamBody: text.slice(0, 2000)
-    });
+    }, submissionUnknown ? "submission_unknown" : "upstream_failed");
   }
   return payload;
 }
@@ -634,18 +734,20 @@ function createTaiSeedanceProviderClient(context = {}, capability = {}) {
         throw upstreamError(msg, {
           provider: config.provider,
           args: args.slice(0, 6).join(" "),
-          stderr: cleanString(error.stderr || "").slice(0, 1000)
-        });
+          stderr: cleanString(error.stderr || "").slice(0, 1000),
+          submissionUnknown: true
+        }, "submission_unknown");
       }
       const combined = (stdout || "") + (stderr || "");
       const taskIdMatch = combined.match(/Task:\s*(cgt-\w+)/i)
         || combined.match(/["']?task_id["']?\s*[:=]\s*["']?(\w+)["']?/i);
       const taskId = taskIdMatch ? taskIdMatch[1].trim() : combined.trim();
       if (!taskId || taskId.length < 5) {
-        throw upstreamError("tai CLI 未返回有效的任务 ID", {
+        throw upstreamError("tai CLI 未返回有效的任务 ID，提交结果未知", {
           provider: config.provider,
-          output: combined.slice(0, 1000)
-        });
+          output: combined.slice(0, 1000),
+          submissionUnknown: true
+        }, "submission_unknown");
       }
       return { taskId, status: "queued", responsePayload: { taskId, taiStdout: (stdout || "").slice(0, 2000), taiStderr: (stderr || "").slice(0, 2000) } };
     },
@@ -719,8 +821,13 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
         method: "POST",
         headers,
         body: JSON.stringify(payload)
-      }, config.timeoutMs, config.provider);
-      return parseSeedanceSubmitResponse(await readJsonResponse(response, config.provider, "create_seedance_task"));
+      }, config.timeoutMs, config.provider, "submission_unknown");
+      return parseSeedanceSubmitResponse(await readJsonResponse(
+        response,
+        config.provider,
+        "create_seedance_task",
+        { submission: true }
+      ));
     },
     async getTask(taskId) {
       const response = await fetchWithTimeout(fetchImpl, seedanceTaskUrl(config.endpoint, taskId, config.taskPollPath), {

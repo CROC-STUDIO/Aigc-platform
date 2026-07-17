@@ -7,7 +7,7 @@ import { makeRequestId } from "./ids.mjs";
 import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
-import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch, submitPendingGenerationTasks } from "./pipeline.mjs";
+import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch } from "./pipeline.mjs";
 import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
 import { uploadPostProcessEnding } from "./postprocess.mjs";
 import { runBatchQc } from "./qc.mjs";
@@ -951,9 +951,12 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         });
       }
       const confirmed = await confirmBatchPlan(scoped, batch.batchId, body);
-      const submitted = await submitPendingGenerationTasks(scoped, batch.batchId);
       const polled = await pollUpstreamBatch(scoped, batch.batchId);
-      return sendOk(res, { ...submitted, batch: polled.batch, confirmedBatch: confirmed.batch }, requestId);
+      return sendOk(res, {
+        ...confirmed,
+        batch: polled.batch,
+        confirmedBatch: confirmed.confirmedBatch || confirmed.batch
+      }, requestId);
     }
     if (batch && req.method === "POST" && batch.action === "confirm-assets") {
       return sendOk(res, await confirmBatchAssets(scoped, batch.batchId, await context.readJson(req)), requestId);

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   repairSeedancePromptContract,
+  copyrightMusicRestriction,
   repairFormalPlanContract,
   MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS
 } from "../../server/wangzhuan/plan-repair.mjs";
@@ -35,6 +36,17 @@ test("repairSeedancePromptContract locks language region currency subtitle and c
   assert.match(prompt, /Mandatory wangzhuan visual carrier repair/);
   assert.match(prompt, /Voiceover performance repair/);
   assert.match(prompt, /high-energy, fast-paced, emotionally expressive/);
+  assert.match(prompt, /copyrighted music|berhak cipta/i);
+});
+
+test("repairSeedancePromptContract localizes the copyright music restriction", () => {
+  const prompt = repairSeedancePromptContract("UGC shot.", { sourceLanguage: "zh-CN" });
+  assert.match(prompt, /禁止使用版权音乐。只使用原创、免版税或已获授权的音频。/);
+  assert.doesNotMatch(prompt, /copyrighted music/i);
+});
+
+test("copyrightMusicRestriction falls back to English", () => {
+  assert.match(copyrightMusicRestriction("en-US"), /Do not use copyrighted music/);
 });
 
 test("repairFormalPlanContract injects mandatory visuals only on carrier slice", () => {

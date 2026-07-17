@@ -24,11 +24,11 @@ function normalizeSubtitleColor(value) {
 
 export function normalizeSubtitlePostProcess(value) {
   const source = value && typeof value === "object" ? value : {};
-  const fontSize = source.fontSize === undefined ? 36 : Number(source.fontSize);
+  const fontSize = source.fontSize === undefined ? 40 : Number(source.fontSize);
   const centerY = source.centerY === undefined ? 960 : Number(source.centerY);
   const textColor = normalizeSubtitleColor(source.textColor);
-  if (!Number.isInteger(fontSize) || fontSize < 12 || fontSize > 96) {
-    throw new WangzhuanError("validation_error", "字幕字号需为 12-96 的整数", {
+  if (!Number.isInteger(fontSize) || fontSize < 20 || fontSize > 60) {
+    throw new WangzhuanError("validation_error", "字幕字号需为 20-60 的整数", {
       field: "postProcess.subtitles.fontSize",
       fontSize: source.fontSize
     });
@@ -243,7 +243,7 @@ function escapeAss(value) {
 export function renderAssSubtitles(cues = [], canvas = {}) {
   const width = Number(canvas.width) > 0 ? Math.trunc(Number(canvas.width)) : 720;
   const height = Number(canvas.height) > 0 ? Math.trunc(Number(canvas.height)) : 1280;
-  const referenceFontSize = Number(canvas.fontSize) > 0 ? Number(canvas.fontSize) : 36;
+  const referenceFontSize = Number(canvas.fontSize) > 0 ? Number(canvas.fontSize) : 40;
   const referenceCenterY = Number.isFinite(Number(canvas.centerY)) ? Number(canvas.centerY) : 960;
   const textColor = ASS_COLORS[normalizeSubtitleColor(canvas.textColor)] || ASS_COLORS.white;
   const scale = Math.min(width / 720, height / 1280);

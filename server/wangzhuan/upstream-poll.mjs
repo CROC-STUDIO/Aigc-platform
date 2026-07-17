@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { reviewSeedanceAsset } from "./asset-review.mjs";
 import {
   findContinuitySourceTask,
-  readBatch,
+  readBatch as readPipelineBatch,
   submitPendingGenerationTasks,
   taskNeedsContinuityReference,
   writeBatch,
@@ -27,9 +27,24 @@ import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage
 import { WangzhuanError } from "./http.mjs";
 
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
+const PENDING_SUBMISSION_BATCH_STATUSES = new Set(["queued", "running", "stitching", "qc", "partial_failed"]);
 const MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS = 30;
 const execFileAsync = promisify(execFile);
 const UPSTREAM_POLL_IN_FLIGHT = new Map();
+
+async function readBatch(context, batchId) {
+  if (typeof context.readBatchForTest === "function") {
+    return context.readBatchForTest(batchId);
+  }
+  return readPipelineBatch(context, batchId);
+}
+
+async function submitPendingTasks(context, batchId) {
+  if (typeof context.submitPendingGenerationTasksForTest === "function") {
+    return context.submitPendingGenerationTasksForTest(batchId);
+  }
+  return submitPendingGenerationTasks(context, batchId);
+}
 
 function pollSingleFlightKey(context, batchId) {
   const scope = context.userProjectRoot || context.sharedProjectRoot || context.userId || context.user?.username || "local";
@@ -86,10 +101,13 @@ function isLegacyMockGenerationTask(task = {}) {
 }
 
 function batchNeedsUpstreamPoll(batch = {}) {
-  if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return false;
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
-  if (tasks.some((task) => shouldPollTaskStatus(task))) return true;
-  if (tasks.some((task) => task.status === "pending") && ACTIVE_POLL_BATCH_STATUSES.has(batch.status)) return true;
+  const hasPendingUpstreamTasks = tasks.some((task) => shouldPollTaskStatus(task));
+  if (["stopped", "failed", "succeeded"].includes(batch.status)) return false;
+  if (hasPendingUpstreamTasks) return true;
+  if (PENDING_SUBMISSION_BATCH_STATUSES.has(batch.status)
+    && tasks.some((task) => task.status === "pending")) return true;
+  if (["qc", "partial_failed"].includes(batch.status)) return false;
   if (!ACTIVE_POLL_BATCH_STATUSES.has(batch.status)) return false;
   const durationSec = Number(batch.estimate?.durationSec || 15);
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
@@ -168,6 +186,11 @@ function generationTaskPollChanged(before = {}, after = {}) {
   return before.status !== after.status
     || before.outputPath !== after.outputPath
     || before.errorMessage !== after.errorMessage
+    || Number(before.upstreamPollAttempts ?? before.responseSummary?.upstreamPollAttempts ?? 0)
+      !== Number(after.upstreamPollAttempts ?? after.responseSummary?.upstreamPollAttempts ?? 0)
+    || before.responseSummary?.upstreamStatus !== after.responseSummary?.upstreamStatus
+    || Number(before.responseSummary?.pollFailureCount || 0) !== Number(after.responseSummary?.pollFailureCount || 0)
+    || before.responseSummary?.pollErrorMessage !== after.responseSummary?.pollErrorMessage
     || Number(before.missingVideoUrlPolls || 0) !== Number(after.missingVideoUrlPolls || 0)
     || Boolean(before.responseSummary?.waitingForVideoUrl) !== Boolean(after.responseSummary?.waitingForVideoUrl)
     || Boolean(before.responseSummary?.videoUrlStored) !== Boolean(after.responseSummary?.videoUrlStored);
@@ -178,6 +201,27 @@ function isApprovedContinuityReference(reference = {}) {
   return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
 }
 
+function continuityTaskVariantKey(task = {}) {
+  return [
+    task.branchId || "default",
+    String(task.branchVariantIndex || task.variantIndex || 1)
+  ].join(":");
+}
+
+function findFailedContinuitySourceTask(tasks = [], task = {}) {
+  const hasFissionSliceOrder = Number.isFinite(Number(task.storySegmentIndex))
+    && Number.isFinite(Number(task.seedanceSliceIndex))
+    && Number(task.seedanceSliceIndex) > 0;
+  return tasks.find((candidate) => {
+    if (candidate.status !== "failed" || continuityTaskVariantKey(candidate) !== continuityTaskVariantKey(task)) return false;
+    if (hasFissionSliceOrder) {
+      return Number(candidate.storySegmentIndex || 0) === Number(task.storySegmentIndex)
+        && Number(candidate.seedanceSliceIndex || 0) === Number(task.seedanceSliceIndex) - 1;
+    }
+    return Number(candidate.segmentIndex || 1) === Number(task.segmentIndex || 1) - 1;
+  }) || null;
+}
+
 async function attachContinuityReferences(context, batch, tasks, now) {
   const nextTasks = [...tasks];
   let changed = false;
@@ -185,7 +229,28 @@ async function attachContinuityReferences(context, batch, tasks, now) {
     const task = nextTasks[index];
     if (task.status !== "pending" || task.continuityReference || !taskNeedsContinuityReference(batch, task)) continue;
     const previous = findContinuitySourceTask(nextTasks, task);
-    if (!previous) continue;
+    if (!previous) {
+      const failedPrevious = findFailedContinuitySourceTask(nextTasks, task);
+      if (!failedPrevious) continue;
+      const sourceReason = failedPrevious.errorMessage ? `：${failedPrevious.errorMessage}` : "";
+      nextTasks[index] = {
+        ...task,
+        status: "failed",
+        finishedAt: now,
+        errorCode: "continuity_reference_failed",
+        errorMessage: `前序分片 ${failedPrevious.generationTaskId} 已失败，无法生成连续性参考帧${sourceReason}`.slice(0, 500),
+        responseSummary: {
+          ...(task.responseSummary || {}),
+          continuityFailure: {
+            sourceGenerationTaskId: failedPrevious.generationTaskId,
+            sourceStatus: failedPrevious.status,
+            sourceErrorCode: failedPrevious.errorCode || "upstream_failed"
+          }
+        }
+      };
+      changed = true;
+      continue;
+    }
     try {
       const continuityReference = await extractContinuityFrame(context, batch, previous);
       if (!isApprovedContinuityReference(continuityReference)) {
@@ -264,16 +329,39 @@ async function pollGenerationTask(context, batch, task, provider, now) {
     });
   }
 
-  const polled = await provider.getTask(task.seedanceTaskId || task.providerJobId);
-  const normalized = normalizeSeedanceTaskStatus(polled.status);
-  const responseSummary = summarizeSeedancePollResponse(polled);
-
-  if (normalized === "queued" || normalized === "running") {
+  let polled;
+  try {
+    polled = await provider.getTask(task.seedanceTaskId || task.providerJobId);
+  } catch (error) {
+    const pollFailureCount = Number(task.responseSummary?.pollFailureCount || 0) + 1;
     return {
       ...task,
       responseSummary: {
         ...(task.responseSummary || {}),
-        ...responseSummary
+        pollFailureCount,
+        pollErrorCode: error?.code || "upstream_poll_failed",
+        pollErrorMessage: error?.message || "查询 Seedance 状态失败，后台将自动重试"
+      }
+    };
+  }
+  const normalized = normalizeSeedanceTaskStatus(polled.status);
+  const responseSummary = summarizeSeedancePollResponse(polled);
+  const responseWithPollRecovery = {
+    ...(task.responseSummary || {}),
+    ...responseSummary,
+    pollFailureCount: 0,
+    pollErrorCode: "",
+    pollErrorMessage: ""
+  };
+
+  if (normalized === "queued" || normalized === "running") {
+    const upstreamPollAttempts = Number(task.upstreamPollAttempts ?? task.responseSummary?.upstreamPollAttempts ?? 0) + 1;
+    return {
+      ...task,
+      upstreamPollAttempts,
+      responseSummary: {
+        ...responseWithPollRecovery,
+        upstreamPollAttempts
       }
     };
   }
@@ -285,10 +373,7 @@ async function pollGenerationTask(context, batch, task, provider, now) {
       finishedAt: now,
       errorCode: "upstream_failed",
       errorMessage: "Seedance 上游任务失败",
-      responseSummary: {
-        ...(task.responseSummary || {}),
-        ...responseSummary
-      }
+      responseSummary: responseWithPollRecovery
     };
   }
 
@@ -304,8 +389,7 @@ async function pollGenerationTask(context, batch, task, provider, now) {
           finishedAt: "",
           missingVideoUrlPolls,
           responseSummary: {
-            ...(task.responseSummary || {}),
-            ...responseSummary,
+            ...responseWithPollRecovery,
             waitingForVideoUrl: true,
             missingVideoUrlPolls
           }
@@ -317,16 +401,30 @@ async function pollGenerationTask(context, batch, task, provider, now) {
         finishedAt: now,
         errorCode: "upstream_failed",
         errorMessage: polled.videoUrl ? "Seedance provider 未配置视频下载能力" : "Seedance 上游未返回视频地址",
-        responseSummary: {
-          ...(task.responseSummary || {}),
-          ...responseSummary,
-          missingVideoUrlPolls
+          responseSummary: {
+            ...responseWithPollRecovery,
+            missingVideoUrlPolls
         }
       };
     }
 
-    const buffer = await provider.downloadVideo(polled.videoUrl);
-    const outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
+    let outputPath;
+    try {
+      const buffer = await provider.downloadVideo(polled.videoUrl);
+      outputPath = await writeSegmentBuffer(context, batch.batchId, task.generationTaskId, buffer);
+    } catch (error) {
+      const pollFailureCount = Number(task.responseSummary?.pollFailureCount || 0) + 1;
+      return {
+        ...task,
+        status: "waiting_upstream",
+        responseSummary: {
+          ...responseWithPollRecovery,
+          pollFailureCount,
+          pollErrorCode: error?.code || "upstream_download_failed",
+          pollErrorMessage: error?.message || "下载 Seedance 视频失败，后台将自动重试"
+        }
+      };
+    }
 
     return {
       ...task,
@@ -338,8 +436,7 @@ async function pollGenerationTask(context, batch, task, provider, now) {
       errorCode: "",
       errorMessage: "",
       responseSummary: {
-        ...(task.responseSummary || {}),
-        ...responseSummary
+        ...responseWithPollRecovery
       }
     };
   }
@@ -351,8 +448,7 @@ async function pollGenerationTask(context, batch, task, provider, now) {
     errorCode: "upstream_failed",
     errorMessage: `Seedance 上游任务状态异常：${normalized || polled.status || "unknown"}`,
     responseSummary: {
-      ...(task.responseSummary || {}),
-      ...responseSummary
+      ...responseWithPollRecovery
     }
   };
 }
@@ -360,12 +456,31 @@ async function pollGenerationTask(context, batch, task, provider, now) {
 async function advanceThirtySecondBatch(context, batchId) {
   const batch = await readBatch(context, batchId);
   if (Number(batch.estimate?.durationSec) !== 30) return batch;
-  if (["qc", "succeeded", "partial_failed", "failed", "stopped"].includes(batch.status)) return batch;
+  if (["succeeded", "failed", "stopped"].includes(batch.status)) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "waiting_upstream")) return batch;
-  if ((Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video")) return batch;
-  const detail = await stitchBatchSegments(context, batchId);
+  if (stitchedDeliveryCoversReadyTasks(batch)) return batch;
+  if (!isBatchReadyForStitch(batch)) {
+    const hasFailedTasks = (Array.isArray(batch.tasks) ? batch.tasks : [])
+      .some((task) => task.status === "failed" || task.status === "stopped");
+    if (!hasFailedTasks) return batch;
+    return writeBatch(context, { ...batch, status: "partial_failed" }, "generation_partial_failed");
+  }
+  const detail = await stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true });
   return detail.batch;
+}
+
+function stitchedDeliveryCoversReadyTasks(batch = {}) {
+  const readyTaskIds = (Array.isArray(batch.tasks) ? batch.tasks : [])
+    .filter((task) => ["downloaded", "succeeded", "qc"].includes(task.status) && task.outputPath)
+    .map((task) => task.generationTaskId);
+  if (!readyTaskIds.length) return false;
+  const deliveredTaskIds = new Set(
+    (Array.isArray(batch.outputs) ? batch.outputs : [])
+      .filter((output) => output.kind === "stitched_video")
+      .flatMap((output) => output.generationTaskIds || [])
+  );
+  return readyTaskIds.every((taskId) => deliveredTaskIds.has(taskId));
 }
 
 export function shouldPollUpstreamBatch(batch = {}) {
@@ -374,7 +489,9 @@ export function shouldPollUpstreamBatch(batch = {}) {
 
 async function pollUpstreamBatchOnce(context, batchId) {
   let batch = await readBatch(context, batchId);
-  if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) {
+  if (["stopped", "failed", "succeeded"].includes(batch.status)
+    || (["qc", "partial_failed"].includes(batch.status)
+      && !(Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => shouldPollTaskStatus(task) || task.status === "pending"))) {
     return { batch, needsPoll: false, polledCount: 0, advanced: false };
   }
 
@@ -413,25 +530,28 @@ async function pollUpstreamBatchOnce(context, batchId) {
   }
 
   let advanced = false;
+  if (PENDING_SUBMISSION_BATCH_STATUSES.has(batch.status)
+    && (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) {
+    const submitted = await submitPendingTasks(context, batchId);
+    batch = submitted.batch;
+    if (submitted.submittedCount > 0) advanced = true;
+  }
   if (durationSec === 30 || hasMultiSliceStitchGroups(batch)) {
-    if (tasksChanged && (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) {
-      const submitted = await submitPendingGenerationTasks(context, batchId);
-      batch = submitted.batch;
-      if (submitted.submittedCount > 0) advanced = true;
-    }
     const beforeStatus = batch.status;
     if (durationSec === 30) {
       batch = await advanceThirtySecondBatch(context, batchId);
     } else if (isBatchReadyForStitch(batch)) {
-      batch = (await stitchBatchSegments(context, batchId)).batch;
+      if (!stitchedDeliveryCoversReadyTasks(batch)) {
+        batch = (await stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true })).batch;
+      }
     } else {
       batch = await finalizeSegmentBatch(context, batchId);
     }
-    advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video");
+    advanced = advanced || batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "stitched_video");
   } else {
     const beforeStatus = batch.status;
     batch = await finalizeSegmentBatch(context, batchId);
-    advanced = batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "segment_video");
+    advanced = advanced || batch.status !== beforeStatus || (Array.isArray(batch.outputs) ? batch.outputs : []).some((output) => output.kind === "segment_video");
   }
 
   const needsPoll = batchNeedsUpstreamPoll(batch);
@@ -446,6 +566,7 @@ export function pollUpstreamBatch(context, batchId) {
 }
 
 export const __upstreamPollTestHooks = {
+  batchNeedsUpstreamPoll,
   mapWithConcurrency,
   resolvePollConcurrency,
   runPollSingleFlight

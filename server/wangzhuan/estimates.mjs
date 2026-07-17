@@ -18,11 +18,10 @@ import {
   hasWangzhuanFactsStore,
   loadBatchDetailFromMysql,
   loadEstimateFromMysql,
-  loadIdempotencyFactFromMysql,
   loadTemplateStoreFromMysql,
   loadVideoDecompositionFromMysql,
   nextPipelineEstimateIdFromMysql,
-  recordIdempotencyFact,
+  runIdempotentOperation,
   syncBatchFacts,
   syncEstimateFact,
   verifyEstimateConfirmationTokenFromMysql
@@ -77,6 +76,29 @@ function stableJson(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function replayResourceId(summary = {}, resourceKey, idKey) {
+  return summary?.[resourceKey]?.[idKey] || summary?.[idKey] || "";
+}
+
+async function replayEstimateResponse(context, summary = {}) {
+  const estimateId = replayResourceId(summary, "estimate", "estimateId");
+  const record = await loadEstimate(context, estimateId);
+  return {
+    estimate: record.estimate || record,
+    limits: record.limits || effectiveLimits(context.config || {}),
+    capabilities: record.capabilities || capabilitySnapshot(context, record.estimate?.durationSec)
+  };
+}
+
+async function replayBatchResponse(context, summary = {}, { includePlans = false } = {}) {
+  const batchId = replayResourceId(summary, "batch", "batchId");
+  const detail = await loadBatchDetailFromMysql(context, batchId);
+  if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+  return includePlans
+    ? { batch: detail.batch, plans: detail.batch.plans || [] }
+    : { batch: detail.batch };
 }
 
 function hashPayload(value) {
@@ -206,11 +228,7 @@ async function nextEstimateId(context) {
   return estimateId;
 }
 
-export async function estimateBatch(context, request = {}) {
-  const requestHash = hashPayload(request);
-  const replay = await loadIdempotencyFactFromMysql(context, "batches_estimate", request.idempotencyKey, requestHash);
-  if (replay) return replay;
-
+async function estimateBatchOnce(context, request = {}) {
   const limits = effectiveLimits(context.config || {});
   let normalized;
   try {
@@ -385,7 +403,7 @@ export async function estimateBatch(context, request = {}) {
   if (confirmationRequired) {
     await recordTelemetryEvent(context, "generation_limit_confirmed", {
       estimateId,
-      confirmationToken,
+      confirmationRequired: true,
       scriptCount: estimate.scriptCount,
       seedanceSegmentCount: estimate.seedanceSegmentCount,
       stitchTaskCount: estimate.stitchTaskCount,
@@ -393,14 +411,19 @@ export async function estimateBatch(context, request = {}) {
     }, { audit: true });
   }
 
-  const result = { estimate, limits, capabilities };
-  if (request.idempotencyKey) {
-    await recordIdempotencyFact(context, "batches_estimate", request.idempotencyKey, requestHash, {
-      type: "estimate",
-      response: result
-    });
-  }
-  return result;
+  return { estimate, limits, capabilities };
+}
+
+export async function estimateBatch(context, request = {}) {
+  const requestHash = hashPayload(request);
+  return runIdempotentOperation(
+    context,
+    "batches_estimate",
+    request.idempotencyKey,
+    requestHash,
+    () => estimateBatchOnce(context, request),
+    { resourceType: "estimate", replayResponse: (summary) => replayEstimateResponse(context, summary) }
+  );
 }
 
 export async function loadEstimate(context, estimateId) {
@@ -542,14 +565,7 @@ async function assertCanStartFromEstimate(context, record, request, options = {}
   }
 }
 
-export async function startBatchFromEstimate(context, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
-  const requestHash = hashPayload(request);
-  const replay = await loadIdempotencyFactFromMysql(context, "batches_start", request.idempotencyKey, requestHash);
-  if (replay) return replay;
-
+async function startBatchFromEstimateOnce(context, request = {}) {
   const record = await loadEstimate(context, request.estimateId);
   await assertCanStartFromEstimate(context, record, request);
   if (record.estimate.durationSec === 30 && preflightStitcher(context).status === "unsupported") {
@@ -588,14 +604,10 @@ export async function startBatchFromEstimate(context, request = {}) {
   await saveBatch(context, batch);
   const preparedBatch = await prepareBatchForPipeline(context, batch);
   const result = { batch: preparedBatch };
-  await recordIdempotencyFact(context, "batches_start", request.idempotencyKey, requestHash, {
-    type: "batch",
-    response: result
-  });
   await recordTelemetryEvent(context, "generation_batch_started", {
     batchId: preparedBatch.batchId,
     estimateId: record.estimate.estimateId,
-    idempotencyKey: request.idempotencyKey,
+    idempotencyKeyPresent: true,
     durationSec: record.estimate.durationSec,
     variantCount: record.estimate.variantCount,
     models: record.estimate.models,
@@ -606,14 +618,22 @@ export async function startBatchFromEstimate(context, request = {}) {
   return result;
 }
 
-export async function prepareBatchPlanFromEstimate(context, request = {}) {
+export async function startBatchFromEstimate(context, request = {}) {
   if (!request.idempotencyKey) {
     throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
   }
   const requestHash = hashPayload(request);
-  const replay = await loadIdempotencyFactFromMysql(context, "batches_plan", request.idempotencyKey, requestHash);
-  if (replay) return replay;
+  return runIdempotentOperation(
+    context,
+    "batches_start",
+    request.idempotencyKey,
+    requestHash,
+    () => startBatchFromEstimateOnce(context, request),
+    { resourceType: "batch", replayResponse: (summary) => replayBatchResponse(context, summary) }
+  );
+}
 
+async function prepareBatchPlanFromEstimateOnce(context, request = {}) {
   const record = await loadEstimate(context, request.estimateId);
   await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
   const branchDrafts = normalizeBranchDrafts(
@@ -638,14 +658,10 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
       batch: preparedBatch,
       plans: preparedBatch.plans || []
     };
-    await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
-      type: "batch_plan",
-      response: result
-    });
     await recordTelemetryEvent(context, "seedance_plan_generated", {
       batchId: preparedBatch.batchId,
       estimateId: record.estimate.estimateId,
-      idempotencyKey: request.idempotencyKey,
+      idempotencyKeyPresent: true,
       planCount: preparedBatch.plans?.length || 0,
       previewType: preparedBatch.previewType
     }, { audit: true });
@@ -653,6 +669,21 @@ export async function prepareBatchPlanFromEstimate(context, request = {}) {
   } catch (error) {
     throw enrichPlanGenerationError(error, planBatchId);
   }
+}
+
+export async function prepareBatchPlanFromEstimate(context, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload(request);
+  return runIdempotentOperation(
+    context,
+    "batches_plan",
+    request.idempotencyKey,
+    requestHash,
+    () => prepareBatchPlanFromEstimateOnce(context, request),
+    { resourceType: "batch_plan", replayResponse: (summary) => replayBatchResponse(context, summary, { includePlans: true }) }
+  );
 }
 
 export async function prepareBatchPlanFromEstimateStream(context, request = {}, res, options = {}) {
@@ -664,61 +695,65 @@ export async function prepareBatchPlanFromEstimateStream(context, request = {}, 
       throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
     }
     const requestHash = hashPayload(request);
-    const replay = await loadIdempotencyFactFromMysql(context, "batches_plan", request.idempotencyKey, requestHash);
-    if (replay) {
-      writeSseLog(res, "idempotency replay — skip upstream");
-      writeSseDone(res, replay, requestId);
-      return;
-    }
+    let operationRan = false;
+    const result = await runIdempotentOperation(
+      context,
+      "batches_plan",
+      request.idempotencyKey,
+      requestHash,
+      async () => {
+        operationRan = true;
+        const record = await loadEstimate(context, request.estimateId);
+        await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
+        const branchDrafts = normalizeBranchDrafts(
+          record.templateSnapshot?.draft || {},
+          record.request?.branches || record.templateSnapshot?.draft?.branches || []
+        );
+        await assertPlanGenerationAllowed(context, record);
 
-    const record = await loadEstimate(context, request.estimateId);
-    await assertCanStartFromEstimate(context, record, request, { allowPreviewRequired: true });
-    const branchDrafts = normalizeBranchDrafts(
-      record.templateSnapshot?.draft || {},
-      record.request?.branches || record.templateSnapshot?.draft?.branches || []
+        const draftBatch = reusableDraftBatch(await loadDraftBatch(context, request.batchId), { allowPreviewRequired: true });
+        const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
+        assertSeedanceReferenceAssetLimits(branchDrafts);
+        await saveBatch(context, batch);
+        planBatchId = batch.batchId;
+
+        const llmConfig = request.llmConfig || {};
+        writeSseLog(res, `model=${llmConfig.model || "(default)"} provider=${llmConfig.provider || "(default)"}`);
+        const streamContext = {
+          ...context,
+          llmStreamHandlers: {
+            onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
+            onDelta: (delta) => writeSseDelta(res, delta)
+          }
+        };
+        const preparedBatch = await prepareBatchForPipeline(streamContext, batch, {
+          useLlmPlans: true,
+          llmConfig,
+          knowledgeNotes: request.knowledgeNotes || "",
+          onPlanProgress: ({ index, total, branchLabel, branchVariantIndex, segmentIndex }) => {
+            writeSseReset(res);
+            writeSseLog(res, `[plan ${index}/${total}] ${branchLabel} variant=${branchVariantIndex} segment=${segmentIndex}`);
+            writeSseLog(res, "POST upstream stream=true …");
+          }
+        });
+        const operationResult = {
+          batch: preparedBatch,
+          plans: preparedBatch.plans || []
+        };
+        await recordTelemetryEvent(context, "seedance_plan_generated", {
+          batchId: preparedBatch.batchId,
+          estimateId: record.estimate.estimateId,
+          idempotencyKeyPresent: true,
+          planCount: preparedBatch.plans?.length || 0,
+          previewType: preparedBatch.previewType
+        }, { audit: true });
+        return operationResult;
+      },
+      { resourceType: "batch_plan", replayResponse: (summary) => replayBatchResponse(context, summary, { includePlans: true }) }
     );
-    await assertPlanGenerationAllowed(context, record);
-
-    const draftBatch = reusableDraftBatch(await loadDraftBatch(context, request.batchId), { allowPreviewRequired: true });
-    const batch = buildPlanPreviewBatch(context, record, draftBatch, branchDrafts);
-    assertSeedanceReferenceAssetLimits(branchDrafts);
-    await saveBatch(context, batch);
-    planBatchId = batch.batchId;
-
-    const llmConfig = request.llmConfig || {};
-    writeSseLog(res, `model=${llmConfig.model || "(default)"} provider=${llmConfig.provider || "(default)"}`);
-    const streamContext = {
-      ...context,
-      llmStreamHandlers: {
-        onRequest: ({ mode }) => writeSseLog(res, `upstream: ${mode}`),
-        onDelta: (delta) => writeSseDelta(res, delta)
-      }
-    };
-    const preparedBatch = await prepareBatchForPipeline(streamContext, batch, {
-      useLlmPlans: true,
-      llmConfig,
-      knowledgeNotes: request.knowledgeNotes || "",
-      onPlanProgress: ({ index, total, branchLabel, branchVariantIndex, segmentIndex }) => {
-        writeSseReset(res);
-        writeSseLog(res, `[plan ${index}/${total}] ${branchLabel} variant=${branchVariantIndex} segment=${segmentIndex}`);
-        writeSseLog(res, "POST upstream stream=true …");
-      }
-    });
-    const result = {
-      batch: preparedBatch,
-      plans: preparedBatch.plans || []
-    };
-    await recordIdempotencyFact(context, "batches_plan", request.idempotencyKey, requestHash, {
-      type: "batch_plan",
-      response: result
-    });
-    await recordTelemetryEvent(context, "seedance_plan_generated", {
-      batchId: preparedBatch.batchId,
-      estimateId: record.estimate.estimateId,
-      idempotencyKey: request.idempotencyKey,
-      planCount: preparedBatch.plans?.length || 0,
-      previewType: preparedBatch.previewType
-    }, { audit: true });
+    if (!operationRan) {
+      writeSseLog(res, "idempotency replay — skip upstream");
+    }
     writeSseLog(res, "");
     writeSseLog(res, "[DONE] all plans ready — saving batch");
     writeSseDone(res, result, requestId);

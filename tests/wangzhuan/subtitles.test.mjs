@@ -14,8 +14,8 @@ import {
 } from "../../server/wangzhuan/subtitles.mjs";
 
 test("subtitle post-process defaults to enabled and accepts an explicit opt-out", () => {
-  assert.deepEqual(normalizeSubtitlePostProcess(), { enabled: true, fontSize: 36, centerY: 960, textColor: "white" });
-  assert.deepEqual(normalizeSubtitlePostProcess({ enabled: false }), { enabled: false, fontSize: 36, centerY: 960, textColor: "white" });
+  assert.deepEqual(normalizeSubtitlePostProcess(), { enabled: true, fontSize: 40, centerY: 960, textColor: "white" });
+  assert.deepEqual(normalizeSubtitlePostProcess({ enabled: false }), { enabled: false, fontSize: 40, centerY: 960, textColor: "white" });
 });
 
 test("ASR word timestamps are split into short subtitle cues", () => {
@@ -46,7 +46,7 @@ test("SRT and ASS render timestamped cues with the lower-third subtitle position
   const ass = renderAssSubtitles(cues, { width: 720, height: 1280 });
   assert.match(ass, /PlayResX: 720/);
   assert.match(ass, /PlayResY: 1280/);
-  assert.match(ass, /DejaVu Sans,36,/);
+  assert.match(ass, /DejaVu Sans,40,/);
   assert.match(ass, /&H00000000/);
   assert.match(ass, /,1,3,0,5,/);
   assert.match(ass, /\\pos\(360,960\)/);
@@ -101,7 +101,7 @@ test("similar short subtitle phrases can be highlighted as white text on yellow 
   assert.equal(cues[2].highlight, undefined);
 
   const ass = renderAssSubtitles(cues, { width: 720, height: 1280 });
-  assert.match(ass, /Style: Highlight,DejaVu Sans,36,&H00FFFFFF,&H000000FF,&H0000D7FF/);
+  assert.match(ass, /Style: Highlight,DejaVu Sans,40,&H00FFFFFF,&H000000FF,&H0000D7FF/);
   assert.match(ass, /Dialogue: 0,0:00:00.00,0:00:01.00,Highlight,.*Tap and earn/);
   assert.match(ass, /Dialogue: 0,0:00:04.00,0:00:05.00,Default,.*Cash out your rewards/);
 });
@@ -155,15 +155,15 @@ test("two-line ASS subtitles use 10px line spacing and stay centered around y 96
   const ass = renderAssSubtitles([
     { startSec: 0, endSec: 1, text: "first line\nsecond line" }
   ], { width: 720, height: 1280 });
-  assert.match(ass, /\\pos\(360,937\).*first line/);
-  assert.match(ass, /\\pos\(360,983\).*second line/);
+  assert.match(ass, /\\pos\(360,935\).*first line/);
+  assert.match(ass, /\\pos\(360,985\).*second line/);
 });
 
 test("ASS subtitles can render yellow text for viral ad style", () => {
   const ass = renderAssSubtitles([
     { startSec: 0, endSec: 1, text: "Tap and earn!" }
   ], { width: 720, height: 1280, textColor: "yellow" });
-  assert.match(ass, /DejaVu Sans,36,&H002ED9FF/);
+  assert.match(ass, /DejaVu Sans,40,&H002ED9FF/);
 });
 
 test("production image does not retain the local Whisper runtime after moving transcription to an API", async () => {

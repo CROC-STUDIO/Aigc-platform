@@ -58,6 +58,66 @@ test("CTA and Ending images are submitted as references only for final Seedance 
   assert.deepEqual(media.map((item) => item.assetId), ["asset_icon", "asset_cta", "asset_ending"]);
 });
 
+test("all approved suffixed assets are submitted in stable reference order", () => {
+  const branchDraft = {
+    branchId: "branch_1",
+    assetUrls: {
+      productRecording_2: "https://assets.test/recording-2.mp4",
+      productScreenshot_3: "https://assets.test/shot-3.png",
+      productScreenshot: "https://assets.test/shot-1.png",
+      productIcon: "https://assets.test/icon.png",
+      productRecording: "https://assets.test/recording-1.mp4",
+      productScreenshot_2: "https://assets.test/shot-2.png"
+    },
+    assetReviews: {
+      productIcon: reviewed("asset_icon"),
+      productScreenshot: reviewed("asset_shot_1"),
+      productScreenshot_2: reviewed("asset_shot_2"),
+      productScreenshot_3: reviewed("asset_shot_3"),
+      productRecording: reviewed("asset_recording_1"),
+      productRecording_2: reviewed("asset_recording_2")
+    }
+  };
+  const batch = {
+    branchDrafts: [branchDraft],
+    scripts: [{ scriptId: "script_1", branchId: "branch_1", branchDraft }],
+    tasks: [{
+      generationTaskId: "gen_1",
+      scriptId: "script_1",
+      branchId: "branch_1",
+      branchVariantIndex: 1,
+      segmentIndex: 1
+    }]
+  };
+
+  const media = collectSeedanceMedia(batch, batch.tasks[0]);
+
+  assert.deepEqual(media.map((item) => item.assetKey), [
+    "productIcon",
+    "productScreenshot",
+    "productScreenshot_2",
+    "productScreenshot_3",
+    "productRecording",
+    "productRecording_2"
+  ]);
+  assert.deepEqual(media.map((item) => item.assetId), [
+    "asset_icon",
+    "asset_shot_1",
+    "asset_shot_2",
+    "asset_shot_3",
+    "asset_recording_1",
+    "asset_recording_2"
+  ]);
+  assert.deepEqual(media.map((item) => item.type), [
+    "image_asset",
+    "image_asset",
+    "image_asset",
+    "image_asset",
+    "video_asset",
+    "video_asset"
+  ]);
+});
+
 test("Seedance payload duration is rounded up and clamped to the 4-15s upstream contract", () => {
   assert.equal(normalizeSeedancePayloadDuration(11.398), 12);
   assert.equal(normalizeSeedancePayloadDuration("8.1"), 9);

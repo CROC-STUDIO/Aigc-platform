@@ -124,6 +124,60 @@ test("branchMediaFields drops orphan review metadata without uploaded asset", ()
   assert.deepEqual(media.assetReviews, {});
 });
 
+test("branchMediaFields preserves asset content hashes and drops reviews for different content", () => {
+  const media = branchMediaFields({
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetContentHashes: { productIcon: "sha256:new-content" },
+    assetReviews: {
+      productIcon: {
+        assetId: "asset_old",
+        status: "approved",
+        contentHash: "sha256:old-content"
+      }
+    }
+  });
+
+  assert.deepEqual(media.assetContentHashes, { productIcon: "sha256:new-content" });
+  assert.deepEqual(media.assetReviews, {});
+});
+
+test("branchMediaFields does not bind a legacy hashless review to content-addressed media", () => {
+  const media = branchMediaFields({
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetContentHashes: { productIcon: "sha256:new-content" },
+    assetReviews: {
+      productIcon: { assetId: "asset_legacy", status: "approved" }
+    }
+  });
+
+  assert.deepEqual(media.assetReviews, {});
+});
+
+test("branchMediaFields does not inherit a hash or review when an override changes stable storage identity", () => {
+  const media = branchMediaFields({
+    assetFileNames: { productIcon: "replacement.png" },
+    assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/replacement.png" },
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/replacement.png" }
+  }, {
+    inheritFrom: {
+      assetFileNames: { productIcon: "original.png" },
+      assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/original.png" },
+      assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/original.png" },
+      assetContentHashes: { productIcon: "sha256:original-content" },
+      assetReviews: {
+        productIcon: {
+          assetId: "asset_original",
+          status: "approved",
+          contentHash: "sha256:original-content"
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(media.assetContentHashes, {});
+  assert.deepEqual(media.assetReviews, {});
+});
+
 test("resolveBranchMediaRefs ignores foreign branch urls from llm output", () => {
   const branch = {
     assetUrls: {
@@ -228,4 +282,106 @@ test("mergeBranchMediaDraft does not backfill missing assets from stale script d
 
   assert.deepEqual(merged.assetUrls, {});
   assert.deepEqual(merged.assetReviews, {});
+});
+
+test("mergeBranchMediaDraft preserves an approved review when the latest draft still points to the same asset", () => {
+  const latest = {
+    branchId: "branch_1",
+    assetFileNames: { productIcon: "icon.png" },
+    assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetContentHashes: { productIcon: "sha256:same-content" },
+    assetReviews: {}
+  };
+  const base = {
+    ...latest,
+    assetReviews: {
+      productIcon: {
+        assetId: "asset_same_content",
+        status: "approved",
+        contentHash: "sha256:same-content"
+      }
+    }
+  };
+
+  const merged = mergeBranchMediaDraft(latest, base);
+
+  assert.deepEqual(merged.assetReviews, base.assetReviews);
+});
+
+test("mergeBranchMediaDraft preserves legacy approved reviews using stable storage identity", () => {
+  const latest = {
+    branchId: "branch_1",
+    assetFileNames: { productIcon: "icon.png" },
+    assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetReviews: {}
+  };
+  const base = {
+    ...latest,
+    assetReviews: {
+      productIcon: { assetId: "asset_legacy", status: "approved" }
+    }
+  };
+
+  assert.deepEqual(mergeBranchMediaDraft(latest, base).assetReviews, base.assetReviews);
+});
+
+test("mergeBranchMediaDraft does not bind a legacy hashless review to a newly hashed asset", () => {
+  const latest = {
+    branchId: "branch_1",
+    assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetContentHashes: { productIcon: "sha256:new-content" },
+    assetReviews: {}
+  };
+  const base = {
+    branchId: "branch_1",
+    assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+    assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+    assetReviews: {
+      productIcon: { assetId: "asset_legacy", status: "approved" }
+    }
+  };
+
+  assert.deepEqual(mergeBranchMediaDraft(latest, base).assetReviews, {});
+});
+
+test("mergeBranchMediaDraft rejects an approved review for replaced content at the same path", () => {
+  const merged = mergeBranchMediaDraft(
+    {
+      branchId: "branch_1",
+      assetFileNames: { productIcon: "icon.png" },
+      assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+      assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+      assetContentHashes: { productIcon: "sha256:new-content" },
+      assetReviews: {
+        productIcon: {
+          assetId: "asset_for_old_content",
+          status: "approved",
+          contentHash: "sha256:old-content"
+        }
+      }
+    },
+    {
+      branchId: "branch_1",
+      assetFileNames: { productIcon: "icon.png" },
+      assetStorageKeys: { productIcon: "uploads/branch_1/productIcon/icon.png" },
+      assetStoredPaths: { productIcon: "product-assets/branch_1/productIcon/icon.png" },
+      assetContentHashes: { productIcon: "sha256:old-content" },
+      assetReviews: {
+        productIcon: {
+          assetId: "asset_for_old_content",
+          status: "approved",
+          contentHash: "sha256:old-content"
+        }
+      }
+    }
+  );
+
+  assert.deepEqual(
+    merged.assetReviews,
+    {},
+    "an approved assetId must not survive when the content hash no longer matches"
+  );
 });

@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import { WangzhuanError } from "./http.mjs";
-import { FINAL_TAIL_REFERENCE_ASSET_ORDER, MAX_SEEDANCE_REFERENCE_ASSETS, REFERENCE_ASSET_ORDER } from "./reference-assets.mjs";
+import {
+  isReferenceVideoAssetKey,
+  MAX_SEEDANCE_REFERENCE_ASSETS,
+  orderedReferenceAssetKeys,
+  referenceAssetBaseKey
+} from "./reference-assets.mjs";
 import { openWangzhuanObjectStream } from "./storage.mjs";
 
 const ASSET_KEY_TO_SLOT = Object.freeze({
@@ -29,8 +34,7 @@ const DEFAULT_ASSET_REVIEW_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_ASSET_REVIEW_POLL_INTERVAL_MS = 2_000;
 
 export function assetKeyToAssetType(assetKey) {
-  const videoKeys = new Set(["productRecording"]);
-  return videoKeys.has(assetKey) ? "video_asset" : "image_asset";
+  return isReferenceVideoAssetKey(assetKey) ? "video_asset" : "image_asset";
 }
 
 export function assetKeyToAssetRole(assetKey) {
@@ -38,7 +42,14 @@ export function assetKeyToAssetRole(assetKey) {
 }
 
 export function assetKeyToSlot(assetKey) {
-  return ASSET_KEY_TO_SLOT[assetKey] || { key: assetKey, index: 0 };
+  const baseKey = referenceAssetBaseKey(assetKey);
+  const baseSlot = ASSET_KEY_TO_SLOT[baseKey];
+  if (!baseSlot) return { key: assetKey, index: 0 };
+  const suffix = assetKey === baseKey ? 1 : Number(String(assetKey).slice(baseKey.length + 1));
+  return {
+    key: baseSlot.key,
+    index: baseSlot.index + (Number.isInteger(suffix) && suffix > 1 ? suffix - 1 : 0)
+  };
 }
 
 function cleanString(value, fallback = "") {
@@ -361,7 +372,8 @@ function shouldReviewAsset(branch = {}, assetKey) {
 
 function branchHasReferenceAsset(branch = {}, assetKey) {
   return Boolean(
-    cleanString(branch?.assetUrls?.[assetKey])
+    cleanString(branch?.assetFileNames?.[assetKey])
+    || cleanString(branch?.assetUrls?.[assetKey])
     || cleanString(branch?.assetStorageKeys?.[assetKey])
     || cleanString(branch?.assetStoredPaths?.[assetKey] || branch?.assetRelativePaths?.[assetKey])
   );
@@ -382,20 +394,11 @@ export function requiresSeedanceAssetReview(branch = {}, assetKey) {
 }
 
 export function countReferencedAssets(branch = {}) {
-  const keys = new Set([
-    ...Object.keys(branch.assetFileNames || {}),
-    ...Object.keys(branch.assetUrls || {})
-  ]);
-  let count = 0;
-  for (const key of keys) {
-    if (!REFERENCE_ASSET_ORDER.includes(key)) continue;
-    if (cleanString(branch.assetFileNames?.[key]) || cleanString(branch.assetUrls?.[key])) count += 1;
-  }
-  return count;
+  return reviewAssetOrder(branch).filter((key) => branchHasReferenceAsset(branch, key)).length;
 }
 
-function reviewAssetOrder() {
-  return [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER];
+function reviewAssetOrder(branch = {}) {
+  return orderedReferenceAssetKeys(branch, { includeFinalTail: true, includeUnknown: false });
 }
 
 export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
@@ -414,9 +417,15 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
       ...branch,
       assetReviews: { ...(branch.assetReviews || {}) }
     };
-    for (const assetKey of reviewAssetOrder()) {
+    for (const assetKey of reviewAssetOrder(nextBranch)) {
       if (!shouldReviewAsset(nextBranch, assetKey)) continue;
-      const current = nextBranch.assetReviews?.[assetKey] || {};
+      const contentHash = cleanString(nextBranch.assetContentHashes?.[assetKey]);
+      let current = nextBranch.assetReviews?.[assetKey] || {};
+      const currentContentHash = cleanString(current.contentHash);
+      if (contentHash && contentHash !== currentContentHash) {
+        current = {};
+        delete nextBranch.assetReviews[assetKey];
+      }
       const currentStatus = reviewStatus(current.status);
       if (currentStatus === "approved" || currentStatus === "rejected" || currentStatus === "failed") continue;
       const review = current.assetId
@@ -428,6 +437,7 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
             mimeType: current.mimeType || "",
             status: current.status,
             reviewReason: current.reviewReason,
+            contentHash,
             storageUrl: nextBranch.assetUrls?.[assetKey] || "",
             storageKey: nextBranch.assetStorageKeys?.[assetKey] || "",
             storedPath: nextBranch.assetStoredPaths?.[assetKey] || nextBranch.assetRelativePaths?.[assetKey] || ""
@@ -437,6 +447,7 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
             branchId: nextBranch.branchId,
             fileName: nextBranch.assetFileNames?.[assetKey] || assetKey,
             mimeType: current.mimeType || "",
+            contentHash,
             storageUrl: nextBranch.assetUrls?.[assetKey] || "",
             storageKey: nextBranch.assetStorageKeys?.[assetKey] || "",
             storedPath: nextBranch.assetStoredPaths?.[assetKey] || nextBranch.assetRelativePaths?.[assetKey] || ""
@@ -446,13 +457,15 @@ export async function ensureAssetReviewsApproved(context, branchDrafts = []) {
         branchId: nextBranch.branchId,
         fileName: nextBranch.assetFileNames?.[assetKey] || assetKey,
         mimeType: current.mimeType || "",
+        contentHash,
         storageUrl: nextBranch.assetUrls?.[assetKey] || "",
         storageKey: nextBranch.assetStorageKeys?.[assetKey] || "",
         storedPath: nextBranch.assetStoredPaths?.[assetKey] || nextBranch.assetRelativePaths?.[assetKey] || ""
       }, review);
       nextBranch.assetReviews[assetKey] = {
         ...current,
-        ...settledReview
+        ...settledReview,
+        ...(contentHash ? { contentHash } : {})
       };
     }
     nextBranches.push(nextBranch);
@@ -466,7 +479,7 @@ export function validateAssetReviewState(branchDrafts = []) {
   const failures = [];
   for (const branch of branches) {
     const assetReviews = branch.assetReviews || {};
-    for (const key of reviewAssetOrder()) {
+    for (const key of reviewAssetOrder(branch)) {
       if (!requiresSeedanceAssetReview(branch, key)) continue;
       const fileName = branch.assetFileNames?.[key];
       const state = assetReviews[key] || {};
@@ -488,7 +501,7 @@ export function validateAssetReviewState(branchDrafts = []) {
     assetsByBranch: branches.map((branch) => ({
       branchId: branch.branchId || "branch_0",
       branchLabel: branch.branchLabel || "",
-      assets: reviewAssetOrder()
+      assets: reviewAssetOrder(branch)
         .filter((key) => requiresSeedanceAssetReview(branch, key))
         .map((key) => ({
           key,

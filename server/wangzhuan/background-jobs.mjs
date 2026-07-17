@@ -27,9 +27,42 @@ const PLAN_SIGNATURE_FIELDS = Object.freeze([
   "storySegments",
   "seedanceSlices",
   "conversionEffectOpportunities",
+  "decomposition",
   "branches",
   "voiceoverStyle",
   "promiseLevel",
+  "truthRules",
+  "cta",
+  "ending",
+  "variantPrompt",
+  "customPrompt",
+  "negativePrompt"
+]);
+const PLAN_BRANCH_SIGNATURE_FIELDS = Object.freeze([
+  "branchId",
+  "branchIndex",
+  "branchLabel",
+  "displayName",
+  "productName",
+  "productLink",
+  "targetChannel",
+  "targetChannels",
+  "targetRegion",
+  "targetRegions",
+  "regions",
+  "language",
+  "languages",
+  "currencySymbol",
+  "materialDirection",
+  "materialDirectionCustom",
+  "outputTemplateMode",
+  "sliceStrategy",
+  "targetSegmentCount",
+  "moneyVisuals",
+  "subtitleWorkflow",
+  "voiceoverStyle",
+  "promiseLevel",
+  "truthRules",
   "cta",
   "ending",
   "variantPrompt",
@@ -54,6 +87,68 @@ function stableJson(value) {
 
 function hashPayload(value) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function cleanSignatureString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function signatureAssetIdentity(asset = {}) {
+  const assetKey = cleanSignatureString(asset.assetKey || asset.key || asset.category);
+  const assetId = cleanSignatureString(asset.assetId);
+  const identity = cleanSignatureString(asset.contentHash)
+    || cleanSignatureString(asset.storageKey)
+    || cleanSignatureString(asset.storedPath)
+    || cleanSignatureString(asset.url)
+    || cleanSignatureString(asset.fileName)
+    || assetId;
+  if (!assetKey || !identity) return null;
+  return {
+    branchId: cleanSignatureString(asset.branchId),
+    assetKey,
+    identity
+  };
+}
+
+function canonicalSignatureAssets(assets = []) {
+  return (Array.isArray(assets) ? assets : [])
+    .map(signatureAssetIdentity)
+    .filter(Boolean)
+    .sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
+}
+
+function canonicalSignatureBranch(branch = {}) {
+  const normalized = Object.fromEntries(
+    PLAN_BRANCH_SIGNATURE_FIELDS.map((field) => [field, branch[field]])
+  );
+  const assetKeys = new Set([
+    ...Object.keys(branch.assetFileNames || {}),
+    ...Object.keys(branch.assetUrls || {}),
+    ...Object.keys(branch.assetStorageKeys || {}),
+    ...Object.keys(branch.assetStoredPaths || {}),
+    ...Object.keys(branch.assetRelativePaths || {}),
+    ...Object.keys(branch.assetContentHashes || {})
+  ]);
+  normalized.assets = canonicalSignatureAssets([...assetKeys].map((assetKey) => ({
+    branchId: branch.branchId,
+    assetKey,
+    fileName: branch.assetFileNames?.[assetKey],
+    url: branch.assetUrls?.[assetKey],
+    storageKey: branch.assetStorageKeys?.[assetKey],
+    storedPath: branch.assetStoredPaths?.[assetKey] || branch.assetRelativePaths?.[assetKey],
+    contentHash: branch.assetContentHashes?.[assetKey],
+    assetId: branch.assetReviews?.[assetKey]?.assetId
+  })));
+  return normalized;
+}
+
+function canonicalPlanSignaturePayload(input = {}) {
+  const payload = Object.fromEntries(
+    PLAN_SIGNATURE_FIELDS.map((field) => [field, input[field]])
+  );
+  payload.assets = canonicalSignatureAssets(input.assets);
+  payload.branches = (Array.isArray(input.branches) ? input.branches : []).map(canonicalSignatureBranch);
+  return payload;
 }
 
 function publicJob(job) {
@@ -262,10 +357,7 @@ export function resetBackgroundJobsForTest() {
 }
 
 export function planDraftSignature(input = {}) {
-  const signaturePayload = Object.fromEntries(
-    PLAN_SIGNATURE_FIELDS.map((field) => [field, input[field]])
-  );
-  return `plansig_${hashPayload(signaturePayload)}`;
+  return `plansig_${hashPayload(canonicalPlanSignaturePayload(input))}`;
 }
 
 export function isPlanSignatureStale(signature, input = {}) {

@@ -208,3 +208,114 @@ test("plan draft signature includes strong fields and ignores disclaimer overlay
   assert.equal(isPlanSignatureStale(signature, { ...base, productName: "Other App" }), true);
   assert.equal(isPlanSignatureStale(signature, { ...base, disclaimer: "changed disclaimer" }), false);
 });
+
+test("plan draft signature ignores transient asset review state but tracks prompt inputs", () => {
+  const base = {
+    productName: "Cash App",
+    targetRegion: "US",
+    language: "en-US",
+    truthRules: { earningMechanism: "Complete tasks for points" },
+    decomposition: { scene: "Kitchen", subject: "A parent using a phone" },
+    branches: [{
+      branchId: "branch_1",
+      branchLabel: "改写 3.1",
+      productName: "Cash App",
+      customPrompt: "Keep the hook direct",
+      assetFileNames: { productIcon: "icon.png" },
+      assetUrls: { productIcon: "https://cdn.test/icon.png" },
+      assetStorageKeys: { productIcon: "uploads/icon.png" },
+      assetStoredPaths: { productIcon: "product-assets/icon.png" },
+      assetReviews: {
+        productIcon: { assetId: "asset_1", status: "pending" },
+        productRecording: { status: "pending" }
+      },
+      postProcess: { subtitles: { fontSize: 40 } },
+      disclaimerOverlay: { position: "bottom_center" }
+    }]
+  };
+  const signature = planDraftSignature(base);
+
+  const beforeFirstReview = {
+    ...base,
+    branches: [{
+      ...base.branches[0],
+      assetReviews: {
+        productIcon: { status: "pending" }
+      }
+    }]
+  };
+  const beforeFirstReviewSignature = planDraftSignature(beforeFirstReview);
+  assert.equal(isPlanSignatureStale(beforeFirstReviewSignature, {
+    ...beforeFirstReview,
+    branches: [{
+      ...beforeFirstReview.branches[0],
+      assetReviews: {
+        productIcon: { assetId: "asset_first_review", status: "approved" }
+      }
+    }]
+  }), false, "assigning the first review assetId must not invalidate an unchanged underlying asset");
+
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    branches: [{
+      ...base.branches[0],
+      assetReviews: {
+        productIcon: { assetId: "asset_1", status: "approved" },
+        productRecording: { status: "pending", reviewReason: "orphan review" }
+      },
+      postProcess: { subtitles: { fontSize: 60 } },
+      disclaimerOverlay: { position: "bottom_left" }
+    }]
+  }), false);
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    truthRules: { earningMechanism: "Watch ads for points" }
+  }), true);
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    decomposition: { scene: "Bus stop", subject: "A commuter using a phone" }
+  }), true);
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    branches: [{ ...base.branches[0], customPrompt: "Use a testimonial hook" }]
+  }), true);
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    branches: [{
+      ...base.branches[0],
+      assetStorageKeys: { productIcon: "uploads/replacement-icon.png" }
+    }]
+  }), true);
+  assert.equal(isPlanSignatureStale(signature, {
+    ...base,
+    branches: [{
+      ...base.branches[0],
+      assetReviews: {
+        productIcon: { assetId: "asset_replacement", status: "approved" }
+      }
+    }]
+  }), false, "review assetId changes are transient when stable storage identity is unchanged");
+
+  const contentAddressedBase = {
+    ...base,
+    branches: [{
+      ...base.branches[0],
+      assetContentHashes: { productIcon: "sha256:old-content" },
+      assetReviews: {
+        productIcon: {
+          assetId: "asset_old",
+          status: "approved",
+          contentHash: "sha256:old-content"
+        }
+      }
+    }]
+  };
+  assert.equal(isPlanSignatureStale(planDraftSignature(contentAddressedBase), {
+    ...contentAddressedBase,
+    branches: [{
+      ...contentAddressedBase.branches[0],
+      assetContentHashes: { productIcon: "sha256:new-content" },
+      assetReviews: {}
+    }]
+  }), true, "replacing the underlying asset content must invalidate the prompt");
+});

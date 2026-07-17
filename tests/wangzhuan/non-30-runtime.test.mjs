@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { qcPathHelpers } from "../../server/wangzhuan/qc.mjs";
 import { finalizeSegmentBatch, hasMultiSliceStitchGroups, isBatchReadyForStitch, stitchBatchSegments } from "../../server/wangzhuan/stitch.mjs";
+import { pollUpstreamBatch } from "../../server/wangzhuan/upstream-poll.mjs";
 
 const { videoSpecCheck, downloadEligibility, shouldRunModelVideoQc } = qcPathHelpers;
 
@@ -384,11 +385,302 @@ test("non-30 mixed outcome materializes successful slices and settles partial_fa
   });
 });
 
-test("non-30 multi-slice batch becomes stitch-ready only after every slice is downloaded", async () => {
+test("partial_failed retry completion replaces stale multi-slice delivery", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const batch = buildMixedOutcomeBatch(root);
+      batch.status = "partial_failed";
+      batch.estimate.durationSec = 30;
+      batch.request = { postProcess: { subtitles: { enabled: false } } };
+      batch.tasks[1] = {
+        ...batch.tasks[1],
+        status: "waiting_upstream",
+        outputPath: "",
+        errorCode: undefined,
+        errorMessage: undefined
+      };
+      batch.outputs = [{
+        outputId: "out_abcd_090",
+        sourceType: "pipeline",
+        batchId: batch.batchId,
+        kind: "stitched_video",
+        generationTaskIds: ["gen_abcd_001"],
+        durationSec: 12,
+        filePath: "stitched/stale.mp4",
+        previewUrl: "https://cdn.example.test/stale.mp4"
+      }];
+      const state = { batch };
+      await writeBatchFiles(root, state.batch);
+      const context = {
+        ...testContext(root, state),
+        seedanceProviderClient: {
+          provider: "seedance",
+          async getTask(taskId) {
+            assert.equal(taskId, "seedance_remote_002");
+            return {
+              taskId,
+              status: "succeeded",
+              videoUrl: "https://cdn.example.test/gen_abcd_002.mp4",
+              responsePayload: { status: "succeeded" }
+            };
+          },
+          async downloadVideo() {
+            return Buffer.from("fake-video-2", "utf8");
+          }
+        }
+      };
+
+      const result = await pollUpstreamBatch(context, state.batch.batchId);
+      const stitched = result.batch.outputs.filter((output) => output.kind === "stitched_video");
+
+      assert.equal(result.polledCount, 1);
+      assert.equal(result.batch.status, "qc");
+      assert.equal(stitched.length, 1);
+      assert.notEqual(stitched[0].outputId, "out_abcd_090");
+      assert.deepEqual(stitched[0].generationTaskIds, ["gen_abcd_001", "gen_abcd_002"]);
+      assert.equal(result.batch.outputs.some((output) => output.outputId === "out_abcd_090"), false);
+      assert.equal(result.batch.replaceDerivedOutputs, true);
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("qc retry completion materializes a missing single-slice delivery", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildBatch(root) };
+    state.batch.status = "qc";
+    state.batch.request = { postProcess: { subtitles: { enabled: false } } };
+    await writeBatchFiles(root, state.batch);
+
+    const finalized = await finalizeSegmentBatch(testContext(root, state), state.batch.batchId);
+
+    assert.equal(finalized.status, "qc");
+    assert.equal(finalized.outputs.length, 1);
+    assert.equal(finalized.outputs[0].kind, "segment_video");
+    assert.deepEqual(finalized.outputs[0].generationTaskIds, ["gen_abcd_001"]);
+  });
+});
+
+test("partial_failed recovery keeps the batch partial while failed slices remain", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildMixedOutcomeBatch(root) };
+    state.batch.status = "partial_failed";
+    state.batch.request = { postProcess: { subtitles: { enabled: false } } };
+    await writeBatchFiles(root, state.batch);
+
+    const finalized = await finalizeSegmentBatch(testContext(root, state), state.batch.batchId);
+
+    assert.equal(finalized.status, "partial_failed");
+    assert.equal(finalized.outputs.length, 1);
+    assert.deepEqual(finalized.outputs[0].generationTaskIds, ["gen_abcd_001"]);
+    assert.equal(finalized.tasks[1].status, "failed");
+  });
+});
+
+test("active polling submits ready pending tasks even when upstream status is unchanged", async () => {
+  await withTempRoot(async (root) => {
+    const batch = buildMixedOutcomeBatch(root);
+    batch.status = "running";
+    batch.estimate.durationSec = 16;
+    batch.request = { postProcess: { subtitles: { enabled: false } } };
+    batch.scripts[1] = {
+      ...batch.scripts[1],
+      segmentIndex: 1,
+      branchVariantIndex: 2,
+      variantIndex: 2
+    };
+    batch.tasks[0] = {
+      ...batch.tasks[0],
+      status: "waiting_upstream",
+      outputPath: ""
+    };
+    batch.tasks[1] = {
+      ...batch.tasks[1],
+      status: "pending",
+      segmentIndex: 1,
+      branchVariantIndex: 2,
+      variantIndex: 2,
+      outputPath: "",
+      errorCode: undefined,
+      errorMessage: undefined
+    };
+    const state = { batch };
+    await writeBatchFiles(root, state.batch);
+    let submittedCount = 0;
+    const context = {
+      ...testContext(root, state),
+      async submitPendingGenerationTasksForTest() {
+        submittedCount += 1;
+        state.batch = {
+          ...state.batch,
+          tasks: state.batch.tasks.map((task) => task.generationTaskId === "gen_abcd_002"
+            ? {
+                ...task,
+                status: "waiting_upstream",
+                seedanceTaskId: "seedance_retry_slot_002",
+                providerJobId: "seedance_retry_slot_002"
+              }
+            : task)
+        };
+        return { batch: state.batch, submittedCount: 1, failedSubmitCount: 0 };
+      },
+      seedanceProviderClient: {
+        provider: "seedance",
+        config: {},
+        async getTask(taskId) {
+          return {
+            taskId,
+            status: "queued",
+            videoUrl: "",
+            responsePayload: { status: "queued" }
+          };
+        },
+        async createTask() {
+          throw new Error("poll should use the pending submission dependency");
+        }
+      }
+    };
+
+    const result = await pollUpstreamBatch(context, state.batch.batchId);
+
+    assert.equal(submittedCount, 1);
+    assert.equal(result.needsPoll, true);
+    assert.equal(result.batch.tasks[1].status, "waiting_upstream");
+    assert.equal(result.batch.tasks[1].seedanceTaskId, "seedance_retry_slot_002");
+  });
+});
+
+test("non-30 polling reuses covered delivery and replaces it only after a new slice is ready", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const batch = buildMixedOutcomeBatch(root);
+      batch.status = "partial_failed";
+      batch.estimate.durationSec = 24;
+      batch.tasks[1] = {
+        ...batch.tasks[1],
+        status: "waiting_upstream",
+        outputPath: "",
+        errorCode: undefined,
+        errorMessage: undefined,
+        responseSummary: { upstreamStatus: "queued", upstreamPollAttempts: 0 }
+      };
+      batch.outputs = [
+        {
+          outputId: "out_abcd_080",
+          sourceType: "pipeline",
+          batchId: batch.batchId,
+          kind: "segment_video",
+          generationTaskIds: ["gen_abcd_001"],
+          durationSec: 12,
+          filePath: "upstream/gen_abcd_001.mp4",
+          subtitlePostProcess: { enabled: true, status: "succeeded" }
+        },
+        {
+          outputId: "out_abcd_081",
+          sourceType: "pipeline",
+          batchId: batch.batchId,
+          kind: "stitched_video",
+          generationTaskIds: ["gen_abcd_001"],
+          durationSec: 12,
+          filePath: "stitched/existing.mp4",
+          previewUrl: "https://cdn.example.test/existing.mp4"
+        }
+      ];
+      const state = { batch };
+      await writeBatchFiles(root, state.batch);
+      let upstreamStatus = "queued";
+      const context = {
+        ...testContext(root, state),
+        seedanceProviderClient: {
+          provider: "seedance",
+          async getTask(taskId) {
+            return {
+              taskId,
+              status: upstreamStatus,
+              videoUrl: upstreamStatus === "succeeded" ? "https://cdn.example.test/gen_abcd_002.mp4" : "",
+              responsePayload: { status: upstreamStatus }
+            };
+          },
+          async downloadVideo() {
+            return Buffer.from("fake-video-2", "utf8");
+          }
+        }
+      };
+
+      const waiting = await pollUpstreamBatch(context, state.batch.batchId);
+      assert.deepEqual(
+        waiting.batch.outputs.filter((output) => output.kind === "stitched_video").map((output) => output.outputId),
+        ["out_abcd_081"]
+      );
+
+      upstreamStatus = "succeeded";
+      const completed = await pollUpstreamBatch(context, state.batch.batchId);
+      const stitched = completed.batch.outputs.filter((output) => output.kind === "stitched_video");
+      assert.equal(stitched.length, 1);
+      assert.notEqual(stitched[0].outputId, "out_abcd_081");
+      assert.deepEqual(stitched[0].generationTaskIds, ["gen_abcd_001", "gen_abcd_002"]);
+      assert.equal(completed.batch.replaceDerivedOutputs, true);
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("queued and running poll progress survives task reloads", async () => {
+  await withTempRoot(async (root) => {
+    const batch = buildBatch(root);
+    batch.status = "running";
+    batch.tasks[0] = {
+      ...batch.tasks[0],
+      status: "waiting_upstream",
+      outputPath: "",
+      upstreamPollAttempts: undefined,
+      responseSummary: { upstreamStatus: "queued", upstreamPollAttempts: 0 }
+    };
+    const state = { batch };
+    await writeBatchFiles(root, state.batch);
+    const statuses = ["queued", "running"];
+    const baseContext = testContext(root, state);
+    const context = {
+      ...baseContext,
+      async writeBatchForTest(next) {
+        state.batch = {
+          ...next,
+          tasks: next.tasks.map((task) => {
+            const reloaded = { ...task };
+            delete reloaded.upstreamPollAttempts;
+            return reloaded;
+          })
+        };
+        return state.batch;
+      },
+      seedanceProviderClient: {
+        provider: "seedance",
+        async getTask(taskId) {
+          const status = statuses.shift();
+          return { taskId, status, videoUrl: "", responsePayload: { status } };
+        }
+      }
+    };
+
+    const first = await pollUpstreamBatch(context, state.batch.batchId);
+    assert.equal(first.batch.tasks[0].responseSummary.upstreamPollAttempts, 1);
+    assert.equal(first.batch.tasks[0].responseSummary.upstreamStatus, "queued");
+
+    const second = await pollUpstreamBatch(context, state.batch.batchId);
+    assert.equal(second.batch.tasks[0].responseSummary.upstreamPollAttempts, 2);
+    assert.equal(second.batch.tasks[0].responseSummary.upstreamStatus, "running");
+  });
+});
+
+test("non-30 multi-slice batch becomes stitch-ready when a post-processable slice is available", async () => {
   await withTempRoot(async (root) => {
     const state = { batch: buildMixedOutcomeBatch(root) };
 
-    assert.equal(isBatchReadyForStitch(state.batch), false);
+    assert.equal(isBatchReadyForStitch(state.batch), true);
 
     state.batch.tasks[1] = {
       ...state.batch.tasks[1],
@@ -402,7 +694,84 @@ test("non-30 multi-slice batch becomes stitch-ready only after every slice is do
   });
 });
 
-test("non-30 multi-variant batch stitches complete variants even when another variant failed", async () => {
+test("a multi-slice group with one successful slice is stitch-ready without optional post-processing", async () => {
+  await withTempRoot(async (root) => {
+    const state = { batch: buildMixedOutcomeBatch(root) };
+    state.batch.request = { postProcess: { subtitles: { enabled: false } } };
+    await writeBatchFiles(root, state.batch);
+
+    assert.equal(isBatchReadyForStitch(state.batch), true);
+
+    const restorePath = await installFakeFfmpeg(root);
+    try {
+      const detail = await stitchBatchSegments(testContext(root, state), state.batch.batchId);
+      const stitched = detail.batch.outputs.filter((output) => output.kind === "stitched_video");
+      assert.equal(detail.batch.status, "partial_failed");
+      assert.equal(stitched.length, 1);
+      assert.deepEqual(stitched[0].generationTaskIds, ["gen_abcd_001"]);
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("partial_failed single-slice variants return to qc after every retry succeeds", async () => {
+  await withTempRoot(async (root) => {
+    const batch = buildBatch(root);
+    batch.status = "partial_failed";
+    batch.request = { postProcess: { subtitles: { enabled: false } } };
+    batch.scripts.push({
+      ...batch.scripts[0],
+      scriptId: "scr_abcd_002",
+      variantIndex: 2,
+      branchVariantIndex: 2,
+      promptPath: "prompts/gen_abcd_002_seedance.txt",
+      scriptPath: "scripts/scr_abcd_002.json"
+    });
+    batch.tasks.push({
+      ...batch.tasks[0],
+      generationTaskId: "gen_abcd_002",
+      seedanceTaskId: "seedance_remote_002",
+      scriptId: "scr_abcd_002",
+      branchVariantIndex: 2,
+      outputPath: "upstream/gen_abcd_002.mp4",
+      promptPath: "prompts/gen_abcd_002_seedance.txt"
+    });
+    const state = { batch };
+    await writeBatchFiles(root, state.batch);
+
+    assert.equal(hasMultiSliceStitchGroups(state.batch), false);
+    const finalized = await finalizeSegmentBatch(testContext(root, state), state.batch.batchId);
+
+    assert.equal(finalized.status, "qc");
+    assert.equal(finalized.outputs.filter((output) => output.kind === "segment_video").length, 2);
+  });
+});
+
+test("a 30 second batch with all slices failed settles instead of retrying no_segments", async () => {
+  await withTempRoot(async (root) => {
+    const batch = buildMixedOutcomeBatch(root);
+    batch.estimate.durationSec = 30;
+    batch.request = { postProcess: { subtitles: { enabled: false } } };
+    batch.tasks = batch.tasks.map((task) => ({
+      ...task,
+      status: "failed",
+      outputPath: "",
+      errorCode: "upstream_failed",
+      errorMessage: "Seedance failed"
+    }));
+    const state = { batch };
+    await writeBatchFiles(root, state.batch);
+
+    const result = await pollUpstreamBatch(testContext(root, state), state.batch.batchId);
+
+    assert.equal(result.batch.status, "partial_failed");
+    assert.equal(result.needsPoll, false);
+    assert.equal(result.batch.outputs.length, 0);
+  });
+});
+
+test("non-30 multi-variant batch delivers available slices even when another slice failed", async () => {
   await withTempRoot(async (root) => {
     const restorePath = await installFakeFfmpeg(root);
     try {
@@ -417,12 +786,11 @@ test("non-30 multi-variant batch stitches complete variants even when another va
       const reports = detail.batch.stitchReports || [];
 
       assert.equal(detail.batch.status, "partial_failed");
-      assert.equal(stitched.length, 1);
-      assert.deepEqual(stitched[0].generationTaskIds, ["gen_abcd_001", "gen_abcd_002"]);
+      assert.equal(stitched.length, 2);
+      assert.deepEqual(stitched.map((output) => output.generationTaskIds), [["gen_abcd_001", "gen_abcd_002"], ["gen_abcd_003"]]);
       assert.equal(segmentOutputs.length, 3);
-      assert.equal(reports.filter((report) => report.status === "succeeded").length, 1);
-      assert.equal(reports.filter((report) => report.status === "failed").length, 1);
-      assert.equal(reports.find((report) => report.status === "failed")?.errorCode, "partial_segments_unavailable");
+      assert.equal(reports.filter((report) => report.status === "succeeded").length, 2);
+      assert.equal(reports.filter((report) => report.status === "failed").length, 0);
     } finally {
       restorePath();
     }
@@ -594,6 +962,49 @@ test("real concat failure settles multi-slice batch as partial_failed", async ()
       assert.equal(report.status, "failed");
       assert.equal(report.errorCode, "stitch_failed");
       assert.ok(report.reportPath);
+    } finally {
+      restorePath();
+    }
+  });
+});
+
+test("failed retry stitch keeps the previous downloadable delivery", async () => {
+  await withTempRoot(async (root) => {
+    const restorePath = await installFakeFfmpeg(root, { failConcat: true });
+    try {
+      const batch = buildMixedOutcomeBatch(root);
+      batch.status = "partial_failed";
+      batch.tasks[1] = {
+        ...batch.tasks[1],
+        status: "downloaded",
+        outputPath: "upstream/gen_abcd_002.mp4",
+        errorCode: undefined,
+        errorMessage: undefined
+      };
+      batch.outputs = [{
+        outputId: "out_abcd_090",
+        sourceType: "pipeline",
+        batchId: batch.batchId,
+        branchId: "branch_1",
+        branchVariantIndex: 1,
+        kind: "stitched_video",
+        generationTaskIds: ["gen_abcd_001"],
+        durationSec: 12,
+        filePath: "stitched/previous.mp4",
+        previewUrl: "https://cdn.example.test/previous.mp4",
+        downloadEligible: true
+      }];
+      const state = { batch };
+      await writeBatchFiles(root, state.batch);
+
+      const detail = await stitchBatchSegments(
+        testContext(root, state),
+        state.batch.batchId,
+        { replaceDerivedOutputs: true }
+      );
+
+      assert.equal(detail.batch.status, "partial_failed");
+      assert.ok(detail.batch.outputs.some((output) => output.outputId === "out_abcd_090"));
     } finally {
       restorePath();
     }

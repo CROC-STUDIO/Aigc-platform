@@ -1,4 +1,5 @@
 import { WangzhuanApiError, isBatchQcRunnable, readWorkbenchRestoreRequest, strongTruthFields, switchProjectScope } from "./wangzhuan-common.js";
+import { branchHasReferenceAsset, pruneOrphanAssetReviews } from "./wangzhuan-branch-assets.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const signatureFields = [
@@ -17,10 +18,43 @@ const signatureFields = [
   "targetSegmentCount",
   "moneyVisuals",
   "subtitleWorkflow",
+  "decomposition",
   "branches",
   "voiceoverStyle",
   "promiseLevel",
+  "truthRules",
   "currencySymbol",
+  "cta",
+  "ending",
+  "variantPrompt",
+  "customPrompt",
+  "negativePrompt"
+];
+const signatureBranchFields = [
+  "branchId",
+  "branchIndex",
+  "branchLabel",
+  "displayName",
+  "productName",
+  "productLink",
+  "targetChannel",
+  "targetChannels",
+  "targetRegion",
+  "targetRegions",
+  "regions",
+  "language",
+  "languages",
+  "currencySymbol",
+  "materialDirection",
+  "materialDirectionCustom",
+  "outputTemplateMode",
+  "sliceStrategy",
+  "targetSegmentCount",
+  "moneyVisuals",
+  "subtitleWorkflow",
+  "voiceoverStyle",
+  "promiseLevel",
+  "truthRules",
   "cta",
   "ending",
   "variantPrompt",
@@ -141,8 +175,8 @@ const state = {
   selectedTemplate: null,
   rewriteConfirmed: false,
   activeBranchIndex: 0,
-  branches: [{ branchId: "branch_1", branchIndex: 1, branchLabel: "改写 3.1", assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetReviews: {} }],
-  branchDraft: { branchId: "branch_1", branchIndex: 1, branchLabel: "改写 3.1", assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetReviews: {} },
+  branches: [{ branchId: "branch_1", branchIndex: 1, branchLabel: "改写 3.1", assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetContentHashes: {}, assetReviews: {} }],
+  branchDraft: { branchId: "branch_1", branchIndex: 1, branchLabel: "改写 3.1", assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetContentHashes: {}, assetReviews: {} },
   draftSignature: "",
   stalePlanPreview: false,
   decompositionEditedFields: new Set(),
@@ -456,7 +490,7 @@ function currentBatchId() {
 }
 
 function emptyAssetMaps() {
-  return { assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetReviews: {} };
+  return { assetFileNames: {}, assetUrls: {}, assetStorageKeys: {}, assetStoredPaths: {}, assetContentHashes: {}, assetReviews: {} };
 }
 
 function assetEntryKey(assetKey, index = 0) {
@@ -510,6 +544,7 @@ function syncAssetInputDataset(input, branch, entryKey) {
   input.dataset.storageUrl = branch.assetUrls?.[entryKey] || "";
   input.dataset.storageKey = branch.assetStorageKeys?.[entryKey] || "";
   input.dataset.storedPath = branch.assetStoredPaths?.[entryKey] || "";
+  input.dataset.contentHash = branch.assetContentHashes?.[entryKey] || "";
   input.dataset.assetId = branch.assetReviews?.[entryKey]?.assetId || "";
   input.dataset.reviewStatus = branch.assetReviews?.[entryKey]?.status || "";
   input.dataset.reviewReason = branch.assetReviews?.[entryKey]?.reviewReason || "";
@@ -578,7 +613,7 @@ function compatibleDurationSecValue() {
 
 function defaultBranchDraft(index = 0, seed = {}) {
   const branchIndex = index + 1;
-  return {
+  return pruneOrphanAssetReviews({
     branchId: seed.branchId || `branch_${branchIndex}`,
     branchIndex,
     branchLabel: seed.branchLabel || `改写 3.${branchIndex}`,
@@ -588,8 +623,9 @@ function defaultBranchDraft(index = 0, seed = {}) {
     assetUrls: { ...(seed.assetUrls || {}) },
     assetStorageKeys: { ...(seed.assetStorageKeys || {}) },
     assetStoredPaths: { ...(seed.assetStoredPaths || {}) },
+    assetContentHashes: { ...(seed.assetContentHashes || {}) },
     assetReviews: { ...(seed.assetReviews || {}) }
-  };
+  });
 }
 
 function activeBranch() {
@@ -678,6 +714,66 @@ function stableJson(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function cleanSignatureString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function signatureAssetIdentity(asset = {}) {
+  const assetKey = cleanSignatureString(asset.assetKey || asset.key || asset.category);
+  const assetId = cleanSignatureString(asset.assetId);
+  const identity = cleanSignatureString(asset.contentHash)
+    || cleanSignatureString(asset.storageKey)
+    || cleanSignatureString(asset.storedPath)
+    || cleanSignatureString(asset.url)
+    || cleanSignatureString(asset.fileName)
+    || assetId;
+  if (!assetKey || !identity) return null;
+  return {
+    branchId: cleanSignatureString(asset.branchId),
+    assetKey,
+    identity
+  };
+}
+
+function canonicalSignatureAssets(assets = []) {
+  return (Array.isArray(assets) ? assets : [])
+    .map(signatureAssetIdentity)
+    .filter(Boolean)
+    .sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
+}
+
+function canonicalSignatureBranch(branch = {}) {
+  const normalized = Object.fromEntries(
+    signatureBranchFields.map((field) => [field, branch[field]])
+  );
+  const assetKeys = new Set([
+    ...Object.keys(branch.assetFileNames || {}),
+    ...Object.keys(branch.assetUrls || {}),
+    ...Object.keys(branch.assetStorageKeys || {}),
+    ...Object.keys(branch.assetStoredPaths || {}),
+    ...Object.keys(branch.assetRelativePaths || {}),
+    ...Object.keys(branch.assetContentHashes || {})
+  ]);
+  normalized.assets = canonicalSignatureAssets([...assetKeys].map((assetKey) => ({
+    branchId: branch.branchId,
+    assetKey,
+    fileName: branch.assetFileNames?.[assetKey],
+    url: branch.assetUrls?.[assetKey],
+    storageKey: branch.assetStorageKeys?.[assetKey],
+    storedPath: branch.assetStoredPaths?.[assetKey] || branch.assetRelativePaths?.[assetKey],
+    contentHash: branch.assetContentHashes?.[assetKey],
+    assetId: branch.assetReviews?.[assetKey]?.assetId
+  })));
+  return normalized;
+}
+
+function canonicalPlanSignaturePayload(input = {}) {
+  const payload = Object.fromEntries(signatureFields.map((field) => [field, input[field]]));
+  payload.assets = canonicalSignatureAssets(input.assets);
+  payload.branches = (Array.isArray(input.branches) ? input.branches : []).map(canonicalSignatureBranch);
+  return payload;
 }
 
 async function sha256Hex(text) {
@@ -784,8 +880,7 @@ function sha256BytesHexFallback(inputBytes) {
 }
 
 async function clientPlanDraftSignature(input = planSignatureInput()) {
-  const payload = Object.fromEntries(signatureFields.map((field) => [field, input[field]]));
-  return `plansig_${await sha256Hex(stableJson(payload))}`;
+  return `plansig_${await sha256Hex(stableJson(canonicalPlanSignaturePayload(input)))}`;
 }
 
 async function api(path, options = {}) {
@@ -989,7 +1084,7 @@ function postProcessRequestFields() {
     ending: state.postProcessEndingAsset ? { ...state.postProcessEndingAsset, enabled: true, imageDurationSec: 1 } : null,
     subtitles: {
       enabled: els.postProcessSubtitles?.checked !== false,
-      fontSize: Number(els.subtitleFontSizeNumber?.value || 36),
+      fontSize: Number(els.subtitleFontSizeNumber?.value || 40),
       centerY: Number(els.subtitleCenterYNumber?.value || 960),
       textColor: els.subtitleTextColor?.value || "white"
     },
@@ -1006,11 +1101,11 @@ function subtitleControlValue(value, min, max, fallback) {
 function syncSubtitleStyleControls(settings = {}, changed = null) {
   const fontSource = changed === els.subtitleFontSizeRange || changed === els.subtitleFontSizeNumber
     ? changed.value
-    : settings.fontSize ?? els.subtitleFontSizeNumber?.value ?? 36;
+    : settings.fontSize ?? els.subtitleFontSizeNumber?.value ?? 40;
   const centerYSource = changed === els.subtitleCenterYRange || changed === els.subtitleCenterYNumber
     ? changed.value
     : settings.centerY ?? els.subtitleCenterYNumber?.value ?? 960;
-  const fontSize = subtitleControlValue(fontSource, 12, 96, 36);
+  const fontSize = subtitleControlValue(fontSource, 20, 60, 40);
   const centerY = subtitleControlValue(centerYSource, 0, 1280, 960);
   const textColor = settings.textColor || els.subtitleTextColor?.value || "white";
   for (const control of [els.subtitleFontSizeRange, els.subtitleFontSizeNumber]) {
@@ -1081,6 +1176,7 @@ function assetReferences() {
       fileName: branch.assetFileNames?.[entryKey] || input?.dataset.uploadedFileName || input?.files?.[0]?.name || "",
       storageKey: branch.assetStorageKeys?.[entryKey] || input?.dataset.storageKey || "",
       storedPath: branch.assetStoredPaths?.[entryKey] || input?.dataset.storedPath || "",
+      contentHash: branch.assetContentHashes?.[entryKey] || input?.dataset.contentHash || "",
       assetId: branch.assetReviews?.[entryKey]?.assetId || input?.dataset.assetId || "",
       reviewStatus: branch.assetReviews?.[entryKey]?.status || input?.dataset.reviewStatus || ""
     }));
@@ -1103,6 +1199,8 @@ function updateBranchAsset(assetKey, asset = {}) {
   branch.assetUrls[assetKey] = asset.storageUrl || asset.previewUrl || "";
   branch.assetStorageKeys[assetKey] = asset.storageKey || "";
   branch.assetStoredPaths[assetKey] = asset.storedPath || "";
+  if (asset.contentHash) branch.assetContentHashes[assetKey] = asset.contentHash;
+  else delete branch.assetContentHashes[assetKey];
   branch.assetReviews[assetKey] = asset.review || {};
 }
 
@@ -1116,6 +1214,7 @@ function pruneBranchAssetsForInput(assetKey, keepKeys = []) {
     delete branch.assetUrls[key];
     delete branch.assetStorageKeys[key];
     delete branch.assetStoredPaths[key];
+    delete branch.assetContentHashes[key];
     delete branch.assetReviews[key];
   }
 }
@@ -1128,6 +1227,7 @@ function removeBranchAssetEntry(entryKey) {
   delete branch.assetUrls[entryKey];
   delete branch.assetStorageKeys[entryKey];
   delete branch.assetStoredPaths[entryKey];
+  delete branch.assetContentHashes[entryKey];
   delete branch.assetReviews[entryKey];
   const baseKey = String(entryKey).replace(/_\d+$/, "");
   const selector = assetInputs.find(([key]) => key === baseKey)?.[1];
@@ -1206,6 +1306,7 @@ function collectCurrentBranchDraft() {
     assetUrls: { ...(branch.assetUrls || {}) },
     assetStorageKeys: { ...(branch.assetStorageKeys || {}) },
     assetStoredPaths: { ...(branch.assetStoredPaths || {}) },
+    assetContentHashes: { ...(branch.assetContentHashes || {}) },
     assetReviews: { ...(branch.assetReviews || {}) }
   };
 }
@@ -1224,6 +1325,7 @@ function resetAssetInputDatasets() {
     delete input.dataset.storageUrl;
     delete input.dataset.storageKey;
     delete input.dataset.storedPath;
+    delete input.dataset.contentHash;
     delete input.dataset.assetId;
     delete input.dataset.reviewStatus;
     delete input.dataset.reviewReason;
@@ -1278,6 +1380,7 @@ function loadBranchToForm(branch = activeBranch()) {
     input.dataset.storageUrl = branch.assetUrls?.[assetKey] || "";
     input.dataset.storageKey = branch.assetStorageKeys?.[assetKey] || "";
     input.dataset.storedPath = branch.assetStoredPaths?.[assetKey] || "";
+    input.dataset.contentHash = branch.assetContentHashes?.[assetKey] || "";
     input.dataset.assetId = branch.assetReviews?.[assetKey]?.assetId || "";
     input.dataset.reviewStatus = branch.assetReviews?.[assetKey]?.status || "";
     input.dataset.reviewReason = branch.assetReviews?.[assetKey]?.reviewReason || "";
@@ -1384,7 +1487,7 @@ function restoreV2FromBatchDetail(detail = {}) {
   state.postProcessEndingAsset = postProcess.ending || null;
   if (els.postProcessSubtitles) els.postProcessSubtitles.checked = postProcess.subtitles?.enabled !== false;
   syncSubtitleStyleControls({
-    fontSize: postProcess.subtitles?.fontSize ?? 36,
+    fontSize: postProcess.subtitles?.fontSize ?? 40,
     centerY: postProcess.subtitles?.centerY ?? 960,
     textColor: postProcess.subtitles?.textColor ?? "white"
   });
@@ -1398,7 +1501,9 @@ function restoreV2FromBatchDetail(detail = {}) {
   }
   renderPostProcessEndingPreview();
   renderExpansionSizes();
-  if (batch.draftSignature) state.draftSignature = batch.draftSignature;
+  const latestPlanJob = detail.backgroundJobs?.latestPlanJob || null;
+  state.planJob = latestPlanJob;
+  state.draftSignature = latestPlanJob?.draftSignature || batch.draftSignature || "";
   state.rewriteConfirmed = restoreRewriteConfirmedFromBatch(batch);
   state.stalePlanPreview = false;
   renderBranchTabs();
@@ -1410,6 +1515,7 @@ function restoreV2FromBatchDetail(detail = {}) {
     els.estimateBox.textContent = `估算结果：${scriptCount} 条脚本 · ${seedanceCount} 段 Seedance · ${state.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟。`;
   }
   renderTasks();
+  void markPlanMaybeStale();
   return true;
 }
 
@@ -1715,6 +1821,7 @@ function applyProductAssetToBranch(assetKey, asset = {}) {
     previewUrl: asset.previewUrl,
     storageKey: asset.storageKey,
     storedPath: asset.storedPath,
+    contentHash: asset.contentHash,
     review: {}
   });
 }
@@ -1854,6 +1961,10 @@ function hasConfirmedVideoGeneration(batch = state.batchDetail?.batch || state.b
   if (batch?.previewConfirmedAt) return true;
   const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
   return tasks.some((task) => task?.status && task.status !== "pending_preview");
+}
+
+function shouldValidatePlanSignature(batch = state.batchDetail?.batch || state.batchDetail || {}) {
+  return !hasConfirmedVideoGeneration(batch);
 }
 
 function setPlanUpstreamLocked(locked) {
@@ -2264,6 +2375,7 @@ function planSignatureInput() {
       fileName: branch.assetFileNames?.[assetKey] || "",
       storageKey: branch.assetStorageKeys?.[assetKey] || "",
       storedPath: branch.assetStoredPaths?.[assetKey] || "",
+      contentHash: branch.assetContentHashes?.[assetKey] || "",
       assetId: branch.assetReviews?.[assetKey]?.assetId || "",
       reviewStatus: branch.assetReviews?.[assetKey]?.status || ""
     })).filter((asset) => asset.fileName || asset.storageKey || asset.storedPath || asset.assetId || asset.reviewStatus)),
@@ -2283,6 +2395,7 @@ function planSignatureInput() {
     promiseLevel: value(els.promiseLevel),
     truthRules: collectTruthRules(),
     currencySymbol: currencyValue(),
+    decomposition: currentDecomposition(),
     cta: value(els.cta),
     ending: value(els.ending),
     variantPrompt: value(els.variantPrompt),
@@ -2516,7 +2629,7 @@ function renderTasks() {
   const planBlockedByDecomposition = !decompositionReady;
   const planDisabled = planRetryable
     ? false
-    : (planJobRunning || planUpstreamLocked || state.stalePlanPreview || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
+    : (planJobRunning || planUpstreamLocked || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
   els.planBatchBtn.disabled = planDisabled;
   if (planRetryable) {
     els.planBatchBtn.title = "后台任务可能仍在运行，可重试查询 prompt 结果";
@@ -2788,7 +2901,9 @@ function syncBackgroundJobActionButtons() {
   const planRetryable = isRecoverableBackgroundJob(state.planJob);
   const decompositionRetryable = isRecoverableBackgroundJob(state.decompositionJob);
   if (els.planBatchBtn) {
-    els.planBatchBtn.textContent = planRetryable ? backgroundJobRetryLabel("plan") : "生成 Seedance prompt";
+    els.planBatchBtn.textContent = planRetryable
+      ? backgroundJobRetryLabel("plan")
+      : state.stalePlanPreview ? "重新生成 Seedance prompt" : "生成 Seedance prompt";
   }
   if (els.draftDecompositionBtn) {
     els.draftDecompositionBtn.textContent = decompositionRetryable ? backgroundJobRetryLabel("decomposition") : "开始解析";
@@ -2877,7 +2992,7 @@ function renderReminders({ batch, plans } = {}) {
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) items.push("本批任务较多，需要确认数量和消耗");
   if (state.stalePlanPreview) items.push("Seedance prompt 已失效，需要重新生成");
   const failedAssets = state.branches.flatMap((branch) => Object.entries(branch.assetReviews || {})
-    .filter(([, review]) => review?.status && !isAssetReviewApproved(review.status))
+    .filter(([assetKey, review]) => branchHasReferenceAsset(branch, assetKey) && review?.status && !isAssetReviewApproved(review.status))
     .map(([key, review]) => `${branch.branchLabel || branch.branchId}/${key}:${review.status}${review.reviewReason ? ` ${review.reviewReason}` : ""}`));
   if (failedAssets.length) items.push(`素材审核未通过：${failedAssets.join("；")}`);
   if (plans?.length && !batch?.tasks?.length) items.push("Seedance prompt 已生成，待确认并提交 Seedance");
@@ -2921,7 +3036,7 @@ async function uploadSeedanceAssetsForReview() {
       if (input) input.value = "";
       renderAssetReviewState();
     }
-    state.stalePlanPreview = Boolean(state.draftSignature && state.batchDetail);
+    await markPlanMaybeStale();
     renderTasks();
   } finally {
     if (els.uploadSeedanceAssetsBtn) els.uploadSeedanceAssetsBtn.disabled = false;
@@ -3140,7 +3255,9 @@ async function startPlanJob() {
   if (retryBackgroundJobPoll("plan")) return;
   els.planBatchBtn.disabled = true;
   assertSeedanceReferenceAssetLimit();
-  const estimateResult = state.estimate?.estimateId ? state.estimate : await estimateBatch();
+  const estimateResult = state.stalePlanPreview || !state.estimate?.estimateId
+    ? await estimateBatch()
+    : state.estimate;
   if (!estimateResult?.estimateId) {
     renderTasks();
     return;
@@ -3437,6 +3554,7 @@ async function confirmPlanAndGenerate() {
   setBusy(els.confirmPlanBtn, true, "提交中");
   renderTasks();
   const plans = collectEditablePlans();
+  const validateDraftSignature = shouldValidatePlanSignature(batch);
   try {
     const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/confirm-plan`, {
       method: "POST",
@@ -3447,8 +3565,8 @@ async function confirmPlanAndGenerate() {
         plans,
         branchDrafts: estimateRequest().branches,
         postProcess: postProcessRequestFields(),
-        draftSignature: state.draftSignature,
-        draftSignatureInput: planSignatureInput()
+        draftSignature: validateDraftSignature ? state.draftSignature : undefined,
+        draftSignatureInput: validateDraftSignature ? planSignatureInput() : undefined
       })
     });
     state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
@@ -3505,7 +3623,7 @@ function startNewTask() {
   state.loggedTaskFailures = new Set();
   state.postProcessEndingAsset = null;
   if (els.postProcessSubtitles) els.postProcessSubtitles.checked = true;
-  syncSubtitleStyleControls({ fontSize: 36, centerY: 960, textColor: "white" });
+  syncSubtitleStyleControls({ fontSize: 40, centerY: 960, textColor: "white" });
   state.expansionSizes = [];
   $("#wzBatchName").value = generatedBatchName();
   els.referenceFile.value = "";
@@ -3580,6 +3698,11 @@ async function estimateBatch() {
 }
 
 async function markPlanMaybeStale() {
+  if (!shouldValidatePlanSignature()) {
+    state.stalePlanPreview = false;
+    renderTasks();
+    return;
+  }
   if (!state.draftSignature || !state.batchDetail) return;
   state.stalePlanPreview = state.draftSignature !== await clientPlanDraftSignature();
   renderTasks();
@@ -3591,6 +3714,7 @@ bindReferenceDropUpload();
 els.decompositionForm?.addEventListener("input", (event) => {
   const field = event.target?.dataset?.decompositionField;
   if (field) state.decompositionEditedFields.add(field);
+  markPlanMaybeStale();
 });
 els.startNewTaskBtn?.addEventListener("click", startNewTask);
 els.addBranchBtn?.addEventListener("click", addBranch);
@@ -3783,7 +3907,7 @@ renderAssetReviewState();
 renderPlanEditors([]);
 renderDisclaimerOverlayPreview();
 renderPostProcessEndingPreview();
-syncSubtitleStyleControls({ fontSize: 36, centerY: 960, textColor: "white" });
+syncSubtitleStyleControls({ fontSize: 40, centerY: 960, textColor: "white" });
 renderExpansionSizes();
 renderTasks();
 renderLogs();

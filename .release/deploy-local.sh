@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 本地一键：打 code-only 包并上传到正式机。
+# 正式机发布入口。必须显式声明 --production，避免候选验证误发到 5177。
 # 用法：
-#   bash .release/deploy-local.sh              # 默认 code-only
-#   bash .release/deploy-local.sh full           # 全量包（含 Dockerfile / compose）
-#   bash .release/deploy-local.sh code-only --remote   # 上传后尝试 SSH 触发远端部署
+#   bash .release/deploy-local.sh --production [code-only|full]
+#   bash .release/deploy-local.sh --production code-only --remote
 
 set -a
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,8 +16,32 @@ if [ -f "$ROOT/.release/env.local.sh" ]; then
 fi
 set +a
 
-MODE="${1:-code-only}"
-RUN_REMOTE="${2:-}"
+MODE="code-only"
+RUN_REMOTE=""
+PRODUCTION_CONFIRMED="false"
+
+for arg in "$@"; do
+  case "$arg" in
+    code-only|full)
+      MODE="$arg"
+      ;;
+    --remote)
+      RUN_REMOTE="--remote"
+      ;;
+    --production)
+      PRODUCTION_CONFIRMED="true"
+      ;;
+    *)
+      echo "usage: $0 --production [code-only|full] [--remote]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$PRODUCTION_CONFIRMED" != "true" ]; then
+  echo "Refusing production deployment without --production. Use docker compose for the local candidate on port 8000." >&2
+  exit 2
+fi
 
 cd "$ROOT"
 
@@ -38,7 +61,7 @@ case "$MODE" in
     REMOTE_CMD="chmod +x /tmp/deploy-aigc-platform.sh && bash /tmp/deploy-aigc-platform.sh"
     ;;
   *)
-    echo "usage: $0 [code-only|full] [--remote]" >&2
+    echo "usage: $0 --production [code-only|full] [--remote]" >&2
     exit 1
     ;;
 esac

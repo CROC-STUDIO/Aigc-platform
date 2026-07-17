@@ -65,6 +65,14 @@ test("stitch refreshes display names when existing segment outputs are reused", 
   assert.match(source, /existingOutput\.durationSec = Number\(entry\.task\.durationSec/);
 });
 
+test("stitching state writes use the explicit stitch_progress trigger", async () => {
+  const source = await readFile(new URL("../../server/wangzhuan/stitch.mjs", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /writeBatch\(context, \{ \.\.\.batch, status: "stitching" \}, "stitch_progress"\)/
+  );
+});
+
 test("post-process ffmpeg timeout has a five minute floor and scales with duration", () => {
   assert.equal(__stitchTestHooks.postProcessTimeoutMs(0), 300000);
   assert.equal(__stitchTestHooks.postProcessTimeoutMs(20), 300000);
