@@ -156,7 +156,9 @@ const SAME_STATUS_TRIGGERS = Object.freeze([
   "stitch_progress",
   "remix_write",
   "user_retry",
-  "user_replacement"
+  "user_replacement",
+  "manual_stitch",
+  "manual_stitch_manage"
 ]);
 
 const RUN_STATUSES = Object.freeze([
@@ -1923,6 +1925,7 @@ function outputRowToOutput(row, taskIds = []) {
   if (probe.stitchKind) output.stitchKind = probe.stitchKind;
   if (Array.isArray(probe.sourceGroups)) output.sourceGroups = probe.sourceGroups;
   if (Array.isArray(probe.segmentOutputIds)) output.segmentOutputIds = probe.segmentOutputIds;
+  if (Array.isArray(probe.compatibility)) output.compatibility = probe.compatibility;
   if (probe.createdBy) output.createdBy = probe.createdBy;
   if (probe.createdAt) output.createdAt = isoDate(probe.createdAt);
   const qcChecksFromReport = parseJsonValue(row.qc_checks_json ?? row.checks_json, []);
@@ -3532,6 +3535,29 @@ async function syncWorkflowOutputs(conn, facts, batch, runId) {
     ...reportOutputs
   ];
   const seenOutputIds = new Set();
+  const deletedOutputIds = [...new Set((batch.deletedOutputIds || []).map(String).filter(Boolean))];
+  if (deletedOutputIds.length) {
+    const placeholders = deletedOutputIds.map(() => "?").join(", ");
+    const deletedOutputPredicate = `wo.run_id = ? AND wo.output_uid IN (${placeholders})`;
+    const deletedOutputParams = [runId, ...deletedOutputIds];
+    await conn.execute(
+      `DELETE sr FROM stitch_reports sr
+       INNER JOIN workflow_outputs wo ON wo.id = sr.output_id
+       WHERE ${deletedOutputPredicate}`,
+      deletedOutputParams
+    );
+    await conn.execute(
+      `DELETE qr FROM qc_reports qr
+       INNER JOIN workflow_outputs wo ON wo.id = qr.output_id
+       WHERE ${deletedOutputPredicate}`,
+      deletedOutputParams
+    );
+    await conn.execute(
+      `DELETE wo FROM workflow_outputs wo
+       WHERE ${deletedOutputPredicate}`,
+      deletedOutputParams
+    );
+  }
   if (batch.replaceDerivedOutputs === true) {
     const retainedDerivedIds = outputs
       .filter((output) => ["stitched_video", "expanded_video"].includes(outputKind(output)))

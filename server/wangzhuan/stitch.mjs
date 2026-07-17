@@ -12,12 +12,20 @@ import { buildOutputDisplayName } from "./output-naming.mjs";
 import {
   hasWangzhuanFactsStore,
   loadBatchDetailFromMysql,
+  loadOutputDetailFromMysql,
   runIdempotentOperation,
   syncBatchFacts
 } from "./mysql-facts.mjs";
-import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import {
+  removeWangzhuanAssetFromObjectStorage,
+  syncWangzhuanAsset,
+  toProjectRelative,
+  wangzhuanPaths,
+  writeAtomicJson
+} from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { resolveBatchPostProcess } from "./postprocess.mjs";
+import { classifyStitchSelection } from "./segment-recovery.mjs";
 import { buildExpandedOutputName, expansionTimeoutMs, renderExpandedVideo } from "./output-expansion.mjs";
 import { writeVolcengineSubtitleArtifacts } from "./subtitles.mjs";
 import { resolveVolcengineAsrConfig, transcribeVolcengineAudio } from "./volcengine-asr.mjs";
@@ -1501,6 +1509,297 @@ export function stitchBatchSegments(context, batchId, options = {}) {
   });
   STITCH_IN_FLIGHT.set(key, tracked);
   return tracked;
+}
+
+function manualStitchIdempotencyKey(request = {}) {
+  const idempotencyKey = String(request.idempotencyKey || "").trim();
+  if (!idempotencyKey) {
+    throw new WangzhuanError("validation_error", "手动拼接请求缺少 idempotencyKey", {
+      field: "idempotencyKey"
+    });
+  }
+  return idempotencyKey;
+}
+
+function manualStitchVersion(batch = {}) {
+  return Math.max(0, ...(Array.isArray(batch.outputs) ? batch.outputs : [])
+    .filter((output) => output.manualStitch === true)
+    .map((output) => Number(output.stitchVersion || 0))) + 1;
+}
+
+function taskForSegmentOutput(batch, output) {
+  const taskIds = new Set((output.generationTaskIds || []).map(String));
+  return (Array.isArray(batch.tasks) ? batch.tasks : []).find((task) => {
+    return taskIds.has(String(task.generationTaskId || ""));
+  }) || null;
+}
+
+function manualStitchGroup(batch, selection) {
+  const entries = selection.outputs.map((output) => {
+    const task = taskForSegmentOutput(batch, output);
+    const script = (Array.isArray(batch.scripts) ? batch.scripts : [])
+      .find((item) => item.scriptId === task?.scriptId) || {
+        scriptId: task?.scriptId,
+        branchId: task?.branchId,
+        branchLabel: task?.branchLabel,
+        branchVariantIndex: task?.branchVariantIndex,
+        segmentIndex: task?.segmentIndex,
+        durationSec: output.durationSec
+      };
+    return { task, script, output };
+  });
+  const first = entries[0] || {};
+  return {
+    variantIndex: first.task?.branchVariantIndex || 1,
+    branchId: selection.kind === "mixed" ? "mixed" : (first.task?.branchId || ""),
+    branchLabel: selection.kind === "mixed" ? "混合编排" : (first.task?.branchLabel || ""),
+    branchVariantIndex: selection.kind === "mixed" ? 0 : Number(first.task?.branchVariantIndex || 1),
+    entries
+  };
+}
+
+function manualStitchFullPath(context, relativePath, field = "filePath") {
+  const root = resolve(context.userProjectRoot);
+  const target = resolve(root, String(relativePath || ""));
+  if (!relativePath || (target !== root && !target.startsWith(`${root}/`))) {
+    throw new WangzhuanError("invalid_material", "拼接输出路径不合法", { field });
+  }
+  return target;
+}
+
+async function validateManualStitchMedia(context, outputs) {
+  const media = [];
+  for (const output of outputs) {
+    const fullPath = manualStitchFullPath(context, output.filePath);
+    if (!existsSync(fullPath)) {
+      throw new WangzhuanError("missing_required_file", "拼接所需的片段文件不存在", {
+        outputId: output.outputId
+      });
+    }
+    await assertDecodableVideo(fullPath);
+    const health = await probeVideoStreamHealth(fullPath);
+    if (!(health.width > 0) || !(health.height > 0) || !(health.durationSec > 0)) {
+      throw new WangzhuanError("invalid_video", "拼接片段媒体参数不完整", {
+        outputId: output.outputId
+      });
+    }
+    media.push({
+      outputId: output.outputId,
+      width: health.width,
+      height: health.height,
+      durationSec: health.durationSec,
+      codecName: health.codecName,
+      hasAudio: await probeHasAudio(fullPath)
+    });
+  }
+  return media;
+}
+
+async function replayManualStitchVersion(context, batchId, summary = {}) {
+  const batch = await readBatch(context, batchId);
+  const outputId = summary.output?.outputId || summary.outputId || "";
+  const output = (Array.isArray(batch.outputs) ? batch.outputs : []).find((item) => item.outputId === outputId);
+  if (!output) throw new WangzhuanError("output_not_found", "拼接版本不存在", { outputId }, 404);
+  return { batch, output };
+}
+
+async function createManualStitchVersionOnce(context, batchId, request) {
+  const outputIds = Array.isArray(request.segmentOutputIds)
+    ? request.segmentOutputIds.map(String).filter(Boolean)
+    : [];
+  if (!outputIds.length) {
+    throw new WangzhuanError("validation_error", "至少选择一个片段后才能拼接", {
+      field: "segmentOutputIds"
+    });
+  }
+  if (outputIds.length > 50) {
+    throw new WangzhuanError("validation_error", "单次拼接最多选择 50 个片段", {
+      field: "segmentOutputIds",
+      maxItems: 50
+    });
+  }
+  if (new Set(outputIds).size !== outputIds.length) {
+    throw new WangzhuanError("validation_error", "拼接队列包含重复片段", {
+      field: "segmentOutputIds"
+    });
+  }
+
+  const batch = await readBatch(context, batchId);
+  const selection = classifyStitchSelection(batch, outputIds);
+  if (selection.outputs.length !== outputIds.length) {
+    throw new WangzhuanError("invalid_material", "拼接队列包含不存在、已删除或非当前版本的片段", {
+      requestedOutputIds: outputIds,
+      resolvedOutputIds: selection.outputs.map((output) => output.outputId)
+    });
+  }
+  if (selection.kind === "mixed" && request.confirmMixed !== true) {
+    throw new WangzhuanError("mixed_stitch_confirmation_required", "跨变体拼接需要先确认混合编排", {
+      sourceGroups: selection.sourceGroups
+    }, 409);
+  }
+  const preflight = preflightStitcher(context);
+  if (preflight.status === "unsupported") {
+    throw new WangzhuanError("stitcher_unavailable", "拼接能力不可用", { batchId });
+  }
+  const createForTest = context.createManualStitchOutputForTest;
+  const media = createForTest ? [] : await validateManualStitchMedia(context, selection.outputs);
+  const sequenceState = { next: nextOutputSequence(batch) };
+  const group = manualStitchGroup(batch, selection);
+  const created = createForTest
+    ? await createForTest({
+        context,
+        batch,
+        group,
+        segmentOutputs: selection.outputs,
+        preflight,
+        outputId: takeOutputId(batch, sequenceState)
+      })
+    : await createSucceededStitchOutput(
+        context,
+        batch,
+        group,
+        selection.outputs,
+        preflight,
+        sequenceState
+      );
+  const stitchVersion = manualStitchVersion(batch);
+  const createdAt = new Date().toISOString();
+  const output = {
+    ...created.output,
+    displayFileName: `manual-stitch-v${stitchVersion}.mp4`,
+    manualStitch: true,
+    stitchVersion,
+    stitchKind: selection.kind,
+    sourceGroups: selection.sourceGroups,
+    segmentOutputIds: [...outputIds],
+    createdBy: currentUserId(context),
+    createdAt,
+    compatibility: media
+  };
+  const report = {
+    ...created.report,
+    manualStitch: true,
+    stitchVersion,
+    stitchKind: selection.kind,
+    sourceGroups: selection.sourceGroups,
+    segmentOutputIds: [...outputIds],
+    createdBy: currentUserId(context),
+    createdAt
+  };
+  if (report.reportPath) {
+    await writeAtomicJson(manualStitchFullPath(context, report.reportPath, "reportPath"), report);
+  }
+  const { replaceDerivedOutputs: _replaceDerivedOutputs, ...batchWithoutReplacementFlag } = batch;
+  const saved = await writeBatch(context, {
+    ...batchWithoutReplacementFlag,
+    outputs: [...(Array.isArray(batch.outputs) ? batch.outputs : []), output],
+    stitchReports: [...(Array.isArray(batch.stitchReports) ? batch.stitchReports : []), report]
+  }, "manual_stitch");
+  await telemetryRecorder(context)("manual_stitch_version_created", {
+    batchId,
+    outputId: output.outputId,
+    stitchVersion,
+    stitchKind: selection.kind,
+    segmentOutputIds: outputIds
+  }, { audit: true }).catch(() => {});
+  return { batch: saved, output, report };
+}
+
+export async function createManualStitchVersion(context, batchId, request = {}) {
+  validateBatchId(batchId);
+  const idempotencyKey = manualStitchIdempotencyKey(request);
+  const requestHash = hashPayload({
+    batchId,
+    segmentOutputIds: request.segmentOutputIds,
+    confirmMixed: request.confirmMixed === true
+  });
+  const runIdempotent = context.runIdempotentOperation || runIdempotentOperation;
+  return runIdempotent(
+    context,
+    "manual_stitch_version",
+    idempotencyKey,
+    requestHash,
+    () => createManualStitchVersionOnce(context, batchId, request),
+    {
+      resourceType: "batch",
+      replayResponse: (summary) => replayManualStitchVersion(context, batchId, summary)
+    }
+  );
+}
+
+async function manualOutputOwner(context, outputId) {
+  const loadOutput = context.loadOutputDetailFromMysql || loadOutputDetailFromMysql;
+  const detail = await loadOutput(context, outputId);
+  if (!detail?.batchId) throw new WangzhuanError("output_not_found", "拼接版本不存在", { outputId }, 404);
+  const batch = await readBatch(context, detail.batchId);
+  const output = (Array.isArray(batch.outputs) ? batch.outputs : []).find((item) => item.outputId === outputId);
+  if (!output) throw new WangzhuanError("output_not_found", "拼接版本不存在", { outputId }, 404);
+  if (output.manualStitch !== true) {
+    throw new WangzhuanError("invalid_state_transition", "只能管理手动拼接版本", { outputId }, 409);
+  }
+  return { batch, output };
+}
+
+function manualStitchDisplayFileName(value) {
+  const displayFileName = String(value || "").trim();
+  if (!displayFileName || displayFileName.length > 160 || /[\\/\u0000-\u001f]/.test(displayFileName)) {
+    throw new WangzhuanError("validation_error", "版本名称不能为空、包含路径字符或超过 160 字符", {
+      field: "displayFileName",
+      maxLength: 160
+    });
+  }
+  return displayFileName.toLowerCase().endsWith(".mp4") ? displayFileName : `${displayFileName}.mp4`;
+}
+
+export async function renameManualStitchVersion(context, outputId, request = {}) {
+  const { batch, output } = await manualOutputOwner(context, outputId);
+  const renamedOutput = {
+    ...output,
+    displayFileName: manualStitchDisplayFileName(request.displayFileName)
+  };
+  const saved = await writeBatch(context, {
+    ...batch,
+    outputs: batch.outputs.map((item) => item.outputId === outputId ? renamedOutput : item)
+  }, "manual_stitch_manage");
+  await telemetryRecorder(context)("manual_stitch_version_renamed", {
+    batchId: batch.batchId,
+    outputId,
+    displayFileName: renamedOutput.displayFileName
+  }, { audit: true }).catch(() => {});
+  return { batch: saved, output: renamedOutput };
+}
+
+export async function deleteManualStitchVersion(context, outputId) {
+  const { batch, output } = await manualOutputOwner(context, outputId);
+  const references = batch.outputs.filter((item) => item.outputId !== outputId && (
+    item.parentOutputId === outputId
+    || (Array.isArray(item.segmentOutputIds) && item.segmentOutputIds.includes(outputId))
+  ));
+  if (references.length) {
+    throw new WangzhuanError("output_in_use", "该拼接版本仍被其他输出引用，暂不能删除", {
+      outputId,
+      referenceOutputIds: references.map((item) => item.outputId)
+    }, 409);
+  }
+  const report = (Array.isArray(batch.stitchReports) ? batch.stitchReports : [])
+    .find((item) => item.outputId === outputId);
+  const saved = await writeBatch(context, {
+    ...batch,
+    deletedOutputIds: [...new Set([...(batch.deletedOutputIds || []), outputId])],
+    outputs: batch.outputs.filter((item) => item.outputId !== outputId),
+    stitchReports: (batch.stitchReports || []).filter((item) => item.outputId !== outputId)
+  }, "manual_stitch_manage");
+  const outputPath = manualStitchFullPath(context, output.filePath);
+  await removeWangzhuanAssetFromObjectStorage(context, outputPath);
+  await rm(outputPath, { force: true });
+  if (report?.reportPath) {
+    await rm(manualStitchFullPath(context, report.reportPath, "reportPath"), { force: true });
+  }
+  await telemetryRecorder(context)("manual_stitch_version_deleted", {
+    batchId: batch.batchId,
+    outputId
+  }, { audit: true }).catch(() => {});
+  return { batch: saved, deletedOutputId: outputId };
 }
 
 function hashPayload(value) {

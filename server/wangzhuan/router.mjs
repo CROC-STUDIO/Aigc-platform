@@ -43,7 +43,12 @@ import {
   stopRemix,
   uploadRemixSource
 } from "./remix.mjs";
-import { retryStitch } from "./stitch.mjs";
+import {
+  createManualStitchVersion,
+  deleteManualStitchVersion,
+  renameManualStitchVersion,
+  retryStitch
+} from "./stitch.mjs";
 import { inspectStorePage } from "./store-page.mjs";
 import {
   generateSeedancePromptFromParsedProductLink,
@@ -236,6 +241,16 @@ function outputExpansionJobsRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/outputs\/([^/]+)\/expand-jobs$/);
   if (!match) return null;
   return { outputId: decodeURIComponent(match[1]) };
+}
+
+function manualStitchVersionRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/stitch-versions$/);
+  return match ? { batchId: match[1] } : null;
+}
+
+function outputManagementRoute(pathname) {
+  const match = pathname.match(/^\/api\/wangzhuan\/outputs\/([^/]+)$/);
+  return match ? { outputId: decodeURIComponent(match[1]) } : null;
 }
 
 function productInfoRoute(pathname) {
@@ -750,6 +765,20 @@ export async function handleWangzhuanRequest(req, res, url, context) {
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/batches/start") {
       const started = await startBatchFromEstimate(scoped, await context.readJson(req));
       return sendOk(res, started, requestId);
+    }
+    const manualStitch = manualStitchVersionRoute(url.pathname);
+    if (manualStitch && req.method === "POST") {
+      const createVersion = scoped.createManualStitchVersion || createManualStitchVersion;
+      return sendOk(res, await createVersion(scoped, manualStitch.batchId, await context.readJson(req)), requestId);
+    }
+    const managedOutput = outputManagementRoute(url.pathname);
+    if (managedOutput && req.method === "PATCH") {
+      const renameVersion = scoped.renameManualStitchVersion || renameManualStitchVersion;
+      return sendOk(res, await renameVersion(scoped, managedOutput.outputId, await context.readJson(req)), requestId);
+    }
+    if (managedOutput && req.method === "DELETE") {
+      const deleteVersion = scoped.deleteManualStitchVersion || deleteManualStitchVersion;
+      return sendOk(res, await deleteVersion(scoped, managedOutput.outputId), requestId);
     }
     const expandRoute = outputExpansionSubmitRoute(url.pathname);
     if (expandRoute && req.method === "POST") {
