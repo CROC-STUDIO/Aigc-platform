@@ -1,5 +1,6 @@
 import { WangzhuanApiError, isBatchQcRunnable, readWorkbenchRestoreRequest, strongTruthFields, switchProjectScope } from "./wangzhuan-common.js";
 import { branchHasReferenceAsset, pruneOrphanAssetReviews } from "./wangzhuan-branch-assets.js";
+import { createSegmentRecoveryController, hasPendingSegmentRecovery } from "./wangzhuan-segment-recovery.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const signatureFields = [
@@ -144,6 +145,8 @@ const els = {
   seedanceModel: $("#wzSeedanceModel"),
   runQcBtn: $("#wzRunQcBtn"),
   stopBatchBtn: $("#wzStopBatchBtn"),
+  segmentRecovery: $("#wzSegmentRecovery"),
+  segmentRecoveryState: $("#wzSegmentRecoveryState"),
   taskQueue: $("#wzV2TaskQueue"),
   reminders: $("#wzV2Reminders"),
   logs: $("#wzV2Logs"),
@@ -171,6 +174,7 @@ const state = {
   codexPromptTestJob: null,
   codexPromptTestResult: null,
   batchDetail: null,
+  currentUserId: "",
   templates: [],
   selectedTemplate: null,
   rewriteConfirmed: false,
@@ -907,6 +911,54 @@ async function api(path, options = {}) {
   return payload.data;
 }
 
+async function downloadRecoveryZip(path, payload, fileName = "wangzhuan-segments.zip") {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    let errorPayload = {};
+    try {
+      errorPayload = await response.json();
+    } catch {
+      errorPayload = { message: "下载失败" };
+    }
+    throw new WangzhuanApiError(errorPayload, response.status);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+const segmentRecoveryController = createSegmentRecoveryController({
+  root: els.segmentRecovery,
+  request: api,
+  downloadZip: downloadRecoveryZip,
+  showToast: (message) => log(message),
+  getScope: () => ({
+    userId: state.currentUserId || "current-user",
+    projectKey: new URLSearchParams(location.search).get("projectKey")
+      || value($("#wzProjectName"))
+      || "current-project"
+  }),
+  onDetail: (detail) => {
+    state.batchDetail = detail;
+    renderBatchDetail(detail);
+  },
+  onRetrySubmitted: (batchId) => {
+    startBatchPolling(batchId, { followSegmentRecovery: true });
+    void loadBatchDetail(batchId).catch((error) => log(`片段恢复详情刷新失败：${error.message}`));
+  },
+  onError: (error, title) => showError(error, title)
+});
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1514,7 +1566,7 @@ function restoreV2FromBatchDetail(detail = {}) {
     const seedanceCount = state.estimate.seedanceSegmentCount || 0;
     els.estimateBox.textContent = `估算结果：${scriptCount} 条脚本 · ${seedanceCount} 段 Seedance · ${state.branches.length} 个裂变子节点。预计时间：${expectedMinutes()} 分钟。`;
   }
-  renderTasks();
+  renderBatchDetail(detail);
   void markPlanMaybeStale();
   return true;
 }
@@ -2569,16 +2621,29 @@ async function loadAuth() {
   const response = await fetch("/api/auth");
   const data = await response.json();
   if (data.authenticated) {
+    state.currentUserId = data.user?.userId || data.user?.username || "current-user";
     els.badge.textContent = data.user?.displayName || data.user?.username || "已登录";
     els.logoutBtn.hidden = false;
     hideLogin();
     return true;
   } else {
+    state.currentUserId = "";
     els.badge.textContent = "未登录";
     els.logoutBtn.hidden = true;
     showLogin();
     return false;
   }
+}
+
+function renderBatchDetail(detail) {
+  segmentRecoveryController.update(detail);
+  const batch = detail?.batch || detail || null;
+  if (els.segmentRecoveryState) {
+    const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
+    const ready = tasks.filter((task) => ["ready", "replacement_ready"].includes(task.availability)).length;
+    els.segmentRecoveryState.textContent = batch?.batchId ? `${ready}/${tasks.length} 个片段可用` : "";
+  }
+  renderTasks();
 }
 
 function renderTasks() {
@@ -3177,7 +3242,7 @@ async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
   });
   if (data.batch) state.batchDetail = data;
   log("草稿已保存");
-  renderTasks();
+  renderBatchDetail(state.batchDetail);
   return data;
 }
 
@@ -3203,7 +3268,7 @@ async function confirmSeedanceAssetReviews() {
     renderAssetReviewState();
   }
   log("Seedance 素材审核结果已确认");
-  renderTasks();
+  renderBatchDetail(state.batchDetail);
 }
 
 async function startDecompositionJob() {
@@ -3428,7 +3493,8 @@ async function pollJob(type, jobId, options = {}) {
           renderPlanEditors(plans);
         }
         log(`${type === "decomposition" ? "AI 拆解" : "Seedance prompt"}完成`);
-        renderTasks();
+        if (type === "plan" && job.batch) renderBatchDetail(state.batchDetail);
+        else renderTasks();
         return;
       }
       if (job.status === "failed") {
@@ -3480,11 +3546,11 @@ async function loadBatchDetail(batchId) {
   const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
   state.batchDetail = data;
   logTaskFailureDetails(data?.batch || data || {});
-  renderTasks();
+  renderBatchDetail(data);
   return data;
 }
 
-function startBatchPolling(batchId) {
+function startBatchPolling(batchId, options = {}) {
   window.clearTimeout(batchPollTimer);
   batchPollNetworkErrorActive = false;
   let lastStatus = "";
@@ -3496,7 +3562,8 @@ function startBatchPolling(batchId) {
         batchPollNetworkErrorActive = false;
       }
       const status = detail?.batch?.status;
-      if (!TERMINAL_BATCH_STATUSES.has(status)) {
+      const followSegmentRecovery = options.followSegmentRecovery && hasPendingSegmentRecovery(detail);
+      if (!TERMINAL_BATCH_STATUSES.has(status) || followSegmentRecovery) {
         batchPollTimer = window.setTimeout(tick, 2000);
       } else if (status && status !== lastStatus) {
         log(`批次已进入终态：${status}`);
@@ -3571,7 +3638,7 @@ async function confirmPlanAndGenerate() {
     });
     state.batchDetail = data.batch ? data : { batch: data.confirmedBatch || batch };
     log("Seedance prompt 已确认，已提交 Seedance 生成");
-    renderTasks();
+    renderBatchDetail(state.batchDetail);
     startBatchPolling(batch.batchId);
   } finally {
     state.confirmPlanSubmitting = false;
@@ -3590,7 +3657,7 @@ async function stopBatch() {
   state.batchDetail = data;
   window.clearTimeout(batchPollTimer);
   log("批次已停止");
-  renderTasks();
+  renderBatchDetail(data);
 }
 
 async function runVideoQc() {
@@ -3643,7 +3710,7 @@ function startNewTask() {
   renderExpansionSizes();
   clearError();
   log("已开始新任务");
-  renderTasks();
+  renderBatchDetail(null);
 }
 
 async function login() {

@@ -23,6 +23,59 @@ test("wangzhuan v2 page keeps old page separate and exposes dense workbench regi
   assert.match(html, /运行与结果/);
 });
 
+test("segment recovery host follows generation batch and stays hidden without a batch", async () => {
+  const html = await readText("public/wangzhuan-v2.html");
+  const batchIndex = html.indexOf('id="wzNodeBatch"');
+  const recoveryIndex = html.indexOf('id="wzSegmentRecovery"');
+  const sideIndex = html.indexOf('class="wz-v2-side"');
+
+  assert.ok(batchIndex >= 0 && recoveryIndex > batchIndex && sideIndex > recoveryIndex);
+  assert.match(html, /<section class="wz-v2-band wz-segment-recovery" id="wzSegmentRecovery" hidden/);
+  assert.match(html, /id="wzSegmentRecoveryTitle">片段恢复与拼接/);
+  assert.match(html, /id="wzSegmentRecoveryState" aria-live="polite"/);
+  assert.match(html, /id="wzSegmentRecoveryBody" data-segment-recovery-body/);
+});
+
+test("segment recovery controller mounts once and receives every batch detail update", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+
+  assert.match(js, /import \{ createSegmentRecoveryController, hasPendingSegmentRecovery \} from "\.\/wangzhuan-segment-recovery\.js"/);
+  assert.match(js, /const segmentRecoveryController = createSegmentRecoveryController\(/);
+  assert.match(js, /function renderBatchDetail\(detail\)/);
+  assert.match(js, /segmentRecoveryController\.update\(detail\)/);
+  assert.match(js, /state\.batchDetail = data;[\s\S]*renderBatchDetail\(data\)/);
+  assert.match(js, /function startNewTask\(\)[\s\S]*renderBatchDetail\(null\)/);
+});
+
+test("segment recovery module exposes approved commands and endpoints", async () => {
+  const js = await readText("public/wangzhuan-segment-recovery.js");
+
+  assert.match(js, /一键重试全部失败片段/);
+  assert.match(js, /下载选中片段/);
+  assert.match(js, /开始拼接/);
+  assert.match(js, /上传替换片段/);
+  assert.match(js, /历次尝试/);
+  assert.match(js, /preload="metadata"/);
+  assert.match(js, /tasks\/retry-failed/);
+  assert.match(js, /tasks\/\$\{encodeURIComponent\(taskId\)\}\/retry/);
+  assert.match(js, /tasks\/\$\{encodeURIComponent\(taskId\)\}\/replacement/);
+  assert.match(js, /stitch-versions/);
+  assert.match(js, /\/api\/wangzhuan\/download/);
+  assert.match(js, /method: "PATCH"/);
+  assert.match(js, /method: "DELETE"/);
+});
+
+test("segment recovery styles keep rows stable and stack actions on mobile", async () => {
+  const css = await readText("public/styles.css");
+
+  assert.match(css, /\.wz-segment-recovery/);
+  assert.match(css, /\.wz-recovery-segment\s*\{/);
+  assert.match(css, /grid-template-columns:/);
+  assert.match(css, /\.wz-recovery-thumb/);
+  assert.match(css, /\.wz-recovery-queue-actions/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.wz-recovery-segment/);
+});
+
 test("wangzhuan v2 page uses required native controls and field labels", async () => {
   const html = await readText("public/wangzhuan-v2.html");
   assert.match(html, /id="wzReferencePreview"/);

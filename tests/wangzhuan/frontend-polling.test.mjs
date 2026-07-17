@@ -119,3 +119,19 @@ test("task manager shows a non-blocking poll error and clears it after recovery"
   assert.match(source.slice(renderStart, renderEnd), /刷新失败，正在重试/);
   assert.match(source.slice(loadStart, loadEnd), /state\.pollError = ""/);
 });
+
+test("segment retries reuse the workbench polling owner after a terminal partial batch", async () => {
+  const source = await readFile(new URL("public/wangzhuan-v2.js", root), "utf8");
+  const pollingStart = source.indexOf("function startBatchPolling");
+  const pollingEnd = source.indexOf("async function restoreWorkbenchFromUrl", pollingStart);
+  const controllerStart = source.indexOf("const segmentRecoveryController");
+  const controllerEnd = source.indexOf("function fileToDataUrl", controllerStart);
+  assert.ok(pollingStart >= 0 && pollingEnd > pollingStart, "expected workbench batch polling owner");
+  assert.ok(controllerStart >= 0 && controllerEnd > controllerStart, "expected recovery controller mount");
+
+  assert.match(source.slice(pollingStart, pollingEnd), /followSegmentRecovery/);
+  assert.match(source.slice(pollingStart, pollingEnd), /hasPendingSegmentRecovery\(detail\)/);
+  assert.match(source.slice(controllerStart, controllerEnd), /onRetrySubmitted/);
+  assert.match(source.slice(controllerStart, controllerEnd), /loadBatchDetail\(batchId\)/);
+  assert.match(source.slice(controllerStart, controllerEnd), /startBatchPolling\(batchId, \{ followSegmentRecovery: true \}\)/);
+});
