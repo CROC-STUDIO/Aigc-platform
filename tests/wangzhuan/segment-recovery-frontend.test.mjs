@@ -254,6 +254,8 @@ test("controller restores a scoped queue and has no global DOM dependency", () =
   assert.match(body.innerHTML, /片段状态/);
   assert.match(body.innerHTML, /拼接队列/);
   assert.match(body.innerHTML, /拼接版本/);
+  assert.match(body.innerHTML, /已移除 1 个失效片段/);
+  assert.match(body.innerHTML, /自动保存/);
   assert.deepEqual(JSON.parse(storage.value(key)).outputIds, ["out_be06_004", "out_be06_001"]);
   controller.destroy();
   assert.equal(listeners.size, 0);
@@ -269,6 +271,23 @@ test("controller shows group running counts and original segment indexes in the 
   assert.match(harness.body.innerHTML, /处理中 1/);
   assert.match(harness.body.innerHTML, /原片段 1/);
   assert.doesNotMatch(harness.body.innerHTML, /原片段 gen_be06_001/);
+});
+
+test("controller does not claim queue autosave when local storage rejects the write", async () => {
+  const harness = controllerHarness({
+    storage: {
+      getItem() {
+        return null;
+      },
+      setItem() {
+        throw new Error("quota exceeded");
+      }
+    }
+  });
+  harness.controller.update({ batch: buildBatch() });
+  await harness.dispatch("change", { selectOutput: "out_be06_001" }, { checked: true });
+
+  assert.doesNotMatch(harness.body.innerHTML, /自动保存/);
 });
 
 test("controller retries one task and all eligible failures through batch-scoped endpoints", async () => {
@@ -296,6 +315,42 @@ test("controller retries one task and all eligible failures through batch-scoped
   assert.match(JSON.parse(calls[1][1].body).idempotencyKey, /^retry-failed-segments-/);
   assert.equal(details.length, 2);
   assert.deepEqual(restartedBatchIds, [buildBatch().batchId, buildBatch().batchId]);
+});
+
+test("controller blocks duplicate actions without locking unrelated downloads", async () => {
+  const batch = buildBatch();
+  batch.tasks[1] = {
+    ...batch.tasks[1],
+    availability: "retryable",
+    retryEligibility: { status: "retryable", canRetry: true, reason: "upstream_failed" }
+  };
+  let resolveRetry;
+  const retryResult = new Promise((resolve) => {
+    resolveRetry = resolve;
+  });
+  const calls = [];
+  const downloads = [];
+  const harness = controllerHarness({
+    request: async (path) => {
+      calls.push(path);
+      return retryResult;
+    },
+    downloadZip: async (...args) => downloads.push(args)
+  });
+  harness.controller.update({ batch });
+
+  const firstRetry = harness.dispatch("click", { retryTask: "gen_be06_002" });
+  await Promise.resolve();
+  await harness.dispatch("click", { retryTask: "gen_be06_002" });
+  await harness.dispatch("click", { downloadOutput: "out_be06_001" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(downloads.length, 1);
+  assert.match(harness.body.innerHTML, /data-retry-task="gen_be06_002" disabled/);
+  assert.doesNotMatch(harness.body.innerHTML, /data-download-output="out_be06_001" disabled/);
+
+  resolveRetry({ batch, retriedCount: 1 });
+  await firstRetry;
 });
 
 test("controller downloads selected outputs and confirms mixed stitching", async () => {
@@ -331,6 +386,58 @@ test("controller downloads selected outputs and confirms mixed stitching", async
   assert.equal(JSON.parse(calls[0][1].body).confirmMixed, true);
 });
 
+test("controller reuses a stitch idempotency key after response loss and rotates it after success", async () => {
+  const batch = buildBatch();
+  const keys = [];
+  let attempt = 0;
+  const harness = controllerHarness({
+    request: async (_path, request) => {
+      keys.push(JSON.parse(request.body).idempotencyKey);
+      attempt += 1;
+      if (attempt === 1) throw new Error("response lost");
+      return { batch };
+    }
+  });
+  harness.controller.update({ batch });
+  await harness.dispatch("change", { selectOutput: "out_be06_001" }, { checked: true });
+
+  await harness.dispatch("click", { startStitch: "" });
+  await harness.dispatch("click", { startStitch: "" });
+  await harness.dispatch("click", { startStitch: "" });
+
+  assert.equal(keys[0], keys[1]);
+  assert.notEqual(keys[1], keys[2]);
+});
+
+test("controller ignores an old action result after switching batches", async () => {
+  const firstBatch = buildBatch();
+  firstBatch.tasks[1] = {
+    ...firstBatch.tasks[1],
+    availability: "retryable",
+    retryEligibility: { status: "retryable", canRetry: true, reason: "upstream_failed" }
+  };
+  const secondBatch = { ...buildBatch(), batchId: "wzb_second" };
+  let resolveRetry;
+  const pending = new Promise((resolve) => {
+    resolveRetry = resolve;
+  });
+  const details = [];
+  const harness = controllerHarness({
+    request: () => pending,
+    onDetail: (detail) => details.push(detail)
+  });
+  harness.controller.update({ batch: firstBatch });
+  const retry = harness.dispatch("click", { retryTask: "gen_be06_002" });
+  await Promise.resolve();
+
+  harness.controller.update({ batch: secondBatch });
+  resolveRetry({ batch: firstBatch, retriedCount: 1 });
+  await retry;
+
+  assert.equal(details.length, 0);
+  assert.equal(harness.root.hidden, false);
+});
+
 test("controller restores, renames and deletes manual stitch versions", async () => {
   const calls = [];
   const batch = buildBatch();
@@ -350,4 +457,31 @@ test("controller restores, renames and deletes manual stitch versions", async ()
   assert.equal(calls[0][1].method, "PATCH");
   assert.equal(JSON.parse(calls[0][1].body).displayFileName, "renamed.mp4");
   assert.equal(calls[1][1].method, "DELETE");
+});
+
+test("controller serializes download rename and delete for the same version", async () => {
+  const batch = buildBatch();
+  let resolveRename;
+  const pendingRename = new Promise((resolve) => {
+    resolveRename = resolve;
+  });
+  const calls = [];
+  const harness = controllerHarness({
+    request: async (path, request) => {
+      calls.push([path, request]);
+      return pendingRename;
+    }
+  });
+  harness.controller.update({ batch });
+
+  const rename = harness.dispatch("click", { renameVersion: "out_be06_010" });
+  await Promise.resolve();
+  const deletion = harness.dispatch("click", { deleteVersion: "out_be06_010" });
+
+  assert.equal(calls.length, 1);
+  assert.match(harness.body.innerHTML, /data-download-output="out_be06_010" disabled/);
+  assert.match(harness.body.innerHTML, /data-delete-version="out_be06_010"[^>]* disabled/);
+
+  resolveRename({ batch });
+  await Promise.all([rename, deletion]);
 });

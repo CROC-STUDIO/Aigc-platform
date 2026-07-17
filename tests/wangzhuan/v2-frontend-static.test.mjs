@@ -45,6 +45,8 @@ test("segment recovery controller mounts once and receives every batch detail up
   assert.match(js, /segmentRecoveryController\.update\(detail\)/);
   assert.match(js, /state\.batchDetail = data;[\s\S]*renderBatchDetail\(data\)/);
   assert.match(js, /function startNewTask\(\)[\s\S]*renderBatchDetail\(null\)/);
+  assert.match(js, /async function downloadRecoveryZip\(path, payload, fileName = "wangzhuan-segments\.zip", signal\)/);
+  assert.match(js, /downloadRecoveryZip[\s\S]*fetch\(path, \{[\s\S]*signal/);
 });
 
 test("segment recovery module exposes approved commands and endpoints", async () => {
@@ -74,6 +76,13 @@ test("segment recovery styles keep rows stable and stack actions on mobile", asy
   assert.match(css, /\.wz-recovery-thumb/);
   assert.match(css, /\.wz-recovery-queue-actions/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.wz-recovery-segment/);
+});
+
+test("wangzhuan v2 mobile navigation keeps five workbenches clear of page content", async () => {
+  const css = await readText("public/styles.css");
+
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.wz-v2-body \.platform-nav\s*\{[\s\S]*grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.wz-v2-shell\s*\{[\s\S]*padding:\s*148px 12px 20px/);
 });
 
 test("wangzhuan v2 page uses required native controls and field labels", async () => {

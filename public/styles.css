@@ -10948,9 +10948,13 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
 }
 
 @media (max-width: 760px) {
+  .wz-v2-body .platform-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
   .wz-v2-shell {
     margin-left: 0;
-    padding: 64px 12px 20px;
+    padding: 148px 12px 20px;
   }
 
   .wz-v2-topline {
@@ -11076,6 +11080,13 @@ details.wz-section-fold > .wz-field-label + .wz-field-label {
   font-size: 10px;
   font-style: normal;
   font-weight: 900;
+  white-space: nowrap;
+}
+
+.wz-recovery-saved {
+  color: #777383;
+  font-size: 9px;
+  font-weight: 700;
   white-space: nowrap;
 }
 

@@ -153,20 +153,26 @@ export function hasPendingSegmentRecovery(detail = {}) {
 function readStoredQueue(storage, key) {
   try {
     const value = JSON.parse(storage?.getItem?.(key) || "null");
-    return Array.isArray(value?.outputIds) ? value.outputIds : [];
+    return {
+      outputIds: Array.isArray(value?.outputIds) ? value.outputIds : [],
+      updatedAt: String(value?.updatedAt || "")
+    };
   } catch {
-    return [];
+    return { outputIds: [], updatedAt: "" };
   }
 }
 
 function writeStoredQueue(storage, key, outputIds) {
+  const updatedAt = new Date().toISOString();
   try {
     storage?.setItem?.(key, JSON.stringify({
       outputIds,
-      updatedAt: new Date().toISOString()
+      updatedAt
     }));
+    return updatedAt;
   } catch {
     // Local storage can be unavailable in private or quota-limited contexts.
+    return "";
   }
 }
 
@@ -210,6 +216,7 @@ export async function validateReplacementFile(file, options = {}) {
     const video = documentRef.createElement("video");
     const objectUrl = urlApi.createObjectURL(file);
     let timer;
+    let settled = false;
     const cleanup = () => {
       globalThis.clearTimeout(timer);
       video.removeAttribute?.("src");
@@ -217,6 +224,8 @@ export async function validateReplacementFile(file, options = {}) {
       urlApi.revokeObjectURL?.(objectUrl);
     };
     const finish = (error) => {
+      if (settled) return;
+      settled = true;
       cleanup();
       if (error) reject(error);
       else resolve();
@@ -237,16 +246,19 @@ export async function validateReplacementFile(file, options = {}) {
 
 function taskActionMarkup(task, view = {}) {
   const taskUid = escapeHtml(taskId(task));
-  const disabled = view.busy ? " disabled" : "";
+  const busyKeys = view.busyKeys || new Set();
+  const retryDisabled = busyKeys.has(`retry:${taskId(task)}`) || busyKeys.has("retry:all") ? " disabled" : "";
+  const uploadDisabled = busyKeys.has(`upload:${taskId(task)}`) ? " disabled" : "";
+  const downloadDisabled = task.currentOutput?.outputId && busyKeys.has(`download:${task.currentOutput.outputId}`) ? " disabled" : "";
   const replacement = ["repair_required", "retry_exhausted", "replacement_ready"].includes(task.availability)
-    ? `<button type="button" class="mini ghost" data-upload-replacement="${taskUid}"${disabled}>上传替换片段</button>
+    ? `<button type="button" class="mini ghost" data-upload-replacement="${taskUid}"${uploadDisabled}>上传替换片段</button>
        <input type="file" data-replacement-input="${taskUid}" accept="video/mp4,video/webm,video/quicktime" hidden>`
     : "";
   const retry = task.availability === "retryable"
-    ? `<button type="button" class="mini" data-retry-task="${taskUid}"${disabled}>重试</button>`
+    ? `<button type="button" class="mini" data-retry-task="${taskUid}"${retryDisabled}>重试</button>`
     : "";
   const download = READY_STATES.has(task.availability) && task.currentOutput?.outputId
-    ? `<button type="button" class="mini ghost" data-download-output="${escapeHtml(task.currentOutput.outputId)}"${disabled}>下载</button>`
+    ? `<button type="button" class="mini ghost" data-download-output="${escapeHtml(task.currentOutput.outputId)}"${downloadDisabled}>下载</button>`
     : "";
   return `${retry}${replacement}${download}<button type="button" class="wz-recovery-icon-btn" data-toggle-task="${taskUid}" aria-label="展开详情" title="展开详情" aria-expanded="${view.expandedTaskIds?.has(taskId(task)) ? "true" : "false"}">⌄</button>`;
 }
@@ -294,7 +306,7 @@ function compatibilityMarkup(model, queue, queueKind) {
 
 function renderModel(model, queue, view = {}) {
   const selected = new Set(queue);
-  const actionDisabled = view.busy ? " disabled" : "";
+  const busyKeys = view.busyKeys || new Set();
   const groups = model.groups.map((group) => {
     const readyCount = group.tasks.filter((task) => READY_STATES.has(task.availability)).length;
     const failedCount = group.tasks.filter((task) => !READY_STATES.has(task.availability) && task.availability !== "running").length;
@@ -344,20 +356,21 @@ function renderModel(model, queue, view = {}) {
     <span class="wz-recovery-version-index">V${escapeHtml(output.stitchVersion || 1)}</span>
     <span><strong>${escapeHtml(output.displayFileName || output.outputId)}</strong><small>${escapeHtml(output.stitchKind || "partial")} · ${escapeHtml(output.segmentOutputIds?.length || 0)} 个片段 · ${escapeHtml(formatTime(output.createdAt))}</small></span>
     <span class="wz-recovery-version-actions">
-      <button type="button" class="mini ghost" data-restore-version="${escapeHtml(output.outputId)}"${actionDisabled}>恢复队列</button>
-      <button type="button" class="mini ghost" data-download-output="${escapeHtml(output.outputId)}"${actionDisabled}>下载</button>
-      <button type="button" class="wz-recovery-icon-btn" data-rename-version="${escapeHtml(output.outputId)}" aria-label="重命名" title="重命名"${actionDisabled}>✎</button>
-      <button type="button" class="wz-recovery-icon-btn danger" data-delete-version="${escapeHtml(output.outputId)}" aria-label="删除" title="删除"${actionDisabled}>×</button>
+      <button type="button" class="mini ghost" data-restore-version="${escapeHtml(output.outputId)}">恢复队列</button>
+      <button type="button" class="mini ghost" data-download-output="${escapeHtml(output.outputId)}"${busyKeys.has(`version:${output.outputId}`) ? " disabled" : ""}>下载</button>
+      <button type="button" class="wz-recovery-icon-btn" data-rename-version="${escapeHtml(output.outputId)}" aria-label="重命名" title="重命名"${busyKeys.has(`version:${output.outputId}`) ? " disabled" : ""}>✎</button>
+      <button type="button" class="wz-recovery-icon-btn danger" data-delete-version="${escapeHtml(output.outputId)}" aria-label="删除" title="删除"${busyKeys.has(`version:${output.outputId}`) ? " disabled" : ""}>×</button>
     </span>
   </li>`).join("");
   const queueKind = recoveryKind(model, queue);
   const retryableCount = model.groups.flatMap((group) => group.tasks).filter((task) => task.availability === "retryable").length;
-  return `<div class="wz-recovery-summary" aria-busy="${view.busy ? "true" : "false"}">
+  const retryBusy = [...busyKeys].some((key) => key.startsWith("retry:"));
+  return `<div class="wz-recovery-summary" aria-busy="${busyKeys.size ? "true" : "false"}">
     <span><strong>${model.summary.total}</strong>片段</span><span><strong>${model.summary.ready}</strong>可用</span><span><strong>${model.summary.failed}</strong>失败</span><span><strong>${model.summary.running}</strong>处理中</span>
   </div>
   ${view.notice?.text ? `<div class="wz-recovery-notice" data-tone="${escapeHtml(view.notice.tone || "info")}" role="status">${escapeHtml(view.notice.text)}</div>` : ""}
-  <section class="wz-recovery-zone" data-recovery-zone="segments"><header><h3>片段状态</h3><span class="wz-recovery-zone-actions"><button type="button" class="mini ghost" data-download-selected ${queue.length && !view.busy ? "" : "disabled"}>下载选中片段（${queue.length}）</button><button type="button" class="mini" data-retry-failed ${retryableCount && !view.busy ? "" : "disabled"}>一键重试全部失败片段</button></span></header>${groups || "<p class=\"wz-recovery-empty\">等待片段任务</p>"}</section>
-  <section class="wz-recovery-zone" data-recovery-zone="queue"><header><h3>拼接队列</h3><span class="wz-recovery-zone-actions"><em data-tone="${queueKind.tone}">${queueKind.text}</em><button type="button" class="mini ghost" data-clear-queue ${queue.length && !view.busy ? "" : "disabled"}>清空</button><button type="button" class="mini" data-start-stitch ${queue.length && !view.busy ? "" : "disabled"}>开始拼接</button></span></header>${compatibilityMarkup(model, queue, queueKind)}<ol class="wz-recovery-queue">${queueItems || "<li class=\"wz-recovery-empty\">尚未选择片段</li>"}</ol></section>
+  <section class="wz-recovery-zone" data-recovery-zone="segments"><header><h3>片段状态</h3><span class="wz-recovery-zone-actions"><button type="button" class="mini ghost" data-download-selected ${queue.length && !busyKeys.has("download:selected") ? "" : "disabled"}>下载选中片段（${queue.length}）</button><button type="button" class="mini" data-retry-failed ${retryableCount && !retryBusy ? "" : "disabled"}>一键重试全部失败片段</button></span></header>${groups || "<p class=\"wz-recovery-empty\">等待片段任务</p>"}</section>
+  <section class="wz-recovery-zone" data-recovery-zone="queue"><header><h3>拼接队列</h3><span class="wz-recovery-zone-actions">${view.queueSavedAt ? `<small class="wz-recovery-saved">自动保存 ${escapeHtml(formatTime(view.queueSavedAt))}</small>` : ""}<em data-tone="${queueKind.tone}">${queueKind.text}</em><button type="button" class="mini ghost" data-clear-queue ${queue.length ? "" : "disabled"}>清空</button><button type="button" class="mini" data-start-stitch ${queue.length && !busyKeys.has("stitch") ? "" : "disabled"}>开始拼接</button></span></header>${compatibilityMarkup(model, queue, queueKind)}<ol class="wz-recovery-queue">${queueItems || "<li class=\"wz-recovery-empty\">尚未选择片段</li>"}</ol></section>
   <section class="wz-recovery-zone" data-recovery-zone="versions"><h3>拼接版本</h3><ol>${versions || "<li class=\"wz-recovery-empty\">暂无手动拼接版本</li>"}</ol></section>`;
 }
 
@@ -370,11 +383,16 @@ export function createSegmentRecoveryController(options = {}) {
   let model = buildRecoveryViewModel();
   let queue = [];
   let storageKey = "";
+  let queueSavedAt = "";
+  let currentBatchId = "";
+  let actionEpoch = 0;
   let draggedIndex = -1;
-  let busy = false;
   let notice = null;
   let destroyed = false;
-  let activeAbort = null;
+  const busyKeys = new Set();
+  const activeAborts = new Map();
+  const actionTokens = new Map();
+  const operationKeys = new Map();
   const expandedTaskIds = new Set();
   const request = options.request || (async () => {
     throw new Error("片段恢复请求方法未配置");
@@ -386,17 +404,39 @@ export function createSegmentRecoveryController(options = {}) {
   const promptAction = options.prompt || globalThis.prompt?.bind(globalThis) || (() => null);
   const validateFile = options.validateReplacementFile || validateReplacementFile;
 
-  const persistAndRender = () => {
-    if (storageKey) writeStoredQueue(storage, storageKey, queue);
-    if (body) body.innerHTML = renderModel(model, queue, { expandedTaskIds, busy, notice });
+  const persistAndRender = (saveQueue = false) => {
+    if (saveQueue && storageKey) queueSavedAt = writeStoredQueue(storage, storageKey, queue);
+    if (body) body.innerHTML = renderModel(model, queue, {
+      expandedTaskIds,
+      busyKeys,
+      notice,
+      queueSavedAt
+    });
+  };
+
+  const resetActiveActions = () => {
+    actionEpoch += 1;
+    for (const entry of activeAborts.values()) entry.controller.abort?.();
+    activeAborts.clear();
+    actionTokens.clear();
+    busyKeys.clear();
   };
 
   const updateDetail = (detail) => {
     const batch = detail?.batch || (detail?.batchId ? detail : null);
+    const nextBatchId = String(batch?.batchId || "");
+    if (nextBatchId !== currentBatchId) {
+      resetActiveActions();
+      currentBatchId = nextBatchId;
+      operationKeys.clear();
+      queueSavedAt = "";
+      notice = null;
+    }
     if (!batch?.batchId) {
       model = buildRecoveryViewModel();
       queue = [];
       storageKey = "";
+      queueSavedAt = "";
       expandedTaskIds.clear();
       notice = null;
       if (root) root.hidden = true;
@@ -407,17 +447,25 @@ export function createSegmentRecoveryController(options = {}) {
     const scope = { ...(options.getScope?.() || {}), batchId: batch.batchId };
     const nextStorageKey = queueStorageKey(scope);
     const storedQueue = nextStorageKey === storageKey && queue.length
-      ? queue
+      ? { outputIds: queue, updatedAt: queueSavedAt }
       : readStoredQueue(storage, nextStorageKey);
     storageKey = nextStorageKey;
-    queue = reconcileQueue(storedQueue, model.outputsById);
+    queueSavedAt = storedQueue.updatedAt;
+    queue = reconcileQueue(storedQueue.outputIds, model.outputsById);
+    const removedStaleCount = storedQueue.outputIds.length - queue.length;
+    if (removedStaleCount > 0) {
+      notice = {
+        tone: "warn",
+        text: `已移除 ${removedStaleCount} 个失效片段，请选择最新结果`
+      };
+    }
     for (const id of expandedTaskIds) {
       if (!model.groups.some((group) => group.tasks.some((task) => taskId(task) === id))) {
         expandedTaskIds.delete(id);
       }
     }
     if (root) root.hidden = false;
-    persistAndRender();
+    persistAndRender(removedStaleCount > 0);
   };
 
   const jsonRequest = (path, payload, method = "POST", signal) => request(path, {
@@ -433,33 +481,53 @@ export function createSegmentRecoveryController(options = {}) {
     else updateDetail(result);
   };
 
-  const runAction = async (title, action, successMessage) => {
-    if (busy || destroyed) return null;
-    busy = true;
+  const actionIsBusy = (actionKey) => {
+    if (busyKeys.has(actionKey)) return true;
+    if (actionKey === "retry:all") return [...busyKeys].some((key) => key.startsWith("retry:"));
+    if (actionKey.startsWith("retry:")) return busyKeys.has("retry:all");
+    return false;
+  };
+
+  const runAction = async (actionKey, title, action, successMessage) => {
+    if (actionIsBusy(actionKey) || destroyed) return null;
+    const actionToken = Symbol(actionKey);
+    const startedEpoch = actionEpoch;
+    const startedBatchId = currentBatchId;
+    actionTokens.set(actionKey, actionToken);
+    busyKeys.add(actionKey);
     notice = { tone: "info", text: `${title}处理中` };
     persistAndRender();
-    activeAbort = typeof AbortController === "function" ? new AbortController() : null;
+    const abortController = typeof AbortController === "function" ? new AbortController() : null;
+    if (abortController) activeAborts.set(actionKey, { controller: abortController, token: actionToken });
     try {
-      const result = await action(activeAbort?.signal);
-      if (destroyed) return result;
+      const result = await action(abortController?.signal);
+      if (destroyed || startedEpoch !== actionEpoch || startedBatchId !== currentBatchId) return null;
       const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
       notice = { tone: "good", text: message || `${title}已完成` };
       applyResult(result);
       options.showToast?.(notice.text);
       return result;
     } catch (error) {
-      if (destroyed || error?.name === "AbortError") return null;
+      if (destroyed || startedEpoch !== actionEpoch || startedBatchId !== currentBatchId || error?.name === "AbortError") return null;
       notice = { tone: "bad", text: error?.message || `${title}失败` };
       options.onError?.(error, title);
       options.showToast?.(notice.text);
       return null;
     } finally {
-      activeAbort = null;
+      if (actionTokens.get(actionKey) === actionToken) {
+        actionTokens.delete(actionKey);
+        activeAborts.delete(actionKey);
+        busyKeys.delete(actionKey);
+      }
       if (!destroyed) {
-        busy = false;
         persistAndRender();
       }
     }
+  };
+
+  const operationIdempotencyKey = (fingerprint, prefix) => {
+    if (!operationKeys.has(fingerprint)) operationKeys.set(fingerprint, newIdempotencyKey(prefix));
+    return operationKeys.get(fingerprint);
   };
 
   const hasData = (target, name) => Boolean(
@@ -480,17 +548,23 @@ export function createSegmentRecoveryController(options = {}) {
       if (input.checked) queue = reconcileQueue([...queue, outputId], model.outputsById);
       else queue = queue.filter((id) => id !== outputId);
       notice = null;
-      persistAndRender();
+      persistAndRender(true);
       return;
     }
     const taskId = input?.dataset?.replacementInput;
     const file = input?.files?.[0];
     if (!taskId || !file) return;
-    await runAction("上传替换片段", async (signal) => {
+    const batchId = currentBatchId;
+    await runAction(`upload:${taskId}`, "上传替换片段", async (signal) => {
       await validateFile(file);
+      if (signal?.aborted) {
+        const error = new Error("上传已取消");
+        error.name = "AbortError";
+        throw error;
+      }
       const form = new FormData();
       form.append("file", file, file.name);
-      return request(`/api/wangzhuan/batches/${encodeURIComponent(model.batch.batchId)}/tasks/${encodeURIComponent(taskId)}/replacement`, {
+      return request(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}/tasks/${encodeURIComponent(taskId)}/replacement`, {
         method: "POST",
         body: form,
         ...(signal ? { signal } : {})
@@ -502,16 +576,20 @@ export function createSegmentRecoveryController(options = {}) {
   const onClick = async (event) => {
     const target = event.target?.closest?.("button") || event.target;
     if (!target?.dataset || target.disabled) return;
+    let saveQueue = false;
     if (hasData(target, "clearQueue")) {
       queue = [];
       notice = null;
+      saveQueue = true;
     } else if (target.dataset.removeQueue) {
       queue = queue.filter((id) => id !== target.dataset.removeQueue);
       notice = null;
+      saveQueue = true;
     } else if (target.dataset.moveQueue) {
       const from = Number(target.dataset.index);
       queue = moveQueueItem(queue, from, target.dataset.moveQueue === "up" ? from - 1 : from + 1);
       notice = null;
+      saveQueue = true;
     } else if (target.dataset.toggleTask) {
       const id = target.dataset.toggleTask;
       if (expandedTaskIds.has(id)) expandedTaskIds.delete(id);
@@ -521,59 +599,77 @@ export function createSegmentRecoveryController(options = {}) {
       return;
     } else if (target.dataset.retryTask) {
       const taskId = target.dataset.retryTask;
-      const result = await runAction("重试片段", (signal) => jsonRequest(
-        `/api/wangzhuan/batches/${encodeURIComponent(model.batch.batchId)}/tasks/${encodeURIComponent(taskId)}/retry`,
-        { idempotencyKey: newIdempotencyKey("retry-segment") },
+      const batchId = currentBatchId;
+      const fingerprint = `${batchId}:retry:${taskId}`;
+      const idempotencyKey = operationIdempotencyKey(fingerprint, "retry-segment");
+      const result = await runAction(`retry:${taskId}`, "重试片段", (signal) => jsonRequest(
+        `/api/wangzhuan/batches/${encodeURIComponent(batchId)}/tasks/${encodeURIComponent(taskId)}/retry`,
+        { idempotencyKey },
         "POST",
         signal
       ), "片段已提交重试");
-      if (Number(result?.retriedCount || 0) > 0) options.onRetrySubmitted?.(result.batch?.batchId || model.batch.batchId);
+      if (result) operationKeys.delete(fingerprint);
+      if (Number(result?.retriedCount || 0) > 0) options.onRetrySubmitted?.(result.batch?.batchId || batchId);
       return;
     } else if (hasData(target, "retryFailed")) {
-      const result = await runAction("重试失败片段", (signal) => jsonRequest(
-        `/api/wangzhuan/batches/${encodeURIComponent(model.batch.batchId)}/tasks/retry-failed`,
-        { idempotencyKey: newIdempotencyKey("retry-failed-segments") },
+      const batchId = currentBatchId;
+      const fingerprint = `${batchId}:retry:all`;
+      const idempotencyKey = operationIdempotencyKey(fingerprint, "retry-failed-segments");
+      const result = await runAction("retry:all", "重试失败片段", (signal) => jsonRequest(
+        `/api/wangzhuan/batches/${encodeURIComponent(batchId)}/tasks/retry-failed`,
+        { idempotencyKey },
         "POST",
         signal
       ), (result) => {
         const summary = result?.summary || {};
         return `已提交 ${Number(summary.submitted || 0)} 个、需修复 ${Number(summary.repairRequired || 0)} 个、已耗尽 ${Number(summary.exhausted || 0)} 个、处理中 ${Number(summary.inProgress || 0)} 个`;
       });
-      if (Number(result?.summary?.submitted || 0) > 0) options.onRetrySubmitted?.(result.batch?.batchId || model.batch.batchId);
+      if (result) operationKeys.delete(fingerprint);
+      if (Number(result?.summary?.submitted || 0) > 0) options.onRetrySubmitted?.(result.batch?.batchId || batchId);
       return;
     } else if (hasData(target, "downloadSelected")) {
-      await runAction("下载选中片段", (signal) => downloadZip("/api/wangzhuan/download", {
+      await runAction("download:selected", "下载选中片段", (signal) => downloadZip("/api/wangzhuan/download", {
         batchIds: [model.batch.batchId],
         outputIds: [...queue]
       }, `wangzhuan-${model.batch.batchId}-segments.zip`, signal), "选中片段下载已开始");
       return;
     } else if (target.dataset.downloadOutput) {
       const outputId = target.dataset.downloadOutput;
-      await runAction("下载产物", (signal) => downloadZip("/api/wangzhuan/download", {
+      const versionOutput = model.stitchVersions.some((output) => output.outputId === outputId);
+      const actionKey = versionOutput ? `version:${outputId}` : `download:${outputId}`;
+      await runAction(actionKey, "下载产物", (signal) => downloadZip("/api/wangzhuan/download", {
         batchIds: [model.batch.batchId],
         outputIds: [outputId]
       }, `wangzhuan-${outputId}.zip`, signal), "产物下载已开始");
       return;
     } else if (hasData(target, "startStitch")) {
-      const requestPayload = buildStitchRequest(queue, model, newIdempotencyKey("stitch-version"));
+      const batchId = currentBatchId;
+      const fingerprint = `${batchId}:stitch:${queue.join("|")}`;
+      const requestPayload = buildStitchRequest(
+        queue,
+        model,
+        operationIdempotencyKey(fingerprint, "stitch-version")
+      );
       if (!requestPayload.segmentOutputIds.length) return;
       if (requestPayload.confirmMixed && !confirmAction("当前队列包含多个分支或变体，确定要生成混合编排版本吗？")) return;
-      await runAction("创建拼接版本", (signal) => jsonRequest(
-        `/api/wangzhuan/batches/${encodeURIComponent(model.batch.batchId)}/stitch-versions`,
+      const result = await runAction("stitch", "创建拼接版本", (signal) => jsonRequest(
+        `/api/wangzhuan/batches/${encodeURIComponent(batchId)}/stitch-versions`,
         requestPayload,
         "POST",
         signal
       ), "新拼接版本已生成");
+      if (result) operationKeys.delete(fingerprint);
       return;
     } else if (target.dataset.restoreVersion) {
       const version = model.stitchVersions.find((output) => output.outputId === target.dataset.restoreVersion);
       queue = reconcileQueue(version?.segmentOutputIds || [], model.outputsById);
       notice = { tone: "info", text: `已恢复 V${version?.stitchVersion || "-"} 的拼接队列` };
+      saveQueue = true;
     } else if (target.dataset.renameVersion) {
       const version = model.stitchVersions.find((output) => output.outputId === target.dataset.renameVersion);
       const nextName = promptAction("输入版本名称", version?.displayFileName || "");
       if (!String(nextName || "").trim()) return;
-      await runAction("重命名版本", (signal) => request(
+      await runAction(`version:${target.dataset.renameVersion}`, "重命名版本", (signal) => request(
         `/api/wangzhuan/outputs/${encodeURIComponent(target.dataset.renameVersion)}`,
         {
           method: "PATCH",
@@ -585,7 +681,7 @@ export function createSegmentRecoveryController(options = {}) {
       return;
     } else if (target.dataset.deleteVersion) {
       if (!confirmAction("确定删除这个手动拼接版本吗？源片段和其他版本不会受影响。")) return;
-      await runAction("删除版本", (signal) => request(
+      await runAction(`version:${target.dataset.deleteVersion}`, "删除版本", (signal) => request(
         `/api/wangzhuan/outputs/${encodeURIComponent(target.dataset.deleteVersion)}`,
         { method: "DELETE", ...(signal ? { signal } : {}) }
       ), "拼接版本已删除");
@@ -593,7 +689,7 @@ export function createSegmentRecoveryController(options = {}) {
     } else {
       return;
     }
-    persistAndRender();
+    persistAndRender(saveQueue);
   };
   const onDragStart = (event) => {
     draggedIndex = Number(event.target?.closest?.("[data-queue-index]")?.dataset?.queueIndex ?? -1);
@@ -608,7 +704,7 @@ export function createSegmentRecoveryController(options = {}) {
     event.preventDefault?.();
     queue = moveQueueItem(queue, draggedIndex, targetIndex);
     draggedIndex = -1;
-    persistAndRender();
+    persistAndRender(true);
   };
   const listeners = [
     ["change", onChange],
@@ -623,7 +719,7 @@ export function createSegmentRecoveryController(options = {}) {
     update: updateDetail,
     destroy() {
       destroyed = true;
-      activeAbort?.abort?.();
+      resetActiveActions();
       for (const [type, listener] of listeners) root?.removeEventListener?.(type, listener);
       model = buildRecoveryViewModel();
       queue = [];

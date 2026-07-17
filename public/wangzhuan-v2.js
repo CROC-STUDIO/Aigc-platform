@@ -202,6 +202,8 @@ const state = {
 };
 
 let batchPollTimer = 0;
+let batchPollOwner = 0;
+let batchDetailLoadOwner = 0;
 let batchPollNetworkErrorActive = false;
 const DECOMPOSITION_LLM_TIMEOUT_MS = 180_000;
 const GEMINI_DECOMPOSITION_TIMEOUT_MS = 300_000;
@@ -911,11 +913,12 @@ async function api(path, options = {}) {
   return payload.data;
 }
 
-async function downloadRecoveryZip(path, payload, fileName = "wangzhuan-segments.zip") {
+async function downloadRecoveryZip(path, payload, fileName = "wangzhuan-segments.zip", signal) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    ...(signal ? { signal } : {})
   });
   if (!response.ok) {
     let errorPayload = {};
@@ -949,13 +952,10 @@ const segmentRecoveryController = createSegmentRecoveryController({
       || "current-project"
   }),
   onDetail: (detail) => {
-    state.batchDetail = detail;
-    renderBatchDetail(detail);
+    const batchId = detail?.batch?.batchId || detail?.batchId;
+    if (batchId) void loadBatchDetail(batchId).catch((error) => log(`片段恢复详情刷新失败：${error.message}`));
   },
-  onRetrySubmitted: (batchId) => {
-    startBatchPolling(batchId, { followSegmentRecovery: true });
-    void loadBatchDetail(batchId).catch((error) => log(`片段恢复详情刷新失败：${error.message}`));
-  },
+  onRetrySubmitted: (batchId) => startBatchPolling(batchId, { followSegmentRecovery: true }),
   onError: (error, title) => showError(error, title)
 });
 
@@ -2817,13 +2817,19 @@ async function openRecentResult(type, id) {
     location.href = `/wangzhuan-tasks.html?remixId=${encodeURIComponent(id)}`;
     return;
   }
+  stopBatchPolling();
   const detail = await loadBatchDetail(id);
+  if (!detail) return;
   restoreV2FromBatchDetail(detail);
   const batch = state.batchDetail?.batch || state.batchDetail || {};
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   els.runStatusBox.textContent = `${batch.batchId || id} · ${batch.status || "-"} · ${tasks.length} 子任务 · ${outputs.length} 输出`;
   log(`已加载最近结果摘要详情：${id}`);
+  const followSegmentRecovery = hasPendingSegmentRecovery(detail);
+  if (!TERMINAL_BATCH_STATUSES.has(batch.status) || followSegmentRecovery) {
+    startBatchPolling(batch.batchId || id, { followSegmentRecovery });
+  }
 }
 
 function failBackgroundJob(type, message, data = {}) {
@@ -3541,22 +3547,31 @@ async function pollJob(type, jobId, options = {}) {
   schedule(POLL_INTERVAL_MS);
 }
 
-async function loadBatchDetail(batchId) {
-  if (!batchId) return null;
-  const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+function applyBatchDetail(data) {
   state.batchDetail = data;
   logTaskFailureDetails(data?.batch || data || {});
   renderBatchDetail(data);
+}
+
+async function loadBatchDetail(batchId, options = {}) {
+  if (!batchId) return null;
+  const loadOwner = options.apply === false ? 0 : ++batchDetailLoadOwner;
+  const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
+  if (options.apply !== false && loadOwner !== batchDetailLoadOwner) return null;
+  if (options.apply !== false && loadOwner === batchDetailLoadOwner) applyBatchDetail(data);
   return data;
 }
 
 function startBatchPolling(batchId, options = {}) {
   window.clearTimeout(batchPollTimer);
+  const pollOwner = ++batchPollOwner;
   batchPollNetworkErrorActive = false;
   let lastStatus = "";
   const tick = async () => {
     try {
-      const detail = await loadBatchDetail(batchId);
+      const detail = await loadBatchDetail(batchId, { apply: false });
+      if (pollOwner !== batchPollOwner) return;
+      applyBatchDetail(detail);
       if (batchPollNetworkErrorActive) {
         log("批次轮询已恢复");
         batchPollNetworkErrorActive = false;
@@ -3570,6 +3585,7 @@ function startBatchPolling(batchId, options = {}) {
       }
       lastStatus = status || lastStatus;
     } catch (error) {
+      if (pollOwner !== batchPollOwner) return;
       const isNetworkError = /failed to fetch|networkerror|load failed/i.test(String(error?.message || ""));
       if (isNetworkError) {
         if (!batchPollNetworkErrorActive) {
@@ -3585,6 +3601,12 @@ function startBatchPolling(batchId, options = {}) {
   batchPollTimer = window.setTimeout(tick, 1200);
 }
 
+function stopBatchPolling() {
+  batchPollOwner += 1;
+  window.clearTimeout(batchPollTimer);
+  batchPollTimer = 0;
+}
+
 async function restoreWorkbenchFromUrl() {
   const restoreRequest = readWorkbenchRestoreRequest();
   if (!restoreRequest?.id) return false;
@@ -3593,14 +3615,19 @@ async function restoreWorkbenchFromUrl() {
     location.href = `/competitor-remix.html?restore=1&remixId=${encodeURIComponent(restoreRequest.id)}${projectParam}#remixNodeDelivery`;
     return true;
   }
+  stopBatchPolling();
   await switchProjectScope(restoreRequest.projectKey);
   const detail = await loadBatchDetail(restoreRequest.id);
+  if (!detail) return false;
   const restored = restoreV2FromBatchDetail(detail);
   const batch = detail?.batch || detail || {};
   if (restored) {
     log(`已从任务管理恢复批次：${batch.batchId || restoreRequest.id}`);
     await restoreBackgroundJobFromRequest(restoreRequest);
-    if (batch.batchId && !TERMINAL_BATCH_STATUSES.has(batch.status)) startBatchPolling(batch.batchId);
+    const followSegmentRecovery = hasPendingSegmentRecovery(detail);
+    if (batch.batchId && (!TERMINAL_BATCH_STATUSES.has(batch.status) || followSegmentRecovery)) {
+      startBatchPolling(batch.batchId, { followSegmentRecovery });
+    }
     if (location.hash) {
       requestAnimationFrame(() => document.querySelector(location.hash)?.scrollIntoView({ block: "start" }));
     }
@@ -3650,29 +3677,37 @@ async function confirmPlanAndGenerate() {
 async function stopBatch() {
   const batch = state.batchDetail?.batch || state.batchDetail;
   if (!batch?.batchId) return;
-  const data = await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/stop`, {
+  batchDetailLoadOwner += 1;
+  await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/stop`, {
     method: "POST",
     body: JSON.stringify({ reason: "wzv2_frontend_stop" })
   });
-  state.batchDetail = data;
-  window.clearTimeout(batchPollTimer);
+  const currentBatch = state.batchDetail?.batch || state.batchDetail;
+  if (currentBatch?.batchId !== batch.batchId) return;
+  stopBatchPolling();
+  const detail = await loadBatchDetail(batch.batchId);
+  if (!detail) return;
   log("批次已停止");
-  renderBatchDetail(data);
 }
 
 async function runVideoQc() {
   const batch = state.batchDetail?.batch || state.batchDetail;
   if (!batch?.batchId) return;
+  batchDetailLoadOwner += 1;
   await api(`/api/wangzhuan/batches/${encodeURIComponent(batch.batchId)}/qc`, {
     method: "POST",
     body: JSON.stringify({})
   });
-  await loadBatchDetail(batch.batchId);
+  const currentBatch = state.batchDetail?.batch || state.batchDetail;
+  if (currentBatch?.batchId !== batch.batchId) return;
+  const detail = await loadBatchDetail(batch.batchId);
+  if (!detail) return;
   log("视频质检已执行");
 }
 
 function startNewTask() {
-  window.clearTimeout(batchPollTimer);
+  stopBatchPolling();
+  batchDetailLoadOwner += 1;
   setPlanUpstreamLocked(false);
   state.referenceVideo = null;
   resetDecompositionDraft({ clearForm: true });
