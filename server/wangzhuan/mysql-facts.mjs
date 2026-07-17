@@ -6,6 +6,16 @@ import { normalizePagination, paginationMeta } from "./pagination.mjs";
 
 let poolPromise = null;
 
+export function resolveSchedulerJobsTableName(env = process.env) {
+  const tableName = String(env.AIGC_SCHEDULER_TABLE || "scheduler_jobs").trim();
+  if (!/^scheduler_jobs(?:_[a-z0-9_]+)?$/.test(tableName)) {
+    throw new Error("AIGC_SCHEDULER_TABLE must be scheduler_jobs or a scheduler_jobs_<lane> table");
+  }
+  return tableName;
+}
+
+const schedulerJobsTableName = resolveSchedulerJobsTableName();
+
 function mysqlConfigFromEnv(env = process.env) {
   if (env.AIGC_DATABASE_URL) {
     const url = new URL(env.AIGC_DATABASE_URL);
@@ -201,7 +211,10 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "queued", "stitching", "stitch_progress", null, 0],
   ["workflow_run", "running", "stitching", "stitch_progress", null, 0],
   ["workflow_run", "running", "stitching", "segments_completed", null, 0],
+  ["workflow_run", "queued", "qc", "generation_completed", null, 0],
   ["workflow_run", "running", "qc", "generation_completed", null, 0],
+  ["workflow_run", "queued", "partial_failed", "generation_partial_failed", null, 1],
+  ["workflow_run", "running", "partial_failed", "generation_partial_failed", null, 1],
   ["workflow_run", "running", "qc", "stitch_progress", null, 0],
   ["workflow_run", "stitching", "partial_failed", "stitch_progress", null, 1],
   ["workflow_run", "partial_failed", "stitching", "stitch_progress", null, 0],
@@ -1834,6 +1847,7 @@ function taskRowToTask(row) {
   if (response.outputStorageKey || row.output_storage_key) task.outputStorageKey = response.outputStorageKey || row.output_storage_key;
   if (response.outputStorageUrl || row.output_storage_url) task.outputStorageUrl = response.outputStorageUrl || row.output_storage_url;
   if (request.continuityReference || response.continuityReference) task.continuityReference = request.continuityReference || response.continuityReference;
+  if (request.retryInfo || response.retryInfo) task.retryInfo = request.retryInfo || response.retryInfo;
   if (Object.keys(request).length) task.requestSummary = request;
   if (Object.keys(response).length) task.responseSummary = response;
   return task;
@@ -2136,6 +2150,24 @@ async function loadBatchByRunRow(conn, facts, run) {
     [run.id]
   );
   const tasks = taskRows.map((row) => taskRowToTask({ ...row, run_uid: run.run_uid, run_type: "pipeline" }));
+  const [retryRows] = await conn.execute(
+    `SELECT wt.task_uid, sj.status, sj.attempts, sj.max_attempts, sj.last_error_code, sj.last_error_message
+    FROM ${schedulerJobsTableName} sj
+    JOIN workflow_tasks wt ON wt.id = sj.task_id
+    WHERE sj.run_id = ? AND sj.job_type = 'task_retry'`,
+    [run.id]
+  );
+  const retryByTaskUid = new Map(retryRows.map((row) => [row.task_uid, {
+    status: row.status,
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 0),
+    errorCode: row.last_error_code || "",
+    errorMessage: row.last_error_message || ""
+  }]));
+  for (const task of tasks) {
+    const retryState = retryByTaskUid.get(task.generationTaskId);
+    if (retryState) task.retryState = retryState;
+  }
   const taskIdsByOutput = new Map();
   for (const task of tasks) {
     const response = parseJsonValue(taskRows.find((row) => row.task_uid === task.generationTaskId)?.response_summary_json, {});
@@ -3038,8 +3070,6 @@ async function findEstimateId(conn, projectId, estimateUid) {
   return rows[0]?.id ?? null;
 }
 
-const ACTIVE_LOCK_RUN_STATUSES = new Set(["checking", "queued", "running", "stitching", "qc", "preview_required"]);
-
 function invalidStateTransitionError(entityType, fromStatus, toStatus, triggerName) {
   const error = new Error(`invalid_state_transition: ${entityType} ${fromStatus || "__new__"} -> ${toStatus} by ${triggerName}`);
   error.code = "invalid_state_transition";
@@ -3073,83 +3103,6 @@ async function insertStateEvent(conn, facts, entityType, entityUid, fromStatus, 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))`,
     [uid("ste"), entityType, entityUid, fromStatus, toStatus, triggerName, facts.userId, reason]
   );
-}
-
-function lockKeyForFacts(facts) {
-  return `project:${facts.projectId}:user:${facts.userId}:upstream_generation`;
-}
-
-async function syncResourceLock(conn, facts, runId, runUid, status) {
-  const lockKey = lockKeyForFacts(facts);
-  if (ACTIVE_LOCK_RUN_STATUSES.has(status)) {
-    await conn.execute(
-      `INSERT INTO resource_locks
-        (lock_key, project_id, user_id, lock_type, owner_run_id, status, acquired_at, expires_at, released_at)
-      VALUES (?, ?, ?, 'upstream_generation', ?, 'active', UTC_TIMESTAMP(3), DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 2 HOUR), NULL)
-      ON DUPLICATE KEY UPDATE
-        owner_run_id = VALUES(owner_run_id),
-        status = 'active',
-        expires_at = VALUES(expires_at),
-        released_at = NULL`,
-      [lockKey, facts.projectId, facts.userId, runId]
-    );
-    return;
-  }
-  await conn.execute(
-    `UPDATE resource_locks
-    SET status = 'released',
-        released_at = COALESCE(released_at, UTC_TIMESTAMP(3))
-    WHERE lock_key = ?
-      AND lock_type = 'upstream_generation'
-      AND status = 'active'
-      AND (owner_run_id = ? OR owner_run_id IS NULL)`,
-    [lockKey, runId]
-  );
-}
-
-export async function findActiveResourceLock(context) {
-  const pool = await getPool();
-  if (!pool) return null;
-  const conn = await pool.getConnection();
-  try {
-    const facts = await ensureContextFacts(conn, context);
-    const [rows] = await conn.execute(
-      `SELECT
-        rl.lock_key,
-        rl.lock_type,
-        rl.status,
-        rl.expires_at,
-        wr.run_uid,
-        wr.run_type,
-        wr.status AS run_status
-      FROM resource_locks rl
-      LEFT JOIN workflow_runs wr ON wr.id = rl.owner_run_id
-      WHERE rl.project_id = ?
-        AND rl.user_id = ?
-        AND rl.lock_type = 'upstream_generation'
-        AND rl.status = 'active'
-        AND rl.expires_at > UTC_TIMESTAMP(3)
-      ORDER BY rl.acquired_at DESC
-      LIMIT 1`,
-      [facts.projectId, facts.userId]
-    );
-    const row = rows[0];
-    if (!row) return null;
-    return {
-      lockKey: row.lock_key,
-      lockType: row.lock_type,
-      status: row.status,
-      expiresAt: isoDate(row.expires_at),
-      runId: row.run_uid || "",
-      runType: row.run_type || "",
-      runStatus: row.run_status || ""
-    };
-  } catch (error) {
-    console.warn(`[mysql-facts] failed to read resource lock: ${error.message}`);
-    return null;
-  } finally {
-    conn.release();
-  }
 }
 
 export async function loadActivePipelineRunFromMysql(context) {
@@ -3685,13 +3638,20 @@ async function syncStitchReports(conn, facts, batch, runId) {
   }
 }
 
+export function isAutomaticSeedanceRetryEligible(task = {}) {
+  return !["asset_review_pending", "submission_unknown"].includes(String(task.errorCode || ""));
+}
+
 async function syncSchedulerJobs(conn, batch, runId) {
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     const uidValue = taskUid(task);
-    if (!uidValue || task.status !== "failed" || Number(task.attempts || 0) >= Number(task.maxAttempts || 2)) continue;
+    if (!uidValue
+      || task.status !== "failed"
+      || !isAutomaticSeedanceRetryEligible(task)
+      || Number(task.attempts || 0) >= Number(task.maxAttempts || 2)) continue;
     const taskDbId = await findTaskDbId(conn, runId, uidValue);
     await conn.execute(
-      `INSERT INTO scheduler_jobs
+      `INSERT INTO ${schedulerJobsTableName}
         (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
       VALUES (?, 'task_retry', 'pending', ?, ?, ?, 0, ?, 0, 3, 'exponential', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
       ON DUPLICATE KEY UPDATE
@@ -3700,7 +3660,7 @@ async function syncSchedulerJobs(conn, batch, runId) {
         status = IF(status = 'running', status, VALUES(status)),
         updated_at = UTC_TIMESTAMP(3)`,
       [
-        `job_retry_${uidValue}`,
+        retrySchedulerJobUid(uidValue, Number(task.attempts || 0) + 1),
         runId,
         taskDbId,
         json({ batchId: batch.batchId, taskUid: uidValue, errorCode: task.errorCode || null }),
@@ -3712,16 +3672,17 @@ async function syncSchedulerJobs(conn, batch, runId) {
 }
 
 function shouldScheduleUpstreamPoll(batch = {}) {
-  if (["stopped", "failed", "succeeded", "qc", "partial_failed"].includes(batch.status)) return false;
   const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  if (["stopped", "failed", "succeeded"].includes(batch.status)) return false;
   if (tasks.some((task) => task.status === "waiting_upstream")) return true;
+  if (tasks.some((task) => task.status === "pending")) {
+    return ["running", "stitching", "qc", "partial_failed"].includes(batch.status);
+  }
+  if (["qc", "partial_failed"].includes(batch.status)) return false;
   if (tasks.some((task) => task.status === "failed"
     && task.errorCode === "upstream_failed"
     && String(task.errorMessage || "").includes("未返回视频地址")
     && Boolean(task.seedanceTaskId || task.providerJobId))) return true;
-  if (tasks.some((task) => task.status === "pending")) {
-    return batch.status === "running" || batch.status === "stitching";
-  }
   if (batch.status !== "running" && batch.status !== "stitching") return false;
   const durationSec = Number(batch.estimate?.durationSec || 15);
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
@@ -3785,7 +3746,7 @@ async function syncUpstreamPollJob(conn, batch, runId) {
   const jobUid = `job_upstream_poll_${batch.batchId}`;
   if (!shouldScheduleUpstreamPoll(batch)) {
     await conn.execute(
-      `UPDATE scheduler_jobs
+      `UPDATE ${schedulerJobsTableName}
       SET status = 'canceled', updated_at = UTC_TIMESTAMP(3)
       WHERE job_uid = ?
         AND status = 'pending'`,
@@ -3794,7 +3755,7 @@ async function syncUpstreamPollJob(conn, batch, runId) {
     return;
   }
   await conn.execute(
-    `INSERT INTO scheduler_jobs
+    `INSERT INTO ${schedulerJobsTableName}
       (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
     VALUES (?, 'upstream_poll', 'pending', ?, NULL, ?, 10, UTC_TIMESTAMP(3), 0, 1000, 'fixed', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
     ON DUPLICATE KEY UPDATE
@@ -3810,12 +3771,20 @@ function schedulerWorkerId(workerId = "") {
   return String(workerId || `worker_${process.pid || "local"}`).slice(0, 80);
 }
 
+function retrySchedulerJobUid(taskUidValue, attemptNo) {
+  const suffix = Math.max(1, Number(attemptNo || 1));
+  const value = `job_retry_${String(taskUidValue || "task")}_${suffix}`;
+  if (value.length <= 80) return value;
+  return `job_retry_${sha256Hex(value).slice(0, 60)}_${suffix}`;
+}
+
 function parseSchedulerJob(row) {
   if (!row) return null;
   return {
     id: row.id,
     jobUid: row.job_uid,
     jobType: row.job_type,
+    runId: row.run_id ?? null,
     status: row.status,
     attempts: Number(row.attempts || 0),
     maxAttempts: Number(row.max_attempts || 0),
@@ -3840,6 +3809,7 @@ export async function claimSchedulerJob(options = {}) {
         sj.id,
         sj.job_uid,
         sj.job_type,
+        sj.run_id,
         sj.status,
         sj.attempts,
         sj.max_attempts,
@@ -3848,7 +3818,7 @@ export async function claimSchedulerJob(options = {}) {
         wt.task_uid,
         au.username,
         p.project_key
-      FROM scheduler_jobs sj
+      FROM ${schedulerJobsTableName} sj
       LEFT JOIN workflow_runs wr ON wr.id = sj.run_id
       LEFT JOIN workflow_tasks wt ON wt.id = sj.task_id
       LEFT JOIN app_users au ON au.id = wr.user_id
@@ -3873,7 +3843,7 @@ export async function claimSchedulerJob(options = {}) {
     }
     await assertAllowedStateTransition(conn, "scheduler_job", row.status, "running", "claim");
     await conn.execute(
-      `UPDATE scheduler_jobs
+      `UPDATE ${schedulerJobsTableName}
       SET status = 'running',
           locked_by = ?,
           locked_at = UTC_TIMESTAMP(3),
@@ -3904,10 +3874,31 @@ export async function completeSchedulerJob(job, options = {}) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await assertAllowedStateTransition(conn, "scheduler_job", "running", "succeeded", "finish");
+    let rerunRequired = false;
+    if (job.jobType === "upstream_poll" && job.runId) {
+      const [rerunRows] = await conn.execute(
+        `SELECT wt.id
+        FROM workflow_tasks wt
+        WHERE wt.run_id = ?
+          AND wt.status IN ('pending', 'waiting_upstream')
+        LIMIT 1
+        FOR UPDATE`,
+        [job.runId]
+      );
+      rerunRequired = rerunRows.length > 0;
+    }
+    const nextStatus = rerunRequired ? "pending" : "succeeded";
+    await assertAllowedStateTransition(
+      conn,
+      "scheduler_job",
+      "running",
+      nextStatus,
+      nextStatus === "pending" ? "retry" : "finish"
+    );
     const [result] = await conn.execute(
-      `UPDATE scheduler_jobs
-      SET status = 'succeeded',
+      `UPDATE ${schedulerJobsTableName}
+      SET status = ?,
+          run_after = CASE WHEN ? = 'pending' THEN UTC_TIMESTAMP(3) ELSE run_after END,
           locked_by = NULL,
           locked_at = NULL,
           lock_expires_at = NULL,
@@ -3917,13 +3908,36 @@ export async function completeSchedulerJob(job, options = {}) {
       WHERE id = ?
         AND status = 'running'
         AND locked_by = ?`,
-      [job.id, workerId]
+      [nextStatus, nextStatus, job.id, workerId]
     );
     await conn.commit();
-    return { skipped: Number.isFinite(Number(result?.affectedRows)) ? Number(result.affectedRows) === 0 : false };
+    const skipped = Number.isFinite(Number(result?.affectedRows)) ? Number(result.affectedRows) === 0 : false;
+    return { skipped, status: skipped ? job.status : nextStatus };
   } catch (error) {
     await conn.rollback();
     throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function renewSchedulerJobLease(job, options = {}) {
+  const pool = await getPool();
+  if (!pool || !job?.id) return { skipped: true };
+  const workerId = schedulerWorkerId(options.workerId || job.workerId);
+  const lockSeconds = Math.max(5, Math.min(Number(options.lockSeconds || 60), 3600));
+  const conn = await pool.getConnection();
+  try {
+    const [result] = await conn.execute(
+      `UPDATE ${schedulerJobsTableName}
+      SET lock_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? SECOND),
+          updated_at = UTC_TIMESTAMP(3)
+      WHERE id = ?
+        AND status = 'running'
+        AND locked_by = ?`,
+      [lockSeconds, job.id, workerId]
+    );
+    return { skipped: Number(result?.affectedRows || 0) === 0 };
   } finally {
     conn.release();
   }
@@ -3938,7 +3952,7 @@ export async function rescheduleSchedulerJob(job, options = {}) {
   try {
     await conn.beginTransaction();
     const [result] = await conn.execute(
-      `UPDATE scheduler_jobs
+      `UPDATE ${schedulerJobsTableName}
       SET status = 'pending',
           run_after = ?,
           locked_by = NULL,
@@ -3978,7 +3992,7 @@ export async function failSchedulerJob(job, error, options = {}) {
     await conn.beginTransaction();
     await assertAllowedStateTransition(conn, "scheduler_job", "running", nextStatus, trigger);
     const [result] = await conn.execute(
-      `UPDATE scheduler_jobs
+      `UPDATE ${schedulerJobsTableName}
       SET status = ?,
           run_after = CASE WHEN ? = 'pending' THEN ? ELSE run_after END,
           locked_by = NULL,
@@ -4086,7 +4100,6 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
       ]
     );
     const runId = existingRunId || await findRunId(conn, facts.projectId, batch.batchId);
-    await syncResourceLock(conn, facts, runId, batch.batchId, batch.status || "queued");
     if (previousStatus !== (batch.status || "queued")) {
       await insertStateEvent(conn, facts, "workflow_run", batch.batchId, previousStatus, batch.status || "queued", triggerName);
     }
@@ -4137,7 +4150,8 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         ...(task.durationSec ? { durationSec: task.durationSec } : {}),
         ...(task.continuityReference ? { continuityReference: task.continuityReference } : {}),
         ...(task.promptStorageKey ? { promptStorageKey: task.promptStorageKey } : {}),
-        ...(task.promptStorageUrl ? { promptStorageUrl: task.promptStorageUrl } : {})
+        ...(task.promptStorageUrl ? { promptStorageUrl: task.promptStorageUrl } : {}),
+        ...(task.retryInfo ? { retryInfo: task.retryInfo } : {})
       };
       const responseSummary = {
         ...(task.responseSummary || {}),
@@ -4153,22 +4167,22 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           script_id = VALUES(script_id),
-          status = VALUES(status),
+          status = IF(workflow_tasks.lease_owner IS NULL, VALUES(status), workflow_tasks.status),
           model_image = VALUES(model_image),
           model_video = VALUES(model_video),
-          provider = VALUES(provider),
-          image_task_id = VALUES(image_task_id),
-          seedance_task_id = VALUES(seedance_task_id),
-          provider_job_id = VALUES(provider_job_id),
+          provider = IF(workflow_tasks.lease_owner IS NULL, VALUES(provider), workflow_tasks.provider),
+          image_task_id = IF(workflow_tasks.lease_owner IS NULL, VALUES(image_task_id), workflow_tasks.image_task_id),
+          seedance_task_id = IF(workflow_tasks.lease_owner IS NULL, VALUES(seedance_task_id), workflow_tasks.seedance_task_id),
+          provider_job_id = IF(workflow_tasks.lease_owner IS NULL, VALUES(provider_job_id), workflow_tasks.provider_job_id),
           prompt_asset_file_id = VALUES(prompt_asset_file_id),
-          output_asset_file_id = VALUES(output_asset_file_id),
-          attempts = VALUES(attempts),
-          started_at = COALESCE(workflow_tasks.started_at, VALUES(started_at)),
-          finished_at = VALUES(finished_at),
-          error_code = VALUES(error_code),
-          error_message = VALUES(error_message),
-          request_summary_json = VALUES(request_summary_json),
-          response_summary_json = VALUES(response_summary_json)`,
+          output_asset_file_id = IF(workflow_tasks.lease_owner IS NULL, VALUES(output_asset_file_id), workflow_tasks.output_asset_file_id),
+          attempts = IF(workflow_tasks.lease_owner IS NULL, GREATEST(workflow_tasks.attempts, VALUES(attempts)), workflow_tasks.attempts),
+          started_at = IF(workflow_tasks.lease_owner IS NULL, COALESCE(workflow_tasks.started_at, VALUES(started_at)), workflow_tasks.started_at),
+          finished_at = IF(workflow_tasks.lease_owner IS NULL, VALUES(finished_at), workflow_tasks.finished_at),
+          error_code = IF(workflow_tasks.lease_owner IS NULL, VALUES(error_code), workflow_tasks.error_code),
+          error_message = IF(workflow_tasks.lease_owner IS NULL, VALUES(error_message), workflow_tasks.error_message),
+          request_summary_json = IF(workflow_tasks.lease_owner IS NULL, VALUES(request_summary_json), workflow_tasks.request_summary_json),
+          response_summary_json = IF(workflow_tasks.lease_owner IS NULL, VALUES(response_summary_json), workflow_tasks.response_summary_json)`,
         [
           uidValue,
           runId,
@@ -4220,6 +4234,35 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
             task.status === "failed" ? 1 : 0,
             json(task.requestSummary || { scriptId: task.scriptId }),
             json(task.responseSummary || { outputPath: task.outputPath || null })
+          ]
+        );
+      }
+      const completedAttemptStatus = ["downloaded", "qc", "succeeded"].includes(task.status)
+        ? "succeeded"
+        : task.status === "failed"
+          ? "failed"
+          : task.status === "stopped" ? "canceled" : "";
+      if (taskId && completedAttemptStatus && Number(task.attempts || 0) > 0) {
+        await conn.execute(
+          `UPDATE task_attempts
+          SET status = ?,
+              finished_at = COALESCE(finished_at, ?),
+              error_code = ?,
+              error_message = ?,
+              retryable = ?
+          WHERE task_id = ?
+            AND attempt_no = ?
+            AND status = 'running'`,
+          [
+            completedAttemptStatus,
+            mysqlDate(task.finishedAt) || mysqlDate(new Date()),
+            completedAttemptStatus === "failed" ? varcharValue(task.errorCode, 80) : null,
+            completedAttemptStatus === "failed" ? varcharValue(task.errorMessage, 512) : null,
+            completedAttemptStatus === "failed"
+              && isAutomaticSeedanceRetryEligible(task)
+              && Number(task.attempts || 0) < Number(task.maxAttempts || 2) ? 1 : 0,
+            taskId,
+            Number(task.attempts)
           ]
         );
       }
@@ -4340,6 +4383,785 @@ export async function loadIdempotencyFactFromMysql(context, endpoint, idempotenc
   }
 }
 
+function idempotencyError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+const IDEMPOTENCY_RESULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
+
+function idempotencyLeaseSeconds(value) {
+  return Math.max(30, Math.min(Number(value || DEFAULT_IDEMPOTENCY_LEASE_SECONDS), 300));
+}
+
+function makeIdempotencyOwnerToken() {
+  return `idem-owner-${randomBytes(18).toString("hex")}`;
+}
+
+const IDEMPOTENCY_RESPONSE_CONTAINERS = new Set([
+  "batch",
+  "confirmedBatch",
+  "estimate",
+  "remix",
+  "output",
+  "outputs",
+  "qc",
+  "downloadSummary"
+]);
+
+function safeIdempotencyResponseKey(key = "") {
+  const value = String(key);
+  if (IDEMPOTENCY_RESPONSE_CONTAINERS.has(value)) return true;
+  return /(?:Id|Ids|Status|Count|Type|Mode|Code|Eligible|Required|Skipped|Replayed)$/i.test(value)
+    || ["status", "type", "mode", "code"].includes(value);
+}
+
+export function safeIdempotencyResponseSummary(value, depth = 0) {
+  if (depth > 10 || value === undefined) return undefined;
+  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") {
+    return /^https?:\/\//i.test(value) ? undefined : value.slice(0, 2000);
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 200).map((item) => safeIdempotencyResponseSummary(item, depth + 1));
+  }
+  if (typeof value !== "object") return undefined;
+  const summary = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!safeIdempotencyResponseKey(key)) continue;
+    const safeValue = safeIdempotencyResponseSummary(item, depth + 1);
+    if (safeValue !== undefined) summary[key] = safeValue;
+  }
+  return summary;
+}
+
+export async function claimIdempotencyFact(context, endpoint, idempotencyKey, requestHash, options = {}) {
+  const pool = await getPool();
+  const ownerToken = String(options.ownerToken || makeIdempotencyOwnerToken()).slice(0, 80);
+  if (!pool || !idempotencyKey) return { owner: true, ownerToken, skipped: true, status: "processing" };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const facts = await ensureContextFacts(conn, context);
+    const keyHash = sha256Buffer(idempotencyKey);
+    const expiresAt = mysqlDate(new Date(Date.now() + idempotencyLeaseSeconds(options.leaseSeconds) * 1000));
+    await conn.execute(
+      `DELETE FROM idempotency_keys
+      WHERE user_id = ?
+        AND project_id = ?
+        AND endpoint = ?
+        AND idempotency_hash = ?
+        AND status <> 'processing'
+        AND expires_at <= UTC_TIMESTAMP(3)`,
+      [facts.userId, facts.projectId, endpoint, keyHash]
+    );
+    const [inserted] = await conn.execute(
+      `INSERT IGNORE INTO idempotency_keys
+        (user_id, project_id, endpoint, idempotency_hash, request_hash, owner_token, response_json, status, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, 'processing', ?)`,
+      [facts.userId, facts.projectId, endpoint, keyHash, requestHash, ownerToken, expiresAt]
+    );
+    if (Number(inserted?.affectedRows || 0) > 0) {
+      await conn.commit();
+      return { owner: true, ownerToken, skipped: false, status: "processing", leaseExpiresAt: expiresAt };
+    }
+
+    const [rows] = await conn.execute(
+      `SELECT id, request_hash, owner_token, response_json, status, expires_at
+      FROM idempotency_keys
+      WHERE user_id = ?
+        AND project_id = ?
+        AND endpoint = ?
+        AND idempotency_hash = ?
+      LIMIT 1
+      FOR UPDATE`,
+      [facts.userId, facts.projectId, endpoint, keyHash]
+    );
+    const row = rows[0];
+    if (!row) throw idempotencyError("idempotency_in_progress", "幂等请求正在处理中，请稍后查询");
+    if (row.request_hash !== requestHash) {
+      throw idempotencyError("idempotency_conflict", "idempotency key was reused with a different request");
+    }
+    if (row.status === "succeeded") {
+      await conn.commit();
+      return {
+        owner: false,
+        skipped: false,
+        status: "succeeded",
+        response: parseJsonValue(row.response_json, null)
+      };
+    }
+    const processingExpired = row.status === "processing" && (!row.expires_at || new Date(row.expires_at).getTime() <= Date.now());
+    if (row.status === "failed" || processingExpired) {
+      const [reclaimed] = await conn.execute(
+        `UPDATE idempotency_keys
+        SET status = 'processing', owner_token = ?, response_json = NULL, expires_at = ?
+        WHERE id = ?
+          AND request_hash = ?
+          AND (status = 'failed' OR (status = 'processing' AND expires_at <= UTC_TIMESTAMP(3)))`,
+        [ownerToken, expiresAt, row.id, requestHash]
+      );
+      if (Number(reclaimed?.affectedRows || 0) > 0) {
+        await conn.commit();
+        return { owner: true, ownerToken, skipped: false, status: "processing", leaseExpiresAt: expiresAt };
+      }
+    }
+    await conn.commit();
+    return { owner: false, skipped: false, status: "processing" };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function renewIdempotencyFact(context, endpoint, idempotencyKey, requestHash, options = {}) {
+  const pool = await getPool();
+  if (!pool || !idempotencyKey) return { skipped: true };
+  const ownerToken = String(options.ownerToken || "").slice(0, 80);
+  if (!ownerToken) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const expiresAt = mysqlDate(new Date(Date.now() + idempotencyLeaseSeconds(options.leaseSeconds) * 1000));
+    const [result] = await conn.execute(
+      `UPDATE idempotency_keys
+      SET expires_at = ?
+      WHERE user_id = ?
+        AND project_id = ?
+        AND endpoint = ?
+        AND idempotency_hash = ?
+        AND request_hash = ?
+        AND owner_token = ?
+        AND status = 'processing'`,
+      [
+        expiresAt,
+        facts.userId,
+        facts.projectId,
+        endpoint,
+        sha256Buffer(idempotencyKey),
+        requestHash,
+        ownerToken
+      ]
+    );
+    return { skipped: Number(result?.affectedRows || 0) === 0, leaseExpiresAt: expiresAt };
+  } finally {
+    conn.release();
+  }
+}
+
+export async function completeIdempotencyFact(context, endpoint, idempotencyKey, requestHash, resource = {}, options = {}) {
+  const pool = await getPool();
+  if (!pool || !idempotencyKey) return { skipped: true };
+  const ownerToken = String(options.ownerToken || "").slice(0, 80);
+  if (!ownerToken) throw idempotencyError("idempotency_conflict", "idempotency owner token is required for completion");
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const expiresAt = mysqlDate(new Date(Date.now() + IDEMPOTENCY_RESULT_TTL_MS));
+    const responseSummary = safeIdempotencyResponseSummary(resource.response || {}) || {};
+    const [result] = await conn.execute(
+      `UPDATE idempotency_keys
+      SET resource_type = ?, resource_id = ?, response_json = ?, status = 'succeeded', expires_at = ?, owner_token = NULL
+      WHERE user_id = ?
+        AND project_id = ?
+        AND endpoint = ?
+        AND idempotency_hash = ?
+        AND request_hash = ?
+        AND owner_token = ?
+        AND status = 'processing'`,
+      [
+        resource.type || resource.resourceType || null,
+        Number.isSafeInteger(resource.resourceId) ? resource.resourceId : null,
+        json(responseSummary),
+        expiresAt,
+        facts.userId,
+        facts.projectId,
+        endpoint,
+        sha256Buffer(idempotencyKey),
+        requestHash,
+        ownerToken
+      ]
+    );
+    if (Number(result?.affectedRows || 0) === 0) {
+      throw idempotencyError("idempotency_conflict", "idempotency claim was lost before completion");
+    }
+    return { skipped: false };
+  } finally {
+    conn.release();
+  }
+}
+
+export async function failIdempotencyFact(context, endpoint, idempotencyKey, requestHash, error = null, options = {}) {
+  const pool = await getPool();
+  if (!pool || !idempotencyKey) return { skipped: true };
+  const ownerToken = String(options.ownerToken || "").slice(0, 80);
+  if (!ownerToken) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const [result] = await conn.execute(
+      `UPDATE idempotency_keys
+      SET status = 'failed', response_json = ?, owner_token = NULL
+      WHERE user_id = ?
+        AND project_id = ?
+        AND endpoint = ?
+        AND idempotency_hash = ?
+        AND request_hash = ?
+        AND owner_token = ?
+        AND status = 'processing'`,
+      [
+        json({ code: error?.code || "operation_failed" }),
+        facts.userId,
+        facts.projectId,
+        endpoint,
+        sha256Buffer(idempotencyKey),
+        requestHash,
+        ownerToken
+      ]
+    );
+    return { skipped: Number(result?.affectedRows || 0) === 0 };
+  } finally {
+    conn.release();
+  }
+}
+
+export async function runIdempotentOperation(context, endpoint, idempotencyKey, requestHash, operation, options = {}) {
+  const leaseSeconds = idempotencyLeaseSeconds(options.leaseSeconds);
+  const claim = await claimIdempotencyFact(context, endpoint, idempotencyKey, requestHash, { leaseSeconds });
+  if (claim.status === "succeeded") {
+    return typeof options.replayResponse === "function"
+      ? options.replayResponse(claim.response || {})
+      : claim.response;
+  }
+  if (!claim.owner) {
+    throw idempotencyError("idempotency_in_progress", "相同请求正在处理中，请稍后重试查询");
+  }
+  const heartbeatMs = Math.max(5_000, Math.min(Number(options.heartbeatMs || leaseSeconds * 1000 / 3), leaseSeconds * 1000 / 2));
+  const heartbeat = setInterval(() => {
+    renewIdempotencyFact(context, endpoint, idempotencyKey, requestHash, {
+      ownerToken: claim.ownerToken,
+      leaseSeconds
+    }).catch((error) => {
+      console.warn(`[mysql-facts] failed to renew idempotency ${endpoint}: ${error.message}`);
+    });
+  }, heartbeatMs);
+  heartbeat.unref?.();
+  let response;
+  try {
+    response = await operation();
+  } catch (error) {
+    clearInterval(heartbeat);
+    await failIdempotencyFact(context, endpoint, idempotencyKey, requestHash, error, {
+      ownerToken: claim.ownerToken
+    }).catch(() => {});
+    throw error;
+  }
+  let completionError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await completeIdempotencyFact(
+        context,
+        endpoint,
+        idempotencyKey,
+        requestHash,
+        {
+          type: options.resourceType || options.type || null,
+          resourceId: options.resourceId,
+          response
+        },
+        { ownerToken: claim.ownerToken }
+      );
+      completionError = null;
+      break;
+    } catch (error) {
+      completionError = error;
+      if (error?.code === "idempotency_conflict" || attempt === 2) break;
+      await renewIdempotencyFact(context, endpoint, idempotencyKey, requestHash, {
+        ownerToken: claim.ownerToken,
+        leaseSeconds
+      }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  clearInterval(heartbeat);
+  if (completionError) throw completionError;
+  return response;
+}
+
+export async function claimPendingSeedanceTasks(context, options = {}) {
+  const candidateTaskUids = [...new Set((options.candidateTaskUids || []).map(String).filter(Boolean))];
+  if (!candidateTaskUids.length) {
+    return { taskUids: [], activeCount: 0, batchActiveCount: 0, batchAvailableSlots: 0, availableSlots: 0 };
+  }
+  const requestedLimit = Math.max(1, Math.min(Number(options.requestedLimit || 1), 50));
+  const concurrencyLimit = Math.max(1, Math.min(Number(options.concurrencyLimit || 1), 50));
+  const leaseOwner = String(options.leaseOwner || "seedance_submitter").slice(0, 128);
+  const leaseSeconds = Math.max(30, Math.min(Number(options.leaseSeconds || 300), 3600));
+  const pool = await getPool();
+  if (!pool) {
+    return {
+      taskUids: candidateTaskUids.slice(0, Math.min(requestedLimit, concurrencyLimit)),
+      activeCount: 0,
+      batchActiveCount: 0,
+      batchAvailableSlots: requestedLimit,
+      availableSlots: concurrencyLimit
+    };
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const facts = await ensureContextFacts(conn, context);
+    await conn.execute(
+      `SELECT project_id
+      FROM project_members
+      WHERE project_id = ? AND user_id = ?
+      FOR UPDATE`,
+      [facts.projectId, facts.userId]
+    );
+    const [unknownSubmissionRows] = await conn.execute(
+      `SELECT wt.task_uid
+      FROM workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_kind = 'seedance_video'
+        AND wt.status = 'pending'
+        AND wt.lease_expires_at <= UTC_TIMESTAMP(3)
+        AND JSON_UNQUOTE(JSON_EXTRACT(wt.request_summary_json, '$.submissionPhase')) = 'sent'
+      FOR UPDATE`,
+      [facts.projectId, facts.userId, options.batchId]
+    );
+    await conn.execute(
+      `UPDATE workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      SET wt.status = 'failed',
+          wt.finished_at = COALESCE(wt.finished_at, UTC_TIMESTAMP(3)),
+          wt.error_code = 'submission_unknown',
+          wt.error_message = 'Seedance 提交已发出但未确认 task_id，已停止自动重试以避免重复扣费',
+          wt.response_summary_json = JSON_SET(
+            COALESCE(wt.response_summary_json, JSON_OBJECT()),
+            '$.status', 'submission_unknown',
+            '$.submissionPhase', 'unknown'
+          ),
+          wt.lease_owner = NULL,
+          wt.lease_expires_at = NULL
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_kind = 'seedance_video'
+        AND wt.status = 'pending'
+        AND wt.lease_expires_at <= UTC_TIMESTAMP(3)
+        AND JSON_UNQUOTE(JSON_EXTRACT(wt.request_summary_json, '$.submissionPhase')) = 'sent'`,
+      [facts.projectId, facts.userId, options.batchId]
+    );
+    for (const row of unknownSubmissionRows) {
+      await insertStateEvent(
+        conn,
+        facts,
+        "workflow_task",
+        row.task_uid,
+        "pending",
+        "failed",
+        "batch_write",
+        "submission_unknown"
+      );
+    }
+    await conn.execute(
+      `UPDATE task_attempts ta
+      INNER JOIN workflow_tasks wt ON wt.id = ta.task_id
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      SET ta.status = 'failed',
+          ta.finished_at = COALESCE(ta.finished_at, UTC_TIMESTAMP(3)),
+          ta.error_code = 'submission_unknown',
+          ta.error_message = 'Seedance submit result is unknown; automatic retry disabled',
+          ta.retryable = 0
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wt.error_code = 'submission_unknown'
+        AND ta.attempt_no = wt.attempts
+        AND ta.status = 'running'`,
+      [facts.projectId, facts.userId, options.batchId]
+    );
+    const [countRows] = await conn.execute(
+      `SELECT
+        COUNT(*) AS active_count,
+        SUM(CASE WHEN wr.run_uid = ? THEN 1 ELSE 0 END) AS batch_active_count
+      FROM workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_kind = 'seedance_video'
+        AND (
+          wt.status = 'waiting_upstream'
+          OR wt.lease_expires_at > UTC_TIMESTAMP(3)
+        )`,
+      [options.batchId, facts.projectId, facts.userId]
+    );
+    const activeCount = Number(countRows[0]?.active_count || 0);
+    const batchActiveCount = Number(countRows[0]?.batch_active_count || 0);
+    const availableSlots = Math.max(0, concurrencyLimit - activeCount);
+    const batchAvailableSlots = Math.max(0, requestedLimit - batchActiveCount);
+    const claimLimit = Math.min(batchAvailableSlots, availableSlots, candidateTaskUids.length);
+    if (claimLimit <= 0) {
+      await conn.commit();
+      return { taskUids: [], activeCount, batchActiveCount, batchAvailableSlots, availableSlots };
+    }
+    const placeholders = candidateTaskUids.map(() => "?").join(", ");
+    // mysql2 prepared LIMIT binding fails with ER_WRONG_ARGUMENTS here; query still escapes every placeholder.
+    const [rows] = await conn.query(
+      `SELECT wt.id, wt.task_uid
+      FROM workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_kind = 'seedance_video'
+        AND wt.status = 'pending'
+        AND (wt.lease_expires_at IS NULL OR wt.lease_expires_at <= UTC_TIMESTAMP(3))
+        AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(wt.request_summary_json, '$.submissionPhase')), '') <> 'sent'
+        AND wt.task_uid IN (${placeholders})
+      ORDER BY wt.priority ASC, wt.id ASC
+      LIMIT ?
+      FOR UPDATE SKIP LOCKED`,
+      [facts.projectId, facts.userId, options.batchId, ...candidateTaskUids, claimLimit]
+    );
+    const ids = rows.map((row) => Number(row.id)).filter(Number.isSafeInteger);
+    if (ids.length) {
+      const idPlaceholders = ids.map(() => "?").join(", ");
+      await conn.execute(
+        `UPDATE workflow_tasks
+        SET lease_owner = ?,
+            lease_expires_at = TIMESTAMPADD(SECOND, ?, UTC_TIMESTAMP(3)),
+            request_summary_json = JSON_SET(
+              COALESCE(request_summary_json, JSON_OBJECT()),
+              '$.submissionPhase', 'claimed'
+            )
+        WHERE id IN (${idPlaceholders})
+          AND status = 'pending'
+          AND (lease_expires_at IS NULL OR lease_expires_at <= UTC_TIMESTAMP(3))`,
+        [leaseOwner, leaseSeconds, ...ids]
+      );
+    }
+    await conn.commit();
+    return {
+      taskUids: rows.map((row) => row.task_uid),
+      activeCount,
+      batchActiveCount,
+      batchAvailableSlots,
+      availableSlots
+    };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+function seedanceSubmissionClaimError(message) {
+  const error = new Error(message);
+  error.code = "seedance_submission_claim_lost";
+  return error;
+}
+
+export async function markSeedanceTaskSubmissionSent(context, options = {}) {
+  const taskUidValue = String(options.taskUid || options.task?.generationTaskId || "");
+  const leaseOwner = String(options.leaseOwner || "").slice(0, 128);
+  const pool = await getPool();
+  if (!pool || !taskUidValue || !leaseOwner) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT wt.id, wt.attempts, wt.max_attempts
+      FROM workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_uid = ?
+        AND wt.task_kind = 'seedance_video'
+        AND wt.status = 'pending'
+        AND wt.lease_owner = ?
+        AND wt.lease_expires_at > UTC_TIMESTAMP(3)
+      LIMIT 1
+      FOR UPDATE`,
+      [facts.projectId, facts.userId, options.batchId, taskUidValue, leaseOwner]
+    );
+    const row = rows[0];
+    if (!row) throw seedanceSubmissionClaimError("Seedance submission claim expired before request send");
+    const sentAt = options.sentAt || new Date().toISOString();
+    const attemptNo = Math.max(Number(row.attempts || 0) + 1, Number(options.attemptNo || 0));
+    const requestSummary = {
+      ...(options.requestSummary || {}),
+      batchId: options.batchId,
+      generationTaskId: taskUidValue,
+      submissionPhase: "sent",
+      submissionSentAt: sentAt,
+      submissionPayloadHash: sha256Hex(json(options.requestSummary || {}))
+    };
+    const [updated] = await conn.execute(
+      `UPDATE workflow_tasks
+      SET attempts = ?,
+          started_at = COALESCE(started_at, ?),
+          request_summary_json = ?
+      WHERE id = ?
+        AND status = 'pending'
+        AND lease_owner = ?
+        AND lease_expires_at > UTC_TIMESTAMP(3)`,
+      [attemptNo, mysqlDate(sentAt), json(requestSummary), row.id, leaseOwner]
+    );
+    if (Number(updated?.affectedRows || 0) === 0) {
+      throw seedanceSubmissionClaimError("Seedance submission claim was lost before request send");
+    }
+    await conn.execute(
+      `INSERT INTO task_attempts
+        (task_id, attempt_no, status, provider, upstream_task_id, started_at, retryable, request_summary_json, response_summary_json)
+      VALUES (?, ?, 'running', ?, NULL, ?, 0, ?, JSON_OBJECT())
+      ON DUPLICATE KEY UPDATE
+        status = 'running',
+        provider = VALUES(provider),
+        started_at = COALESCE(task_attempts.started_at, VALUES(started_at)),
+        request_summary_json = VALUES(request_summary_json)`,
+      [row.id, attemptNo, options.provider || "seedance", mysqlDate(sentAt), json(requestSummary)]
+    );
+    await conn.commit();
+    return { skipped: false, attemptNo, sentAt };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function persistSeedanceSubmissionResult(context, options = {}) {
+  const task = options.task || {};
+  const taskUidValue = String(options.taskUid || task.generationTaskId || "");
+  const leaseOwner = String(options.leaseOwner || "").slice(0, 128);
+  const pool = await getPool();
+  if (!pool || !taskUidValue || !leaseOwner) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const facts = await ensureContextFacts(conn, context);
+    const [rows] = await conn.execute(
+      `SELECT
+        wr.id AS run_id,
+        wr.status AS run_status,
+        wt.id AS task_id,
+        wt.status AS task_status,
+        wt.attempts,
+        wt.max_attempts
+      FROM workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wr.run_type = 'pipeline'
+        AND wt.task_uid = ?
+        AND wt.task_kind = 'seedance_video'
+        AND wt.status = 'pending'
+        AND wt.lease_owner = ?
+      LIMIT 1
+      FOR UPDATE`,
+      [facts.projectId, facts.userId, options.batchId, taskUidValue, leaseOwner]
+    );
+    const row = rows[0];
+    if (!row) throw seedanceSubmissionClaimError("Seedance submission result cannot be persisted after claim loss");
+    const nextStatus = task.status === "waiting_upstream" ? "waiting_upstream" : "failed";
+    const localAssetReviewFailure = nextStatus === "failed"
+      && task.errorCode === "asset_review_pending"
+      && !String(task.seedanceTaskId || task.providerJobId || "").trim();
+    const attemptNo = localAssetReviewFailure
+      ? Math.max(0, Number(row.attempts || 0) || 0)
+      : Math.max(Number(row.attempts || 0), Number(task.attempts || 0), 1);
+    const submissionPhase = nextStatus === "waiting_upstream"
+      ? "accepted"
+      : task.errorCode === "submission_unknown" ? "unknown" : "rejected";
+    const requestSummary = {
+      ...(task.requestSummary || {}),
+      batchId: options.batchId,
+      generationTaskId: taskUidValue,
+      ...(task.scriptId ? { scriptId: task.scriptId } : {}),
+      ...(task.branchId ? { branchId: task.branchId } : {}),
+      ...(task.branchVariantIndex ? { branchVariantIndex: task.branchVariantIndex } : {}),
+      ...(task.segmentIndex ? { segmentIndex: task.segmentIndex } : {}),
+      ...(task.retryInfo ? { retryInfo: task.retryInfo } : {}),
+      submissionPhase
+    };
+    const responseSummary = {
+      ...(task.responseSummary || {}),
+      submissionPhase
+    };
+    const [updated] = await conn.execute(
+      `UPDATE workflow_tasks
+      SET status = ?,
+          provider = ?,
+          image_task_id = ?,
+          seedance_task_id = ?,
+          provider_job_id = ?,
+          attempts = ?,
+          started_at = COALESCE(started_at, ?),
+          finished_at = ?,
+          error_code = ?,
+          error_message = ?,
+          request_summary_json = ?,
+          response_summary_json = ?,
+          lease_owner = NULL,
+          lease_expires_at = NULL
+      WHERE id = ?
+        AND status = 'pending'
+        AND lease_owner = ?`,
+      [
+        nextStatus,
+        task.provider || "seedance",
+        task.imageTaskId || null,
+        task.seedanceTaskId || null,
+        task.providerJobId || task.seedanceTaskId || null,
+        attemptNo,
+        mysqlDate(task.startedAt) || mysqlDate(new Date()),
+        mysqlDate(task.finishedAt),
+        varcharValue(task.errorCode, 80),
+        varcharValue(task.errorMessage, 512),
+        json(requestSummary),
+        json(responseSummary),
+        row.task_id,
+        leaseOwner
+      ]
+    );
+    if (Number(updated?.affectedRows || 0) === 0) {
+      throw seedanceSubmissionClaimError("Seedance submission result lost its database claim");
+    }
+    await insertStateEvent(
+      conn,
+      facts,
+      "workflow_task",
+      taskUidValue,
+      row.task_status,
+      nextStatus,
+      "batch_write",
+      task.errorCode || null
+    );
+    const attemptStatus = nextStatus === "failed" ? "failed" : "running";
+    if (!localAssetReviewFailure) {
+      await conn.execute(
+        `INSERT INTO task_attempts
+          (task_id, attempt_no, status, provider, upstream_task_id, started_at, finished_at, error_code, error_message, retryable, request_summary_json, response_summary_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          status = VALUES(status),
+          provider = VALUES(provider),
+          upstream_task_id = VALUES(upstream_task_id),
+          finished_at = VALUES(finished_at),
+          error_code = VALUES(error_code),
+          error_message = VALUES(error_message),
+          retryable = VALUES(retryable),
+          request_summary_json = VALUES(request_summary_json),
+          response_summary_json = VALUES(response_summary_json)`,
+        [
+          row.task_id,
+          attemptNo,
+          attemptStatus,
+          task.provider || "seedance",
+          task.seedanceTaskId || task.providerJobId || null,
+          mysqlDate(task.startedAt) || mysqlDate(new Date()),
+          mysqlDate(task.finishedAt),
+          varcharValue(task.errorCode, 80),
+          varcharValue(task.errorMessage, 512),
+          nextStatus === "failed" && isAutomaticSeedanceRetryEligible(task) ? 1 : 0,
+          json(requestSummary),
+          json(responseSummary)
+        ]
+      );
+    }
+    if (nextStatus === "waiting_upstream") {
+      if (row.run_status === "queued") {
+        await conn.execute(
+          `UPDATE workflow_runs
+          SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = UTC_TIMESTAMP(3)
+          WHERE id = ? AND status = 'queued'`,
+          [mysqlDate(task.startedAt) || mysqlDate(new Date()), row.run_id]
+        );
+        await insertStateEvent(conn, facts, "workflow_run", options.batchId, "queued", "running", "batch_write");
+      }
+      await conn.execute(
+        `INSERT INTO ${schedulerJobsTableName}
+          (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
+        VALUES (?, 'upstream_poll', 'pending', ?, NULL, ?, 10, UTC_TIMESTAMP(3), 0, 1000, 'fixed', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+        ON DUPLICATE KEY UPDATE
+          payload_json = VALUES(payload_json),
+          run_after = IF(status = 'running', run_after, VALUES(run_after)),
+          status = IF(status = 'running', status, VALUES(status)),
+          updated_at = UTC_TIMESTAMP(3)`,
+        [`job_upstream_poll_${options.batchId}`, row.run_id, json({ batchId: options.batchId })]
+      );
+    } else if (isAutomaticSeedanceRetryEligible(task) && attemptNo < Number(row.max_attempts || 2)) {
+      await conn.execute(
+        `INSERT INTO ${schedulerJobsTableName}
+          (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
+        VALUES (?, 'task_retry', 'pending', ?, ?, ?, 0, ?, 0, 3, 'exponential', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+        ON DUPLICATE KEY UPDATE
+          payload_json = VALUES(payload_json),
+          run_after = IF(status = 'running', run_after, VALUES(run_after)),
+          status = IF(status = 'running', status, VALUES(status)),
+          updated_at = UTC_TIMESTAMP(3)`,
+        [
+          retrySchedulerJobUid(taskUidValue, attemptNo + 1),
+          row.run_id,
+          row.task_id,
+          json({ batchId: options.batchId, taskUid: taskUidValue, errorCode: task.errorCode || null }),
+          mysqlDate(task.nextAttemptAt) || mysqlDate(new Date(Date.now() + 60_000))
+        ]
+      );
+    }
+    await conn.commit();
+    return { skipped: false, status: nextStatus, attemptNo };
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function releasePendingSeedanceTaskClaims(context, options = {}) {
+  const taskUids = [...new Set((options.taskUids || []).map(String).filter(Boolean))];
+  const pool = await getPool();
+  if (!pool || !taskUids.length) return { skipped: true };
+  const conn = await pool.getConnection();
+  try {
+    const facts = await ensureContextFacts(conn, context);
+    const placeholders = taskUids.map(() => "?").join(", ");
+    const [result] = await conn.execute(
+      `UPDATE workflow_tasks wt
+      INNER JOIN workflow_runs wr ON wr.id = wt.run_id
+      SET wt.lease_owner = NULL, wt.lease_expires_at = NULL
+      WHERE wr.project_id = ?
+        AND wr.user_id = ?
+        AND wr.run_uid = ?
+        AND wt.lease_owner = ?
+        AND wt.task_uid IN (${placeholders})`,
+      [facts.projectId, facts.userId, options.batchId, String(options.leaseOwner || "").slice(0, 128), ...taskUids]
+    );
+    return { skipped: false, releasedCount: Number(result?.affectedRows || 0) };
+  } finally {
+    conn.release();
+  }
+}
+
 export async function recordIdempotencyFact(context, endpoint, idempotencyKey, requestHash, resource = {}) {
   const pool = await getPool();
   if (!pool || !idempotencyKey) return { skipped: true };
@@ -4366,7 +5188,7 @@ export async function recordIdempotencyFact(context, endpoint, idempotencyKey, r
         requestHash,
         resource.type || null,
         Number.isSafeInteger(resource.resourceId) ? resource.resourceId : null,
-        json(resource.response || {}),
+        json(safeIdempotencyResponseSummary(resource.response || {}) || {}),
         mysqlDate(expiresAt)
       ]
     );

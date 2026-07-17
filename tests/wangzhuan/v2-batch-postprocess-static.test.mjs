@@ -54,14 +54,14 @@ test("v2 serializes post-process choices without adding them to the Seedance pla
   assert.match(js, /state\.postProcessEndingAsset = data\.asset \|\| null/);
   assert.match(js, /state\.expansionSizes/);
   assert.match(js, /function postProcessRequestFields\(\)/);
-  assert.match(js, /fontSize:\s*Number\(els\.subtitleFontSizeNumber\?\.value \|\| 36\)/);
+  assert.match(js, /fontSize:\s*Number\(els\.subtitleFontSizeNumber\?\.value \|\| 40\)/);
   assert.match(js, /centerY:\s*Number\(els\.subtitleCenterYNumber\?\.value \|\| 960\)/);
   assert.match(js, /textColor:\s*els\.subtitleTextColor\?\.value \|\| "white"/);
   assert.match(js, /function syncSubtitleStyleControls\(/);
-  assert.match(js, /postProcess\.subtitles\?\.fontSize \?\? 36/);
+  assert.match(js, /postProcess\.subtitles\?\.fontSize \?\? 40/);
   assert.match(js, /postProcess\.subtitles\?\.centerY \?\? 960/);
   assert.match(js, /postProcess\.subtitles\?\.textColor \?\? "white"/);
-  assert.match(js, /syncSubtitleStyleControls\(\{ fontSize: 36, centerY: 960, textColor: "white" \}\)/);
+  assert.match(js, /syncSubtitleStyleControls\(\{ fontSize: 40, centerY: 960, textColor: "white" \}\)/);
   assert.match(js, /postProcess:\s*postProcessRequestFields\(\)/);
   assert.match(js, /confirm-plan[\s\S]*postProcess:\s*postProcessRequestFields\(\)/);
   assert.doesNotMatch(signatureSource, /postProcess|expansionSizes|postProcessEnding/);

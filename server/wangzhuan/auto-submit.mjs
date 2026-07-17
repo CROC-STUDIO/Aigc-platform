@@ -101,14 +101,16 @@ export async function runAutoSubmitPipeline(context, request = {}, depsOverride 
     branchDrafts: request.branchDrafts || request.branches || [],
     assetReviewConfirmed: Boolean(request.assetReviewConfirmed)
   });
-  const submitted = await deps.submitPendingGenerationTasks(context, batchId);
+  const submitted = Number.isFinite(Number(confirmed?.submittedCount))
+    ? confirmed
+    : await deps.submitPendingGenerationTasks(context, batchId);
   const polled = await deps.pollUpstreamBatch(context, batchId);
   const qcResult = await maybeRunQc(context, polled.batch || submitted.batch || confirmed.batch, deps);
   return {
     mode: AUTO_SUBMIT_MODE.submitted,
     estimate,
     plans,
-    confirmedBatch: confirmed.batch,
+    confirmedBatch: confirmed.confirmedBatch || confirmed.batch,
     submittedCount: submitted.submittedCount || 0,
     failedSubmitCount: submitted.failedSubmitCount || 0,
     batch: qcResult.batch,

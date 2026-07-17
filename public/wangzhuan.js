@@ -1169,7 +1169,7 @@ function syncRewriteHints() {
 }
 
 function isBackgroundReminderBatch(batch) {
-  if (!batch?.batchId || terminalBatchStatus(batch.status)) return false;
+  if (!batch?.batchId || !shouldKeepBatchLive(batch)) return false;
   return !["draft", "checking"].includes(batch.status);
 }
 
@@ -1185,13 +1185,17 @@ function activeLockFromBatchInfo(batch) {
 }
 
 function isCurrentWorkbenchBatchBlocking(batch, stalePlanPreview = false) {
-  if (!batch?.batchId || terminalBatchStatus(batch.status)) return false;
+  if (!batch?.batchId || !shouldKeepBatchLive(batch)) return false;
   if (batch.status === "preview_required" && !stalePlanPreview) return false;
   return ["queued", "running", "stitching", "qc"].includes(batch.status);
 }
 
 function hasActivePipelineBatch() {
   return isCurrentWorkbenchBatchBlocking(state.batchDetail?.batch, isCurrentPlanPreviewStale(state.batchDetail?.batch));
+}
+
+function shouldKeepBatchLive(batch = {}) {
+  return isBatchGenerationActive(batch, batch.tasks || []) || !terminalBatchStatus(batch.status);
 }
 
 async function refreshBackgroundActiveBatchBanner() {
@@ -1409,10 +1413,10 @@ function syncRuntimeClock() {
   window.clearInterval(state.runtimeClockTimer);
   state.runtimeClockTimer = 0;
   const batch = state.batchDetail?.batch;
-  if (!batch || terminalBatchStatus(batch.status)) return;
+  if (!batch || !shouldKeepBatchLive(batch)) return;
   const tick = () => {
     const currentBatch = state.batchDetail?.batch;
-    if (!currentBatch || terminalBatchStatus(currentBatch.status)) {
+    if (!currentBatch || !shouldKeepBatchLive(currentBatch)) {
       window.clearInterval(state.runtimeClockTimer);
       state.runtimeClockTimer = 0;
       return;
@@ -1431,7 +1435,7 @@ function stopRuntimeClock() {
 }
 
 function batchProgressSection(batch, tasks, outputs = []) {
-  if (!batch || terminalBatchStatus(batch.status)) return "";
+  if (!batch || !shouldKeepBatchLive(batch)) return "";
   const progress = batchGenerationProgress(batch, tasks);
   return `
     ${taskProgressHtml(progress)}
@@ -4027,7 +4031,7 @@ function startPolling() {
       await loadGallerySafely();
       if (generation !== state.pollGeneration) return;
       const batch = detail?.batch;
-      if (!batch || terminalBatchStatus(batch.status)) {
+      if (!batch || !shouldKeepBatchLive(batch)) {
         if (batch) {
           renderBatchOutputPreviews(batch.outputs || [], { force: true });
           await loadGallery({ force: true }).catch(() => {});
@@ -4210,7 +4214,7 @@ async function retryStitch() {
     });
     renderBatch();
     await loadGallery();
-    if (!terminalBatchStatus(state.batchDetail?.batch?.status)) startPolling();
+    if (shouldKeepBatchLive(state.batchDetail?.batch)) startPolling();
   } catch (error) {
     renderError(els.globalError, error, "重试拼接失败");
   } finally {
@@ -4222,7 +4226,7 @@ async function loadBatchById(batchId) {
   const data = await apiEnvelope(`/api/wangzhuan/batches/${encodeURIComponent(batchId)}`);
   state.batchDetail = data;
   renderBatch();
-  if (!terminalBatchStatus(data.batch?.status)) startPolling();
+  if (shouldKeepBatchLive(data.batch)) startPolling();
   return data;
 }
 
@@ -4236,7 +4240,7 @@ async function loadActiveBatch() {
   state.batchDetail = detail;
   renderBatch();
   await loadGallerySafely();
-  if (!terminalBatchStatus(detail.batch.status)) startPolling();
+  if (shouldKeepBatchLive(detail.batch)) startPolling();
   return detail;
 }
 
@@ -4260,7 +4264,7 @@ async function restoreBatchWorkbenchFromTasks(batchId) {
   await hydrateReferenceWorkflowFromBatch(data.batch);
   restoreWorkflowFromBatch(data);
   renderBatch();
-  if (!terminalBatchStatus(data.batch?.status)) startPolling();
+  if (shouldKeepBatchLive(data.batch)) startPolling();
   if (isBackgroundReminderBatch(data.batch)) {
     const lock = activeLockFromBatchInfo(data.batch);
     if (lock) renderActiveLockBanner(lockHost(), lock);

@@ -250,6 +250,7 @@ export const workflowTriggerLabels = {
   stitch_completed: "拼接完成",
   qc_started: "质检已开始",
   qc_completed: "质检完成",
+  scheduler_retry: "Seedance 自动重试",
   user_stop: "用户停止",
   batch_write: "批次更新"
 };
@@ -270,7 +271,7 @@ export function formatWorkflowEvent(event = {}) {
 }
 
 export function isBatchGenerationActive(batch = {}, tasks = []) {
-  if (!batch || terminalBatchStatus(batch.status)) return false;
+  if (!batch || ["succeeded", "failed", "stopped", "skipped"].includes(batch.status)) return false;
   if (["queued", "running", "stitching"].includes(batch.status)) return true;
   return tasks.some((task) => ["pending", "waiting_upstream"].includes(task.status));
 }
@@ -319,6 +320,12 @@ export function renderGenerationTaskCards(tasks = []) {
     const upstream = generationTaskUpstreamLabel(task);
     const requestLine = summarizeGenerationRequest(task);
     const live = ["pending", "waiting_upstream"].includes(task.status);
+    const retry = task.responseSummary?.retryInfo;
+    const pollNotice = task.responseSummary?.pollErrorMessage;
+    const retryState = task.retryState;
+    const retryLine = retry?.automatic
+      ? `上游失败已自动重试（${retry.attempt}/${retry.maxAttempts}）：${retry.priorErrorMessage || retry.priorErrorCode || "未知错误"}`
+      : "";
     return `
       <article class="wz-generation-task${live ? " is-live" : ""}">
         <div class="wz-generation-task-head">
@@ -328,6 +335,10 @@ export function renderGenerationTaskCards(tasks = []) {
         <small>${escapeHtml(upstream)}</small>
         <small>${escapeHtml(requestLine)}</small>
         <small>${escapeHtml(task.seedanceTaskId ? `任务 ID：${task.seedanceTaskId}` : (task.errorCode || "尚未提交"))}</small>
+        ${task.errorMessage ? `<small class="wz-output-error">${escapeHtml(`上游错误：${task.errorMessage}`)}</small>` : ""}
+        ${pollNotice ? `<small class="wz-output-error">${escapeHtml(`查询失败，后台重试中：${pollNotice}`)}</small>` : ""}
+        ${retryLine ? `<small class="wz-output-error">${escapeHtml(retryLine)}</small>` : ""}
+        ${retryState?.status === "failed" ? `<small class="wz-output-error">${escapeHtml(`自动重试已耗尽（${retryState.attempts}/${retryState.maxAttempts}）：${retryState.errorMessage || retryState.errorCode || "未知错误"}`)}</small>` : ""}
       </article>
     `;
   }).join("");
@@ -1714,15 +1725,25 @@ export async function confirmBatchPlanRequest(batchId, plans, confirmationNotes 
   });
 }
 
-export function schedulePoll({ load, shouldStop, interval = 2000 }) {
+export function schedulePoll({ load, shouldStop, onError, interval = 2000 }) {
   let timer = 0;
+  let canceled = false;
   const tick = async () => {
-    const value = await load();
-    if (shouldStop(value)) return;
+    if (canceled) return;
+    let value;
+    try {
+      value = await load();
+    } catch (error) {
+      if (!canceled && typeof onError === "function") onError(error);
+    }
+    if (canceled || shouldStop(value)) return;
     timer = window.setTimeout(tick, interval);
   };
   timer = window.setTimeout(tick, interval);
-  return () => window.clearTimeout(timer);
+  return () => {
+    canceled = true;
+    window.clearTimeout(timer);
+  };
 }
 
 let toastTimer = 0;

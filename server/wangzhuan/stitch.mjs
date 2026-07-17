@@ -12,8 +12,7 @@ import { buildOutputDisplayName } from "./output-naming.mjs";
 import {
   hasWangzhuanFactsStore,
   loadBatchDetailFromMysql,
-  loadIdempotencyFactFromMysql,
-  recordIdempotencyFact,
+  runIdempotentOperation,
   syncBatchFacts
 } from "./mysql-facts.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
@@ -693,7 +692,9 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
         });
         continue;
       }
-      if (FAILED_TASK_STATUSES.has(entry.task.status)) continue;
+      // A partial batch can still have an upstream task in flight. It must not
+      // block materialization of the downloaded slices in the same group.
+      if (!STITCH_READY_TASK_STATUSES.has(entry.task.status) || !entry.task.outputPath) continue;
       const outputId = takeOutputId(batch, sequenceState);
       const target = segmentOutputPath(context, batch.batchId, outputId);
       const filePath = userRelative(context, target);
@@ -773,9 +774,27 @@ async function materializeSegmentOutputs(context, batch, groups, sequenceState) 
   return outputs;
 }
 
-function hasCompleteSubmittedSegments(group, { requiresPostProcess = false } = {}) {
-  return (group.entries.length >= 2 || requiresPostProcess) && group.entries.every(({ task }) => {
+function stitchableEntries(group) {
+  return group.entries.filter(({ task }) => {
     return task.seedanceTaskId && STITCH_READY_TASK_STATUSES.has(task.status) && Boolean(task.outputPath);
+  });
+}
+
+function hasStitchableSegments(group, { requiresPostProcess = false } = {}) {
+  const entries = stitchableEntries(group);
+  return entries.length > 0 && (group.entries.length >= 2 || requiresPostProcess);
+}
+
+function hasUnmaterializedReadySegments(batch = {}) {
+  const materializedTaskIds = new Set();
+  for (const output of Array.isArray(batch.outputs) ? batch.outputs : []) {
+    if (output.kind !== "segment_video") continue;
+    for (const taskId of output.generationTaskIds || []) materializedTaskIds.add(taskId);
+  }
+  return (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => {
+    return STITCH_READY_TASK_STATUSES.has(task.status)
+      && Boolean(task.outputPath)
+      && !materializedTaskIds.has(task.generationTaskId);
   });
 }
 
@@ -785,11 +804,15 @@ function groupHasTerminalTasks(group) {
   });
 }
 
+function deliveryGroupKey(value = {}) {
+  return `${value.branchId || "default"}:${Number(value.branchVariantIndex || value.variantIndex || 1)}`;
+}
+
 export function isBatchReadyForStitch(batch = {}) {
   const groups = groupTasksByVariant(batch);
   const postProcess = resolveBatchPostProcess(batch);
   const requiresPostProcess = Boolean(postProcess.ending || postProcess.subtitles.enabled || postProcess.expansionSizes.length);
-  return groups.length > 0 && groups.some((group) => hasCompleteSubmittedSegments(group, { requiresPostProcess }));
+  return groups.length > 0 && groups.some((group) => hasStitchableSegments(group, { requiresPostProcess }));
 }
 
 function buildReport({ outputId, segmentOutputIds, preflight, status, errorCode = "", errorMessage = "", disclaimerOverlay = null, tailSegments = [], postProcessEnding = null, subtitlePostProcess = null }) {
@@ -1229,7 +1252,7 @@ export async function materializeBatchSegmentOutputs(context, batchId) {
     ...batch,
     tasks,
     outputs: [...segmentOutputs, ...existingNonSegmentOutputs]
-  }, "segments_completed");
+  }, ["qc", "partial_failed"].includes(batch.status) ? "stitch_progress" : "segments_completed");
   await writeTaskMaps(context, saved);
   return saved;
 }
@@ -1241,22 +1264,27 @@ export async function finalizeFifteenSecondBatch(context, batchId) {
 export async function finalizeSegmentBatch(context, batchId) {
   const batch = await readBatch(context, batchId);
   if (Number(batch.estimate?.durationSec) === 30) return batch;
-  if (["qc", "succeeded", "partial_failed", "failed", "stopped"].includes(batch.status)) return batch;
+  if (["succeeded", "failed", "stopped"].includes(batch.status)) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending")) return batch;
   if ((Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "waiting_upstream")) return batch;
 
   let working = batch;
-  const hasSegments = (Array.isArray(working.outputs) ? working.outputs : []).some((output) => output.kind === "segment_video");
-  if (!hasSegments) {
+  if (hasUnmaterializedReadySegments(working)) {
     working = await materializeBatchSegmentOutputs(context, batchId);
   }
-  if (working.status === "running" || working.status === "queued") {
-    const hasFailedTasks = (Array.isArray(working.tasks) ? working.tasks : [])
-      .some((task) => FAILED_TASK_STATUSES.has(task.status));
+  const hasFailedTasks = (Array.isArray(working.tasks) ? working.tasks : [])
+    .some((task) => FAILED_TASK_STATUSES.has(task.status));
+  const nextStatus = hasFailedTasks ? "partial_failed" : "qc";
+  if (working.status !== nextStatus) {
+    const triggerName = working.status === "partial_failed" && nextStatus === "qc"
+      ? "stitch_progress"
+      : working.status === "qc" && nextStatus === "partial_failed"
+        ? "qc_partial_failed"
+        : hasFailedTasks ? "generation_partial_failed" : "generation_completed";
     working = await writeBatch(
       context,
-      { ...working, status: hasFailedTasks ? "partial_failed" : "qc" },
-      hasFailedTasks ? "generation_partial_failed" : "generation_completed"
+      { ...working, status: nextStatus },
+      triggerName
     );
   }
   return working;
@@ -1274,7 +1302,7 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
     throw new WangzhuanError("no_segments", "没有可用于拼接的分段视频", { batchId });
   }
 
-  const withStitchingStatus = await writeBatch(context, { ...batch, status: "stitching" });
+  const withStitchingStatus = await writeBatch(context, { ...batch, status: "stitching" }, "stitch_progress");
   const sequenceState = { next: nextOutputSequence(withStitchingStatus) };
   let segmentOutputs;
   try {
@@ -1310,17 +1338,24 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
   }
 
   const existingNonSegmentOutputs = (Array.isArray(batch.outputs) ? batch.outputs : []).filter((output) => output.kind !== "segment_video");
+  const previousDerivedOutputs = existingNonSegmentOutputs.filter((output) => ["stitched_video", "expanded_video"].includes(output.kind));
   const nextOutputs = [...segmentOutputs, ...existingNonSegmentOutputs.filter((output) => !["stitched_video", "expanded_video"].includes(output.kind))];
   const stitchReports = options.replaceDerivedOutputs
     ? []
     : Array.isArray(batch.stitchReports) ? [...batch.stitchReports] : [];
   const postProcessFailures = [];
+  const successfulDeliveryGroups = new Set();
+  const successfulDeliveryTaskIds = new Set();
   let currentSucceededCount = 0;
   let currentFailedCount = 0;
 
   for (const group of groups) {
     const groupSegments = group.entries.map((entry) => segmentByTask.get(entry.task.generationTaskId)).filter(Boolean);
-    const groupReady = hasCompleteSubmittedSegments(group, { requiresPostProcess: true });
+    const readyEntries = group.entries.filter((entry) => segmentByTask.has(entry.task.generationTaskId));
+    const readyGroup = { ...group, entries: readyEntries };
+    // Partial batches may contain a failed or still-queued slice. Stitch the
+    // ready subset for this group and keep the missing task in partial_failed.
+    const groupReady = hasStitchableSegments(readyGroup, { requiresPostProcess: true });
     if (!groupReady) {
       const missingIds = group.entries
         .filter((entry) => !segmentByTask.has(entry.task.generationTaskId))
@@ -1364,7 +1399,7 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
       const stitched = await createSucceededStitchOutput(
         context,
         { ...withStitchingStatus, outputs: nextOutputs },
-        group,
+        readyGroup,
         groupSegments,
         preflight,
         sequenceState
@@ -1380,7 +1415,10 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
       nextOutputs.push(...expanded.outputs);
       postProcessFailures.push(...expanded.failures);
       stitchReports.push(stitched.report);
+      successfulDeliveryGroups.add(deliveryGroupKey(group));
+      for (const taskId of stitched.output.generationTaskIds || []) successfulDeliveryTaskIds.add(taskId);
       currentSucceededCount += 1;
+      if (readyEntries.length < group.entries.length) currentFailedCount += 1;
     } catch (error) {
       const report = await createFailedReport(
         context,
@@ -1395,6 +1433,12 @@ async function stitchBatchSegmentsOnce(context, batchId, options = {}) {
       currentFailedCount += 1;
     }
   }
+
+  nextOutputs.push(...previousDerivedOutputs.filter((output) => {
+    const coveredByTask = (output.generationTaskIds || [])
+      .some((taskId) => successfulDeliveryTaskIds.has(taskId));
+    return !coveredByTask && !successfulDeliveryGroups.has(deliveryGroupKey(output));
+  }));
 
   const hasStitched = currentSucceededCount > 0;
   const nextStatus = hasStitched && currentFailedCount === 0 ? "qc" : "partial_failed";
@@ -1463,14 +1507,7 @@ function hashPayload(value) {
   return createHash("sha256").update(JSON.stringify(value ?? {}), "utf8").digest("hex");
 }
 
-export async function retryStitch(context, batchId, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
-  validateBatchId(batchId);
-  const requestHash = hashPayload({ batchId, forceFail: request.forceFail === true });
-  const replay = await loadIdempotencyFactFromMysql(context, "retry_stitch", request.idempotencyKey, requestHash);
-  if (replay) return replay;
+async function retryStitchOnce(context, batchId) {
   const batch = await readBatch(context, batchId);
   const hasPostProcessFailures = Array.isArray(batch.postProcessFailures) && batch.postProcessFailures.length > 0;
   const canRetryCompletedPostProcess = batch.status === "qc" && hasPostProcessFailures;
@@ -1480,13 +1517,29 @@ export async function retryStitch(context, batchId, request = {}) {
   if (canRetryCompletedPostProcess) {
     await writeBatch(context, { ...batch, status: "partial_failed" }, "qc_partial_failed");
   }
-  const result = await stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true });
-  await recordIdempotencyFact(context, "retry_stitch", request.idempotencyKey, requestHash, {
-    type: "batch",
-    id: batchId,
-    response: result
-  });
-  return result;
+  return stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true });
+}
+
+async function replayStitchResponse(context, summary = {}) {
+  const batchId = summary?.batch?.batchId || summary?.batchId || "";
+  const batch = await readBatch(context, batchId);
+  return stitchResult(context, batchId, batch);
+}
+
+export async function retryStitch(context, batchId, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  validateBatchId(batchId);
+  const requestHash = hashPayload({ batchId, forceFail: request.forceFail === true });
+  return runIdempotentOperation(
+    context,
+    "retry_stitch",
+    request.idempotencyKey,
+    requestHash,
+    () => retryStitchOnce(context, batchId),
+    { resourceType: "batch", replayResponse: (summary) => replayStitchResponse(context, summary) }
+  );
 }
 
 export const __stitchTestHooks = {

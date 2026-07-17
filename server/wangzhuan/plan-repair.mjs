@@ -41,6 +41,17 @@ export const MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS = Object.freeze([
 const DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR = "high-energy, fast-paced, emotionally expressive, contagious net-earning ad delivery; the speaker sounds excited, urgent, credible, and drives curiosity in every spoken beat";
 const DEFAULT_OPENING_HOOK_REPAIR = "first 1-2 seconds must start with a high-impact attention hook scene: visible reward feedback, top balance/reward counter rising, coin or cash burst, surprised human reaction, or withdrawal-success style proof visual before any slow explanation";
 
+export function copyrightMusicRestriction(language = "") {
+  const value = cleanString(language).toLowerCase();
+  if (value.startsWith("zh") || /[一-鿿]/u.test(language)) return "禁止使用版权音乐。只使用原创、免版税或已获授权的音频。";
+  if (value.startsWith("pt")) return "Não use música protegida por direitos autorais. Use apenas áudio original, livre de royalties ou devidamente licenciado.";
+  if (value.startsWith("es")) return "No uses música con derechos de autor. Utiliza únicamente audio original, libre de regalías o debidamente autorizado.";
+  if (value.startsWith("id")) return "Jangan gunakan musik berhak cipta. Gunakan hanya audio orisinal, bebas royalti, atau berlisensi.";
+  if (value.startsWith("ja")) return "著作権で保護された音楽は禁止です。オリジナル、ロイヤリティフリー、または適切に許諾された音声のみを使用すること。";
+  if (value.startsWith("ko")) return "저작권이 있는 음악은 금지입니다. 오리지널, 로열티 프리 또는 적법하게 라이선스된 오디오만 사용하세요.";
+  return "Do not use copyrighted music. Use only original, royalty-free, or properly licensed audio.";
+}
+
 function normalizeConversionEffect(effect = "") {
   const value = cleanString(effect).toLowerCase();
   const aliases = {
@@ -186,6 +197,7 @@ function localizedFallbackText(kind, language = "") {
 
 export function repairSeedancePromptContract(prompt, context = {}) {
   const targetLanguage = cleanString(context.targetLanguage);
+  const sourceLanguage = cleanString(context.sourceLanguage) || cleanString(context.originalLanguage) || targetLanguage;
   const targetRegion = cleanString(context.targetRegion);
   const currencySymbol = cleanString(context.currencySymbol);
   const currencyName = cleanString(context.currencyName);
@@ -227,6 +239,9 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   }
   if (!/no burned subtitles|no captions|no dense text blocks/i.test(repaired)) {
     additions.push("Subtitle repair: no burned subtitles, no captions, no dense text blocks, no paragraph text; if visible text appears, keep only 1-3 short UI words in the target language.");
+  }
+  if (!/copyrighted music|版权音乐|direitos autorais|derechos de autor|berhak cipta|著作権で保護された音楽|저작권이 있는 음악/i.test(repaired)) {
+    additions.push(copyrightMusicRestriction(sourceLanguage));
   }
   if (!/no gibberish|no pseudo-text|avoid AI-generated gibberish|real product screenshots/i.test(repaired)) {
     additions.push("UI text repair: avoid AI-generated gibberish text, pseudo-letters, fake unreadable app UI, and dense generated screens; when a phone UI is needed, use approved product screenshots/reference assets or simple icon/button/progress visuals with only 1-3 short target-language words.");

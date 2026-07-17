@@ -23,18 +23,15 @@ import {
   writeAtomicJson
 } from "./storage.mjs";
 import {
-  findActiveResourceLock,
-  loadActivePipelineRunFromMysql,
   loadActiveRemixFromMysql,
   loadBlockingRemixForSourceFromMysql,
   loadEstimateFromMysql,
-  loadIdempotencyFactFromMysql,
   loadRemixDetailFromMysql,
   loadRemixSourceFromMysql,
   loadTemplateStoreFromMysql,
   nextRemixEstimateIdFromMysql,
   nextRemixSourceIdFromMysql,
-  recordIdempotencyFact,
+  runIdempotentOperation,
   syncEstimateFact,
   syncRemixFacts,
   syncRemixSourceFact
@@ -67,22 +64,6 @@ function currentUserId(context) {
 
 function isAdmin(context) {
   return context.user?.role === "admin" || context.user?.isAdmin;
-}
-
-async function assertNoMysqlResourceLock(context) {
-  const activeMysqlLock = await findActiveResourceLock(context);
-  if (!activeMysqlLock) return;
-  const runningResource = activeMysqlLock.runType === "pipeline"
-    ? "pipeline_batch"
-    : activeMysqlLock.runType === "remix"
-      ? "remix"
-      : activeMysqlLock.runType || "mysql_resource_lock";
-  throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-    runningResource,
-    batchId: activeMysqlLock.runType === "pipeline" ? activeMysqlLock.runId : undefined,
-    remixId: activeMysqlLock.runType === "remix" ? activeMysqlLock.runId : undefined,
-    status: activeMysqlLock.runStatus || activeMysqlLock.status
-  });
 }
 
 function safeFileName(name, fallback = "source.mp4") {
@@ -476,6 +457,12 @@ function downloadSummary(remix) {
     packageReady: outputs.some((item) => item.downloadEligible),
     missingFiles: []
   };
+}
+
+async function replayRemixResponse(context, summary = {}) {
+  const remixId = summary?.remix?.remixId || summary?.remixId || "";
+  const remix = await readRemix(context, remixId);
+  return { remix, downloadSummary: downloadSummary(remix) };
 }
 
 async function writeText(target, text) {
@@ -912,15 +899,6 @@ async function materializeProviderOutput(context, remix, jobSnapshot, outputBuff
   }, "preview_confirm");
 }
 
-async function findActiveRemix(context) {
-  const detail = await loadActiveRemixFromMysql(context);
-  return detail?.remix || null;
-}
-
-async function findActiveBatch(context) {
-  return loadActivePipelineRunFromMysql(context);
-}
-
 async function assertSourceSubmitUnlocked(context, sourceId) {
   const blocking = await loadBlockingRemixForSourceFromMysql(context, sourceId);
   if (!blocking?.remix) return;
@@ -999,30 +977,7 @@ export async function uploadRemixSource(context, request = {}) {
   };
 }
 
-export async function startDirectMaskEdit(context, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
-  const requestHash = hashPayload(request);
-  const replay = await loadIdempotencyFactFromMysql(context, "remix_mask_edit_start", request.idempotencyKey, requestHash);
-  if (replay) return replay;
-  await assertNoMysqlResourceLock(context);
-  const activeBatch = await findActiveBatch(context);
-  if (activeBatch) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "pipeline_batch",
-      batchId: activeBatch.batchId,
-      status: activeBatch.status
-    });
-  }
-  const active = await findActiveRemix(context);
-  if (active) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      remixId: active.remixId,
-      status: active.status
-    });
-  }
-
+async function startDirectMaskEditOnce(context, request = {}) {
   const normalized = validateDirectMaskEditRequest(request, effectiveLimits(context.config || {}));
   const source = await loadSourceProbe(context, normalized.sourceId);
   await assertSourceSubmitUnlocked(context, source.sourceId);
@@ -1105,12 +1060,22 @@ export async function startDirectMaskEdit(context, request = {}) {
     updatedAt: now
   };
   remix = await writeRemix(context, remix);
-  const result = { remix, downloadSummary: downloadSummary(remix) };
-  await recordIdempotencyFact(context, "remix_mask_edit_start", request.idempotencyKey, requestHash, {
-    type: "remix",
-    response: result
-  });
-  return result;
+  return { remix, downloadSummary: downloadSummary(remix) };
+}
+
+export async function startDirectMaskEdit(context, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload(request);
+  return runIdempotentOperation(
+    context,
+    "remix_mask_edit_start",
+    request.idempotencyKey,
+    requestHash,
+    () => startDirectMaskEditOnce(context, request),
+    { resourceType: "remix", replayResponse: (summary) => replayRemixResponse(context, summary) }
+  );
 }
 
 export async function estimateRemix(context, request = {}) {
@@ -1160,30 +1125,7 @@ export async function loadRemixEstimate(context, estimateId) {
   return record;
 }
 
-export async function startRemix(context, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
-  const requestHash = hashPayload(request);
-  const replay = await loadIdempotencyFactFromMysql(context, "remix_start", request.idempotencyKey, requestHash);
-  if (replay) return replay;
-  await assertNoMysqlResourceLock(context);
-  const activeBatch = await findActiveBatch(context);
-  if (activeBatch) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      runningResource: "pipeline_batch",
-      batchId: activeBatch.batchId,
-      status: activeBatch.status
-    });
-  }
-  const active = await findActiveRemix(context);
-  if (active) {
-    throw new WangzhuanError("batch_already_running", "当前已有任务运行，请等待或停止后再试", {
-      remixId: active.remixId,
-      status: active.status
-    });
-  }
-
+async function startRemixOnce(context, request = {}) {
   const record = await loadRemixEstimate(context, request.estimateId);
   if (record.estimateHash !== hashPayload(record.request)) {
     throw new WangzhuanError("validation_error", "estimate 已失效，请重新估算", { estimateId: request.estimateId });
@@ -1241,12 +1183,22 @@ export async function startRemix(context, request = {}) {
     updatedAt: now
   };
   remix = await writeRemix(context, remix);
-  const result = { remix, downloadSummary: downloadSummary(remix) };
-  await recordIdempotencyFact(context, "remix_start", request.idempotencyKey, requestHash, {
-    type: "remix",
-    response: result
-  });
-  return result;
+  return { remix, downloadSummary: downloadSummary(remix) };
+}
+
+export async function startRemix(context, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload(request);
+  return runIdempotentOperation(
+    context,
+    "remix_start",
+    request.idempotencyKey,
+    requestHash,
+    () => startRemixOnce(context, request),
+    { resourceType: "remix", replayResponse: (summary) => replayRemixResponse(context, summary) }
+  );
 }
 
 export async function getRemixDetail(context, remixId) {
@@ -1392,13 +1344,7 @@ export async function stopRemix(context, remixId, request = {}) {
   };
 }
 
-export async function confirmRemixPreview(context, remixId, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
-  const requestHash = hashPayload({ remixId, ...request });
-  const replay = await loadIdempotencyFactFromMysql(context, "remix_preview_confirm", request.idempotencyKey, requestHash);
-  if (replay) return replay;
+async function confirmRemixPreviewOnce(context, remixId, request = {}) {
   const remix = await readRemix(context, remixId);
   const outputId = request.outputId || remix.outputs?.[0]?.outputId;
   const output = (Array.isArray(remix.outputs) ? remix.outputs : []).find((item) => item.outputId === outputId);
@@ -1438,10 +1384,20 @@ export async function confirmRemixPreview(context, remixId, request = {}) {
     confirmed: true,
     confirmedBy: saved.previewConfirmedBy
   }, { audit: true });
-  const result = { remix: saved, downloadSummary: downloadSummary(saved) };
-  await recordIdempotencyFact(context, "remix_preview_confirm", request.idempotencyKey, requestHash, {
-    type: "remix",
-    response: result
-  });
-  return result;
+  return { remix: saved, downloadSummary: downloadSummary(saved) };
+}
+
+export async function confirmRemixPreview(context, remixId, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload({ remixId, ...request });
+  return runIdempotentOperation(
+    context,
+    "remix_preview_confirm",
+    request.idempotencyKey,
+    requestHash,
+    () => confirmRemixPreviewOnce(context, remixId, request),
+    { resourceType: "remix", replayResponse: (summary) => replayRemixResponse(context, summary) }
+  );
 }

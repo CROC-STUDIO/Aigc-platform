@@ -12,10 +12,10 @@
 
 ## 推荐入口
 
-日常业务代码发布：
+正式环境业务代码发布（必须显式确认）：
 
 ```bash
-bash .release/deploy-local.sh
+bash .release/deploy-local.sh --production code-only
 ```
 
 发布链路现在统一走 JumpServer 标准封装：
@@ -43,7 +43,7 @@ bash .release/deploy-local.sh
 仅当改了 Docker / compose / 容器运行依赖时，才走 full：
 
 ```bash
-bash .release/deploy-local.sh full
+bash .release/deploy-local.sh --production full
 ```
 
 ## 主要文件

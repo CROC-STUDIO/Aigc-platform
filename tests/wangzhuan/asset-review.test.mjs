@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ensureAssetReviewsApproved, reviewSeedanceAsset } from "../../server/wangzhuan/asset-review.mjs";
+import {
+  ensureAssetReviewsApproved,
+  reviewSeedanceAsset,
+  validateAssetReviewState
+} from "../../server/wangzhuan/asset-review.mjs";
 
 function makeContext(root, overrides = {}) {
   return {
@@ -174,6 +178,7 @@ test("ensureAssetReviewsApproved waits for pending Seedance asset review to sett
     assetFileNames: { productIcon: "icon.png" },
     assetStorageKeys: { productIcon: "product_info/DemoProduct/assets/icon.png" },
     assetStoredPaths: { productIcon: "product_info/DemoProduct/assets/icon.png" },
+    assetContentHashes: { productIcon: "sha256:product-info-icon" },
     assetUrls: {},
     assetReviews: {}
   }]);
@@ -181,5 +186,90 @@ test("ensureAssetReviewsApproved waits for pending Seedance asset review to sett
   assert.equal(result.reviewResult.ok, true);
   assert.equal(result.branches[0].assetReviews.productIcon.assetId, "asset_wait_1");
   assert.equal(result.branches[0].assetReviews.productIcon.status, "approved");
+  assert.equal(result.branches[0].assetReviews.productIcon.contentHash, "sha256:product-info-icon");
   assert.equal(detailCalls, 2);
+});
+
+test("ensureAssetReviewsApproved re-reviews a hashless approval when content identity is available", async () => {
+  const root = await mkdtemp(join(tmpdir(), "asset-review-content-identity-"));
+  const relativePath = "批处理记录/网赚管线/product-assets/branch_1/productIcon/icon.png";
+  await mkdir(join(root, "批处理记录/网赚管线/product-assets/branch_1/productIcon"), { recursive: true });
+  await writeFile(join(root, relativePath), Buffer.from("new-icon-content"));
+  let reviewCalls = 0;
+  const context = makeContext(root, {
+    reviewProductAsset: async () => {
+      reviewCalls += 1;
+      return { assetId: "asset_new_content", status: "approved" };
+    }
+  });
+
+  const result = await ensureAssetReviewsApproved(context, [{
+    branchId: "branch_1",
+    assetFileNames: { productIcon: "icon.png" },
+    assetStoredPaths: { productIcon: relativePath },
+    assetContentHashes: { productIcon: "sha256:new-icon-content" },
+    assetReviews: {
+      productIcon: { assetId: "asset_legacy", status: "approved" }
+    }
+  }]);
+
+  assert.equal(reviewCalls, 1);
+  assert.equal(result.branches[0].assetReviews.productIcon.assetId, "asset_new_content");
+  assert.equal(result.branches[0].assetReviews.productIcon.contentHash, "sha256:new-icon-content");
+});
+
+test("ensureAssetReviewsApproved reviews every suffixed reference asset", async () => {
+  const reviewedKeys = [];
+  const context = makeContext("/tmp/unused", {
+    reviewProductAsset: async (asset) => {
+      reviewedKeys.push(asset.assetKey);
+      return { assetId: `asset_${asset.assetKey}`, status: "approved" };
+    }
+  });
+  const assetFileNames = {
+    productIcon: "icon.png",
+    productScreenshot: "shot-1.png",
+    productScreenshot_2: "shot-2.png",
+    productScreenshot_3: "shot-3.png",
+    productRecording: "recording-1.mp4",
+    productRecording_2: "recording-2.mp4"
+  };
+  const assetStoredPaths = Object.fromEntries(
+    Object.entries(assetFileNames).map(([key, fileName]) => [key, `product-assets/branch_1/${key}/${fileName}`])
+  );
+
+  const result = await ensureAssetReviewsApproved(context, [{
+    branchId: "branch_1",
+    assetFileNames,
+    assetStoredPaths,
+    assetUrls: {},
+    assetReviews: {}
+  }]);
+
+  assert.deepEqual(reviewedKeys, [
+    "productIcon",
+    "productScreenshot",
+    "productScreenshot_2",
+    "productScreenshot_3",
+    "productRecording",
+    "productRecording_2"
+  ]);
+  assert.equal(result.reviewResult.ok, true);
+  assert.deepEqual(Object.keys(result.branches[0].assetReviews), reviewedKeys);
+});
+
+test("selected reference files cannot be confirmed before upload and review", () => {
+  const result = validateAssetReviewState([{
+    branchId: "branch_1",
+    branchLabel: "改写 3.1",
+    assetFileNames: { productScreenshot_2: "pending-shot.png" },
+    assetUrls: {},
+    assetStorageKeys: {},
+    assetStoredPaths: {},
+    assetReviews: {}
+  }]);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.failures.map((item) => item.assetKey), ["productScreenshot_2"]);
+  assert.match(result.failures[0].reason, /上传并审核/);
 });

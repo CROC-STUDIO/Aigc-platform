@@ -29,7 +29,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    image: ad-picture-web-codex-app
+    image: ad-picture-web-candidate-app:latest
     container_name: aigc-app
     restart: unless-stopped
     depends_on:
@@ -50,6 +50,7 @@ services:
       AIGC_CONFIG_PATH: /data/app/config.json
       AIGC_USERS_PATH: /data/users/users.json
       AIGC_PROJECT_ROOT: /data/project-data
+      AIGC_SCHEDULER_TABLE: ${AIGC_SCHEDULER_TABLE:-scheduler_jobs}
       AIGC_SESSION_COOKIE_NAME: ${AIGC_SESSION_COOKIE_NAME:-ad_session_codex}
       AIGC_PROJECT_ROOT_COOKIE_NAME: ${AIGC_PROJECT_ROOT_COOKIE_NAME:-ad_project_root_codex}
       TAI_ENTRY: /usr/local/lib/node_modules/tai-ai/dist/tai.min.js

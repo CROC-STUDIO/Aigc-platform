@@ -85,6 +85,8 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /CTA 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzCtaAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(html, /Ending 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzEndingAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="1"/);
+  assert.match(html, /id="wzSubtitleFontSizeRange" type="range" min="20" max="60" step="1" value="40"/);
+  assert.match(html, /id="wzSubtitleFontSizeNumber" type="number" min="20" max="60" step="1" value="40"/);
   assert.doesNotMatch(html, /同时生成数量/);
   assert.match(html, /Seedance prompt/);
   assert.doesNotMatch(html, /Seedance 预案/);
@@ -172,6 +174,19 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /const planRetryable = isRecoverableBackgroundJob\(state\.planJob\)/);
   assert.match(js, /const planDisabled = planRetryable/);
   assert.match(js, /els\.planBatchBtn\.disabled = planDisabled/);
+  const renderTasksSource = js.slice(js.indexOf("function renderTasks()"), js.indexOf("function renderReminders"));
+  assert.doesNotMatch(renderTasksSource, /planUpstreamLocked \|\| state\.stalePlanPreview \|\| planBlockedByRewrite/);
+  assert.match(renderTasksSource, /els\.confirmPlanBtn\.disabled = state\.confirmPlanSubmitting \|\| !plans\.length \|\| state\.stalePlanPreview/);
+  assert.match(js, /async function uploadSeedanceAssetsForReview\(\)[\s\S]*await markPlanMaybeStale\(\)/);
+  assert.doesNotMatch(js, /state\.stalePlanPreview = Boolean\(state\.draftSignature && state\.batchDetail\)/);
+  assert.match(js, /import \{ branchHasReferenceAsset, pruneOrphanAssetReviews \} from "\.\/wangzhuan-branch-assets\.js"/);
+  assert.match(js, /\.filter\(\(\[assetKey, review\]\) => branchHasReferenceAsset\(branch, assetKey\)/);
+  assert.match(startPlanJobSource, /state\.stalePlanPreview \|\| !state\.estimate\?\.estimateId\s*\? await estimateBatch\(\)\s*:\s*state\.estimate/);
+  assert.match(js, /function shouldValidatePlanSignature\([^)]*batch[^)]*\)[\s\S]*return !hasConfirmedVideoGeneration\(batch\)/);
+  assert.match(js, /if \(!shouldValidatePlanSignature\(\)\) \{\s*state\.stalePlanPreview = false;\s*renderTasks\(\);\s*return;\s*\}/);
+  assert.match(js, /const validateDraftSignature = shouldValidatePlanSignature\(batch\)/);
+  assert.match(js, /draftSignature:\s*validateDraftSignature \? state\.draftSignature : undefined/);
+  assert.match(js, /draftSignatureInput:\s*validateDraftSignature \? planSignatureInput\(\) : undefined/);
   assert.match(js, /const planBlockedByRewrite = !state\.rewriteConfirmed/);
   assert.match(js, /const planBlockedByDecomposition = !decompositionReady/);
   assert.match(js, /视频拆解进行中；拆解完成或手动填写脚本拆解后，可直接生成 Seedance prompt/);
@@ -226,7 +241,7 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /\/confirm-plan/);
   assert.match(js, /wzv2-confirm-/);
   assert.match(js, /confirmedPlanIds/);
-  assert.match(js, /draftSignature:\s*state\.draftSignature/);
+  assert.match(js, /draftSignature:\s*validateDraftSignature \? state\.draftSignature : undefined/);
   assert.match(js, /clientPlanDraftSignature/);
   assert.match(js, /isBatchQcRunnable/);
   assert.match(js, /\/stop/);
@@ -314,6 +329,28 @@ test("wangzhuan v2 error display includes asset review failure details", async (
   assert.match(js, /assetKey/);
   assert.match(js, /fileName/);
   assert.match(js, /requestId:/);
+});
+
+test("wangzhuan v2 restores the latest plan job signature from batch detail", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  const restoreSource = js.slice(
+    js.indexOf("function restoreV2FromBatchDetail"),
+    js.indexOf("function collectBranchDrafts")
+  );
+
+  assert.match(restoreSource, /detail\.backgroundJobs\?\.latestPlanJob/);
+  assert.match(restoreSource, /state\.planJob\s*=\s*latestPlanJob/);
+  assert.match(restoreSource, /state\.draftSignature\s*=\s*latestPlanJob\?\.draftSignature\s*\|\|\s*batch\.draftSignature\s*\|\|\s*""/);
+});
+
+test("wangzhuan v2 marks an existing plan stale when decomposition fields are edited", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  const listenerSource = js.slice(
+    js.indexOf('els.decompositionForm?.addEventListener("input"'),
+    js.indexOf("els.startNewTaskBtn?.addEventListener")
+  );
+
+  assert.match(listenerSource, /markPlanMaybeStale\(\)/);
 });
 
 test("v2 captures wangzhuan output template fields for Seedance planning", async () => {

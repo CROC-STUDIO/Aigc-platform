@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 
@@ -88,6 +89,7 @@ export async function uploadProductAsset(context, request = {}) {
   }
 
   const branchId = sanitizeSegment(request.branchId || "branch_1", "branch_1");
+  const contentHash = `sha256:${createHash("sha256").update(buffer).digest("hex")}`;
   const targetDir = join(wangzhuanPaths(context).userRoot, "product-assets", branchId, assetKey);
   await mkdir(targetDir, { recursive: true });
   const target = join(targetDir, fileName);
@@ -95,7 +97,7 @@ export async function uploadProductAsset(context, request = {}) {
   const storage = await syncWangzhuanAsset(context, target, `product_${assetKey}`, { required: true });
   const storedPath = toProjectRelative(context.userProjectRoot, target);
   const normalizedMimeType = mimeType || [...allowedMimes][0] || "application/octet-stream";
-  const review = await reviewSeedanceAsset(context, {
+  const reviewed = await reviewSeedanceAsset(context, {
     branchId,
     assetKey,
     fileName,
@@ -103,8 +105,10 @@ export async function uploadProductAsset(context, request = {}) {
     buffer,
     storageUrl: storage.storageUrl,
     storageKey: storage.storageKey,
-    storedPath
+    storedPath,
+    contentHash
   });
+  const review = { ...reviewed, contentHash };
   return {
     asset: {
       branchId,
@@ -112,6 +116,7 @@ export async function uploadProductAsset(context, request = {}) {
       fileName,
       mimeType: normalizedMimeType,
       sizeBytes: buffer.length,
+      contentHash,
       storedPath,
       previewUrl: storage.storageUrl,
       storageKey: storage.storageKey,

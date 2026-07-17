@@ -16,6 +16,12 @@ export const FINAL_TAIL_REFERENCE_ASSET_ORDER = Object.freeze([
   "endingAsset"
 ]);
 
+const MULTI_REFERENCE_ASSET_KEYS = new Set([
+  "productIcon",
+  "productScreenshot",
+  "productRecording"
+]);
+
 const NON_SEEDANCE_REFERENCE_ASSET_KEYS = new Set([
   "ctaAsset",
   "endingAsset",
@@ -39,34 +45,86 @@ function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function sourceAssetKeys(source = {}) {
+  const maps = source && typeof source === "object" && (
+    source.assetFileNames
+    || source.assetUrls
+    || source.assetStorageKeys
+    || source.assetStoredPaths
+    || source.assetRelativePaths
+  )
+    ? [
+        source.assetFileNames,
+        source.assetUrls,
+        source.assetStorageKeys,
+        source.assetStoredPaths,
+        source.assetRelativePaths
+      ]
+    : [source];
+  return [...new Set(maps.flatMap((map) => Object.keys(map && typeof map === "object" ? map : {})))];
+}
+
+export function referenceAssetBaseKey(assetKey = "") {
+  const key = cleanString(assetKey);
+  const order = [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER];
+  for (const baseKey of order) {
+    if (key === baseKey) return baseKey;
+    if (MULTI_REFERENCE_ASSET_KEYS.has(baseKey) && new RegExp(`^${baseKey}_[2-9]$`).test(key)) return baseKey;
+  }
+  return key;
+}
+
+function referenceAssetOrdinal(assetKey = "", baseKey = referenceAssetBaseKey(assetKey)) {
+  if (assetKey === baseKey) return 1;
+  const suffix = Number(String(assetKey).slice(baseKey.length + 1));
+  return Number.isInteger(suffix) && suffix >= 2 ? suffix : Number.MAX_SAFE_INTEGER;
+}
+
+export function isReferenceVideoAssetKey(assetKey = "") {
+  return REFERENCE_VIDEO_ASSET_KEYS.has(referenceAssetBaseKey(assetKey));
+}
+
+export function orderedReferenceAssetKeys(source = {}, options = {}) {
+  const includeFinalTail = options.includeFinalTail === true;
+  const includeUnknown = options.includeUnknown !== false;
+  const keys = sourceAssetKeys(source);
+  const baseOrder = includeFinalTail
+    ? [...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER]
+    : REFERENCE_ASSET_ORDER;
+  const ordered = [];
+  for (const baseKey of baseOrder) {
+    ordered.push(...keys
+      .filter((key) => referenceAssetBaseKey(key) === baseKey)
+      .sort((left, right) => referenceAssetOrdinal(left, baseKey) - referenceAssetOrdinal(right, baseKey)));
+  }
+  if (!includeUnknown) return ordered;
+  const known = new Set([...REFERENCE_ASSET_ORDER, ...FINAL_TAIL_REFERENCE_ASSET_ORDER]);
+  ordered.push(...keys.filter((key) => {
+    const baseKey = referenceAssetBaseKey(key);
+    return !known.has(baseKey) && !NON_SEEDANCE_REFERENCE_ASSET_KEYS.has(key);
+  }));
+  return ordered;
+}
+
 export function assetKeyLabel(assetKey = "") {
-  return ASSET_KEY_LABELS[assetKey] || assetKey || "素材";
+  const baseKey = referenceAssetBaseKey(assetKey);
+  const label = ASSET_KEY_LABELS[baseKey] || assetKey || "素材";
+  const ordinal = referenceAssetOrdinal(assetKey, baseKey);
+  return ordinal > 1 && Number.isFinite(ordinal) ? `${label} ${ordinal}` : label;
 }
 
 export function orderedReferenceAssets(assetUrls = {}) {
   const urls = assetUrls && typeof assetUrls === "object" ? assetUrls : {};
   const items = [];
   const seen = new Set();
-  for (const key of REFERENCE_ASSET_ORDER) {
+  for (const key of orderedReferenceAssetKeys(urls)) {
     const url = cleanString(urls[key]);
     if (!url || seen.has(url)) continue;
     seen.add(url);
     items.push({
       key,
       url,
-      isVideo: REFERENCE_VIDEO_ASSET_KEYS.has(key)
-    });
-  }
-  for (const [key, rawUrl] of Object.entries(urls)) {
-    if (REFERENCE_ASSET_ORDER.includes(key)) continue;
-    if (NON_SEEDANCE_REFERENCE_ASSET_KEYS.has(key)) continue;
-    const url = cleanString(rawUrl);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    items.push({
-      key,
-      url,
-      isVideo: REFERENCE_VIDEO_ASSET_KEYS.has(key)
+      isVideo: isReferenceVideoAssetKey(key)
     });
   }
   return items;

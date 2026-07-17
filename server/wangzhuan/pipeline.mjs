@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -8,11 +9,16 @@ import { deriveSeedanceSlicesForGeneration, normalizeFissionAnalysis } from "./f
 import { WangzhuanError } from "./http.mjs";
 import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
 import {
+  claimPendingSeedanceTasks,
   hasWangzhuanFactsStore,
   loadActivePipelineRunFromMysql,
   loadBatchDetailFromMysql,
   loadEstimateFromMysql,
   loadLatestBatchEstimateForReferenceVideo,
+  markSeedanceTaskSubmissionSent,
+  persistSeedanceSubmissionResult,
+  releasePendingSeedanceTaskClaims,
+  runIdempotentOperation,
   syncBatchFacts
 } from "./mysql-facts.mjs";
 import {
@@ -37,7 +43,7 @@ import {
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "./plan-preview.mjs";
-import { repairFormalPlanContract } from "./plan-repair.mjs";
+import { copyrightMusicRestriction, repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
 
@@ -127,6 +133,21 @@ function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashPayload(value) {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
 function validateBatchId(batchId) {
   if (!/^wzb_\d{14}_[a-f0-9]{4}$/.test(String(batchId || ""))) {
     throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
@@ -150,6 +171,11 @@ async function requireFactsStore() {
 
 async function readBatch(context, batchId) {
   validateBatchId(batchId);
+  if (typeof context.readBatchForTest === "function") {
+    const batch = await context.readBatchForTest(batchId);
+    if (!batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
+    return batch;
+  }
   await requireFactsStore();
   const detail = await loadBatchDetailFromMysql(context, batchId);
   const batch = detail?.batch;
@@ -600,13 +626,24 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
   }
   const promptTarget = join(context.userProjectRoot, promptRelPath);
   const prompt = await readFile(promptTarget, "utf8");
+  const sourceLanguage = batch.request?.sourceLanguage
+    || batch.sourceLanguage
+    || batch.templateSnapshot?.sourceLanguage
+    || batch.templateSnapshot?.sourceVideoProfile?.language
+    || batch.referenceVideo?.language
+    || batch.targetLanguage
+    || batch.request?.targetLanguage
+    || "en-US";
+  const safePrompt = /copyrighted music|版权音乐|direitos autorais|derechos de autor|berhak cipta|著作権で保護された音楽|저작권이 있는 음악/i.test(prompt)
+    ? prompt
+    : `${prompt.trim()}\n${copyrightMusicRestriction(sourceLanguage)}\n`;
   const media = [
     ...collectSeedanceMedia(batch, task),
     ...continuityReferenceMedia(task)
   ];
   return buildSeedanceGenerationPayload({
     model: resolveSeedanceModel(batch, provider, task),
-    prompt,
+    prompt: safePrompt,
     media,
     mode: media.length ? "omni_reference" : "text_to_video",
     ratio: provider?.config?.ratio || batch.templateSnapshot?.draft?.defaultOutputRatio || "9:16",
@@ -626,7 +663,7 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
   });
 }
 
-async function submitTaskToSeedance(context, batch, task, provider, now) {
+async function submitTaskToSeedance(context, batch, task, provider, now, leaseOwner) {
   if (!provider) {
     throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法提交生成任务", {
       generationTaskId: task.generationTaskId,
@@ -634,9 +671,29 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
       requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
     });
   }
-  const payload = await buildSeedanceTaskPayload(context, batch, task, provider);
+  const retryInfo = task.retryInfo || task.responseSummary?.retryInfo;
+  let payload;
   let result;
+  let submissionMarkedSent = false;
   try {
+    payload = await buildSeedanceTaskPayload(context, batch, task, provider);
+    const requestSummary = summarizeSeedanceRequest(payload, provider);
+    try {
+      await markSeedanceTaskSubmissionSent(context, {
+        batchId: batch.batchId,
+        taskUid: task.generationTaskId,
+        leaseOwner,
+        attemptNo: Number(task.attempts || 0) + 1,
+        provider: provider.provider || "seedance",
+        sentAt: now,
+        requestSummary
+      });
+      submissionMarkedSent = true;
+    } catch (error) {
+      if (!error.code) error.code = "database_unavailable";
+      error.seedanceSubmissionNotSent = true;
+      throw error;
+    }
     result = await provider.createTask(payload, {
       batchId: batch.batchId,
       generationTaskId: task.generationTaskId,
@@ -645,6 +702,11 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
       branchLabel: task.branchLabel || ""
     });
   } catch (error) {
+    if (error?.seedanceSubmissionNotSent
+      || error?.code === "seedance_submission_claim_lost"
+      || error?.code === "database_unavailable") throw error;
+    const submissionUnknown = error?.code === "submission_unknown" || error?.data?.submissionUnknown === true;
+    const localAssetReviewFailure = error?.code === "asset_review_pending" && !submissionMarkedSent;
     return {
       ...task,
       status: "failed",
@@ -653,17 +715,20 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
       provider: provider.provider || "seedance",
       providerJobId: task.providerJobId,
       remoteUrlStored: false,
-      attempts: Number(task.attempts || 0) + 1,
+      attempts: Number(task.attempts || 0) + (localAssetReviewFailure ? 0 : 1),
       startedAt: now,
       finishedAt: now,
-      errorCode: error?.code || "upstream_failed",
-      errorMessage: error?.message || "Seedance 上游请求失败",
+      errorCode: submissionUnknown ? "submission_unknown" : error?.code || "upstream_failed",
+      errorMessage: submissionUnknown
+        ? "Seedance 提交结果未知，已停止自动重试以避免重复扣费"
+        : error?.message || "Seedance 上游请求失败",
       requestSummary: summarizeSeedanceRequest(payload, provider),
       responseSummary: {
-        status: "failed",
+        status: submissionUnknown ? "submission_unknown" : "failed",
         upstreamCode: error?.data?.upstreamCode || error?.code || "",
         upstreamMessage: error?.data?.upstreamMessage || error?.message || "",
-        httpStatus: error?.data?.status
+        httpStatus: error?.data?.status,
+        ...(retryInfo ? { retryInfo } : {})
       }
     };
   }
@@ -679,10 +744,13 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
       attempts: Number(task.attempts || 0) + 1,
       startedAt: now,
       finishedAt: now,
-      errorCode: "upstream_failed",
-      errorMessage: "Seedance 上游响应缺少 task id",
+      errorCode: "submission_unknown",
+      errorMessage: "Seedance 上游响应缺少 task id，已停止自动重试以避免重复扣费",
       requestSummary: summarizeSeedanceRequest(payload, provider),
-      responseSummary: summarizeSeedanceResponse(result)
+      responseSummary: {
+        ...summarizeSeedanceResponse(result),
+        ...(retryInfo ? { retryInfo } : {})
+      }
     };
   }
   return {
@@ -692,6 +760,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
     seedanceTaskId,
     provider: provider.provider || "seedance",
     providerJobId: seedanceTaskId,
+    upstreamPollAttempts: 0,
     remoteUrlStored: false,
     attempts: Number(task.attempts || 0) + 1,
     startedAt: now,
@@ -700,7 +769,10 @@ async function submitTaskToSeedance(context, batch, task, provider, now) {
     errorMessage: undefined,
     nextAttemptAt: undefined,
     requestSummary: summarizeSeedanceRequest(payload, provider),
-    responseSummary: summarizeSeedanceResponse(result)
+    responseSummary: {
+      ...summarizeSeedanceResponse(result),
+      ...(retryInfo ? { retryInfo } : {})
+    }
   };
 }
 
@@ -1534,6 +1606,28 @@ export async function stopBatch(context, batchId, request = {}) {
   };
 }
 
+export function batchStatusAfterSeedanceSubmission(batchStatus, state = {}) {
+  if (["qc", "partial_failed"].includes(batchStatus)) return batchStatus;
+  if (Number(state.submittedCount || 0) > 0) return "running";
+  if (Number(state.failedSubmitCount || 0) > 0 && !state.hasDeferredPending) return "failed";
+  return batchStatus === "queued" ? "running" : batchStatus;
+}
+
+export function resolveSeedanceConcurrencyLimit(context = {}) {
+  const configured = context.config?.wangzhuan?.limits?.maxConcurrency
+    ?? context.config?.wangzhuan?.capabilities?.maxConcurrency
+    ?? 4;
+  return Math.max(1, Math.min(Number(configured) || 4, 50));
+}
+
+export function resolveSeedanceSubmissionLeaseSeconds(provider = {}) {
+  const configuredTimeoutMs = Number(provider.config?.timeoutMs);
+  const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+    ? configuredTimeoutMs
+    : 600_000;
+  return Math.max(300, Math.min(Math.ceil(timeoutMs / 1000) + 60, 3600));
+}
+
 export async function submitPendingGenerationTasks(context, batchId) {
   const batch = await readBatch(context, batchId);
   if (batch.status === "stopped" || batch.status === "preview_required") {
@@ -1550,42 +1644,84 @@ export async function submitPendingGenerationTasks(context, batchId) {
       requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
     });
   }
-  const limit = Math.max(
-    1,
-    Math.min(
-      Number(context.config?.wangzhuan?.capabilities?.maxConcurrency || 4),
-      Number(batch.estimate?.requestedConcurrency || batch.request?.requestedConcurrency || 1) || 1
-    )
-  );
+  const concurrencyLimit = resolveSeedanceConcurrencyLimit(context);
+  const requestedLimit = Math.max(1, Number(batch.estimate?.requestedConcurrency || batch.request?.requestedConcurrency || 1) || 1);
   const originalTasks = Array.isArray(batch.tasks) ? batch.tasks : [];
-  const tasks = [...originalTasks];
   const pendingIndexes = [];
   for (let index = 0; index < originalTasks.length; index += 1) {
     if (isGenerationTaskSubmitReady(batch, originalTasks[index])) pendingIndexes.push(index);
   }
-  for (let offset = 0; offset < pendingIndexes.length; offset += limit) {
-    const chunk = pendingIndexes.slice(offset, offset + limit);
-    const chunkResults = await Promise.all(chunk.map(async (taskIndex) => {
-      const nextTask = await submitTaskToSeedance(context, batch, originalTasks[taskIndex], provider, now);
-      return { taskIndex, nextTask };
+  const leaseOwner = `seedance_submit:${batchId}:${process.pid}:${Date.now()}`.slice(0, 128);
+  const leaseSeconds = resolveSeedanceSubmissionLeaseSeconds(provider);
+  const claim = await claimPendingSeedanceTasks(context, {
+    batchId,
+    candidateTaskUids: pendingIndexes.map((index) => originalTasks[index].generationTaskId),
+    requestedLimit,
+    concurrencyLimit,
+    leaseOwner,
+    leaseSeconds
+  });
+  const claimedTaskUids = new Set(claim.taskUids);
+  const claimedIndexes = pendingIndexes.filter((index) => claimedTaskUids.has(originalTasks[index].generationTaskId));
+  const persistedTaskUids = [];
+  const writebackFailures = [];
+  if (claimedIndexes.length) {
+    const chunkResults = await Promise.all(claimedIndexes.map(async (taskIndex) => {
+      const sourceTask = originalTasks[taskIndex];
+      try {
+        const nextTask = await submitTaskToSeedance(context, batch, sourceTask, provider, now, leaseOwner);
+        await persistSeedanceSubmissionResult(context, {
+          batchId,
+          taskUid: sourceTask.generationTaskId,
+          leaseOwner,
+          task: nextTask
+        });
+        return { taskIndex, nextTask, persisted: true };
+      } catch (error) {
+        return { taskIndex, nextTask: null, persisted: false, error };
+      }
     }));
-    for (const { taskIndex, nextTask } of chunkResults) {
+    for (const { taskIndex, nextTask, persisted, error } of chunkResults) {
+      const taskUid = originalTasks[taskIndex].generationTaskId;
+      if (!persisted) {
+        writebackFailures.push({ taskUid, error });
+        continue;
+      }
+      persistedTaskUids.push(taskUid);
       if (nextTask.status === "waiting_upstream") submittedCount += 1;
       if (nextTask.status === "failed") failedSubmitCount += 1;
-      tasks[taskIndex] = nextTask;
     }
   }
-  const nextStatus = submittedCount > 0
-    ? "running"
-    : failedSubmitCount > 0
-      ? "failed"
-      : batch.status === "queued" ? "running" : batch.status;
+  if (writebackFailures.length) {
+    throw new WangzhuanError("database_unavailable", "Seedance 提交结果未能完整写入数据库，已保留任务租约并停止自动重提", {
+      batchId,
+      taskIds: writebackFailures.map((item) => item.taskUid),
+      causes: writebackFailures.map((item) => String(item.error?.code || item.error?.message || "writeback_failed").slice(0, 80))
+    });
+  }
+  const refreshed = await readBatch(context, batchId);
+  const tasks = Array.isArray(refreshed.tasks) ? refreshed.tasks : [];
+  const hasDeferredPending = tasks.some((task) => task.status === "pending");
+  const nextStatus = batchStatusAfterSeedanceSubmission(refreshed.status, {
+    submittedCount,
+    failedSubmitCount,
+    hasDeferredPending
+  });
   const saved = await writeBatch(context, {
-    ...batch,
+    ...refreshed,
     status: nextStatus,
     tasks,
-    startedAt: batch.startedAt || (submittedCount > 0 ? now : undefined)
+    startedAt: refreshed.startedAt || (submittedCount > 0 ? now : undefined)
   });
+  if (persistedTaskUids.length) {
+    await releasePendingSeedanceTaskClaims(context, {
+      batchId,
+      taskUids: persistedTaskUids,
+      leaseOwner
+    }).catch((error) => {
+      console.warn(`[wangzhuan] failed to release Seedance submission lease for ${batchId}: ${error.message}`);
+    });
+  }
   await writeTaskMaps(context, saved);
   for (const task of saved.tasks.filter((item) => item.startedAt === now && item.status === "waiting_upstream")) {
     await recordTelemetryEvent(context, "generation_task_submitted", {
@@ -1597,9 +1733,16 @@ export async function submitPendingGenerationTasks(context, batchId) {
       provider: task.provider || provider.provider,
       modelImage: task.modelImage,
       modelVideo: task.modelVideo
-    }, { audit: true });
+    }, { audit: true }).catch((error) => {
+      console.warn(`[wangzhuan] failed to record Seedance submission telemetry for ${task.generationTaskId}: ${error.message}`);
+    });
   }
-  return { batch: saved, submittedCount, failedSubmitCount };
+  return {
+    batch: saved,
+    submittedCount,
+    failedSubmitCount,
+    deferredCount: Math.max(0, pendingIndexes.length - claimedIndexes.length)
+  };
 }
 
 export async function retryFailedGenerationTask(context, batchId, generationTaskId) {
@@ -1608,17 +1751,7 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
     return { batch, retriedCount: 0 };
   }
   const now = new Date().toISOString();
-  let retriedCount = 0;
   let found = false;
-  const provider = createSeedanceProviderClient(context);
-  if (!provider) {
-    throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法重试生成任务", {
-      batchId,
-      generationTaskId,
-      requiredConfig: "wangzhuan.seedanceProvider.endpoint",
-      requiredEnv: ["WANGZHUAN_SEEDANCE_ENDPOINT", "WANGZHUAN_LLM_API_KEY"]
-    });
-  }
   const tasks = [];
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     if (task.generationTaskId !== generationTaskId) {
@@ -1626,12 +1759,17 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
       continue;
     }
     found = true;
-    if (task.status !== "failed") {
+    const pendingRetry = task.status === "pending" && Boolean(task.retryInfo || task.responseSummary?.retryInfo);
+    if (task.status !== "failed" && !pendingRetry) {
       throw new WangzhuanError("invalid_state_transition", "任务当前状态不可重试", {
         batchId,
         generationTaskId,
         status: task.status
       });
+    }
+    if (pendingRetry) {
+      tasks.push(task);
+      continue;
     }
     const attempts = Number(task.attempts || 0);
     const maxAttempts = Number(task.maxAttempts || 2);
@@ -1643,20 +1781,44 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
         maxAttempts
       });
     }
-    retriedCount += 1;
+    const retryInfo = {
+      automatic: true,
+      retriedAt: now,
+      priorErrorCode: task.errorCode || "upstream_failed",
+      priorErrorMessage: task.errorMessage || "Seedance 上游任务失败",
+      attempt: attempts + 1,
+      maxAttempts
+    };
     const resetTask = {
       ...task,
-      attempts
+      status: "pending",
+      attempts,
+      retryInfo,
+      seedanceTaskId: "",
+      providerJobId: "",
+      remoteUrlStored: false,
+      finishedAt: undefined,
+      errorCode: undefined,
+      errorMessage: undefined,
+      responseSummary: { ...(task.responseSummary || {}), retryInfo }
     };
-    tasks.push(await submitTaskToSeedance(context, batch, resetTask, provider, now));
+    tasks.push(resetTask);
   }
   if (!found) {
     throw new WangzhuanError("task_not_found", "任务不存在", { batchId, generationTaskId });
   }
-  const saved = await writeBatchWithTrigger(context, { ...batch, status: "running", tasks }, "scheduler_retry");
-  await writeTaskMaps(context, saved);
+  // A retry may be triggered after partial delivery has already settled the
+  // run. Keep terminal partial/qc status while the task is resubmitted; the
+  // task-level scheduler and upstream poll job will advance it later.
+  const retryBatchStatus = ["qc", "partial_failed"].includes(batch.status) ? batch.status : "running";
+  const reset = await writeBatchWithTrigger(context, { ...batch, status: retryBatchStatus, tasks }, "scheduler_retry");
+  await writeTaskMaps(context, reset);
+  const submitted = await submitPendingGenerationTasks(context, batchId);
+  const saved = submitted.batch;
+  const retried = saved.tasks.find((task) => task.generationTaskId === generationTaskId);
+  const priorAttempts = Number(batch.tasks.find((task) => task.generationTaskId === generationTaskId)?.attempts || 0);
+  const retriedCount = Number(retried?.attempts || 0) > priorAttempts ? 1 : 0;
   if (retriedCount > 0) {
-    const retried = saved.tasks.find((task) => task.generationTaskId === generationTaskId);
     await recordTelemetryEvent(context, "generation_task_retried", {
       batchId: saved.batchId,
       generationTaskId,
@@ -1664,9 +1826,11 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
       attempts: retried?.attempts || 0,
       imageTaskId: retried?.imageTaskId || "",
       seedanceTaskId: retried?.seedanceTaskId || ""
-    }, { audit: true });
+    }, { audit: true }).catch((error) => {
+      console.warn(`[wangzhuan] failed to record Seedance retry telemetry for ${generationTaskId}: ${error.message}`);
+    });
   }
-  return { batch: saved, retriedCount };
+  return { ...submitted, batch: saved, retriedCount };
 }
 
 function currentPlanIds(batch, request = {}) {
@@ -1675,6 +1839,51 @@ function currentPlanIds(batch, request = {}) {
     : [];
   if (requested.length) return new Set(requested);
   return new Set((Array.isArray(batch.plans) ? batch.plans : []).map((plan) => plan.planId));
+}
+
+function hasSeedanceUpstreamIdentity(task = {}) {
+  return Boolean(
+    String(task.seedanceTaskId || "").trim()
+    || String(task.providerJobId || "").trim()
+  );
+}
+
+function isRecoverableConfirmedPlanPreSubmitFailure(task = {}) {
+  return task.status === "failed"
+    && task.errorCode === "asset_review_pending"
+    && !hasSeedanceUpstreamIdentity(task);
+}
+
+export function recoverConfirmedPlanPreSubmitFailures(batch = {}) {
+  if (!batch.previewConfirmedAt
+    || batch.previewType !== "seedance_plan"
+    || !["partial_failed", "failed"].includes(batch.status)) {
+    return { batch, recoveredTaskIds: [] };
+  }
+  const recoveredTaskIds = [];
+  const tasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
+    if (!isRecoverableConfirmedPlanPreSubmitFailure(task)) return task;
+    const attempts = Math.max(0, Number(task.attempts || 0) || 0);
+    const maxAttempts = Math.max(1, Number(task.maxAttempts || 2) || 2);
+    recoveredTaskIds.push(task.generationTaskId);
+    return {
+      ...task,
+      status: "pending",
+      attempts: Math.min(attempts, maxAttempts - 1),
+      finishedAt: undefined,
+      errorCode: undefined,
+      errorMessage: undefined
+    };
+  });
+  if (!recoveredTaskIds.length) return { batch, recoveredTaskIds };
+  return {
+    batch: {
+      ...batch,
+      status: batch.status === "failed" ? "running" : batch.status,
+      tasks
+    },
+    recoveredTaskIds
+  };
 }
 
 function editablePlanById(request = {}) {
@@ -1784,11 +1993,43 @@ export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPl
   return { nextPlans, nextScripts, confirmedAt: now };
 }
 
-export async function confirmBatchPlan(context, batchId, request = {}) {
-  if (!request.idempotencyKey) {
-    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
-  }
+async function confirmBatchPlanOnce(context, batchId, request) {
   const batch = await readBatch(context, batchId);
+  if (batch.previewConfirmedAt
+    && batch.previewType === "seedance_plan"
+    && batch.status !== "preview_required") {
+    const confirmedPlanIds = currentPlanIds(batch, request);
+    const plans = Array.isArray(batch.plans) ? batch.plans : [];
+    const unknownPlanIds = [...confirmedPlanIds].filter((planId) => !plans.some((plan) => plan.planId === planId));
+    const unconfirmedPlanIds = [...confirmedPlanIds].filter((planId) => !plans.some((plan) => plan.planId === planId && plan.status === "confirmed"));
+    if (!unknownPlanIds.length && !unconfirmedPlanIds.length) {
+      const rawBranchSource = batch.branchDrafts || batch.request?.branchDrafts || batch.request?.branches || [];
+      const branchSource = normalizeBranchDrafts(batch.templateSnapshot?.draft || {}, rawBranchSource);
+      const review = await ensureAssetReviewsApproved(context, branchSource);
+      const reviewedBatch = {
+        ...batch,
+        branchDrafts: review.branches,
+        request: {
+          ...(batch.request || {}),
+          branches: review.branches,
+          branchDrafts: review.branches
+        }
+      };
+      if (!review.reviewResult.ok) {
+        await writeBatchWithTrigger(context, reviewedBatch, "batch_write");
+        throw new WangzhuanError("asset_review_pending", "产品素材审核未通过，请上传 Seedance 素材并完成审核后再确认生成", {
+          failures: review.reviewResult.failures,
+          assetsByBranch: review.reviewResult.assetsByBranch
+        });
+      }
+      const recovery = recoverConfirmedPlanPreSubmitFailures(reviewedBatch);
+      const resumedBatch = recovery.recoveredTaskIds.length
+        ? await writeBatchWithTrigger(context, recovery.batch, "scheduler_retry")
+        : reviewedBatch;
+      if (recovery.recoveredTaskIds.length) await writeTaskMaps(context, resumedBatch);
+      return { batch: resumedBatch, confirmedPlanIds: [...confirmedPlanIds], resumed: true };
+    }
+  }
   if (batch.status !== "preview_required") {
     throw new WangzhuanError("validation_error", "当前批次不在预案确认阶段", {
       batchId,
@@ -1861,12 +2102,57 @@ export async function confirmBatchPlan(context, batchId, request = {}) {
     previewConfirmationNotes: cleanConfirmationNotes(request.confirmationNotes)
   }, "plan_confirmed");
   await writeTaskMaps(context, saved);
-  await recordTelemetryEvent(context, "seedance_plan_confirmed", {
-    batchId: saved.batchId,
-    confirmedPlanCount: nextPlans.filter((plan) => plan.status === "confirmed").length,
-    idempotencyKey: request.idempotencyKey
-  }, { audit: true });
   return { batch: saved, confirmedPlanIds: [...confirmedPlanIds] };
+}
+
+async function replayConfirmedBatchPlan(context, batchId, summary = {}) {
+  const replayBatchId = summary?.batch?.batchId || summary?.confirmedBatch?.batchId || summary?.batchId || batchId;
+  const batch = await readBatch(context, replayBatchId);
+  return {
+    batch,
+    confirmedBatch: batch,
+    confirmedPlanIds: (Array.isArray(batch.plans) ? batch.plans : [])
+      .filter((plan) => plan.status === "confirmed")
+      .map((plan) => plan.planId),
+    submittedCount: Number(summary.submittedCount || 0),
+    failedSubmitCount: Number(summary.failedSubmitCount || 0),
+    deferredCount: Number(summary.deferredCount || 0),
+    replayed: true
+  };
+}
+
+export async function confirmBatchPlan(context, batchId, request = {}) {
+  if (!request.idempotencyKey) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 必填", { field: "idempotencyKey" });
+  }
+  const requestHash = hashPayload({ batchId, ...request });
+  return runIdempotentOperation(
+    context,
+    "batch_plan_confirm",
+    request.idempotencyKey,
+    requestHash,
+    async () => {
+      const confirmed = await confirmBatchPlanOnce(context, batchId, request);
+      const submitted = await submitPendingGenerationTasks(context, batchId);
+      await recordTelemetryEvent(context, "seedance_plan_confirmed", {
+        batchId,
+        confirmedPlanCount: confirmed.confirmedPlanIds.length,
+        resumed: Boolean(confirmed.resumed)
+      }, { audit: true }).catch((error) => {
+        console.warn(`[wangzhuan] failed to record Seedance plan confirmation telemetry for ${batchId}: ${error.message}`);
+      });
+      return {
+        ...submitted,
+        batch: submitted.batch,
+        confirmedBatch: confirmed.batch,
+        confirmedPlanIds: confirmed.confirmedPlanIds
+      };
+    },
+    {
+      resourceType: "batch",
+      replayResponse: (summary) => replayConfirmedBatchPlan(context, batchId, summary)
+    }
+  );
 }
 
 export async function confirmBatchAssets(context, batchId, request = {}) {
@@ -1941,3 +2227,7 @@ export {
   readBatch,
   writeTaskMaps
 };
+
+export const __pipelineTestHooks = Object.freeze({
+  submitTaskToSeedance
+});

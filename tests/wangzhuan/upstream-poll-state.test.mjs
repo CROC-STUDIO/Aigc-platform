@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { __upstreamPollTestHooks, statusAfterTaskWrite } from "../../server/wangzhuan/upstream-poll.mjs";
 import { listStateTransitionRules } from "../../server/wangzhuan/mysql-facts.mjs";
+import { isBatchGenerationActive } from "../../public/wangzhuan-common.js";
 
 test("statusAfterTaskWrite keeps run non-terminal when downloaded_output sees failed tasks", () => {
   const batch = { status: "running" };
@@ -31,6 +32,45 @@ test("statusAfterTaskWrite preserves terminal batch states", () => {
   ];
 
   assert.equal(statusAfterTaskWrite(batch, tasks), "partial_failed");
+});
+
+test("terminal partial batch keeps polling a waiting upstream task", () => {
+  const { batchNeedsUpstreamPoll } = __upstreamPollTestHooks;
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "partial_failed",
+    tasks: [{ status: "waiting_upstream", seedanceTaskId: "aigc_waiting" }]
+  }), true);
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "qc",
+    tasks: [{ status: "failed", errorCode: "upstream_failed" }]
+  }), false);
+});
+
+test("pending work keeps polling when no submission slot was claimed", () => {
+  const { batchNeedsUpstreamPoll } = __upstreamPollTestHooks;
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "partial_failed",
+    tasks: [{ status: "pending" }]
+  }), true);
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "queued",
+    tasks: [{ status: "pending" }]
+  }), true);
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "draft",
+    tasks: [{ status: "pending" }]
+  }), false);
+  assert.equal(batchNeedsUpstreamPoll({
+    status: "preview_required",
+    tasks: [{ status: "pending" }]
+  }), false);
+});
+
+test("partial failed batch remains active while a Seedance task is waiting", () => {
+  assert.equal(isBatchGenerationActive(
+    { status: "partial_failed" },
+    [{ status: "waiting_upstream" }]
+  ), true);
 });
 
 test("state transition rules allow pending continuity task to fail during downloaded_output writeback", () => {

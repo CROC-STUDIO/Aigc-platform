@@ -55,7 +55,7 @@ curl -I http://127.0.0.1:5177/
 
 ```bash
 cd /Users/lucy/Desktop/project/Aigc-platform
-bash .release/deploy-local.sh
+bash .release/deploy-local.sh --production code-only
 ```
 
 等价步骤：

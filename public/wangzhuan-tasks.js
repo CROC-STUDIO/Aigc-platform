@@ -11,6 +11,7 @@ import {
   escapeHtml,
   formatTimestamp,
   idempotencyKey,
+  isBatchGenerationActive,
   isBatchQcRunnable,
   operationLabels,
   remixStatusLabels,
@@ -62,6 +63,7 @@ const state = {
   selectedProjectKey: "",
   activeProjectKey: "",
   detail: null,
+  pollError: "",
   stopPagePoll: null,
   loading: false,
   bootstrapped: false,
@@ -329,6 +331,12 @@ function updatePagePolling() {
     load: async () => {
       await loadSelectedDetail({ silent: true });
       return state.detail;
+    },
+    onError: (error) => {
+      const message = error?.message || "请求失败";
+      if (message === state.pollError) return;
+      state.pollError = message;
+      renderDetailPanel({ force: true });
     },
     shouldStop: () => !shouldPollPage(),
     interval: 4000
@@ -849,8 +857,8 @@ function renderRemixDetail(detail) {
 
 function shouldPollDetail(detail) {
   if (state.selectedType === "batch") {
-    const status = detail?.batch?.status;
-    return Boolean(status && !terminalBatchStatus(status));
+    return isBatchGenerationActive(detail?.batch, detail?.batch?.tasks || [])
+      || Boolean(detail?.batch?.status && !terminalBatchStatus(detail.batch.status));
   }
   const status = detail?.remix?.status;
   return Boolean(status && !["succeeded", "failed", "stopped"].includes(status));
@@ -876,9 +884,13 @@ function renderDetailPanel(options = {}) {
   }
   els.detail.hidden = false;
   els.detail.className = "wz-tasks-detail";
-  const nextHtml = state.selectedType === "remix"
+  const pollNotice = state.pollError
+    ? `<div class="wz-warning wz-tasks-notice" role="status"><strong>刷新失败，正在重试</strong><div>${escapeHtml(state.pollError)}</div></div>`
+    : "";
+  const detailHtml = state.selectedType === "remix"
     ? renderRemixDetail(state.detail)
     : renderBatchDetail(state.detail);
+  const nextHtml = `${pollNotice}${detailHtml}`;
   if (!force && els.detail.innerHTML === nextHtml) return;
   const scrollTop = els.detail.scrollTop;
   els.detail.innerHTML = nextHtml;
@@ -979,11 +991,12 @@ async function loadSelectedDetail(options = {}) {
     const nextDetail = await apiEnvelope(url);
     if (requestId !== state.detailRequestId) return;
     state.detail = nextDetail;
+    const hadPollError = Boolean(state.pollError);
+    state.pollError = "";
     const nextSignature = detailSignature(state.detail);
-    if (!silent || previousSignature !== nextSignature) {
-      renderDetailPanel({ force: !silent || previousSignature !== nextSignature });
+    if (!silent || previousSignature !== nextSignature || hadPollError) {
+      renderDetailPanel({ force: !silent || previousSignature !== nextSignature || hadPollError });
     }
-    updatePagePolling();
   } catch (error) {
     if (requestId !== state.detailRequestId) return;
     if (!silent) {
@@ -1005,11 +1018,13 @@ async function selectTask(type, id, projectKey = "") {
   state.selectedId = id;
   state.selectedProjectKey = projectKey;
   state.detail = null;
+  state.pollError = "";
   syncSelectionUrl();
   renderTaskList();
   renderDetailPanel({ force: true });
   try {
     await loadSelectedDetail();
+    updatePagePolling();
   } catch (error) {
     renderError(els.globalError, error, "加载任务详情失败");
   }
@@ -1197,6 +1212,7 @@ async function refreshTasksPage(options = {}) {
   await loadTasks({ silent, autoSelect, scope, runType, page });
   if (state.selectedId) {
     await loadSelectedDetail({ silent });
+    updatePagePolling();
   } else {
     stopPagePolling();
     renderDetailPanel({ force: true });
