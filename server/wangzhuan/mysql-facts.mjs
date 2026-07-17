@@ -154,7 +154,8 @@ const SAME_STATUS_TRIGGERS = Object.freeze([
   "batch_created",
   "qc_completed",
   "stitch_progress",
-  "remix_write"
+  "remix_write",
+  "user_retry"
 ]);
 
 const RUN_STATUSES = Object.freeze([
@@ -228,6 +229,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_run", "running", "failed", "qc_completed", null, 1],
   ["workflow_run", "queued", "failed", "batch_write", null, 1],
   ["workflow_run", "failed", "running", "scheduler_retry", null, 0],
+  ["workflow_run", "failed", "running", "user_retry", null, 0],
   ["workflow_run", "failed", "running", "batch_write", null, 0],
   ["workflow_run", "failed", "succeeded", "qc_completed", null, 1],
   ["workflow_run", "failed", "partial_failed", "qc_completed", null, 1],
@@ -281,6 +283,7 @@ const STATE_TRANSITION_RULES = Object.freeze([
   ["workflow_task", "pending", "waiting_upstream", "batch_write", null, 0],
   ["workflow_task", "waiting_upstream", "pending", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "pending", "scheduler_retry", null, 0],
+  ["workflow_task", "failed", "pending", "user_retry", null, 0],
   ["workflow_task", "failed", "waiting_upstream", "scheduler_retry", null, 0],
   ["workflow_task", "failed", "waiting_upstream", "batch_write", null, 0],
   ["workflow_task", "failed", "downloaded", "batch_write", null, 0],
@@ -4453,7 +4456,17 @@ const IDEMPOTENCY_RESPONSE_CONTAINERS = new Set([
   "output",
   "outputs",
   "qc",
-  "downloadSummary"
+  "downloadSummary",
+  "task",
+  "results",
+  "summary",
+  "retryInfo",
+  "automatic",
+  "submitted",
+  "repairRequired",
+  "exhausted",
+  "inProgress",
+  "unavailable"
 ]);
 
 function safeIdempotencyResponseKey(key = "") {

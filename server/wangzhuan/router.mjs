@@ -7,7 +7,15 @@ import { makeRequestId } from "./ids.mjs";
 import { saveBatchDraft } from "./batch-drafts.mjs";
 import { publicLlmConfig, publicQcLlmConfig } from "./llm-config.mjs";
 import { buildDownloadPackage } from "./package.mjs";
-import { confirmBatchAssets, confirmBatchPlan, getBatchDetail, getActiveBatch, stopBatch } from "./pipeline.mjs";
+import {
+  confirmBatchAssets,
+  confirmBatchPlan,
+  getBatchDetail,
+  getActiveBatch,
+  retryFailedGenerationTasksForUser,
+  retryGenerationTaskForUser,
+  stopBatch
+} from "./pipeline.mjs";
 import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
 import { uploadPostProcessEnding } from "./postprocess.mjs";
 import { runBatchQc } from "./qc.mjs";
@@ -124,6 +132,18 @@ function batchRoute(pathname) {
   const match = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})(?:\/(stop|retry-stitch|qc|confirm-plan|confirm-assets))?$/);
   if (!match) return null;
   return { batchId: match[1], action: match[2] || "detail" };
+}
+
+function segmentRetryRoute(pathname) {
+  const bulkMatch = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/tasks\/retry-failed$/);
+  if (bulkMatch) return { batchId: bulkMatch[1], action: "retry_failed", taskId: "" };
+  const taskMatch = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/tasks\/([^/]+)\/retry$/);
+  if (!taskMatch) return null;
+  return {
+    batchId: taskMatch[1],
+    action: "retry_one",
+    taskId: decodeURIComponent(taskMatch[2])
+  };
 }
 
 function remixRoute(pathname) {
@@ -928,6 +948,23 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         }, requestId);
       }
       return sendOk(res, publicJob, requestId);
+    }
+    const segmentRetry = segmentRetryRoute(url.pathname);
+    if (segmentRetry && req.method === "POST" && segmentRetry.action === "retry_one") {
+      const retryOne = scoped.retryGenerationTaskForUser || retryGenerationTaskForUser;
+      return sendOk(
+        res,
+        await retryOne(scoped, segmentRetry.batchId, segmentRetry.taskId, await context.readJson(req)),
+        requestId
+      );
+    }
+    if (segmentRetry && req.method === "POST" && segmentRetry.action === "retry_failed") {
+      const retryFailed = scoped.retryFailedGenerationTasksForUser || retryFailedGenerationTasksForUser;
+      return sendOk(
+        res,
+        await retryFailed(scoped, segmentRetry.batchId, await context.readJson(req)),
+        requestId
+      );
     }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {

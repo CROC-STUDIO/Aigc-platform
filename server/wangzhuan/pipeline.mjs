@@ -1747,7 +1747,7 @@ export async function submitPendingGenerationTasks(context, batchId) {
   };
 }
 
-export async function retryFailedGenerationTask(context, batchId, generationTaskId) {
+export async function retryFailedGenerationTask(context, batchId, generationTaskId, options = {}) {
   const batch = await readBatch(context, batchId);
   if (batch.status === "stopped") {
     return { batch, retriedCount: 0 };
@@ -1784,7 +1784,7 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
       });
     }
     const retryInfo = {
-      automatic: true,
+      automatic: options.automatic !== false,
       retriedAt: now,
       priorErrorCode: task.errorCode || "upstream_failed",
       priorErrorMessage: task.errorMessage || "Seedance 上游任务失败",
@@ -1813,7 +1813,8 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   // run. Keep terminal partial/qc status while the task is resubmitted; the
   // task-level scheduler and upstream poll job will advance it later.
   const retryBatchStatus = ["qc", "partial_failed"].includes(batch.status) ? batch.status : "running";
-  const reset = await writeBatchWithTrigger(context, { ...batch, status: retryBatchStatus, tasks }, "scheduler_retry");
+  const triggerName = options.triggerName || (options.automatic === false ? "user_retry" : "scheduler_retry");
+  const reset = await writeBatchWithTrigger(context, { ...batch, status: retryBatchStatus, tasks }, triggerName);
   await writeTaskMaps(context, reset);
   const submitted = await submitPendingGenerationTasks(context, batchId);
   const saved = submitted.batch;
@@ -1833,6 +1834,146 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
     });
   }
   return { ...submitted, batch: saved, retriedCount };
+}
+
+function requiredManualRetryIdempotencyKey(request = {}) {
+  const idempotencyKey = String(request.idempotencyKey || "").trim();
+  if (!idempotencyKey) {
+    throw new WangzhuanError("validation_error", "重试请求缺少 idempotencyKey", {
+      field: "idempotencyKey"
+    });
+  }
+  if (idempotencyKey.length > 200) {
+    throw new WangzhuanError("validation_error", "idempotencyKey 长度不能超过 200", {
+      field: "idempotencyKey",
+      maxLength: 200
+    });
+  }
+  return idempotencyKey;
+}
+
+function manualRetryStateError(batchId, generationTaskId, eligibility) {
+  const data = {
+    batchId,
+    generationTaskId,
+    availability: eligibility.status,
+    reason: eligibility.reason
+  };
+  if (eligibility.status === "repair_required") {
+    return new WangzhuanError("repair_required", "片段需要先修复素材或上传替换视频", data, 409);
+  }
+  if (eligibility.status === "retry_exhausted") {
+    return new WangzhuanError("retry_exhausted", "片段重试次数已耗尽", data, 409);
+  }
+  return new WangzhuanError("invalid_state_transition", "片段当前状态不可重试", data, 409);
+}
+
+function manualRetryOperation(context) {
+  return typeof context.runIdempotentOperation === "function"
+    ? context.runIdempotentOperation
+    : runIdempotentOperation;
+}
+
+function failedTaskRetryOperation(context) {
+  return typeof context.retryFailedGenerationTaskForTest === "function"
+    ? context.retryFailedGenerationTaskForTest
+    : retryFailedGenerationTask;
+}
+
+export async function retryGenerationTaskForUser(context, batchId, generationTaskId, request = {}) {
+  validateBatchId(batchId);
+  const idempotencyKey = requiredManualRetryIdempotencyKey(request);
+  const endpoint = "segment_retry";
+  const requestHash = hashPayload({ batchId, generationTaskId });
+  const runIdempotent = manualRetryOperation(context);
+  return runIdempotent(
+    context,
+    endpoint,
+    idempotencyKey,
+    requestHash,
+    async () => {
+      const batch = enrichSegmentRecovery(await readBatch(context, batchId));
+      const task = batch.tasks.find((item) => item.generationTaskId === generationTaskId);
+      if (!task) throw new WangzhuanError("task_not_found", "任务不存在", { batchId, generationTaskId }, 404);
+      if (task.retryEligibility.status !== "retryable") {
+        throw manualRetryStateError(batchId, generationTaskId, task.retryEligibility);
+      }
+      const retryTask = failedTaskRetryOperation(context);
+      const result = await retryTask(context, batchId, generationTaskId, {
+        automatic: false,
+        triggerName: "user_retry"
+      });
+      return {
+        ...result,
+        task: result.batch?.tasks?.find((item) => item.generationTaskId === generationTaskId) || task
+      };
+    },
+    { resourceType: "batch" }
+  );
+}
+
+export async function retryFailedGenerationTasksForUser(context, batchId, request = {}) {
+  validateBatchId(batchId);
+  const idempotencyKey = requiredManualRetryIdempotencyKey(request);
+  const endpoint = "segment_retry_failed";
+  const requestHash = hashPayload({ batchId });
+  const runIdempotent = manualRetryOperation(context);
+  return runIdempotent(
+    context,
+    endpoint,
+    idempotencyKey,
+    requestHash,
+    async () => {
+      const batch = enrichSegmentRecovery(await readBatch(context, batchId));
+      const summary = {
+        submitted: 0,
+        repairRequired: 0,
+        exhausted: 0,
+        inProgress: 0,
+        unavailable: 0
+      };
+      const results = [];
+      let latestBatch = batch;
+      const retryTask = failedTaskRetryOperation(context);
+      for (const task of batch.tasks) {
+        const availability = task.retryEligibility.status;
+        if (availability === "repair_required") summary.repairRequired += 1;
+        else if (availability === "retry_exhausted") summary.exhausted += 1;
+        else if (availability === "running") summary.inProgress += 1;
+        else if (availability === "unavailable") summary.unavailable += 1;
+
+        if (availability !== "retryable") {
+          results.push({
+            taskId: task.generationTaskId,
+            status: availability,
+            reason: task.retryEligibility.reason
+          });
+          continue;
+        }
+        try {
+          const result = await retryTask(context, batchId, task.generationTaskId, {
+            automatic: false,
+            triggerName: "user_retry"
+          });
+          latestBatch = result.batch || latestBatch;
+          summary.submitted += Number(result.retriedCount || 0);
+          results.push({
+            taskId: task.generationTaskId,
+            status: Number(result.retriedCount || 0) > 0 ? "submitted" : "skipped",
+            retriedCount: Number(result.retriedCount || 0)
+          });
+        } catch (error) {
+          results.push({
+            taskId: task.generationTaskId,
+            status: "failed",
+            code: error?.code || "internal_error"
+          });
+        }
+      }
+      return { batch: latestBatch, summary, results };
+    },
+    { resourceType: "batch" }
+  );
 }
 
 function currentPlanIds(batch, request = {}) {
