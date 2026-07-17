@@ -12,8 +12,10 @@ import {
   confirmBatchPlan,
   getBatchDetail,
   getActiveBatch,
+  MAX_SEGMENT_REPLACEMENT_BYTES,
   retryFailedGenerationTasksForUser,
   retryGenerationTaskForUser,
+  uploadSegmentReplacement,
   stopBatch
 } from "./pipeline.mjs";
 import { uploadDisclaimerOverlayAsset, uploadProductAsset } from "./product-assets.mjs";
@@ -137,6 +139,14 @@ function batchRoute(pathname) {
 function segmentRetryRoute(pathname) {
   const bulkMatch = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/tasks\/retry-failed$/);
   if (bulkMatch) return { batchId: bulkMatch[1], action: "retry_failed", taskId: "" };
+  const replacementMatch = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/tasks\/([^/]+)\/replacement$/);
+  if (replacementMatch) {
+    return {
+      batchId: replacementMatch[1],
+      action: "replacement",
+      taskId: decodeURIComponent(replacementMatch[2])
+    };
+  }
   const taskMatch = pathname.match(/^\/api\/wangzhuan\/batches\/(wzb_\d{14}_[a-f0-9]{4})\/tasks\/([^/]+)\/retry$/);
   if (!taskMatch) return null;
   return {
@@ -965,6 +975,22 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         await retryFailed(scoped, segmentRetry.batchId, await context.readJson(req)),
         requestId
       );
+    }
+    if (segmentRetry && req.method === "POST" && segmentRetry.action === "replacement") {
+      const form = await context.readMultipart(req, {
+        maxBytes: MAX_SEGMENT_REPLACEMENT_BYTES + (1024 * 1024)
+      });
+      const file = form.files?.file || form.files?.replacement || Object.values(form.files || {})[0];
+      if (!file?.buffer?.length) {
+        throw new WangzhuanError("validation_error", "请选择要上传的替换视频", { field: "file" });
+      }
+      const uploadReplacement = scoped.uploadSegmentReplacement || uploadSegmentReplacement;
+      return sendOk(res, await uploadReplacement(scoped, segmentRetry.batchId, segmentRetry.taskId, {
+        ...form.fields,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        buffer: file.buffer
+      }), requestId);
     }
     const batch = batchRoute(url.pathname);
     if (batch && req.method === "GET" && batch.action === "detail") {

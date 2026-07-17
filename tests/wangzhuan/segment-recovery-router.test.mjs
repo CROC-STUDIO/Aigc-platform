@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   retryFailedGenerationTasksForUser,
-  retryGenerationTaskForUser
+  retryGenerationTaskForUser,
+  uploadSegmentReplacement
 } from "../../server/wangzhuan/pipeline.mjs";
 import { handleWangzhuanRequest } from "../../server/wangzhuan/router.mjs";
 import {
@@ -270,4 +274,190 @@ test("state transition rules allow explicit user retry writes", () => {
     && rule.fromStatus === "failed"
     && rule.toStatus === "pending"
     && rule.triggerName === "user_retry"));
+  assert.ok(rules.some((rule) => rule.entityType === "workflow_run"
+    && rule.fromStatus === "partial_failed"
+    && rule.toStatus === "partial_failed"
+    && rule.triggerName === "user_replacement"));
+});
+
+async function replacementContext() {
+  const root = await mkdtemp(join(tmpdir(), "wz-segment-replacement-"));
+  let batch = buildBatch();
+  const writes = [];
+  return {
+    root,
+    userId: "tester",
+    user: { username: "tester", permissions: { "wangzhuan:view": true } },
+    userProjectRoot: root,
+    sharedProjectRoot: root,
+    readBatchForTest: async () => batch,
+    writeBatchForTest: async (next, triggerName) => {
+      batch = next;
+      writes.push({ batch: structuredClone(next), triggerName });
+      return next;
+    },
+    assertDecodableVideoForTest: async () => {},
+    probeVideoStreamHealthForTest: async () => ({
+      codecName: "h264",
+      profile: "High",
+      pixFmt: "yuv420p",
+      width: 720,
+      height: 1280,
+      durationSec: 10,
+      size: 4096
+    }),
+    syncWangzhuanAsset: async ({ fullPath }) => ({
+      storageKey: `segments/${fullPath.split("/").pop()}`,
+      storageUrl: `https://cdn.example.test/${fullPath.split("/").pop()}`
+    }),
+    get batch() {
+      return batch;
+    },
+    get writes() {
+      return writes;
+    }
+  };
+}
+
+test("replacement upload appends a validated segment output and keeps older replacements", async () => {
+  const context = await replacementContext();
+  try {
+    const first = await uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+      fileName: "replacement.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.alloc(4096, 1)
+    });
+    const second = await uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+      fileName: "replacement-v2.webm",
+      mimeType: "video/webm",
+      buffer: Buffer.alloc(4096, 2)
+    });
+
+    assert.equal(first.output.kind, "segment_video");
+    assert.equal(first.output.fulfillmentSource, "user_replacement");
+    assert.equal(first.output.durationSec, 10);
+    assert.equal(second.output.fulfillmentSource, "user_replacement");
+    assert.notEqual(second.output.outputId, first.output.outputId);
+    assert.equal(context.batch.outputs.filter((output) => output.fulfillmentSource === "user_replacement").length, 2);
+    assert.equal(
+      context.batch.tasks.find((task) => task.generationTaskId === "gen_be06_repair").currentOutputId,
+      second.output.outputId
+    );
+    assert.equal(context.writes.at(-1).triggerName, "user_replacement");
+    assert.equal((await readFile(join(context.root, second.output.filePath))).length, 4096);
+  } finally {
+    await rm(context.root, { recursive: true, force: true });
+  }
+});
+
+test("replacement upload validates state, extension, mime and size", async () => {
+  const context = await replacementContext();
+  try {
+    await assert.rejects(
+      uploadSegmentReplacement(context, BATCH_ID, "gen_missing", {
+        fileName: "replacement.mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.alloc(4096)
+      }),
+      (error) => error?.code === "task_not_found"
+    );
+    await assert.rejects(
+      uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+        fileName: "replacement.avi",
+        mimeType: "video/x-msvideo",
+        buffer: Buffer.alloc(4096)
+      }),
+      (error) => error?.code === "invalid_material"
+    );
+    await assert.rejects(
+      uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+        fileName: "replacement.mp4",
+        mimeType: "video/webm",
+        buffer: Buffer.alloc(4096)
+      }),
+      (error) => error?.code === "invalid_material"
+    );
+    await assert.rejects(
+      uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+        fileName: "replacement.mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.allocUnsafe((100 * 1024 * 1024) + 1)
+      }),
+      (error) => error?.code === "file_too_large"
+    );
+  } finally {
+    await rm(context.root, { recursive: true, force: true });
+  }
+});
+
+test("failed replacement probe leaves no output or temporary file", async () => {
+  const context = await replacementContext();
+  context.assertDecodableVideoForTest = async () => {
+    throw Object.assign(new Error("decode failed"), { code: "stitch_failed" });
+  };
+  try {
+    await assert.rejects(
+      uploadSegmentReplacement(context, BATCH_ID, "gen_be06_repair", {
+        fileName: "broken.mov",
+        mimeType: "video/quicktime",
+        buffer: Buffer.alloc(4096)
+      }),
+      (error) => error?.code === "invalid_video"
+    );
+
+    assert.equal(context.batch.outputs.length, 0);
+    const segmentDir = join(context.root, "批处理记录", "网赚管线", "batches", BATCH_ID, "segments");
+    assert.deepEqual(await readdir(segmentDir).catch(() => []), []);
+  } finally {
+    await rm(context.root, { recursive: true, force: true });
+  }
+});
+
+test("replacement route reads bounded multipart data and forwards the file", async () => {
+  const multipartCalls = [];
+  const uploadCalls = [];
+  const context = routerContext({}, {
+    readMultipart: async (_req, options) => {
+      multipartCalls.push(options);
+      return {
+        fields: {},
+        files: {
+          file: {
+            fileName: "replacement.mp4",
+            mimeType: "video/mp4",
+            buffer: Buffer.alloc(4096)
+          }
+        }
+      };
+    },
+    uploadSegmentReplacement: async (_scoped, batchId, taskId, request) => {
+      uploadCalls.push({ batchId, taskId, request });
+      return {
+        output: {
+          outputId: "out_be06_001",
+          kind: "segment_video",
+          fulfillmentSource: "user_replacement"
+        }
+      };
+    }
+  });
+  const response = await call(
+    "POST",
+    `/api/wangzhuan/batches/${BATCH_ID}/tasks/gen_be06_repair/replacement`,
+    {},
+    context
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.data.output.fulfillmentSource, "user_replacement");
+  assert.equal(multipartCalls[0].maxBytes, (100 * 1024 * 1024) + (1024 * 1024));
+  assert.equal(uploadCalls[0].request.buffer.length, 4096);
+});
+
+test("server multipart reader enforces a byte limit", async () => {
+  const source = await readFile(new URL("../../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /async function readRequestBuffer\(req, options = \{\}\)/);
+  assert.match(source, /size > maxBytes/);
+  assert.match(source, /file_too_large/);
+  assert.match(source, /readRequestBuffer\(req, options\)/);
 });

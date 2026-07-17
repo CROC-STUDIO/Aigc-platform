@@ -165,7 +165,7 @@ async function probeHasAudio(filePath) {
   }
 }
 
-async function probeVideoStreamHealth(filePath) {
+export async function probeVideoStreamHealth(filePath) {
   try {
     const { stdout } = await execFileAsync("ffprobe", [
       "-v", "error",
@@ -210,7 +210,7 @@ function isCorruptDecodeLog(text = "") {
     .test(String(text || ""));
 }
 
-async function assertDecodableVideo(filePath, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
+export async function assertDecodableVideo(filePath, { timeoutMs = DEFAULT_STITCH_TIMEOUT_MS } = {}) {
   if (!existsSync(filePath)) {
     throw new WangzhuanError("stitch_failed", "拼接输出文件不存在", { filePath });
   }

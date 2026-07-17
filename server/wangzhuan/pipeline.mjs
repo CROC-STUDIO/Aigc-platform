@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, extname, join } from "node:path";
 
 import { normalizeBranchDrafts, normalizeStoredBranchDrafts } from "./branches.mjs";
 import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { deriveSeedanceSlicesForGeneration, normalizeFissionAnalysis } from "./fission-analysis.mjs";
 import { WangzhuanError } from "./http.mjs";
-import { makeGenerationTaskId, makeScriptId } from "./ids.mjs";
+import { makeGenerationTaskId, makeOutputId, makeScriptId } from "./ids.mjs";
 import {
   claimPendingSeedanceTasks,
   hasWangzhuanFactsStore,
@@ -31,7 +31,7 @@ import {
   summarizeSeedanceRequest,
   summarizeSeedanceResponse
 } from "./seedance-provider.mjs";
-import { toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
+import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import {
   buildGenerationPlanRecord,
@@ -47,12 +47,19 @@ import { copyrightMusicRestriction, repairFormalPlanContract } from "./plan-repa
 import { listBackgroundJobs } from "./background-jobs.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
 import { enrichSegmentRecovery } from "./segment-recovery.mjs";
+import { assertDecodableVideo, probeVideoStreamHealth } from "./stitch.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
 const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc", "preview_required"]);
 const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "skipped", "stopped"]);
 const SLICE_ROLES = ["hook_slice", "proof_slice", "withdrawal_slice", "cta_slice"];
+export const MAX_SEGMENT_REPLACEMENT_BYTES = 100 * 1024 * 1024;
+const SEGMENT_REPLACEMENT_MIME_BY_EXT = new Map([
+  [".mp4", new Set(["video/mp4"])],
+  [".mov", new Set(["video/quicktime", "video/mov"])],
+  [".webm", new Set(["video/webm"])]
+]);
 const FISSION_SLICE_METADATA_FIELDS = [
   "storySegmentIndex",
   "seedanceSliceIndex",
@@ -1974,6 +1981,148 @@ export async function retryFailedGenerationTasksForUser(context, batchId, reques
     },
     { resourceType: "batch" }
   );
+}
+
+function nextReplacementOutputId(batch = {}) {
+  const maxSequence = Math.max(0, ...(Array.isArray(batch.outputs) ? batch.outputs : []).map((output) => {
+    const match = String(output.outputId || "").match(/^out_[a-f0-9]{4}_(\d{3})$/);
+    return match ? Number(match[1]) : 0;
+  }));
+  return makeOutputId(batch.batchId, maxSequence + 1);
+}
+
+function validateSegmentReplacementRequest(request = {}) {
+  const fileName = String(request.fileName || request.name || "replacement.mp4").trim();
+  const extension = extname(fileName).toLowerCase();
+  const allowedMimeTypes = SEGMENT_REPLACEMENT_MIME_BY_EXT.get(extension);
+  const mimeType = String(request.mimeType || "").trim().toLowerCase();
+  if (!allowedMimeTypes || (mimeType && !allowedMimeTypes.has(mimeType))) {
+    throw new WangzhuanError("invalid_material", "替换片段仅支持 MP4、MOV 或 WEBM 视频", {
+      field: "file",
+      allowedExts: [...SEGMENT_REPLACEMENT_MIME_BY_EXT.keys()]
+    });
+  }
+  if (!Buffer.isBuffer(request.buffer) || request.buffer.length === 0) {
+    throw new WangzhuanError("invalid_material", "替换片段文件为空", { field: "file" });
+  }
+  if (request.buffer.length > MAX_SEGMENT_REPLACEMENT_BYTES) {
+    throw new WangzhuanError("file_too_large", "替换片段超过 100 MB 大小上限", {
+      sizeBytes: request.buffer.length,
+      maxUploadBytes: MAX_SEGMENT_REPLACEMENT_BYTES
+    });
+  }
+  return {
+    fileName,
+    extension,
+    mimeType: mimeType || [...allowedMimeTypes][0],
+    buffer: request.buffer
+  };
+}
+
+export async function uploadSegmentReplacement(context, batchId, generationTaskId, request = {}) {
+  validateBatchId(batchId);
+  const upload = validateSegmentReplacementRequest(request);
+  const batch = enrichSegmentRecovery(await readBatch(context, batchId));
+  const task = batch.tasks.find((item) => item.generationTaskId === generationTaskId);
+  if (!task) throw new WangzhuanError("task_not_found", "任务不存在", { batchId, generationTaskId }, 404);
+  if (!["repair_required", "retry_exhausted", "replacement_ready"].includes(task.availability)) {
+    throw new WangzhuanError("invalid_state_transition", "当前片段状态不支持上传替换视频", {
+      batchId,
+      generationTaskId,
+      availability: task.availability
+    }, 409);
+  }
+
+  const outputId = nextReplacementOutputId(batch);
+  const segmentDir = join(batchDir(context, batchId), "segments");
+  const target = join(segmentDir, `${outputId}${upload.extension}`);
+  const temporaryTarget = join(segmentDir, `.${outputId}.uploading${upload.extension}`);
+  const assertVideo = context.assertDecodableVideoForTest || assertDecodableVideo;
+  const probeVideo = context.probeVideoStreamHealthForTest || probeVideoStreamHealth;
+  let persisted = false;
+  await mkdir(segmentDir, { recursive: true });
+  await writeFile(temporaryTarget, upload.buffer);
+  try {
+    let media;
+    try {
+      await assertVideo(temporaryTarget);
+      media = await probeVideo(temporaryTarget);
+      if (!(media?.width > 0) || !(media?.height > 0) || !(media?.durationSec > 0) || !media?.codecName) {
+        throw new Error("video stream metadata is incomplete");
+      }
+    } catch (error) {
+      throw new WangzhuanError("invalid_video", "替换片段无法完整解码，请重新导出后上传", {
+        fileName: upload.fileName,
+        reason: String(error?.message || "invalid video").slice(0, 300)
+      });
+    }
+
+    await rename(temporaryTarget, target);
+    const storage = await syncWangzhuanAsset(context, target, "pipeline_segment_replacement", { required: true });
+    const createdAt = new Date().toISOString();
+    const output = {
+      outputId,
+      sourceType: "pipeline",
+      batchId,
+      scriptId: task.scriptId,
+      branchId: task.branchId || "",
+      branchLabel: task.branchLabel || "",
+      branchVariantIndex: task.branchVariantIndex || 1,
+      generationTaskIds: [generationTaskId],
+      durationSec: Number(media.durationSec),
+      kind: "segment_video",
+      filePath: userRelative(context, target),
+      fileName: `${outputId}${upload.extension}`,
+      displayFileName: `${outputId}_replacement${upload.extension}`,
+      mimeType: upload.mimeType,
+      sizeBytes: upload.buffer.length,
+      width: Number(media.width),
+      height: Number(media.height),
+      codecName: media.codecName,
+      previewUrl: storage.storageUrl,
+      storageKey: storage.storageKey,
+      storageUrl: storage.storageUrl,
+      qcStatus: "not_started",
+      downloadEligible: false,
+      visualPreviewRequired: false,
+      previewConfirmed: false,
+      fulfillmentSource: "user_replacement",
+      createdBy: currentUserId(context),
+      createdAt
+    };
+    const tasks = batch.tasks.map((item) => item.generationTaskId === generationTaskId
+      ? {
+          ...item,
+          currentOutputId: outputId,
+          responseSummary: {
+            ...(item.responseSummary || {}),
+            currentOutputId: outputId,
+            fulfillmentSource: "user_replacement"
+          }
+        }
+      : item);
+    const saved = await writeBatchWithTrigger(context, {
+      ...batch,
+      tasks,
+      outputs: [...(Array.isArray(batch.outputs) ? batch.outputs : []), output]
+    }, "user_replacement");
+    persisted = true;
+    await recordTelemetryEvent(context, "segment_replacement_uploaded", {
+      batchId,
+      generationTaskId,
+      outputId,
+      sizeBytes: output.sizeBytes,
+      durationSec: output.durationSec
+    }, { audit: true }).catch(() => {});
+    return {
+      batch: saved,
+      output,
+      task: saved.tasks.find((item) => item.generationTaskId === generationTaskId)
+    };
+  } finally {
+    await rm(temporaryTarget, { force: true }).catch(() => {});
+    if (!persisted) await rm(target, { force: true }).catch(() => {});
+  }
 }
 
 function currentPlanIds(batch, request = {}) {

@@ -155,7 +155,8 @@ const SAME_STATUS_TRIGGERS = Object.freeze([
   "qc_completed",
   "stitch_progress",
   "remix_write",
-  "user_retry"
+  "user_retry",
+  "user_replacement"
 ]);
 
 const RUN_STATUSES = Object.freeze([
@@ -1851,6 +1852,7 @@ function taskRowToTask(row) {
   if (response.outputStorageUrl || row.output_storage_url) task.outputStorageUrl = response.outputStorageUrl || row.output_storage_url;
   if (request.continuityReference || response.continuityReference) task.continuityReference = request.continuityReference || response.continuityReference;
   if (request.retryInfo || response.retryInfo) task.retryInfo = request.retryInfo || response.retryInfo;
+  if (response.currentOutputId) task.currentOutputId = response.currentOutputId;
   if (Object.keys(request).length) task.requestSummary = request;
   if (Object.keys(response).length) task.responseSummary = response;
   return task;
@@ -3402,6 +3404,7 @@ function fileNameFromPath(value, fallback = "file") {
 function outputForTask(batch, task, uidValue) {
   const outputs = Array.isArray(batch.outputs) ? batch.outputs : [];
   return outputs.find((output) => {
+    if (task.currentOutputId && output.outputId === task.currentOutputId) return true;
     if (task.outputId && output.outputId === task.outputId) return true;
     return Array.isArray(output.generationTaskIds) && output.generationTaskIds.includes(uidValue);
   }) || null;
@@ -4205,6 +4208,7 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         ...(task.responseSummary || {}),
         outputPath: task.outputPath || task.responseSummary?.outputPath || null,
         remoteUrlStored: task.remoteUrlStored ?? task.responseSummary?.remoteUrlStored,
+        ...(task.currentOutputId ? { currentOutputId: task.currentOutputId } : {}),
         ...(taskOutput?.outputId ? { outputId: taskOutput.outputId } : {}),
         ...(task.outputStorageKey || taskOutput?.storageKey ? { outputStorageKey: task.outputStorageKey || taskOutput?.storageKey } : {}),
         ...(task.outputStorageUrl || taskOutput?.storageUrl ? { outputStorageUrl: task.outputStorageUrl || taskOutput?.storageUrl } : {})

@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
 import { handleWangzhuanRequest } from "./server/wangzhuan/router.mjs";
+import { WangzhuanError } from "./server/wangzhuan/http.mjs";
 import { runDueSchedulerJobs } from "./server/wangzhuan/scheduler.mjs";
 import { resolveProjectFilePath } from "./server/project-file-paths.mjs";
 import { createAuthStore, publicUser } from "./server/auth-store.mjs";
@@ -3004,9 +3005,20 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function readRequestBuffer(req) {
+async function readRequestBuffer(req, options = {}) {
+  const maxBytes = Math.max(0, Number(options.maxBytes || 0));
   const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (maxBytes > 0 && size > maxBytes) {
+      throw new WangzhuanError("file_too_large", "上传文件超过大小上限", {
+        maxUploadBytes: maxBytes
+      });
+    }
+    chunks.push(buffer);
+  }
   return Buffer.concat(chunks);
 }
 
@@ -3027,11 +3039,11 @@ function parseContentDisposition(value = "") {
   return result;
 }
 
-async function readMultipart(req) {
+async function readMultipart(req, options = {}) {
   const contentType = req.headers["content-type"] || "";
   const boundary = parseMultipartBoundary(contentType);
   if (!boundary) throw new Error("multipart boundary missing");
-  const body = await readRequestBuffer(req);
+  const body = await readRequestBuffer(req, options);
   const delimiter = Buffer.from(`--${boundary}`);
   const fields = {};
   const files = {};
