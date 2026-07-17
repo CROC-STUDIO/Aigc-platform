@@ -1912,6 +1912,14 @@ function outputRowToOutput(row, taskIds = []) {
   }
   if (probe.modelQcSummary && typeof probe.modelQcSummary === "object") output.modelQcSummary = probe.modelQcSummary;
   if (Array.isArray(probe.qcChecks) && probe.qcChecks.length) output.qcChecks = probe.qcChecks;
+  if (probe.fulfillmentSource) output.fulfillmentSource = probe.fulfillmentSource;
+  if (probe.manualStitch === true) output.manualStitch = true;
+  if (probe.stitchVersion !== undefined) output.stitchVersion = Number(probe.stitchVersion);
+  if (probe.stitchKind) output.stitchKind = probe.stitchKind;
+  if (Array.isArray(probe.sourceGroups)) output.sourceGroups = probe.sourceGroups;
+  if (Array.isArray(probe.segmentOutputIds)) output.segmentOutputIds = probe.segmentOutputIds;
+  if (probe.createdBy) output.createdBy = probe.createdBy;
+  if (probe.createdAt) output.createdAt = isoDate(probe.createdAt);
   const qcChecksFromReport = parseJsonValue(row.qc_checks_json ?? row.checks_json, []);
   if (Array.isArray(qcChecksFromReport) && qcChecksFromReport.length) output.qcChecks = qcChecksFromReport;
   if (row.qc_report_summary || row.qc_summary) output.qcSummary = row.qc_report_summary || row.qc_summary;
@@ -2150,6 +2158,43 @@ async function loadBatchByRunRow(conn, facts, run) {
     [run.id]
   );
   const tasks = taskRows.map((row) => taskRowToTask({ ...row, run_uid: run.run_uid, run_type: "pipeline" }));
+  const [attemptRows] = await conn.execute(
+    `SELECT
+      wt.task_uid,
+      ta.attempt_no,
+      ta.status,
+      ta.provider,
+      ta.upstream_task_id,
+      ta.started_at,
+      ta.finished_at,
+      ta.error_code,
+      ta.error_message,
+      ta.retryable
+    FROM task_attempts ta
+    JOIN workflow_tasks wt ON wt.id = ta.task_id
+    WHERE wt.run_id = ?
+    ORDER BY wt.id ASC, ta.attempt_no ASC`,
+    [run.id]
+  );
+  const attemptsByTaskUid = new Map();
+  for (const row of attemptRows) {
+    const taskUidValue = row.task_uid;
+    if (!attemptsByTaskUid.has(taskUidValue)) attemptsByTaskUid.set(taskUidValue, []);
+    attemptsByTaskUid.get(taskUidValue).push({
+      attemptNo: Number(row.attempt_no || 0),
+      status: row.status || "",
+      provider: row.provider || "",
+      upstreamTaskId: row.upstream_task_id || "",
+      startedAt: isoDate(row.started_at),
+      finishedAt: isoDate(row.finished_at),
+      errorCode: row.error_code || "",
+      errorMessage: row.error_message || "",
+      retryable: row.retryable === 1 || row.retryable === true
+    });
+  }
+  for (const task of tasks) {
+    task.attemptHistory = attemptsByTaskUid.get(task.generationTaskId) || [];
+  }
   const [retryRows] = await conn.execute(
     `SELECT wt.task_uid, sj.status, sj.attempts, sj.max_attempts, sj.last_error_code, sj.last_error_message
     FROM ${schedulerJobsTableName} sj

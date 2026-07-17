@@ -46,6 +46,7 @@ import {
 import { copyrightMusicRestriction, repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
+import { enrichSegmentRecovery } from "./segment-recovery.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
@@ -1565,6 +1566,7 @@ export async function getBatchDetail(context, batchId) {
   let detail = await loadBatchDetailFromMysql(context, batchId);
   if (!detail?.batch) throw new WangzhuanError("batch_not_found", "批次不存在", { batchId });
   detail = await enrichBatchWorkbenchContext(context, detail);
+  detail = { ...detail, batch: enrichSegmentRecovery(detail.batch) };
   detail = await attachBackgroundJobSummaries(context, detail);
   return detail;
 }
