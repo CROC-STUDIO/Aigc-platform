@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { normalizeBranchDrafts, normalizeStoredBranchDrafts } from "./branches.mjs";
-import { ensureAssetReviewsApproved, validateAssetReviewState } from "./asset-review.mjs";
+import { ensureAssetReviewsApproved, reviewSeedanceAsset, validateAssetReviewState } from "./asset-review.mjs";
 import { getChannelRules } from "./channel-rules.mjs";
 import { deriveSeedanceSlicesForGeneration, normalizeFissionAnalysis } from "./fission-analysis.mjs";
 import { WangzhuanError } from "./http.mjs";
@@ -46,11 +48,12 @@ import {
 import { copyrightMusicRestriction, repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
-import { enrichSegmentRecovery } from "./segment-recovery.mjs";
+import { currentSegmentOutput, enrichSegmentRecovery } from "./segment-recovery.mjs";
 import { assertDecodableVideo, probeVideoStreamHealth } from "./stitch.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
 const MODEL_VIDEO = DEFAULT_SEEDANCE_MODEL;
+const execFileAsync = promisify(execFile);
 const STOPPABLE_BATCH_STATUSES = new Set(["draft", "checking", "queued", "running", "stitching", "qc", "preview_required"]);
 const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "skipped", "stopped"]);
 const SLICE_ROLES = ["hook_slice", "proof_slice", "withdrawal_slice", "cta_slice"];
@@ -681,6 +684,27 @@ async function buildSeedanceTaskPayload(context, batch, task, provider) {
   });
 }
 
+function continuityParentForTask(task = {}) {
+  const reference = task.continuityReference || task.requestSummary?.continuityReference || {};
+  if (!task.previousSliceId && !reference.sourceGenerationTaskId) return null;
+  return {
+    generationTaskId: reference.sourceGenerationTaskId || "",
+    continuitySliceId: reference.sourceContinuitySliceId || task.previousSliceId || "",
+    attemptNo: Number(reference.sourceAttempt || 0),
+    outputId: reference.sourceOutputId || "",
+    outputPath: reference.sourceOutputPath || ""
+  };
+}
+
+function buildTaskRequestSummary(task, payload, provider) {
+  const continuityParent = continuityParentForTask(task);
+  return {
+    ...(task.requestSummary || {}),
+    ...summarizeSeedanceRequest(payload, provider),
+    ...(continuityParent ? { continuityParent } : {})
+  };
+}
+
 async function submitTaskToSeedance(context, batch, task, provider, now, leaseOwner) {
   if (!provider) {
     throw new WangzhuanError("upstream_failed", "Seedance 未配置，无法提交生成任务", {
@@ -695,7 +719,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
   let submissionMarkedSent = false;
   try {
     payload = await buildSeedanceTaskPayload(context, batch, task, provider);
-    const requestSummary = summarizeSeedanceRequest(payload, provider);
+    const requestSummary = buildTaskRequestSummary(task, payload, provider);
     try {
       await markSeedanceTaskSubmissionSent(context, {
         batchId: batch.batchId,
@@ -740,7 +764,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
       errorMessage: submissionUnknown
         ? "Seedance 提交结果未知，已停止自动重试以避免重复扣费"
         : error?.message || "Seedance 上游请求失败",
-      requestSummary: summarizeSeedanceRequest(payload, provider),
+      requestSummary: buildTaskRequestSummary(task, payload, provider),
       responseSummary: {
         status: submissionUnknown ? "submission_unknown" : "failed",
         upstreamCode: error?.data?.upstreamCode || error?.code || "",
@@ -764,7 +788,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
       finishedAt: now,
       errorCode: "submission_unknown",
       errorMessage: "Seedance 上游响应缺少 task id，已停止自动重试以避免重复扣费",
-      requestSummary: summarizeSeedanceRequest(payload, provider),
+      requestSummary: buildTaskRequestSummary(task, payload, provider),
       responseSummary: {
         ...summarizeSeedanceResponse(result),
         ...(retryInfo ? { retryInfo } : {})
@@ -786,7 +810,7 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
     errorCode: undefined,
     errorMessage: undefined,
     nextAttemptAt: undefined,
-    requestSummary: summarizeSeedanceRequest(payload, provider),
+    requestSummary: buildTaskRequestSummary(task, payload, provider),
     responseSummary: {
       ...summarizeSeedanceResponse(result),
       ...(retryInfo ? { retryInfo } : {})
@@ -1786,6 +1810,7 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   }
   const now = new Date().toISOString();
   let found = false;
+  let continuityRetryQueued = false;
   const tasks = [];
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     if (task.generationTaskId !== generationTaskId) {
@@ -1794,7 +1819,9 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
     }
     found = true;
     const pendingRetry = task.status === "pending" && Boolean(task.retryInfo || task.responseSummary?.retryInfo);
-    if (task.status !== "failed" && !pendingRetry) {
+    const continuityStaleRetry = options.allowContinuityStale === true
+      && ["downloaded", "succeeded", "qc"].includes(task.status);
+    if (task.status !== "failed" && !pendingRetry && !continuityStaleRetry) {
       throw new WangzhuanError("invalid_state_transition", "任务当前状态不可重试", {
         batchId,
         generationTaskId,
@@ -1818,8 +1845,8 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
     const retryInfo = {
       automatic: options.automatic !== false,
       retriedAt: now,
-      priorErrorCode: task.errorCode || "upstream_failed",
-      priorErrorMessage: task.errorMessage || "Seedance 上游任务失败",
+      priorErrorCode: continuityStaleRetry ? "continuity_version_stale" : task.errorCode || "upstream_failed",
+      priorErrorMessage: continuityStaleRetry ? "前序片段已生成新版本" : task.errorMessage || "Seedance 上游任务失败",
       attempt: attempts + 1,
       maxAttempts
     };
@@ -1834,8 +1861,15 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
       finishedAt: undefined,
       errorCode: undefined,
       errorMessage: undefined,
+      continuityReference: undefined,
+      requestSummary: {
+        ...(task.requestSummary || {}),
+        continuityReference: undefined,
+        continuityParent: undefined
+      },
       responseSummary: { ...(task.responseSummary || {}), retryInfo }
     };
+    if (continuityStaleRetry) continuityRetryQueued = true;
     tasks.push(resetTask);
   }
   if (!found) {
@@ -1852,7 +1886,7 @@ export async function retryFailedGenerationTask(context, batchId, generationTask
   const saved = submitted.batch;
   const retried = saved.tasks.find((task) => task.generationTaskId === generationTaskId);
   const priorAttempts = Number(batch.tasks.find((task) => task.generationTaskId === generationTaskId)?.attempts || 0);
-  const retriedCount = Number(retried?.attempts || 0) > priorAttempts ? 1 : 0;
+  const retriedCount = Number(retried?.attempts || 0) > priorAttempts || continuityRetryQueued ? 1 : 0;
   if (retriedCount > 0) {
     await recordTelemetryEvent(context, "generation_task_retried", {
       batchId: saved.batchId,
@@ -1927,13 +1961,14 @@ export async function retryGenerationTaskForUser(context, batchId, generationTas
       const batch = enrichSegmentRecovery(await readBatch(context, batchId));
       const task = batch.tasks.find((item) => item.generationTaskId === generationTaskId);
       if (!task) throw new WangzhuanError("task_not_found", "任务不存在", { batchId, generationTaskId }, 404);
-      if (task.retryEligibility.status !== "retryable") {
+      if (!["retryable", "continuity_stale"].includes(task.retryEligibility.status)) {
         throw manualRetryStateError(batchId, generationTaskId, task.retryEligibility);
       }
       const retryTask = failedTaskRetryOperation(context);
       const result = await retryTask(context, batchId, generationTaskId, {
         automatic: false,
-        triggerName: "user_retry"
+        triggerName: "user_retry",
+        allowContinuityStale: task.retryEligibility.status === "continuity_stale"
       });
       return {
         ...result,
@@ -2044,6 +2079,63 @@ function validateSegmentReplacementRequest(request = {}) {
   };
 }
 
+function continuityDependents(batch = {}, sourceTask = {}) {
+  const sourceSliceId = String(sourceTask.continuitySliceId || "");
+  if (!sourceSliceId) return [];
+  return (Array.isArray(batch.tasks) ? batch.tasks : []).filter((task) => {
+    return task.generationTaskId !== sourceTask.generationTaskId
+      && task.branchId === sourceTask.branchId
+      && Number(task.branchVariantIndex || task.variantIndex || 1)
+        === Number(sourceTask.branchVariantIndex || sourceTask.variantIndex || 1)
+      && String(task.previousSliceId || "") === sourceSliceId;
+  });
+}
+
+async function prepareReplacementContinuityReference(context, batch, task, output, sourcePath) {
+  if (typeof context.prepareReplacementContinuityReferenceForTest === "function") {
+    return context.prepareReplacementContinuityReferenceForTest({ batch, task, output, sourcePath });
+  }
+  const target = join(batchDir(context, batch.batchId), "continuity", `${output.outputId}_last_frame.jpg`);
+  await mkdir(dirname(target), { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-sseof", "-0.2",
+    "-i", sourcePath,
+    "-frames:v", "1",
+    "-q:v", "2",
+    target
+  ], {
+    timeout: 30000,
+    windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  const storage = await syncWangzhuanAsset(context, target, "pipeline_continuity_frame", { required: true });
+  const storedPath = userRelative(context, target);
+  const review = await reviewSeedanceAsset(context, {
+    branchId: task.branchId || "",
+    assetKey: "continuityFrame",
+    fileName: `${output.outputId}_last_frame.jpg`,
+    mimeType: "image/jpeg",
+    buffer: await readFile(target),
+    storageUrl: storage.storageUrl,
+    storageKey: storage.storageKey,
+    storedPath
+  });
+  return {
+    sourceGenerationTaskId: task.generationTaskId,
+    sourceContinuitySliceId: task.continuitySliceId || "",
+    sourceOutputId: output.outputId,
+    sourceOutputPath: output.filePath,
+    sourceAttempt: Number(task.attempts || 0),
+    sourceKind: "user_replacement",
+    storedPath,
+    storageKey: storage.storageKey,
+    storageUrl: storage.storageUrl,
+    review,
+    createdAt: new Date().toISOString()
+  };
+}
+
 export async function uploadSegmentReplacement(context, batchId, generationTaskId, request = {}) {
   validateBatchId(batchId);
   const upload = validateSegmentReplacementRequest(request);
@@ -2115,17 +2207,53 @@ export async function uploadSegmentReplacement(context, batchId, generationTaskI
       createdBy: currentUserId(context),
       createdAt
     };
-    const tasks = batch.tasks.map((item) => item.generationTaskId === generationTaskId
-      ? {
+    const dependentIds = new Set(continuityDependents(batch, task).map((item) => item.generationTaskId));
+    const continuityReference = dependentIds.size
+      ? await prepareReplacementContinuityReference(context, batch, task, output, target)
+      : null;
+    const continuityApproved = continuityReference ? isApprovedContinuityReference(continuityReference) : false;
+    const tasks = batch.tasks.map((item) => {
+      if (item.generationTaskId === generationTaskId) {
+        return {
           ...item,
+          status: "downloaded",
+          outputPath: output.filePath,
           currentOutputId: outputId,
+          finishedAt: createdAt,
+          errorCode: undefined,
+          errorMessage: undefined,
           responseSummary: {
             ...(item.responseSummary || {}),
             currentOutputId: outputId,
+            outputPath: output.filePath,
             fulfillmentSource: "user_replacement"
           }
+        };
+      }
+      if (!dependentIds.has(item.generationTaskId) || !continuityReference) return item;
+      const shouldResume = continuityApproved
+        && (item.status === "failed" || !currentSegmentOutput(batch, item));
+      return {
+        ...item,
+        ...(shouldResume ? {
+          status: "pending",
+          seedanceTaskId: "",
+          providerJobId: "",
+          finishedAt: undefined,
+          errorCode: undefined,
+          errorMessage: undefined
+        } : !continuityApproved ? {
+          status: "failed",
+          errorCode: "asset_review_pending",
+          errorMessage: continuityReference.review?.reviewReason || "替换片段尾帧审核未通过"
+        } : {}),
+        continuityReference,
+        requestSummary: {
+          ...(item.requestSummary || {}),
+          continuityReference
         }
-      : item);
+      };
+    });
     const saved = await writeBatchWithTrigger(context, {
       ...batch,
       tasks,

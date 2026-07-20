@@ -75,6 +75,78 @@ function attemptHistoryFor(attemptsByTask, task) {
   return [...history].sort((left, right) => Number(left.attemptNo || 0) - Number(right.attemptNo || 0));
 }
 
+function latestContinuityParent(task = {}) {
+  const history = Array.isArray(task.attemptHistory) ? task.attemptHistory : [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (history[index]?.continuityParent) return history[index].continuityParent;
+  }
+  return task.requestSummary?.continuityParent || null;
+}
+
+function currentParentVersion(task = {}) {
+  const output = task.currentOutput || null;
+  const history = Array.isArray(task.attemptHistory) ? task.attemptHistory : [];
+  const latestSucceeded = [...history].reverse().find((attempt) => attempt.status === "succeeded");
+  return {
+    generationTaskId: taskUid(task),
+    continuitySliceId: String(task.continuitySliceId || ""),
+    attemptNo: Number(latestSucceeded?.attemptNo || task.attempts || 0),
+    outputId: String(output?.outputId || task.currentOutputId || ""),
+    outputPath: String(output?.filePath || task.outputPath || "")
+  };
+}
+
+function continuityParentMatches(recorded = {}, current = {}) {
+  if (!recorded || !current) return false;
+  if (recorded.generationTaskId && recorded.generationTaskId !== current.generationTaskId) return false;
+  if (recorded.continuitySliceId && recorded.continuitySliceId !== current.continuitySliceId) return false;
+  if (Number(recorded.attemptNo || 0) && Number(current.attemptNo || 0)
+    && Number(recorded.attemptNo) !== Number(current.attemptNo)) return false;
+  if (recorded.outputId && current.outputId && recorded.outputId !== current.outputId) return false;
+  if (recorded.outputPath && current.outputPath && recorded.outputPath !== current.outputPath) return false;
+  return true;
+}
+
+function applyContinuityRecoveryState(tasks = []) {
+  const bySliceId = new Map(tasks
+    .filter((task) => task.continuitySliceId)
+    .map((task) => [`${recoveryGroupKey(task)}:${task.continuitySliceId}`, task]));
+  return tasks.map((task) => {
+    const previousSliceId = String(task.previousSliceId || "");
+    if (!previousSliceId) return task;
+    const parent = bySliceId.get(`${recoveryGroupKey(task)}:${previousSliceId}`);
+    const parentVersion = parent ? currentParentVersion(parent) : null;
+    const recordedParent = latestContinuityParent(task);
+    const parentReady = Boolean(parent?.currentOutput && ["ready", "replacement_ready"].includes(parent.availability));
+    const continuityState = {
+      status: parentReady ? "ready" : "waiting_predecessor",
+      parentTaskId: parentVersion?.generationTaskId || "",
+      parentContinuitySliceId: previousSliceId,
+      parentAttemptNo: Number(parentVersion?.attemptNo || 0),
+      parentOutputId: parentVersion?.outputId || "",
+      recordedParentAttemptNo: Number(recordedParent?.attemptNo || 0),
+      recordedParentOutputId: recordedParent?.outputId || ""
+    };
+    if (!parentReady) {
+      return {
+        ...task,
+        continuityState,
+        retryEligibility: { status: "waiting_predecessor", canRetry: false, reason: "previous_slice_unavailable" },
+        availability: "waiting_predecessor"
+      };
+    }
+    if (task.currentOutput && (!recordedParent || !continuityParentMatches(recordedParent, parentVersion))) {
+      return {
+        ...task,
+        continuityState: { ...continuityState, status: "continuity_stale" },
+        retryEligibility: { status: "continuity_stale", canRetry: true, reason: "continuity_version_stale" },
+        availability: "continuity_stale"
+      };
+    }
+    return { ...task, continuityState };
+  });
+}
+
 function branchOrder(value = {}) {
   const explicit = Number(value.branchIndex);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -157,7 +229,7 @@ export function enrichSegmentRecovery(batch = {}, attemptsByTask = new Map()) {
       recoveryGroupKey: recoveryGroupKey(task)
     };
   });
-  return { ...batch, tasks };
+  return { ...batch, tasks: applyContinuityRecoveryState(tasks) };
 }
 
 export function groupRecoveryTasks(batch = {}) {
@@ -195,9 +267,10 @@ export function groupRecoveryTasks(batch = {}) {
 }
 
 export function classifyStitchSelection(batch = {}, outputIds = []) {
-  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const recoveryBatch = enrichSegmentRecovery(batch);
+  const tasks = recoveryBatch.tasks;
   const outputsById = new Map(
-    (Array.isArray(batch.outputs) ? batch.outputs : [])
+    (Array.isArray(recoveryBatch.outputs) ? recoveryBatch.outputs : [])
       .filter(isUsableSegmentOutput)
       .map((output) => [output.outputId, output])
   );
@@ -228,5 +301,34 @@ export function classifyStitchSelection(batch = {}, outputIds = []) {
     const selectedTaskIds = new Set(selectedTasks.filter(Boolean).map(taskUid));
     if (groupTasks.length > 0 && selectedTaskIds.size === groupTasks.length) kind = "complete";
   }
-  return { kind, sourceGroups, outputs: selected };
+  const selectedIndexes = new Map(selectedTasks
+    .map((task, index) => [task?.continuitySliceId, index])
+    .filter(([sliceId]) => sliceId));
+  const continuityErrors = [];
+  for (const [index, task] of selectedTasks.entries()) {
+    if (!task?.previousSliceId) continue;
+    if (task.continuityState?.status === "continuity_stale") {
+      continuityErrors.push({
+        code: "continuity_parent_stale",
+        generationTaskId: taskUid(task),
+        previousSliceId: task.previousSliceId
+      });
+      continue;
+    }
+    const parentIndex = selectedIndexes.get(task.previousSliceId);
+    if (parentIndex !== undefined && parentIndex >= index) {
+      continuityErrors.push({
+        code: "continuity_order_invalid",
+        generationTaskId: taskUid(task),
+        previousSliceId: task.previousSliceId
+      });
+    }
+  }
+  return {
+    kind,
+    sourceGroups,
+    outputs: selected,
+    continuityCompatible: continuityErrors.length === 0,
+    continuityErrors
+  };
 }

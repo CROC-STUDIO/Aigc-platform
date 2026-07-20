@@ -96,7 +96,16 @@ function fakeBatchPool() {
       finished_at: "2026-07-17 05:13:00.000",
       error_code: "upstream_timeout",
       error_message: "timeout",
-      retryable: 1
+      retryable: 1,
+      request_summary_json: JSON.stringify({
+        continuityParent: {
+          generationTaskId: "gen_parent",
+          continuitySliceId: "cg_story_slice_2",
+          attemptNo: 1,
+          outputId: "out_parent_v1",
+          outputPath: "segments/parent-v1.mp4"
+        }
+      })
     },
     {
       task_uid: "gen_be06_001",
@@ -108,7 +117,16 @@ function fakeBatchPool() {
       finished_at: "2026-07-17 05:14:00.000",
       error_code: "upstream_failed",
       error_message: "temporary provider failure",
-      retryable: 1
+      retryable: 1,
+      request_summary_json: JSON.stringify({
+        continuityParent: {
+          generationTaskId: "gen_parent",
+          continuitySliceId: "cg_story_slice_2",
+          attemptNo: 2,
+          outputId: "out_parent_v2",
+          outputPath: "segments/parent-v2.mp4"
+        }
+      })
     }
   ];
   const outputRows = [{
@@ -173,6 +191,8 @@ test("batch detail hydrates ordered task attempts and manual output metadata", a
   assert.deepEqual(detail.batch.tasks[0].attemptHistory.map((item) => item.attemptNo), [1, 2]);
   assert.equal(detail.batch.tasks[0].attemptHistory[0].retryable, true);
   assert.equal(detail.batch.tasks[0].attemptHistory[1].upstreamTaskId, "seedance_attempt_2");
+  assert.equal(detail.batch.tasks[0].attemptHistory[1].continuityParent.attemptNo, 2);
+  assert.equal(detail.batch.tasks[0].attemptHistory[1].continuityParent.outputId, "out_parent_v2");
   assert.equal(detail.batch.tasks[0].continuitySliceId, "cg_story_slice_3");
   assert.equal(detail.batch.tasks[0].previousSliceId, "cg_story_slice_2");
   assert.equal(detail.batch.tasks[0].continuityReferenceNeeded, true);
@@ -205,7 +225,7 @@ test("getBatchDetail exposes recovery eligibility and availability", async () =>
 
   assert.equal(detail.batch.tasks[0].branchVariantIndex, 1);
   assert.equal(detail.batch.tasks[0].segmentIndex, 1);
-  assert.equal(detail.batch.tasks[0].retryEligibility.status, "retryable");
-  assert.equal(detail.batch.tasks[0].availability, "retryable");
+  assert.equal(detail.batch.tasks[0].retryEligibility.status, "waiting_predecessor");
+  assert.equal(detail.batch.tasks[0].availability, "waiting_predecessor");
   assert.deepEqual(detail.batch.tasks[0].attemptHistory.map((item) => item.attemptNo), [1, 2]);
 });

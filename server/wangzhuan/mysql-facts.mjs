@@ -2193,7 +2193,8 @@ async function loadBatchByRunRow(conn, facts, run) {
       ta.finished_at,
       ta.error_code,
       ta.error_message,
-      ta.retryable
+      ta.retryable,
+      ta.request_summary_json
     FROM task_attempts ta
     JOIN workflow_tasks wt ON wt.id = ta.task_id
     WHERE wt.run_id = ?
@@ -2204,6 +2205,7 @@ async function loadBatchByRunRow(conn, facts, run) {
   for (const row of attemptRows) {
     const taskUidValue = row.task_uid;
     if (!attemptsByTaskUid.has(taskUidValue)) attemptsByTaskUid.set(taskUidValue, []);
+    const attemptRequest = parseJsonValue(row.request_summary_json, {});
     attemptsByTaskUid.get(taskUidValue).push({
       attemptNo: Number(row.attempt_no || 0),
       status: row.status || "",
@@ -2213,7 +2215,8 @@ async function loadBatchByRunRow(conn, facts, run) {
       finishedAt: isoDate(row.finished_at),
       errorCode: row.error_code || "",
       errorMessage: row.error_message || "",
-      retryable: row.retryable === 1 || row.retryable === true
+      retryable: row.retryable === 1 || row.retryable === true,
+      ...(attemptRequest.continuityParent ? { continuityParent: attemptRequest.continuityParent } : {})
     });
   }
   for (const task of tasks) {

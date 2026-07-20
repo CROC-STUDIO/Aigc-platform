@@ -184,6 +184,8 @@ function statusText(status) {
     retryable: "可重试",
     repair_required: "需修复素材",
     retry_exhausted: "重试已耗尽",
+    waiting_predecessor: "等待前序片段",
+    continuity_stale: "连续性版本已失效",
     unavailable: "不可用"
   }[status] || status || "未知";
 }
@@ -254,7 +256,7 @@ function taskActionMarkup(task, view = {}) {
     ? `<button type="button" class="mini ghost" data-upload-replacement="${taskUid}"${uploadDisabled}>上传替换片段</button>
        <input type="file" data-replacement-input="${taskUid}" accept="video/mp4,video/webm,video/quicktime" hidden>`
     : "";
-  const retry = task.availability === "retryable"
+  const retry = ["retryable", "continuity_stale"].includes(task.availability)
     ? `<button type="button" class="mini" data-retry-task="${taskUid}"${retryDisabled}>重试</button>`
     : "";
   const download = READY_STATES.has(task.availability) && task.currentOutput?.outputId
@@ -271,6 +273,7 @@ function attemptMarkup(task) {
     <span>${escapeHtml(attempt.status || "-")} · ${escapeHtml(attempt.provider || "-")}</span>
     <span>${escapeHtml(formatTime(attempt.startedAt))} → ${escapeHtml(formatTime(attempt.finishedAt))}</span>
     ${attempt.upstreamTaskId ? `<code>${escapeHtml(attempt.upstreamTaskId)}</code>` : ""}
+    ${attempt.continuityParent ? `<small>父尝试 ${escapeHtml(attempt.continuityParent.attemptNo || "-")} · ${escapeHtml(attempt.continuityParent.generationTaskId || "-")}</small>` : ""}
     ${attempt.errorMessage ? `<p>${escapeHtml(attempt.errorCode || "failed")} · ${escapeHtml(attempt.errorMessage)}</p>` : ""}
   </li>`).join("")}</ol>`;
 }
@@ -317,6 +320,9 @@ function renderModel(model, queue, view = {}) {
       const selectable = output?.outputId && model.outputsById.has(output.outputId);
       const expanded = view.expandedTaskIds?.has(taskId(task));
       const errorText = task.errorMessage || task.retryEligibility?.reason || "";
+      const continuityText = task.availability === "continuity_stale"
+        ? `父尝试 ${task.continuityState?.recordedParentAttemptNo || "-"} → 当前父尝试 ${task.continuityState?.parentAttemptNo || "-"}`
+        : task.availability === "waiting_predecessor" ? "等待前序片段可用" : "";
       return `<div class="wz-recovery-segment-wrap" data-task-id="${escapeHtml(taskId(task))}">
       <div class="wz-recovery-segment">
         <input type="checkbox" data-select-output="${escapeHtml(output?.outputId || "")}" ${checked ? "checked" : ""} ${selectable ? "" : "disabled"} aria-label="选择片段 ${escapeHtml(task.segmentIndex || 1)}">
@@ -324,7 +330,7 @@ function renderModel(model, queue, view = {}) {
         <span class="wz-recovery-segment-name"><strong>片段 ${escapeHtml(task.segmentIndex || 1)}</strong><small>${escapeHtml(task.segmentRole || task.title || task.scriptId || taskId(task))} · ${escapeHtml(task.durationSec || output?.durationSec || "-")}s</small></span>
         <span class="wz-recovery-status" data-status="${escapeHtml(task.availability)}">${escapeHtml(statusText(task.availability))}</span>
         <span class="wz-recovery-attempt"><strong>最新</strong><small>尝试 ${escapeHtml(task.attemptHistory?.length || task.attempts || 0)} · ${escapeHtml(formatTime(task.finishedAt || task.updatedAt))}</small></span>
-        <span class="wz-recovery-error" title="${escapeHtml(errorText)}">${escapeHtml(errorText || (output?.fulfillmentSource === "user_replacement" ? "用户替换" : "--"))}</span>
+        <span class="wz-recovery-error" title="${escapeHtml(errorText)}">${escapeHtml(continuityText || errorText || (output?.fulfillmentSource === "user_replacement" ? "用户替换" : "--"))}</span>
         <span class="wz-recovery-actions">${taskActionMarkup(task, view)}</span>
       </div>
       ${expanded ? `<div class="wz-recovery-detail">

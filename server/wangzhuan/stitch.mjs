@@ -1632,6 +1632,11 @@ async function createManualStitchVersionOnce(context, batchId, request) {
       resolvedOutputIds: selection.outputs.map((output) => output.outputId)
     });
   }
+  if (!selection.continuityCompatible) {
+    throw new WangzhuanError("continuity_lineage_mismatch", "拼接队列包含连续性版本已失效或顺序不兼容的片段", {
+      continuityErrors: selection.continuityErrors
+    }, 409);
+  }
   if (selection.kind === "mixed" && request.confirmMixed !== true) {
     throw new WangzhuanError("mixed_stitch_confirmation_required", "跨变体拼接需要先确认混合编排", {
       sourceGroups: selection.sourceGroups

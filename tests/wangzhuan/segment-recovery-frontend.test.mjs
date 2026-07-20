@@ -155,6 +155,37 @@ test("recovery view model groups variants and indexes only current selectable ou
   assert.equal(model.stitchVersions[0].stitchVersion, 1);
 });
 
+test("recovery UI shows predecessor wait, stale lineage, and parent attempt details", () => {
+  const batch = buildBatch();
+  batch.tasks[0] = {
+    ...batch.tasks[0],
+    availability: "waiting_predecessor",
+    continuityState: { parentTaskId: "gen_parent", parentAttemptNo: 2 }
+  };
+  batch.tasks[2] = {
+    ...batch.tasks[2],
+    availability: "continuity_stale",
+    retryEligibility: { status: "continuity_stale", canRetry: true },
+    continuityState: {
+      parentTaskId: "gen_parent",
+      parentAttemptNo: 2,
+      recordedParentAttemptNo: 1
+    },
+    attemptHistory: [{
+      attemptNo: 1,
+      status: "succeeded",
+      continuityParent: { generationTaskId: "gen_parent", attemptNo: 1 }
+    }]
+  };
+  const harness = controllerHarness();
+  harness.controller.update({ batch });
+
+  assert.match(harness.body.innerHTML, /等待前序片段/);
+  assert.match(harness.body.innerHTML, /连续性版本已失效/);
+  assert.match(harness.body.innerHTML, /父尝试 1/);
+  assert.match(harness.body.innerHTML, /当前父尝试 2/);
+});
+
 test("queue reconciliation removes stale ids and deduplicates without changing order", () => {
   const model = buildRecoveryViewModel(buildBatch());
 

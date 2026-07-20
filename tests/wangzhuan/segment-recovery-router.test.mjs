@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  retryFailedGenerationTask,
   retryFailedGenerationTasksForUser,
   retryGenerationTaskForUser,
   uploadSegmentReplacement
@@ -163,6 +164,100 @@ test("single user retry is idempotent and marks the retry as manual", async () =
   assert.equal(context.retryCalls[0].options.automatic, false);
 });
 
+test("stale continuity retry clears old lineage and queues recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wz-continuity-retry-"));
+  const parentTaskId = "gen_be06_parent";
+  const childTaskId = "gen_be06_child";
+  let batch = {
+    batchId: BATCH_ID,
+    userId: "tester",
+    status: "partial_failed",
+    tasks: [
+      {
+        generationTaskId: parentTaskId,
+        branchId: "branch_1",
+        branchVariantIndex: 1,
+        segmentIndex: 1,
+        status: "downloaded",
+        attempts: 2,
+        maxAttempts: 3,
+        continuityGroupId: "cg_story",
+        continuitySliceId: "cg_story_slice_1",
+        currentOutputId: "out_parent_v2"
+      },
+      {
+        generationTaskId: childTaskId,
+        branchId: "branch_1",
+        branchVariantIndex: 1,
+        segmentIndex: 2,
+        status: "downloaded",
+        attempts: 1,
+        maxAttempts: 3,
+        continuityGroupId: "cg_story",
+        continuitySliceId: "cg_story_slice_2",
+        previousSliceId: "cg_story_slice_1",
+        continuityReferenceNeeded: true,
+        currentOutputId: "out_child_v1",
+        continuityReference: {
+          sourceGenerationTaskId: parentTaskId,
+          sourceContinuitySliceId: "cg_story_slice_1",
+          sourceAttempt: 1,
+          sourceOutputId: "out_parent_v1"
+        },
+        requestSummary: {
+          continuityReference: { sourceAttempt: 1, sourceOutputId: "out_parent_v1" },
+          continuityParent: { generationTaskId: parentTaskId, attemptNo: 1, outputId: "out_parent_v1" }
+        }
+      }
+    ],
+    outputs: [
+      {
+        outputId: "out_parent_v2",
+        generationTaskId: parentTaskId,
+        kind: "segment_video",
+        filePath: "segments/parent-v2.mp4",
+        createdAt: "2026-07-20T04:00:00.000Z"
+      },
+      {
+        outputId: "out_child_v1",
+        generationTaskId: childTaskId,
+        kind: "segment_video",
+        filePath: "segments/child-v1.mp4",
+        createdAt: "2026-07-20T03:00:00.000Z"
+      }
+    ]
+  };
+  const context = {
+    userId: "tester",
+    sharedProjectRoot: root,
+    userProjectRoot: root,
+    user: { username: "tester", permissions: { "wangzhuan:view": true } },
+    seedanceProviderClient: { provider: "seedance", config: {} },
+    readBatchForTest: async () => batch,
+    writeBatchForTest: async (next) => {
+      batch = next;
+      return batch;
+    }
+  };
+
+  try {
+    const retried = await retryGenerationTaskForUser({
+      ...context,
+      runIdempotentOperation: async (_context, _endpoint, _key, _hash, operation) => operation(),
+      retryFailedGenerationTaskForTest: retryFailedGenerationTask
+    }, BATCH_ID, childTaskId, { idempotencyKey: "retry-stale-child" });
+
+    assert.equal(retried.retriedCount, 1);
+    assert.equal(retried.task.status, "pending");
+    assert.equal(retried.task.retryInfo.priorErrorCode, "continuity_version_stale");
+    assert.equal(retried.task.continuityReference, undefined);
+    assert.equal(retried.task.requestSummary.continuityReference, undefined);
+    assert.equal(retried.task.requestSummary.continuityParent, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("single user retry rejects repair-required tasks and missing idempotency keys", async () => {
   const context = serviceContext();
 
@@ -284,6 +379,13 @@ async function replacementContext() {
   const root = await mkdtemp(join(tmpdir(), "wz-segment-replacement-"));
   let batch = buildBatch();
   const writes = [];
+  batch.tasks[1].continuityGroupId = "cg_story";
+  batch.tasks[1].continuitySliceId = "cg_story_slice_2";
+  batch.tasks[2].continuityGroupId = "cg_story";
+  batch.tasks[2].continuitySliceId = "cg_story_slice_3";
+  batch.tasks[2].previousSliceId = "cg_story_slice_2";
+  batch.tasks[2].continuityReferenceNeeded = true;
+  batch.tasks[2].errorCode = "continuity_reference_failed";
   return {
     root,
     userId: "tester",
@@ -309,6 +411,15 @@ async function replacementContext() {
     syncWangzhuanAsset: async ({ fullPath }) => ({
       storageKey: `segments/${fullPath.split("/").pop()}`,
       storageUrl: `https://cdn.example.test/${fullPath.split("/").pop()}`
+    }),
+    prepareReplacementContinuityReferenceForTest: async ({ task, output }) => ({
+      sourceGenerationTaskId: task.generationTaskId,
+      sourceContinuitySliceId: task.continuitySliceId,
+      sourceOutputId: output.outputId,
+      sourceOutputPath: output.filePath,
+      sourceAttempt: Number(task.attempts || 0),
+      storedPath: "continuity/replacement-tail.jpg",
+      review: { assetId: "asset_replacement_tail", status: "approved" }
     }),
     get batch() {
       return batch;
@@ -344,6 +455,13 @@ test("replacement upload appends a validated segment output and keeps older repl
       second.output.outputId
     );
     assert.equal(context.writes.at(-1).triggerName, "user_replacement");
+    const sourceTask = context.batch.tasks.find((task) => task.generationTaskId === "gen_be06_repair");
+    const dependentTask = context.batch.tasks.find((task) => task.generationTaskId === "gen_be06_exhausted");
+    assert.equal(sourceTask.status, "downloaded");
+    assert.equal(sourceTask.outputPath, second.output.filePath);
+    assert.equal(dependentTask.status, "pending");
+    assert.equal(dependentTask.continuityReference.sourceOutputId, second.output.outputId);
+    assert.equal(dependentTask.continuityReference.review.assetId, "asset_replacement_tail");
     assert.equal((await readFile(join(context.root, second.output.filePath))).length, 4096);
   } finally {
     await rm(context.root, { recursive: true, force: true });

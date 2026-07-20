@@ -192,6 +192,48 @@ test("manual stitch requires mixed confirmation and current unique segment outpu
   }
 });
 
+test("manual stitch rejects stale and reversed continuity lineage", async () => {
+  const context = await testContext();
+  try {
+    const parent = context.batch.tasks[0];
+    const child = context.batch.tasks[1];
+    parent.continuityGroupId = "cg_story";
+    parent.continuitySliceId = "cg_story_slice_1";
+    parent.attempts = 2;
+    child.continuityGroupId = "cg_story";
+    child.continuitySliceId = "cg_story_slice_2";
+    child.previousSliceId = "cg_story_slice_1";
+    child.requestSummary = {
+      continuityParent: {
+        generationTaskId: parent.generationTaskId,
+        continuitySliceId: parent.continuitySliceId,
+        attemptNo: 1,
+        outputId: "out_parent_old"
+      }
+    };
+
+    await assert.rejects(
+      createManualStitchVersion(context, BATCH_ID, {
+        idempotencyKey: "stale-continuity",
+        segmentOutputIds: ["out_be06_001", "out_be06_002"]
+      }),
+      (error) => error?.code === "continuity_lineage_mismatch"
+    );
+
+    child.requestSummary.continuityParent.attemptNo = 2;
+    child.requestSummary.continuityParent.outputId = "out_be06_001";
+    await assert.rejects(
+      createManualStitchVersion(context, BATCH_ID, {
+        idempotencyKey: "reversed-continuity",
+        segmentOutputIds: ["out_be06_002", "out_be06_001"]
+      }),
+      (error) => error?.code === "continuity_lineage_mismatch"
+    );
+  } finally {
+    await rm(context.root, { recursive: true, force: true });
+  }
+});
+
 test("manual stitch idempotency replay does not append another version", async () => {
   const context = await testContext();
   try {

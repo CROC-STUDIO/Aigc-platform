@@ -81,7 +81,12 @@ function writebackFactsPool() {
       }
       if (text.includes("INSERT INTO task_attempts") && text.includes("VALUES (?, ?, 'running'")) {
         state.providerAttemptWrites += 1;
-        state.attemptRows.push({ attemptNo: Number(params[1]), status: "running", upstreamTaskId: null });
+        state.attemptRows.push({
+          attemptNo: Number(params[1]),
+          status: "running",
+          upstreamTaskId: null,
+          requestSummary: JSON.parse(params[4])
+        });
         return [{ affectedRows: 1 }];
       }
 
@@ -117,8 +122,14 @@ function writebackFactsPool() {
         if (current) {
           current.status = params[2];
           current.upstreamTaskId = params[4];
+          current.requestSummary = JSON.parse(params[10]);
         } else {
-          state.attemptRows.push({ attemptNo: Number(params[1]), status: params[2], upstreamTaskId: params[4] });
+          state.attemptRows.push({
+            attemptNo: Number(params[1]),
+            status: params[2],
+            upstreamTaskId: params[4],
+            requestSummary: JSON.parse(params[10])
+          });
         }
         return [{ affectedRows: 1 }];
       }
@@ -154,7 +165,16 @@ test("Seedance task id is written through its lease before the batch-level write
     provider: "seedance",
     attemptNo: 1,
     sentAt: "2026-07-17T03:00:00.000Z",
-    requestSummary: { model: "seedance", duration: 4 }
+    requestSummary: {
+      model: "seedance",
+      duration: 4,
+      continuityParent: {
+        generationTaskId: "gen_abcd_parent",
+        continuitySliceId: "cg_story_slice_1",
+        attemptNo: 2,
+        outputId: "out_parent_v2"
+      }
+    }
   });
   assert.equal(sent.attemptNo, 1);
   assert.equal(fake.state.requestSummary.submissionPhase, "sent");
@@ -171,7 +191,16 @@ test("Seedance task id is written through its lease before the batch-level write
       providerJobId: "aigc_remote_001",
       attempts: 1,
       startedAt: "2026-07-17T03:00:00.000Z",
-      requestSummary: { model: "seedance", duration: 4 },
+      requestSummary: {
+        model: "seedance",
+        duration: 4,
+        continuityParent: {
+          generationTaskId: "gen_abcd_parent",
+          continuitySliceId: "cg_story_slice_1",
+          attemptNo: 2,
+          outputId: "out_parent_v2"
+        }
+      },
       responseSummary: { status: "queued", taskId: "aigc_remote_001" }
     }
   });
@@ -182,7 +211,15 @@ test("Seedance task id is written through its lease before the batch-level write
   assert.equal(fake.state.leaseOwner, null);
   assert.equal(fake.state.requestSummary.submissionPhase, "accepted");
   assert.equal(fake.state.responseSummary.submissionPhase, "accepted");
-  assert.deepEqual(fake.state.attemptRows, [{ attemptNo: 1, status: "running", upstreamTaskId: "aigc_remote_001" }]);
+  assert.equal(fake.state.attemptRows[0].attemptNo, 1);
+  assert.equal(fake.state.attemptRows[0].status, "running");
+  assert.equal(fake.state.attemptRows[0].upstreamTaskId, "aigc_remote_001");
+  assert.deepEqual(fake.state.attemptRows[0].requestSummary.continuityParent, {
+    generationTaskId: "gen_abcd_parent",
+    continuitySliceId: "cg_story_slice_1",
+    attemptNo: 2,
+    outputId: "out_parent_v2"
+  });
   assert.equal(fake.state.runStatus, "running");
   assert.equal(fake.state.stateEvents, 2);
   assert.equal(fake.state.pollJobCreated, true);

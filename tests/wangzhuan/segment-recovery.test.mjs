@@ -180,3 +180,75 @@ test("stitch selection ignores missing and duplicate output ids", () => {
   assert.equal(result.kind, "partial");
   assert.deepEqual(result.outputs.map((output) => output.outputId), ["out_001"]);
 });
+
+test("recovery marks descendants waiting or stale against the current predecessor version", () => {
+  const batch = buildBatch();
+  const parent = batch.tasks[0];
+  const child = batch.tasks[1];
+  parent.continuityGroupId = "cg_story";
+  parent.continuitySliceId = "cg_story_slice_1";
+  parent.attempts = 2;
+  parent.currentOutputId = "out_001";
+  child.continuityGroupId = "cg_story";
+  child.continuitySliceId = "cg_story_slice_2";
+  child.previousSliceId = "cg_story_slice_1";
+  child.continuityReferenceNeeded = true;
+  child.attemptHistory = [{
+    attemptNo: 1,
+    status: "succeeded",
+    continuityParent: {
+      generationTaskId: parent.generationTaskId,
+      continuitySliceId: parent.continuitySliceId,
+      attemptNo: 1,
+      outputId: "out_parent_old",
+      outputPath: "segments/parent-old.mp4"
+    }
+  }];
+
+  const stale = enrichSegmentRecovery(batch);
+  assert.equal(stale.tasks[1].availability, "continuity_stale");
+  assert.equal(stale.tasks[1].retryEligibility.canRetry, true);
+  assert.equal(stale.tasks[1].continuityState.parentAttemptNo, 2);
+  assert.equal(stale.tasks[1].continuityState.recordedParentAttemptNo, 1);
+
+  const waitingBatch = structuredClone(batch);
+  waitingBatch.outputs = waitingBatch.outputs.filter((output) => output.outputId !== "out_001");
+  waitingBatch.tasks[0].currentOutputId = "";
+  waitingBatch.tasks[0].status = "failed";
+  waitingBatch.tasks[1].attemptHistory = [];
+  const waiting = enrichSegmentRecovery(waitingBatch);
+  assert.equal(waiting.tasks[1].availability, "waiting_predecessor");
+});
+
+test("stitch selection rejects stale lineage and reversed continuity order", () => {
+  const batch = buildBatch();
+  const parent = batch.tasks[0];
+  const child = batch.tasks[1];
+  parent.continuityGroupId = "cg_story";
+  parent.continuitySliceId = "cg_story_slice_1";
+  parent.attempts = 2;
+  child.continuityGroupId = "cg_story";
+  child.continuitySliceId = "cg_story_slice_2";
+  child.previousSliceId = "cg_story_slice_1";
+  child.requestSummary = {
+    continuityParent: {
+      generationTaskId: parent.generationTaskId,
+      continuitySliceId: parent.continuitySliceId,
+      attemptNo: 1,
+      outputId: "out_parent_old"
+    }
+  };
+
+  const stale = classifyStitchSelection(batch, ["out_001", "out_002"]);
+  assert.equal(stale.continuityCompatible, false);
+  assert.equal(stale.continuityErrors[0].code, "continuity_parent_stale");
+
+  child.requestSummary.continuityParent.attemptNo = 2;
+  child.requestSummary.continuityParent.outputId = "out_001";
+  const reversed = classifyStitchSelection(batch, ["out_002", "out_001"]);
+  assert.equal(reversed.continuityCompatible, false);
+  assert.equal(reversed.continuityErrors[0].code, "continuity_order_invalid");
+
+  const compatible = classifyStitchSelection(batch, ["out_001", "out_002"]);
+  assert.equal(compatible.continuityCompatible, true);
+});
