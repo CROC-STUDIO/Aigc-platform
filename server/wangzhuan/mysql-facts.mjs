@@ -1853,6 +1853,22 @@ function taskRowToTask(row) {
   if (response.outputStorageKey || row.output_storage_key) task.outputStorageKey = response.outputStorageKey || row.output_storage_key;
   if (response.outputStorageUrl || row.output_storage_url) task.outputStorageUrl = response.outputStorageUrl || row.output_storage_url;
   if (request.continuityReference || response.continuityReference) task.continuityReference = request.continuityReference || response.continuityReference;
+  for (const field of [
+    "storySegmentIndex",
+    "seedanceSliceIndex",
+    "continuityGroupId",
+    "continuitySliceId",
+    "continuitySequence",
+    "previousSliceId",
+    "continuityMode",
+    "boundaryType",
+    "startFrameState",
+    "endFrameState",
+    "continuityReferenceNeeded",
+    "globalContinuityAnchors"
+  ]) {
+    if (Object.hasOwn(request, field)) task[field] = request[field];
+  }
   if (request.retryInfo || response.retryInfo) task.retryInfo = request.retryInfo || response.retryInfo;
   if (response.currentOutputId) task.currentOutputId = response.currentOutputId;
   if (Object.keys(request).length) task.requestSummary = request;
@@ -4226,6 +4242,20 @@ export async function syncBatchFacts(context, batch, triggerName = "batch_write"
         ...(task.planId ? { planId: task.planId } : {}),
         ...(task.durationSec ? { durationSec: task.durationSec } : {}),
         ...(task.continuityReference ? { continuityReference: task.continuityReference } : {}),
+        ...Object.fromEntries([
+          "storySegmentIndex",
+          "seedanceSliceIndex",
+          "continuityGroupId",
+          "continuitySliceId",
+          "continuitySequence",
+          "previousSliceId",
+          "continuityMode",
+          "boundaryType",
+          "startFrameState",
+          "endFrameState",
+          "continuityReferenceNeeded",
+          "globalContinuityAnchors"
+        ].filter((field) => task[field] !== undefined).map((field) => [field, task[field]])),
         ...(task.promptStorageKey ? { promptStorageKey: task.promptStorageKey } : {}),
         ...(task.promptStorageUrl ? { promptStorageUrl: task.promptStorageUrl } : {}),
         ...(task.retryInfo ? { retryInfo: task.retryInfo } : {})

@@ -66,7 +66,19 @@ function fakeBatchPool() {
       branchLabel: "默认分支",
       branchVariantIndex: 1,
       segmentIndex: 1,
-      durationSec: 10
+      durationSec: 10,
+      storySegmentIndex: 2,
+      seedanceSliceIndex: 3,
+      continuityGroupId: "cg_story",
+      continuitySliceId: "cg_story_slice_3",
+      continuitySequence: 3,
+      previousSliceId: "cg_story_slice_2",
+      continuityMode: "continuous_from_previous",
+      boundaryType: "continuity_handoff",
+      startFrameState: { pose: "phone raised" },
+      endFrameState: { pose: "taps button" },
+      continuityReferenceNeeded: true,
+      globalContinuityAnchors: { protagonist: "same worker" }
     }),
     response_summary_json: JSON.stringify({ retryable: true }),
     script_uid: "scr_be06_001",
@@ -161,6 +173,11 @@ test("batch detail hydrates ordered task attempts and manual output metadata", a
   assert.deepEqual(detail.batch.tasks[0].attemptHistory.map((item) => item.attemptNo), [1, 2]);
   assert.equal(detail.batch.tasks[0].attemptHistory[0].retryable, true);
   assert.equal(detail.batch.tasks[0].attemptHistory[1].upstreamTaskId, "seedance_attempt_2");
+  assert.equal(detail.batch.tasks[0].continuitySliceId, "cg_story_slice_3");
+  assert.equal(detail.batch.tasks[0].previousSliceId, "cg_story_slice_2");
+  assert.equal(detail.batch.tasks[0].continuityReferenceNeeded, true);
+  assert.deepEqual(detail.batch.tasks[0].startFrameState, { pose: "phone raised" });
+  assert.deepEqual(detail.batch.tasks[0].globalContinuityAnchors, { protagonist: "same worker" });
   const output = detail.batch.outputs[0];
   assert.deepEqual({
     manualStitch: output.manualStitch,

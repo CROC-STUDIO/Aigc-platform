@@ -81,6 +81,16 @@ const FISSION_SLICE_METADATA_FIELDS = [
   "style",
   "quality",
   "subtitleWorkflow",
+  "continuityGroupId",
+  "continuitySliceId",
+  "continuitySequence",
+  "previousSliceId",
+  "continuityMode",
+  "boundaryType",
+  "startFrameState",
+  "endFrameState",
+  "continuityReferenceNeeded",
+  "globalContinuityAnchors",
   "targetSegmentMerge",
   "targetSegmentSplit",
   "mergedSourceSegments",
@@ -798,6 +808,11 @@ function hasFissionSliceOrder(task = {}) {
 }
 
 export function taskNeedsContinuityReference(batch = {}, task = {}) {
+  if (String(task.previousSliceId || "").trim()) return true;
+  if (task.continuityReferenceNeeded !== undefined) {
+    return Boolean(task.continuityReferenceNeeded);
+  }
+  if (String(task.continuityGroupId || "").trim()) return false;
   const segmentIndex = Number(task.segmentIndex || 1);
   if (segmentIndex <= 1) return false;
   if (hasFissionSliceOrder(task)) {
@@ -807,6 +822,16 @@ export function taskNeedsContinuityReference(batch = {}, task = {}) {
 }
 
 export function findContinuitySourceTask(tasks = [], task = {}) {
+  const previousSliceId = String(task.previousSliceId || "").trim();
+  if (previousSliceId) {
+    return tasks.find((candidate) => {
+      return taskSegmentKey(candidate) === taskSegmentKey(task)
+        && String(candidate.continuitySliceId || "").trim() === previousSliceId
+        && (!task.continuityGroupId || candidate.continuityGroupId === task.continuityGroupId)
+        && ["downloaded", "succeeded", "qc"].includes(candidate.status)
+        && Boolean(candidate.outputPath);
+    }) || null;
+  }
   if (hasFissionSliceOrder(task)) {
     const storySegmentIndex = Number(task.storySegmentIndex);
     const seedanceSliceIndex = Number(task.seedanceSliceIndex);
@@ -814,7 +839,7 @@ export function findContinuitySourceTask(tasks = [], task = {}) {
       return taskSegmentKey(candidate) === taskSegmentKey(task)
         && Number(candidate.storySegmentIndex || 0) === storySegmentIndex
         && Number(candidate.seedanceSliceIndex || 0) === seedanceSliceIndex - 1
-        && candidate.status === "downloaded"
+        && ["downloaded", "succeeded", "qc"].includes(candidate.status)
         && Boolean(candidate.outputPath);
     }) || null;
   }
@@ -823,7 +848,7 @@ export function findContinuitySourceTask(tasks = [], task = {}) {
   return tasks.find((candidate) => {
     return taskSegmentKey(candidate) === taskSegmentKey(task)
       && Number(candidate.segmentIndex || 1) === segmentIndex - 1
-      && candidate.status === "downloaded"
+      && ["downloaded", "succeeded", "qc"].includes(candidate.status)
       && Boolean(candidate.outputPath);
   }) || null;
 }

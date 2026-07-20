@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isGenerationTaskSubmitReady } from "../../server/wangzhuan/pipeline.mjs";
+import {
+  findContinuitySourceTask,
+  isGenerationTaskSubmitReady
+} from "../../server/wangzhuan/pipeline.mjs";
 
 function task(overrides = {}) {
   return {
@@ -178,4 +181,70 @@ test("non-30s slices from same story segment require previous tail-frame continu
     ...batch,
     tasks: [firstSlice, reviewedSecondSlice]
   }, reviewedSecondSlice), true);
+});
+
+test("continuity groups follow previousSliceId across arbitrary story segments", () => {
+  const first = task({
+    generationTaskId: "gen_chain_1",
+    segmentIndex: 1,
+    storySegmentIndex: 1,
+    seedanceSliceIndex: 1,
+    continuityGroupId: "cg_story",
+    continuitySliceId: "cg_story_slice_1",
+    continuitySequence: 1,
+    previousSliceId: "",
+    continuityReferenceNeeded: false,
+    status: "downloaded",
+    outputPath: "segments/gen_chain_1.mp4",
+    attempts: 2
+  });
+  const second = task({
+    generationTaskId: "gen_chain_2",
+    segmentIndex: 2,
+    storySegmentIndex: 2,
+    seedanceSliceIndex: 2,
+    continuityGroupId: "cg_story",
+    continuitySliceId: "cg_story_slice_2",
+    continuitySequence: 2,
+    previousSliceId: "cg_story_slice_1",
+    continuityReferenceNeeded: true,
+    continuityReference: {
+      sourceGenerationTaskId: "gen_chain_1",
+      sourceOutputPath: "segments/gen_chain_1.mp4",
+      sourceAttempt: 2,
+      review: { assetId: "asset_chain_1", status: "approved" }
+    }
+  });
+  const third = task({
+    generationTaskId: "gen_chain_3",
+    segmentIndex: 3,
+    storySegmentIndex: 3,
+    seedanceSliceIndex: 3,
+    continuityGroupId: "cg_story",
+    continuitySliceId: "cg_story_slice_3",
+    continuitySequence: 3,
+    previousSliceId: "cg_story_slice_2",
+    continuityReferenceNeeded: true
+  });
+  const independentGroupStart = task({
+    generationTaskId: "gen_independent_1",
+    segmentIndex: 4,
+    storySegmentIndex: 4,
+    seedanceSliceIndex: 4,
+    continuityGroupId: "cg_proof",
+    continuitySliceId: "cg_proof_slice_1",
+    continuitySequence: 1,
+    previousSliceId: "",
+    continuityReferenceNeeded: false
+  });
+  const batch = {
+    estimate: { durationSec: 42 },
+    tasks: [first, second, third, independentGroupStart]
+  };
+
+  assert.equal(findContinuitySourceTask(batch.tasks, second), first);
+  assert.equal(findContinuitySourceTask(batch.tasks, third), null);
+  assert.equal(isGenerationTaskSubmitReady(batch, second), true);
+  assert.equal(isGenerationTaskSubmitReady(batch, third), false);
+  assert.equal(isGenerationTaskSubmitReady(batch, independentGroupStart), true);
 });

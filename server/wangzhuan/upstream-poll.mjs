@@ -132,7 +132,7 @@ async function writeSegmentBuffer(context, batchId, generationTaskId, buffer) {
 async function extractContinuityFrame(context, batch, sourceTask) {
   const sourcePath = sourceTask.outputPath ? join(context.userProjectRoot, sourceTask.outputPath) : "";
   if (!sourcePath) {
-    throw new WangzhuanError("missing_required_file", "缺少第一段视频，无法生成第二段连续性参考帧", {
+    throw new WangzhuanError("missing_required_file", "缺少前序片段视频，无法生成后续片段连续性参考帧", {
       batchId: batch.batchId,
       generationTaskId: sourceTask.generationTaskId
     });
@@ -166,6 +166,10 @@ async function extractContinuityFrame(context, batch, sourceTask) {
   });
   return {
     sourceGenerationTaskId: sourceTask.generationTaskId,
+    sourceContinuitySliceId: sourceTask.continuitySliceId || "",
+    sourceOutputId: sourceTask.currentOutputId || sourceTask.responseSummary?.outputId || "",
+    sourceOutputPath: sourceTask.outputPath || "",
+    sourceAttempt: Number(sourceTask.attempts || 0),
     storedPath,
     storageKey: storage.storageKey,
     storageUrl: storage.storageUrl,
@@ -209,11 +213,16 @@ function continuityTaskVariantKey(task = {}) {
 }
 
 function findFailedContinuitySourceTask(tasks = [], task = {}) {
+  const previousSliceId = String(task.previousSliceId || "").trim();
   const hasFissionSliceOrder = Number.isFinite(Number(task.storySegmentIndex))
     && Number.isFinite(Number(task.seedanceSliceIndex))
     && Number(task.seedanceSliceIndex) > 0;
   return tasks.find((candidate) => {
     if (candidate.status !== "failed" || continuityTaskVariantKey(candidate) !== continuityTaskVariantKey(task)) return false;
+    if (previousSliceId) {
+      return String(candidate.continuitySliceId || "").trim() === previousSliceId
+        && (!task.continuityGroupId || candidate.continuityGroupId === task.continuityGroupId);
+    }
     if (hasFissionSliceOrder) {
       return Number(candidate.storySegmentIndex || 0) === Number(task.storySegmentIndex)
         && Number(candidate.seedanceSliceIndex || 0) === Number(task.seedanceSliceIndex) - 1;
@@ -259,7 +268,7 @@ async function attachContinuityReferences(context, batch, tasks, now) {
           status: "failed",
           finishedAt: now,
           errorCode: "continuity_reference_failed",
-          errorMessage: continuityReference.review?.reviewReason || "第一段尾帧审核未通过，无法提交第二段生成",
+          errorMessage: continuityReference.review?.reviewReason || "前序片段尾帧审核未通过，无法提交后续片段生成",
           responseSummary: {
             ...(task.responseSummary || {}),
             continuityReference
@@ -273,6 +282,10 @@ async function attachContinuityReferences(context, batch, tasks, now) {
             ...(task.requestSummary || {}),
             continuityReference: {
               sourceGenerationTaskId: continuityReference.sourceGenerationTaskId,
+              sourceContinuitySliceId: continuityReference.sourceContinuitySliceId,
+              sourceOutputId: continuityReference.sourceOutputId,
+              sourceOutputPath: continuityReference.sourceOutputPath,
+              sourceAttempt: continuityReference.sourceAttempt,
               storedPath: continuityReference.storedPath,
               assetId: continuityReference.review.assetId,
               status: continuityReference.review.status
@@ -287,7 +300,7 @@ async function attachContinuityReferences(context, batch, tasks, now) {
         status: "failed",
         finishedAt: now,
         errorCode: error?.code || "continuity_reference_failed",
-        errorMessage: error?.message || "第一段尾帧生成失败，无法提交第二段生成"
+        errorMessage: error?.message || "前序片段尾帧生成失败，无法提交后续片段生成"
       };
       changed = true;
     }

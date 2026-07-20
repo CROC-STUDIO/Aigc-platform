@@ -86,14 +86,20 @@ test("failed continuity predecessors settle dependent tasks instead of leaving t
           generationTask("gen_story_source", {
             storySegmentIndex: 1,
             seedanceSliceIndex: 1,
+            continuityGroupId: "cg_story",
+            continuitySliceId: "cg_story_slice_1",
             status: "failed",
             errorCode: "upstream_failed",
             errorMessage: "Seedance rejected the first slice"
           }),
           generationTask("gen_story_dependent", {
             segmentIndex: 2,
-            storySegmentIndex: 1,
-            seedanceSliceIndex: 2
+            storySegmentIndex: 2,
+            seedanceSliceIndex: 2,
+            continuityGroupId: "cg_story",
+            continuitySliceId: "cg_story_slice_2",
+            previousSliceId: "cg_story_slice_1",
+            continuityReferenceNeeded: true
           })
         ],
         outputs: []

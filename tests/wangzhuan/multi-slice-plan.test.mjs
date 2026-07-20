@@ -238,6 +238,16 @@ test("prepareBatchForPipeline prefers decomposition seedanceSlices over mechanic
         segmentIndex: 1,
         storySegmentIndex: 1,
         seedanceSliceIndex: 1,
+        continuityGroupId: "cg_story",
+        continuitySliceId: "cg_story_slice_1",
+        continuitySequence: 1,
+        previousSliceId: "",
+        continuityMode: "independent_slice",
+        boundaryType: "continuity_group_start",
+        continuityReferenceNeeded: false,
+        startFrameState: { pose: "sitting" },
+        endFrameState: { pose: "raises phone" },
+        globalContinuityAnchors: { protagonist: "same creator" },
         startSec: 0,
         endSec: 11,
         durationSec: 11,
@@ -253,7 +263,17 @@ test("prepareBatchForPipeline prefers decomposition seedanceSlices over mechanic
       {
         segmentIndex: 2,
         storySegmentIndex: 2,
-        seedanceSliceIndex: 1,
+        seedanceSliceIndex: 2,
+        continuityGroupId: "cg_story",
+        continuitySliceId: "cg_story_slice_2",
+        continuitySequence: 2,
+        previousSliceId: "cg_story_slice_1",
+        continuityMode: "continuous_from_previous",
+        boundaryType: "continuity_handoff",
+        continuityReferenceNeeded: true,
+        startFrameState: { pose: "phone remains raised" },
+        endFrameState: { pose: "taps product UI" },
+        globalContinuityAnchors: { protagonist: "same creator" },
         startSec: 11,
         endSec: 24,
         durationSec: 13,
@@ -274,6 +294,10 @@ test("prepareBatchForPipeline prefers decomposition seedanceSlices over mechanic
   assert.deepEqual(prepared.scripts.map((script) => script.durationSec), [11, 13]);
   assert.deepEqual(prepared.scripts.map((script) => script.storySegmentIndex), [1, 2]);
   assert.deepEqual(prepared.tasks.map((task) => task.sliceDurationSec), [11, 13]);
+  assert.deepEqual(prepared.tasks.map((task) => task.continuitySliceId), ["cg_story_slice_1", "cg_story_slice_2"]);
+  assert.equal(prepared.tasks[1].previousSliceId, "cg_story_slice_1");
+  assert.equal(prepared.tasks[1].continuityReferenceNeeded, true);
+  assert.deepEqual(prepared.tasks[1].globalContinuityAnchors, { protagonist: "same creator" });
 });
 
 test("targetSegmentCount overrides decomposition slice count", async () => {

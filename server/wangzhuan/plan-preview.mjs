@@ -254,6 +254,8 @@ function resolveSeedancePlanValidationContext(input = {}) {
   const draftSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(draft.subtitleWorkflow);
   const branchSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(branch.subtitleWorkflow, draftSubtitleWorkflow);
   const explicitSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(input.subtitleWorkflow, branchSubtitleWorkflow);
+  const forceContinuity = String(input.currentSlice?.continuityMode || "") === "continuous_from_previous"
+    || Boolean(String(input.currentSlice?.previousSliceId || "").trim());
   return {
     branch,
     branchId: branch.branchId,
@@ -270,6 +272,7 @@ function resolveSeedancePlanValidationContext(input = {}) {
       || cleanString(branch.withdrawalVisual)
       || cleanString(draft.withdrawalVisual),
     subtitleWorkflow: explicitSubtitleWorkflow,
+    forceContinuity,
     sliceDiversity: {
       ...normalizeObject(draft.sliceDiversity),
       ...normalizeObject(branch.sliceDiversity),
@@ -487,6 +490,13 @@ function compactStorySegment(segment = {}) {
     segmentConversionStyle: segment.segmentConversionStyle,
     segmentRhythm: segment.segmentRhythm,
     segmentStructureSkeleton: segment.segmentStructureSkeleton,
+    continuityGroupId: segment.continuityGroupId,
+    continuityMode: segment.continuityMode,
+    boundaryType: segment.boundaryType,
+    startFrameState: segment.startFrameState,
+    endFrameState: segment.endFrameState,
+    continuityReferenceNeeded: segment.continuityReferenceNeeded,
+    globalContinuityAnchors: segment.globalContinuityAnchors,
     conversionSignals: segment.conversionSignals,
     conversionEffectOpportunities: segment.conversionEffectOpportunities,
     openingHookIntensity: segment.openingHookIntensity,
@@ -512,6 +522,16 @@ function compactSliceContext(slice = {}) {
     durationSec: slice.durationSec,
     sliceDurationSec: slice.sliceDurationSec,
     segmentRole: slice.segmentRole,
+    continuityGroupId: slice.continuityGroupId,
+    continuitySliceId: slice.continuitySliceId,
+    continuitySequence: slice.continuitySequence,
+    previousSliceId: slice.previousSliceId,
+    continuityMode: slice.continuityMode,
+    boundaryType: slice.boundaryType,
+    startFrameState: slice.startFrameState,
+    endFrameState: slice.endFrameState,
+    continuityReferenceNeeded: slice.continuityReferenceNeeded,
+    globalContinuityAnchors: slice.globalContinuityAnchors,
     scene: slice.scene,
     subject: slice.subject,
     action: slice.action,
@@ -543,6 +563,8 @@ export function buildCompactDecompositionForSlice(decomposition = {}, currentSli
   return {
     sourceVideoProfile: decomposition?.sourceVideoProfile || {},
     wholeVideoConversion: decomposition?.wholeVideoConversion || {},
+    sourceAssemblyMode: decomposition?.sourceAssemblyMode || "",
+    continuityPlan: decomposition?.continuityPlan || { groups: [] },
     storySegments: currentStorySegment ? [compactStorySegment(currentStorySegment)] : [],
     adjacentStorySegments: {
       previous: currentIndex > 0 ? summarizeAdjacentStorySegment(storySegments[currentIndex - 1]) : null,
@@ -694,7 +716,14 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       plan.subtitles,
       contextSubtitleWorkflow
     ),
-    sliceDiversity: normalizeSliceDiversity(plan.sliceDiversity, context.sliceDiversity)
+    sliceDiversity: context.forceContinuity
+      ? normalizeSliceDiversity({}, {
+          personChangedFromPrevious: false,
+          sceneChangedFromPrevious: false,
+          clothingChangedFromPrevious: false,
+          voiceChangedFromPrevious: false
+        })
+      : normalizeSliceDiversity(plan.sliceDiversity, context.sliceDiversity)
   }, context.branch || {});
 }
 
@@ -750,6 +779,16 @@ export function buildSeedancePlanMessages({
   const schemaHint = compactPrompt ? buildCompactSchemaHint() : SEEDANCE_PLAN_SCHEMA_HINT;
   const requiredDisclaimers = [...new Set((promptChannelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
   const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
+  const isContinuousSlice = String(currentSlice?.continuityMode || "") === "continuous_from_previous"
+    || Boolean(String(currentSlice?.previousSliceId || "").trim());
+  const continuityPromptRule = isContinuousSlice
+    ? [
+        "连续性切片覆盖规则：",
+        "1. 当前切片必须从前序片段尾帧继续，人物身份、服装、场景、产品/UI、姿态、声音与环境音必须沿用 currentSlice.startFrameState 和 globalContinuityAnchors。",
+        "2. 不得套用默认换人、换场、换服装、换声音；sliceDiversity 的 personChangedFromPrevious、sceneChangedFromPrevious、clothingChangedFromPrevious、voiceChangedFromPrevious 必须全部为 false。",
+        "3. imagePrompt 与 seedancePrompt 必须说明使用前序 continuity frame，并从 startFrameState 推进到 endFrameState，不得重新开场、重置 UI、跳变镜位或更换说话人。"
+      ].join("\n")
+    : "";
   const fissionSliceContext = {
     mandatoryMoneyVisualCarrier: Boolean(mandatoryMoneyVisualCarrier),
     isFinalSeedanceSlice: Boolean(isFinalSeedanceSlice),
@@ -776,7 +815,17 @@ export function buildSeedancePlanMessages({
           endSec: currentSlice?.endSec,
           durationSec: currentSlice?.durationSec,
           sliceDurationSec: currentSlice?.sliceDurationSec,
-          segmentRole: currentSlice?.segmentRole
+          segmentRole: currentSlice?.segmentRole,
+          continuityGroupId: currentSlice?.continuityGroupId,
+          continuitySliceId: currentSlice?.continuitySliceId,
+          continuitySequence: currentSlice?.continuitySequence,
+          previousSliceId: currentSlice?.previousSliceId,
+          continuityMode: currentSlice?.continuityMode,
+          boundaryType: currentSlice?.boundaryType,
+          startFrameState: currentSlice?.startFrameState,
+          endFrameState: currentSlice?.endFrameState,
+          continuityReferenceNeeded: currentSlice?.continuityReferenceNeeded,
+          globalContinuityAnchors: currentSlice?.globalContinuityAnchors
         },
         targetSegmentCount: targetSegmentCount || "follow_decomposition",
         conversionEffectOpportunities: currentStorySegment?.conversionEffectOpportunities || currentSlice?.conversionEffectOpportunities || [],
@@ -802,6 +851,8 @@ export function buildSeedancePlanMessages({
     "",
     "当前裂变切片上下文：",
     JSON.stringify(fissionSliceContext, null, 2),
+    "",
+    continuityPromptRule,
     "",
     formatSeedanceEnergyRules(),
     "",
@@ -878,7 +929,9 @@ export function buildSeedancePlanMessages({
 	    "2. 切片策略由参考视频剧情段落决定：优先按已有 seedanceSlices 执行；若拆解只提供 storySegments + sliceSplitHints，则由后端按 startSec、endSec、sliceDurationSec 自动派生当前切片；只有同一剧情段过长时才按剧情节点拆成 5-15s 相邻 Seedance 切片。",
 	    "3. 如果 targetSegmentCount 是 1-5 的数字，必须在不改变参考视频核心转化基调的前提下，将参考视频剧情段落合并或拆分成用户选择的目标段数；每个 Seedance prompt 只写当前 currentSlice 对应的那一段，不要继续按原始拆解段数生成。",
 	    "4. 如果 targetSegmentCount=follow_decomposition，则跟随拆解段落，并由系统优先复用 seedanceSlices、否则基于 storySegments + sliceSplitHints 自动切片后按顺序执行。",
-	    "5. 不同切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
+	    isContinuousSlice
+      ? "5. 当前切片属于连续性组，必须保持人物、场景、服装、产品/UI、姿态、声音与环境音一致；sliceDiversity 四项必须全部为 false。"
+      : "5. 独立切片之间必须体现人物、场景、服装和声音变化，避免同一人物或同一场景贯穿全片；sliceDiversity 必须记录变化点。",
 	    "6. 每个切片是否出现 Hook、承接、说服、转化、短剧高光、UI 强反馈或提现包装，主要依据参考视频拆解中该段是否存在对应结构，不得为了模板强制补齐不存在的段落。",
     `7. moneyVisuals 可使用 ${HIGH_ATTRACTION_VISUAL_EXAMPLES}、收益数字增长、提现成功、到账动画、提现记录或真实风格截图；未提供 truthRules 时，这些元素只能表现为无具体金额的数字增长或其他不含具体金额的视觉反馈，不得出现具体金额、到账速度或保证收益。`,
     "8. withdrawalVisual 必须说明提现展示方式，例如 Pix/Nubank 选项、银行卡到账动画、提现记录截图或本地支付方式；具体金额、门槛和到账时间只能来自 truthRules。",

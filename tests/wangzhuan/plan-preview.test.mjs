@@ -66,6 +66,90 @@ test("Seedance plan prompt includes fission story segment and carrier context", 
   assert.match(text, /基于 storySegments \+ sliceSplitHints 自动切片/);
 });
 
+test("continuous slices preserve identity scene UI voice and audio instead of applying diversity", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_continuity_prompt",
+      templateSnapshot: { draft: { productName: "Drama App", language: "zh-CN", regions: ["CN"] } },
+      estimate: { request: { language: "zh-CN", targetRegions: ["CN"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      productName: "Drama App",
+      languages: ["zh-CN"],
+      regions: ["CN"],
+      truthRules: {}
+    },
+    decomposition: {
+      sourceAssemblyMode: "continuous_story",
+      continuityPlan: {
+        groups: [{
+          continuityGroupId: "cg_1",
+          storySegmentIndexes: [1, 2, 3],
+          globalAnchors: {
+            protagonist: "same courier",
+            wardrobe: "blue jacket",
+            scene: "same apartment",
+            productUi: "reward popup remains open",
+            voiceAndAudio: "same speaker and room tone"
+          }
+        }]
+      },
+      storySegments: [{
+        storySegmentIndex: 2,
+        continuityGroupId: "cg_1",
+        startSec: 12,
+        endSec: 24,
+        durationSec: 12
+      }]
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 2,
+    sliceDurationSec: 12,
+    currentSlice: {
+      storySegmentIndex: 2,
+      seedanceSliceIndex: 2,
+      continuityGroupId: "cg_1",
+      continuitySliceId: "cg_1_slice_2",
+      previousSliceId: "cg_1_slice_1",
+      continuityMode: "continuous_from_previous",
+      startFrameState: { pose: "phone remains raised", productUi: "reward popup remains open" },
+      endFrameState: { pose: "turns toward the door" },
+      globalContinuityAnchors: { protagonist: "same courier", wardrobe: "blue jacket" },
+      durationSec: 12
+    },
+    totalSegmentCount: 3
+  });
+
+  const text = messagesText(messages);
+  assert.match(text, /连续性切片/);
+  assert.match(text, /人物身份、服装、场景、产品\/UI、姿态、声音与环境音/);
+  assert.match(text, /不得套用默认换人、换场、换服装、换声音/);
+  assert.match(text, /"previousSliceId": "cg_1_slice_1"/);
+  assert.match(text, /"protagonist": "same courier"/);
+
+  const validated = validateSeedancePlan({
+    hook: "continue",
+    body: "continue from the prior frame",
+    imagePrompt: "same subject and scene",
+    seedancePrompt: "use the previous continuity frame",
+    negativePrompt: "no identity drift",
+    sliceDiversity: {
+      personChangedFromPrevious: true,
+      sceneChangedFromPrevious: true,
+      clothingChangedFromPrevious: true,
+      voiceChangedFromPrevious: true
+    }
+  }, { forceContinuity: true });
+  assert.deepEqual(validated.sliceDiversity, {
+    personChangedFromPrevious: false,
+    sceneChangedFromPrevious: false,
+    clothingChangedFromPrevious: false,
+    voiceChangedFromPrevious: false
+  });
+});
+
 test("generateSeedancePlan repairs prompt before returning validated plan", async () => {
   const context = {
     callWangzhuanLlm: async () => JSON.stringify({
