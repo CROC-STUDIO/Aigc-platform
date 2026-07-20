@@ -101,7 +101,7 @@ const FISSION_DECOMPOSITION_FIELDS = Object.freeze([
   "seedanceSlices"
 ]);
 
-export const DECOMPOSITION_PROMPT_VERSION = "fission_decomposition_v3_continuity";
+export const DECOMPOSITION_PROMPT_VERSION = "fission_decomposition_v4_continuity_schema";
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;

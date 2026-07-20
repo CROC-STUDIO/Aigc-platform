@@ -556,6 +556,79 @@ test("deriveSeedanceSlicesForGeneration links an ordered continuity chain across
   });
 });
 
+test("legacy range continuity groups are normalized into an ordered multi-slice chain", () => {
+  const normalized = normalizeFissionAnalysis({
+    sourceAssemblyMode: "hybrid_overlay_montage",
+    continuityPlan: {
+      continuousGroups: [
+        {
+          groupIndex: 1,
+          startSec: 0,
+          endSec: 24,
+          basis: "same indoor drama ensemble, fixed wardrobe, shared room and reward HUD",
+          reuseGoal: "drama hook and reward proof"
+        },
+        {
+          groupIndex: 2,
+          startSec: 24,
+          endSec: 34,
+          basis: "focus switches to the woman, but it remains the same indoor drama space, shared HUD and unchanged audio logic",
+          reuseGoal: "emotional continuation of the same indoor story"
+        },
+        {
+          groupIndex: 3,
+          startSec: 34,
+          endSec: 42,
+          basis: "hard reset to full-screen content library UI; live-action cast disappears",
+          reuseGoal: "content library proof"
+        },
+        {
+          groupIndex: 4,
+          startSec: 42,
+          endSec: 48.576,
+          basis: "brand and product proof close",
+          reuseGoal: "product proof"
+        }
+      ]
+    },
+    storySegments: [
+      { storySegmentIndex: 1, startSec: 0, endSec: 6, durationSec: 6, ...sevenDimensions },
+      {
+        storySegmentIndex: 2,
+        startSec: 6,
+        endSec: 24,
+        durationSec: 18,
+        sliceSplitHints: [{ splitSec: 14, reason: "dialogue moves into reward proof" }],
+        ...sevenDimensions
+      },
+      { storySegmentIndex: 3, startSec: 24, endSec: 34, durationSec: 10, ...sevenDimensions },
+      { storySegmentIndex: 4, startSec: 34, endSec: 42, durationSec: 8, ...sevenDimensions },
+      { storySegmentIndex: 5, startSec: 42, endSec: 48.576, durationSec: 6.576, ...sevenDimensions }
+    ]
+  }, { deriveSeedanceSlices: true });
+
+  assert.equal(normalized.sourceAssemblyMode, "mixed");
+  assert.deepEqual(normalized.continuityPlan.groups.map((group) => ({
+    continuityGroupId: group.continuityGroupId,
+    storySegmentIndexes: group.storySegmentIndexes
+  })), [
+    { continuityGroupId: "cg_1", storySegmentIndexes: [1, 2, 3] },
+    { continuityGroupId: "cg_2", storySegmentIndexes: [4] },
+    { continuityGroupId: "cg_3", storySegmentIndexes: [5] }
+  ]);
+  assert.deepEqual(normalized.seedanceSlices.slice(0, 4).map((slice) => ({
+    group: slice.continuityGroupId,
+    mode: slice.continuityMode,
+    previous: slice.previousSliceId
+  })), [
+    { group: "cg_1", mode: "independent_slice", previous: "" },
+    { group: "cg_1", mode: "continuous_from_previous", previous: "cg_1_slice_1" },
+    { group: "cg_1", mode: "continuous_from_previous", previous: "cg_1_slice_2" },
+    { group: "cg_1", mode: "continuous_from_previous", previous: "cg_1_slice_3" }
+  ]);
+  assert.match(normalized.seedanceSlices[1].globalContinuityAnchors.continuityBasis, /fixed wardrobe/);
+});
+
 test("deriveSeedanceSlicesForGeneration falls back to storySegments when explicit seedanceSlices are invalid", () => {
   const slices = deriveSeedanceSlicesForGeneration({
     storySegments: [
@@ -668,6 +741,8 @@ test("FISSION_ANALYSIS_PROMPT_REQUIREMENTS covers production fission analysis ru
   assert.match(text, /cashCoinFeedback/);
   assert.match(text, /fastRewardCue/);
   assert.match(text, /conversionEffectOpportunities/);
+  assert.match(text, /shot\/reverse-shot/i);
+  assert.match(text, /focal-subject cut alone does not start a new group/i);
   assert.match(text, /no burned subtitles/i);
   assert.match(text, /no captions/i);
   assert.match(text, /subtitleWorkflow\.subtitleScript/);
@@ -707,6 +782,7 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /sourceAssemblyMode/);
   assert.match(prompt, /continuityPlan/);
   assert.match(prompt, /continuityGroupId/);
+  assert.match(prompt, /Shot\/reverse-shot/i);
   assert.match(prompt, /startFrameState/);
   assert.match(prompt, /endFrameState/);
   assert.doesNotMatch(prompt, /可选的 seedanceSlices 示例/);
@@ -775,6 +851,12 @@ test("compact decomposition prompt keeps downstream-required story segment contr
   assert.match(prompt, /超过 15 秒时，必须给出 sliceSplitHints/i);
   assert.match(prompt, /seedanceSlices 可选/i);
   assert.match(prompt, /storySegments \+ sliceSplitHints 自动派生/);
+  assert.match(prompt, /continuityPlan/);
+  assert.match(prompt, /groups/);
+  assert.match(prompt, /continuityGroupId/);
+  assert.match(prompt, /storySegmentIndexes/);
+  assert.match(prompt, /globalAnchors/);
+  assert.match(prompt, /正反打|shot\/reverse-shot/i);
 });
 
 test("reference video decomposition validation preserves fission fields", () => {

@@ -615,9 +615,24 @@ function buildCompactSchemaHint() {
   };
 }
 
+function hasMeaningfulDiversityVariables(value) {
+  if (Array.isArray(value)) return value.some(hasMeaningfulDiversityVariables);
+  if (value && typeof value === "object") {
+    return Object.entries(value).some(([key, entry]) => {
+      if (key === "lockedElements") return false;
+      return hasMeaningfulDiversityVariables(entry);
+    });
+  }
+  if (typeof value === "boolean") return value;
+  return Boolean(String(value ?? "").trim());
+}
+
 function buildRepairContext(input = {}) {
   const localeContext = resolvePlanLocaleContext(input.batch || {}, input.branch || {});
   const validationContext = resolveSeedancePlanValidationContext(input);
+  const currentSlice = input.currentSlice || {};
+  const isContinuousSlice = currentSlice.continuityMode === "continuous_from_previous"
+    || Boolean(String(currentSlice.previousSliceId || "").trim());
   return {
     targetLanguage: localeContext.primaryLanguage,
     targetRegion: localeContext.primaryRegion,
@@ -635,8 +650,13 @@ function buildRepairContext(input = {}) {
     isOpeningSlice: Number(input.segmentIndex || input.currentSlice?.segmentIndex || input.currentSlice?.seedanceSliceIndex || 0) === 1,
     voiceoverPerformance: input.currentSlice?.voiceoverPerformance || input.currentSlice?.voiceoverStyle || input.branch?.voiceoverStyle || input.batch?.templateSnapshot?.draft?.voiceoverStyle || "",
     openingHookRepair: input.currentSlice?.openingHookIntensity || input.currentSlice?.coreHook || input.currentSlice?.explosivePoint || "",
-    characterDiversity: input.currentSlice?.variableLayers
-      ? JSON.stringify({ variableLayers: input.currentSlice.variableLayers })
+    continuityMode: currentSlice.continuityMode || "",
+    previousSliceId: currentSlice.previousSliceId || "",
+    startFrameState: currentSlice.startFrameState,
+    endFrameState: currentSlice.endFrameState,
+    globalContinuityAnchors: currentSlice.globalContinuityAnchors,
+    characterDiversity: !isContinuousSlice && hasMeaningfulDiversityVariables(currentSlice.variableLayers)
+      ? JSON.stringify({ variableLayers: currentSlice.variableLayers })
       : ""
   };
 }

@@ -7,7 +7,7 @@ import {
 } from "../../server/wangzhuan/reference-videos.mjs";
 
 test("decomposition cache version includes the continuity contract", () => {
-  assert.equal(DECOMPOSITION_PROMPT_VERSION, "fission_decomposition_v3_continuity");
+  assert.equal(DECOMPOSITION_PROMPT_VERSION, "fission_decomposition_v4_continuity_schema");
 });
 
 test("decomposition cache key differs when knowledgeNotes changes", () => {

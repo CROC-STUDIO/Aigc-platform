@@ -203,6 +203,9 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   const currencyName = cleanString(context.currencyName);
   const localeIdentity = cleanString(context.localeIdentity);
   const characterDiversity = cleanString(context.characterDiversity);
+  const previousSliceId = cleanString(context.previousSliceId);
+  const isContinuousSlice = cleanString(context.continuityMode) === "continuous_from_previous"
+    || Boolean(previousSliceId);
   const voiceoverPerformance = cleanString(context.voiceoverPerformance) || DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR;
   const openingHookRepair = cleanString(context.openingHookRepair) || DEFAULT_OPENING_HOOK_REPAIR;
   const moneyVisuals = uniqueList(context.moneyVisuals);
@@ -212,6 +215,12 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   const forbiddenCurrencies = forbiddenCurrencyText(currencySymbol);
   const additions = [];
   let repaired = sanitizeMoneyAmounts(prompt, context);
+  if (isContinuousSlice) {
+    repaired = repaired.replace(
+      /\s*Character diversity requirement for this slice:.*?This slice must visibly differ from adjacent slices in person, scene, clothing, and camera setup\./gis,
+      ""
+    ).trim();
+  }
 
   if (targetLanguage && !new RegExp(`targetLanguage\\s*=\\s*${escapeRegExp(targetLanguage)}|language must be ${escapeRegExp(targetLanguage)}|use target language ${escapeRegExp(targetLanguage)}`, "i").test(repaired)) {
     additions.push(`Hard language lock: targetLanguage=${targetLanguage}; all visible scene text, generated app/UI microcopy, subtitles/captions, CTA wording, voiceover, spoken dialogue, and audio direction must use ${targetLanguage} only. Do not show Chinese, English defaults, source-video language, or mixed-language text unless ${targetLanguage} explicitly requires it.`);
@@ -228,8 +237,20 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   if (localeIdentity && !repaired.includes(localeIdentity)) {
     additions.push(`Local identity repair: ${localeIdentity}.`);
   }
-  if (characterDiversity && !/Character diversity requirement|must visibly differ from adjacent slices|person, scene, clothing/i.test(repaired)) {
+  if (!isContinuousSlice && characterDiversity && !/Character diversity requirement|must visibly differ from adjacent slices|person, scene, clothing/i.test(repaired)) {
     additions.push(`Character diversity requirement for this slice: ${characterDiversity}. This slice must visibly differ from adjacent slices in person, scene, clothing, and camera setup.`);
+  }
+  if (isContinuousSlice && !/Continuity preservation requirement/i.test(repaired)) {
+    const anchors = context.globalContinuityAnchors && typeof context.globalContinuityAnchors === "object"
+      ? JSON.stringify(context.globalContinuityAnchors)
+      : cleanString(context.globalContinuityAnchors);
+    const startState = context.startFrameState && typeof context.startFrameState === "object"
+      ? JSON.stringify(context.startFrameState)
+      : cleanString(context.startFrameState);
+    const endState = context.endFrameState && typeof context.endFrameState === "object"
+      ? JSON.stringify(context.endFrameState)
+      : cleanString(context.endFrameState);
+    additions.push(`Continuity preservation requirement: continue from previousSliceId=${previousSliceId || "previous slice"}; keep the same ensemble identity, character relationships, wardrobe, scene, lighting, product/UI state, voice, and room tone. Global anchors: ${anchors || "preserve prior established anchors"}. Start frame state: ${startState || "continue the approved prior tail frame"}. End frame state: ${endState || "advance the same scene without resetting identity"}. Any generic instruction to change person, scene, clothing, camera setup, or voice is overridden for this slice.`);
   }
   if (!/Voiceover performance repair|high-energy|fast-paced|emotionally expressive|contagious/i.test(repaired)) {
     additions.push(`Voiceover performance repair: all spoken lines and audio direction for this slice must use ${voiceoverPerformance}; avoid slow, flat, neutral explanatory delivery.`);
@@ -318,9 +339,14 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
       reason: "normalized into final formal plan"
     }))
   ], { targetLanguage, currencySymbol });
-  const characterDiversity = cleanString(context.characterDiversity)
-    || cleanString(plan.characterDiversityPlan?.currentSlice)
-    || cleanString(context.characterDiversityPlan?.currentSlice);
+  const previousSliceId = cleanString(context.previousSliceId) || cleanString(sourceSlice.previousSliceId);
+  const continuityMode = cleanString(context.continuityMode) || cleanString(sourceSlice.continuityMode);
+  const isContinuousSlice = continuityMode === "continuous_from_previous" || Boolean(previousSliceId);
+  const characterDiversity = isContinuousSlice
+    ? ""
+    : cleanString(context.characterDiversity)
+      || cleanString(plan.characterDiversityPlan?.currentSlice)
+      || cleanString(context.characterDiversityPlan?.currentSlice);
   const subtitleWorkflow = normalizeSubtitleWorkflow(plan, context);
   const repairedPrompt = repairSeedancePromptContract(plan.seedancePrompt, {
     targetLanguage,
@@ -329,6 +355,11 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     currencyName,
     localeIdentity,
     characterDiversity,
+    continuityMode,
+    previousSliceId,
+    startFrameState: context.startFrameState ?? sourceSlice.startFrameState,
+    endFrameState: context.endFrameState ?? sourceSlice.endFrameState,
+    globalContinuityAnchors: context.globalContinuityAnchors ?? sourceSlice.globalContinuityAnchors,
     moneyVisuals,
     conversionEffectOpportunities: repairedOpportunities,
     isOpeningSlice,
@@ -374,8 +405,12 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     characterDiversityPlan: {
       ...(context.characterDiversityPlan || {}),
       ...(plan.characterDiversityPlan || {}),
-      ...(characterDiversity ? { currentSlice: characterDiversity } : {}),
-      mustDifferFromAdjacentSlices: plan.characterDiversityPlan?.mustDifferFromAdjacentSlices ?? context.characterDiversityPlan?.mustDifferFromAdjacentSlices ?? true
+      ...(isContinuousSlice
+        ? { currentSlice: "" }
+        : characterDiversity ? { currentSlice: characterDiversity } : {}),
+      mustDifferFromAdjacentSlices: isContinuousSlice
+        ? false
+        : plan.characterDiversityPlan?.mustDifferFromAdjacentSlices ?? context.characterDiversityPlan?.mustDifferFromAdjacentSlices ?? true
     }
   };
 }

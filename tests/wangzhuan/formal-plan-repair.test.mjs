@@ -28,6 +28,34 @@ test("repairSeedancePromptContract appends language region currency subtitle and
   assert.doesNotMatch(repaired, /\$50/);
 });
 
+test("repairFormalPlanContract makes continuity override adjacent-slice diversity", () => {
+  const repaired = repairFormalPlanContract({
+    hook: "continue",
+    body: "same indoor story",
+    seedancePrompt: "Continue the same room and ensemble.",
+    imagePrompt: "Same room.",
+    negativePrompt: "No identity drift.",
+    characterDiversityPlan: {
+      currentSlice: "change person and wardrobe",
+      mustDifferFromAdjacentSlices: true
+    }
+  }, {
+    targetLanguage: "en-US",
+    targetRegion: "US",
+    continuityMode: "continuous_from_previous",
+    previousSliceId: "cg_story_slice_1",
+    globalContinuityAnchors: { scene: "same living room", ensemble: "same woman and man" },
+    characterDiversity: "change person and wardrobe",
+    disableMandatoryMoneyVisuals: true
+  });
+
+  assert.doesNotMatch(repaired.seedancePrompt, /Character diversity requirement/);
+  assert.match(repaired.seedancePrompt, /Continuity preservation requirement/);
+  assert.match(repaired.seedancePrompt, /same living room/);
+  assert.equal(repaired.characterDiversityPlan.mustDifferFromAdjacentSlices, false);
+  assert.equal(repaired.characterDiversityPlan.currentSlice, "");
+});
+
 test("repairFormalPlanContract normalizes contract fields and carries conversionEffectOpportunities", () => {
   const repaired = repairFormalPlanContract({
     hook: "Hook",

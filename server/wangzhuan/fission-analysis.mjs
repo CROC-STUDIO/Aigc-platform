@@ -19,6 +19,7 @@ export const FISSION_ANALYSIS_PROMPT_REQUIREMENTS = Object.freeze([
   "Observed conversionSignals must distinguish withdrawalSuccess, earningsNumber, emotionalVoiceover, cashCoinFeedback, and fastRewardCue.",
   "conversionEffectOpportunities are allowed fission placements; keep them separate from observed conversionSignals.",
   "Classify sourceAssemblyMode as continuous_story, independent_segments, or mixed; scene cuts alone do not prove independence.",
+  "Treat shot/reverse-shot coverage, alternating members of the same cast, fixed wardrobe and relationships, shared room tone, and persistent HUD/UI as one continuity group; a focal-subject cut alone does not start a new group.",
   "Output continuityPlan.groups independently from storySegments. Each group must list continuityGroupId, storySegmentIndexes, and globalAnchors for identity, wardrobe, scene, product/UI, camera, voice, and audio continuity.",
   "Each continuous story segment or Seedance slice must preserve continuityGroupId, continuityMode, boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
   "Seedance prompts must use no burned subtitles, no captions, and no dense text blocks; subtitle text belongs in subtitleWorkflow.subtitleScript."
@@ -105,16 +106,78 @@ function normalizeContinuityFields(value = {}) {
   return fields;
 }
 
-function normalizeContinuityPlan(value) {
+function storySegmentIndexesForRange(group = {}, storySegments = []) {
+  const startSec = numberOrFallback(group.startSec, Number.NaN);
+  const endSec = numberOrFallback(group.endSec, Number.NaN);
+  if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return [];
+  return storySegments
+    .filter((segment) => segment.startSec < endSec && segment.endSec > startSec)
+    .map((segment) => segment.storySegmentIndex);
+}
+
+function normalizeLegacyContinuityAnchors(group = {}) {
+  if (group.globalAnchors !== undefined) return normalizeStructuredValue(group.globalAnchors);
+  if (group.globalContinuityAnchors !== undefined) return normalizeStructuredValue(group.globalContinuityAnchors);
+  return Object.fromEntries([
+    ["continuityBasis", cleanString(group.basis)],
+    ["reuseGoal", cleanString(group.reuseGoal)]
+  ].filter(([, value]) => value));
+}
+
+function shouldMergeLegacyContinuityGroups(previous = {}, current = {}) {
+  const previousEnd = numberOrFallback(previous.endSec, Number.NaN);
+  const currentStart = numberOrFallback(current.startSec, Number.NaN);
+  if (!Number.isFinite(previousEnd) || !Number.isFinite(currentStart) || Math.abs(previousEnd - currentStart) > 0.05) {
+    return false;
+  }
+  const currentEvidence = [current.basis, current.reuseGoal].map(cleanString).join(" ").toLowerCase();
+  const hardReset = /full-screen|app\s*(home|ui|screen)|product\s*(ui|screen)|content library|brand|end[ -]?card|cta|真人消失|完全改变|独立产品|内容库|品牌落版|时空重置/.test(currentEvidence);
+  const continuityEvidence = /same|shared|unchanged|continues?|continuation|remains|同一|仍属|未变|延续|继续|固定/.test(currentEvidence);
+  return continuityEvidence && !hardReset;
+}
+
+function mergeLegacyContinuityGroups(groups = []) {
+  return groups.reduce((merged, group) => {
+    const previous = merged.at(-1);
+    if (!previous || !shouldMergeLegacyContinuityGroups(previous, group)) {
+      merged.push({ ...group });
+      return merged;
+    }
+    previous.endSec = group.endSec;
+    previous.basis = [previous.basis, group.basis].map(cleanString).filter(Boolean).join("; ");
+    previous.reuseGoal = [previous.reuseGoal, group.reuseGoal].map(cleanString).filter(Boolean).join("; ");
+    return merged;
+  }, []);
+}
+
+function normalizeContinuityPlan(value, storySegments = []) {
   const input = normalizeObject(value);
-  const groups = normalizeArray(input.groups).map((group) => ({
-    continuityGroupId: cleanString(group?.continuityGroupId),
-    storySegmentIndexes: normalizeArray(group?.storySegmentIndexes)
-      .map((index) => numberOrFallback(index, 0))
-      .filter((index) => index > 0),
-    globalAnchors: normalizeStructuredValue(group?.globalAnchors)
-  })).filter((group) => group.continuityGroupId);
+  const canonicalGroups = normalizeArray(input.groups);
+  const legacyGroups = canonicalGroups.length ? [] : mergeLegacyContinuityGroups(normalizeArray(input.continuousGroups));
+  const sourceGroups = canonicalGroups.length ? canonicalGroups : legacyGroups;
+  const groups = sourceGroups.map((group, index) => {
+    const explicitIndexes = normalizeArray(group?.storySegmentIndexes)
+      .map((item) => numberOrFallback(item, 0))
+      .filter((item) => item > 0);
+    return {
+      continuityGroupId: cleanString(group?.continuityGroupId)
+        || (canonicalGroups.length ? "" : `cg_${index + 1}`),
+      storySegmentIndexes: explicitIndexes.length
+        ? explicitIndexes
+        : storySegmentIndexesForRange(group, storySegments),
+      globalAnchors: normalizeLegacyContinuityAnchors(group)
+    };
+  }).filter((group) => group.continuityGroupId && group.storySegmentIndexes.length);
   return { groups };
+}
+
+function normalizeSourceAssemblyMode(value) {
+  const normalized = cleanString(value).toLowerCase();
+  if (["continuous_story", "independent_segments", "mixed"].includes(normalized)) return normalized;
+  if (/hybrid|montage|mixed/.test(normalized)) return "mixed";
+  if (/continuous|single_story|single-scene/.test(normalized)) return "continuous_story";
+  if (/independent|fragmented|separate/.test(normalized)) return "independent_segments";
+  return "";
 }
 
 function continuityGroupForStorySegment(continuityPlan, storySegmentIndex) {
@@ -524,19 +587,20 @@ function summarizeSliceSplitReason(sliceCount, usedHints = []) {
 
 export function normalizeFissionAnalysis(input = {}, options = {}) {
   const strictStorySegmentTiming = Boolean(options.strictStorySegmentTiming);
-  const continuityPlan = normalizeContinuityPlan(input?.continuityPlan);
   const normalizedStorySegments = Array.isArray(input?.storySegments)
     ? input.storySegments.map((segment, index) => normalizeStorySegment(segment, index, {
         strictTiming: strictStorySegmentTiming
       }))
     : [];
-  const storySegments = applyContinuityPlanToStorySegments(normalizedStorySegments, continuityPlan);
+  const baseStorySegments = normalizedStorySegments.length === 0 && hasSevenDimensions(input)
+    ? [buildFallbackStorySegment(input, options)]
+    : normalizedStorySegments;
+  const continuityPlan = normalizeContinuityPlan(input?.continuityPlan, baseStorySegments);
+  const storySegments = applyContinuityPlanToStorySegments(baseStorySegments, continuityPlan);
   if (strictStorySegmentTiming) {
     assertChronologicalStorySegments(storySegments);
   }
-  const fallbackStorySegments = storySegments.length === 0 && hasSevenDimensions(input)
-    ? [buildFallbackStorySegment(input, options)]
-    : storySegments;
+  const fallbackStorySegments = storySegments;
   let seedanceSlices = [];
   if (Array.isArray(input?.seedanceSlices)) {
     try {
@@ -555,7 +619,7 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
     seedanceSlices = fallbackStorySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
   }
 
-  const sourceAssemblyMode = cleanString(input?.sourceAssemblyMode);
+  const sourceAssemblyMode = normalizeSourceAssemblyMode(input?.sourceAssemblyMode);
   const hasContinuityContract = Boolean(sourceAssemblyMode
     || continuityPlan.groups.length
     || fallbackStorySegments.some((segment) => segment.continuityGroupId)

@@ -150,6 +150,58 @@ test("continuous slices preserve identity scene UI voice and audio instead of ap
   });
 });
 
+test("continuous plan repair suppresses empty diversity and preserves continuity anchors", async () => {
+  const context = {
+    callWangzhuanLlm: async () => JSON.stringify({
+      hook: "Continue the indoor story",
+      body: "Continue from the prior shot",
+      voiceover: "Keep watching",
+      subtitles: ["Keep watching"],
+      cta: "",
+      ending: "",
+      imagePrompt: "Same ensemble and room.",
+      seedancePrompt: "Continue the same indoor ensemble scene from the previous frame.",
+      negativePrompt: "No identity drift.",
+      sliceDiversity: {
+        personChangedFromPrevious: true,
+        sceneChangedFromPrevious: true,
+        clothingChangedFromPrevious: true,
+        voiceChangedFromPrevious: true
+      }
+    })
+  };
+
+  const plan = await generateSeedancePlan(context, {
+    batch: { templateSnapshot: { draft: { productName: "App", language: "en-US", regions: ["US"] } }, estimate: { request: {} } },
+    branch: { branchId: "b1", productName: "App", languages: ["en-US"], regions: ["US"], truthRules: {} },
+    decomposition: {},
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 2,
+    sliceDurationSec: 10,
+    currentSlice: {
+      segmentIndex: 2,
+      continuityMode: "continuous_from_previous",
+      previousSliceId: "cg_story_slice_1",
+      startFrameState: { cast: "same woman and man", wardrobe: "fixed coats and suit" },
+      endFrameState: { action: "the conversation continues" },
+      globalContinuityAnchors: { scene: "same living room", relationship: "same ensemble" },
+      variableLayers: []
+    }
+  });
+
+  assert.doesNotMatch(plan.seedancePrompt, /Character diversity requirement/);
+  assert.doesNotMatch(plan.seedancePrompt, /must visibly differ from adjacent slices/);
+  assert.match(plan.seedancePrompt, /Continuity preservation requirement/);
+  assert.match(plan.seedancePrompt, /same living room/);
+  assert.deepEqual(plan.sliceDiversity, {
+    personChangedFromPrevious: false,
+    sceneChangedFromPrevious: false,
+    clothingChangedFromPrevious: false,
+    voiceChangedFromPrevious: false
+  });
+});
+
 test("generateSeedancePlan repairs prompt before returning validated plan", async () => {
   const context = {
     callWangzhuanLlm: async () => JSON.stringify({

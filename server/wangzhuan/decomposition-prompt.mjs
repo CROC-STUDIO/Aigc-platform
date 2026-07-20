@@ -72,6 +72,8 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
   const notes = String(request.knowledgeNotes || "").trim();
   const requiredHint = pickSchemaHints([
     ...CORE_DECOMPOSITION_FIELDS,
+    "sourceAssemblyMode",
+    "continuityPlan",
     "storySegments",
     "sliceSplitHints",
     "seedanceSlices"
@@ -86,7 +88,8 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
     "4. 必须输出 storySegments；每段必须包含数字 startSec、endSec、durationSec，以及 scene、subject、action、camera、lighting、style、quality。",
     "5. 当某个 storySegment 超过 15 秒时，必须给出 sliceSplitHints，切点基于叙事转折，不要只因为字幕/UI/特效出现就切段。",
     "6. seedanceSlices 可选；如果不输出，后端会基于 storySegments + sliceSplitHints 自动派生生成切片。",
-    "7. 必须输出 sourceAssemblyMode 与 continuityPlan；连续组按人物、服装、场景、UI、镜头、声音和动作状态判断，不能按固定 30 秒或两段限制。",
+    "7. 必须输出 sourceAssemblyMode 与 continuityPlan.groups；每组严格使用 continuityGroupId、storySegmentIndexes、globalAnchors，不能改名为 continuousGroups 或只给时间范围。",
+    "8. 同一场景中的正反打（shot/reverse-shot）、多人交替出镜、固定人物关系与服装、持续 HUD/环境音仍属于同一连续组；不要因为焦点人物切换就拆组。只有切到独立产品 UI、内容库、品牌落版或真实时空重置时才新建连续组。",
     "",
     "参考视频信息：",
     videoProbePrompt(probe),
@@ -142,6 +145,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "seedanceSlices are optional: if you can output high-quality executable 5-15s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
     "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
     "sourceAssemblyMode is mandatory: continuous_story, independent_segments, or mixed. Scene cuts alone do not prove that segments are independent.",
+    "Shot/reverse-shot coverage, alternating members of the same cast, fixed character relationships and wardrobe, shared room tone, and a persistent HUD/UI remain one continuity group; changing the focal person alone is not a group boundary.",
     "continuityPlan is mandatory and independent from storySegments: groups contain continuityGroupId, storySegmentIndexes, and globalAnchors; continuous chains may contain any number of Seedance slices.",
     "For continuous boundaries include boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
     "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
