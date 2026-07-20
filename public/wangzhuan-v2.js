@@ -2635,6 +2635,15 @@ async function loadAuth() {
   }
 }
 
+async function initializeAuthenticatedWorkspace() {
+  await loadTemplates();
+  await Promise.all([
+    loadProductLibrary(),
+    loadRecentResults(1),
+    restoreWorkbenchFromUrl()
+  ]);
+}
+
 function renderBatchDetail(detail) {
   segmentRecoveryController.update(detail);
   const batch = detail?.batch || detail || null;
@@ -3758,8 +3767,9 @@ async function login() {
     });
     const data = await response.json();
     if (!response.ok || data.error) throw new Error(data.error || "登录失败");
-    await loadAuth();
-    await loadTemplates().catch((error) => showError(error, "模板加载失败"));
+    if (await loadAuth()) {
+      await initializeAuthenticatedWorkspace().catch((error) => showError(error, "初始化失败"));
+    }
   } catch (error) {
     const status = els.loginModal?.querySelector(".login-status");
     if (status) status.textContent = error.message || "登录失败";
@@ -4020,12 +4030,7 @@ renderProductLibraryDetail(null);
 loadAuth()
   .then(async (authenticated) => {
     if (!authenticated) return null;
-    await loadTemplates();
-    await Promise.all([
-      loadProductLibrary(),
-      loadRecentResults(1),
-      restoreWorkbenchFromUrl()
-    ]);
+    await initializeAuthenticatedWorkspace();
     return null;
   })
   .catch((error) => showError(error, "初始化失败"));

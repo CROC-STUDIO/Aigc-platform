@@ -579,6 +579,27 @@ test("wangzhuan v2 page exposes bounded logs and lazy recent result controls", a
   assert.match(html, /id="wzRefreshRecentBtn"/);
 });
 
+test("successful login initializes the product library without requiring a refresh", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  const initializerStart = js.indexOf("async function initializeAuthenticatedWorkspace");
+  const loginStart = js.indexOf("async function login()");
+  const logoutStart = js.indexOf("async function logout()", loginStart);
+  const bootstrapStart = js.lastIndexOf("loadAuth()");
+
+  assert.ok(initializerStart >= 0, "expected a shared authenticated workspace initializer");
+  const initializerEnd = js.indexOf("\n}\n", initializerStart) + 3;
+  const initializerBody = js.slice(initializerStart, initializerEnd);
+  const loginBody = js.slice(loginStart, logoutStart);
+  const bootstrapBody = js.slice(bootstrapStart);
+
+  assert.match(initializerBody, /await loadTemplates\(\)/);
+  assert.match(initializerBody, /loadProductLibrary\(\)/);
+  assert.match(initializerBody, /loadRecentResults\(1\)/);
+  assert.match(initializerBody, /restoreWorkbenchFromUrl\(\)/);
+  assert.match(loginBody, /await initializeAuthenticatedWorkspace\(\)/);
+  assert.match(bootstrapBody, /await initializeAuthenticatedWorkspace\(\)/);
+});
+
 test("task manager separates final outputs from intermediate outputs", async () => {
   const js = await readText("public/wangzhuan-tasks.js");
   assert.match(js, /function batchWorkflowStep\(batch = \{\}\)/);
