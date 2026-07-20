@@ -56,6 +56,35 @@ test("repairFormalPlanContract makes continuity override adjacent-slice diversit
   assert.equal(repaired.characterDiversityPlan.currentSlice, "");
 });
 
+test("repairFormalPlanContract honors an explicit opening-slice money visual opt-out", () => {
+  const repaired = repairFormalPlanContract({
+    segmentIndex: 1,
+    hook: "Family drama conflict",
+    body: "Unlock the next episode",
+    seedancePrompt: "Keep the opening focused on the family conflict and episode continuation.",
+    imagePrompt: "Bright indoor family drama.",
+    negativePrompt: "No cash, earnings, payout, or withdrawal imagery.",
+    disableMandatoryMoneyVisuals: true,
+    conversionEffectOpportunities: [{ effect: "cash_rain", placement: "opening" }]
+  }, {
+    targetLanguage: "en-US",
+    targetRegion: "US",
+    currencySymbol: "$",
+    mandatoryMoneyVisualCarrier: true,
+    sourceSlice: {
+      conversionSignals: { cashCoinFeedback: { present: true } },
+      conversionEffectOpportunities: [{ effect: "coin_burst", placement: "opening" }]
+    }
+  });
+
+  assert.deepEqual(repaired.moneyVisuals, []);
+  assert.deepEqual(repaired.conversionEffectOpportunities, []);
+  assert.doesNotMatch(repaired.seedancePrompt, /Mandatory wangzhuan visual carrier repair/);
+  assert.doesNotMatch(repaired.seedancePrompt, /cash rain|coin burst/i);
+  assert.doesNotMatch(repaired.seedancePrompt, /net-earning ad|balance\/reward counter rising/);
+  assert.match(repaired.seedancePrompt, /high-impact narrative conflict/);
+});
+
 test("repairFormalPlanContract normalizes contract fields and carries conversionEffectOpportunities", () => {
   const repaired = repairFormalPlanContract({
     hook: "Hook",

@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { reviewSeedanceAsset } from "./asset-review.mjs";
+import { reviewSeedanceAsset, waitForSeedanceAssetReview } from "./asset-review.mjs";
 import {
   findContinuitySourceTask,
   readBatch as readPipelineBatch,
@@ -154,7 +154,7 @@ async function extractContinuityFrame(context, batch, sourceTask) {
   const storage = await syncWangzhuanAsset(context, target, "pipeline_continuity_frame", { required: true });
   const storedPath = userRelative(context, target);
   const buffer = await readFile(target);
-  const review = await reviewSeedanceAsset(context, {
+  const reviewInput = {
     branchId: sourceTask.branchId || "",
     assetKey: "continuityFrame",
     fileName: `${sourceTask.generationTaskId}_last_frame.jpg`,
@@ -163,7 +163,9 @@ async function extractContinuityFrame(context, batch, sourceTask) {
     storageUrl: storage.storageUrl,
     storageKey: storage.storageKey,
     storedPath
-  });
+  };
+  const review = await reviewSeedanceAsset(context, reviewInput);
+  const settledReview = await waitForSeedanceAssetReview(context, reviewInput, review);
   return {
     sourceGenerationTaskId: sourceTask.generationTaskId,
     sourceContinuitySliceId: sourceTask.continuitySliceId || "",
@@ -173,7 +175,7 @@ async function extractContinuityFrame(context, batch, sourceTask) {
     storedPath,
     storageKey: storage.storageKey,
     storageUrl: storage.storageUrl,
-    review,
+    review: settledReview,
     createdAt: new Date().toISOString()
   };
 }
@@ -203,6 +205,10 @@ function generationTaskPollChanged(before = {}, after = {}) {
 function isApprovedContinuityReference(reference = {}) {
   const status = String(reference.review?.status || "").toLowerCase();
   return Boolean(reference.review?.assetId && ["approved", "active", "success", "succeeded", "pass", "passed"].includes(status));
+}
+
+function isPendingContinuityReference(reference = {}) {
+  return ["pending", "queued", "running", "processing"].includes(String(reference.review?.status || "").toLowerCase());
 }
 
 function continuityTaskVariantKey(task = {}) {
@@ -236,7 +242,35 @@ async function attachContinuityReferences(context, batch, tasks, now) {
   let changed = false;
   for (let index = 0; index < nextTasks.length; index += 1) {
     const task = nextTasks[index];
-    if (task.status !== "pending" || task.continuityReference || !taskNeedsContinuityReference(batch, task)) continue;
+    if (task.status !== "pending" || !taskNeedsContinuityReference(batch, task)) continue;
+    if (task.continuityReference) {
+      if (!isPendingContinuityReference(task.continuityReference)) continue;
+      const review = await waitForSeedanceAssetReview(context, {
+        assetId: task.continuityReference.review?.assetId,
+        assetKey: "continuityFrame",
+        fileName: `${task.continuityReference.sourceGenerationTaskId || task.generationTaskId}_last_frame.jpg`,
+        mimeType: "image/jpeg",
+        storageUrl: task.continuityReference.storageUrl,
+        storageKey: task.continuityReference.storageKey,
+        storedPath: task.continuityReference.storedPath
+      }, task.continuityReference.review);
+      if (isApprovedContinuityReference({ review })) {
+        nextTasks[index] = {
+          ...task,
+          continuityReference: { ...task.continuityReference, review },
+          requestSummary: {
+            ...(task.requestSummary || {}),
+            continuityReference: {
+              ...(task.requestSummary?.continuityReference || {}),
+              assetId: review.assetId,
+              status: review.status
+            }
+          }
+        };
+        changed = true;
+      }
+      continue;
+    }
     const previous = findContinuitySourceTask(nextTasks, task);
     if (!previous) {
       const failedPrevious = findFailedContinuitySourceTask(nextTasks, task);

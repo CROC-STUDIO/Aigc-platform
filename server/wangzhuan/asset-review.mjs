@@ -287,7 +287,7 @@ export async function refreshSeedanceAssetReview(context = {}, asset = {}) {
   };
 }
 
-async function waitForSeedanceAssetReview(context = {}, asset = {}, initialReview = {}) {
+export async function waitForSeedanceAssetReview(context = {}, asset = {}, initialReview = {}) {
   let latest = { ...initialReview };
   if (!cleanString(latest.assetId) || !isReviewPending(latest.status)) return latest;
   const { timeoutMs, intervalMs } = assetReviewWaitOptions(context);

@@ -77,6 +77,19 @@ test("explicit retryable provider failure can retry before attempt limit", () =>
   });
 });
 
+test("continuity reference failure can retry before attempt limit", () => {
+  assert.deepEqual(classifyRetryEligibility({
+    status: "failed",
+    errorCode: "continuity_reference_failed",
+    attempts: 0,
+    maxAttempts: 2
+  }), {
+    status: "retryable",
+    canRetry: true,
+    reason: "continuity_reference_failed"
+  });
+});
+
 test("failed task at its attempt limit is exhausted", () => {
   assert.equal(classifyRetryEligibility({
     status: "failed",

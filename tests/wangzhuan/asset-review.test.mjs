@@ -7,7 +7,8 @@ import test from "node:test";
 import {
   ensureAssetReviewsApproved,
   reviewSeedanceAsset,
-  validateAssetReviewState
+  validateAssetReviewState,
+  waitForSeedanceAssetReview
 } from "../../server/wangzhuan/asset-review.mjs";
 
 function makeContext(root, overrides = {}) {
@@ -187,6 +188,48 @@ test("ensureAssetReviewsApproved waits for pending Seedance asset review to sett
   assert.equal(result.branches[0].assetReviews.productIcon.assetId, "asset_wait_1");
   assert.equal(result.branches[0].assetReviews.productIcon.status, "approved");
   assert.equal(result.branches[0].assetReviews.productIcon.contentHash, "sha256:product-info-icon");
+  assert.equal(detailCalls, 2);
+});
+
+test("waitForSeedanceAssetReview settles a pending continuity frame review", async () => {
+  let detailCalls = 0;
+  const context = makeContext("/tmp/unused", {
+    config: {
+      wangzhuan: {
+        seedanceProvider: {
+          endpoint: "https://seedance.test",
+          apiKey: "test-key"
+        },
+        seedanceAssetReview: {
+          waitTimeoutMs: 500,
+          pollIntervalMs: 10
+        }
+      }
+    },
+    fetch: async () => {
+      detailCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          asset_id: "asset_continuity_1",
+          status: detailCalls >= 2 ? "approved" : "pending"
+        })
+      };
+    }
+  });
+
+  const result = await waitForSeedanceAssetReview(context, {
+    assetKey: "continuityFrame",
+    fileName: "segment-last-frame.jpg",
+    mimeType: "image/jpeg"
+  }, {
+    assetId: "asset_continuity_1",
+    status: "pending"
+  });
+
+  assert.equal(result.assetId, "asset_continuity_1");
+  assert.equal(result.status, "approved");
   assert.equal(detailCalls, 2);
 });
 

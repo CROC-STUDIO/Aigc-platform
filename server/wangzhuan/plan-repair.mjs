@@ -206,7 +206,11 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   const previousSliceId = cleanString(context.previousSliceId);
   const isContinuousSlice = cleanString(context.continuityMode) === "continuous_from_previous"
     || Boolean(previousSliceId);
-  const voiceoverPerformance = cleanString(context.voiceoverPerformance) || DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR;
+  const moneyVisualsDisabled = Boolean(context.disableMandatoryMoneyVisuals);
+  const voiceoverPerformance = cleanString(context.voiceoverPerformance)
+    || (moneyVisualsDisabled
+      ? "high-energy, fast-paced, emotionally expressive short-drama trailer delivery with urgent but natural performance"
+      : DEFAULT_HIGH_ENERGY_VOICEOVER_REPAIR);
   const openingHookRepair = cleanString(context.openingHookRepair) || DEFAULT_OPENING_HOOK_REPAIR;
   const moneyVisuals = uniqueList(context.moneyVisuals);
   const effectOpportunities = normalizeConversionEffectOpportunities(context.conversionEffectOpportunities, context);
@@ -228,10 +232,10 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   if (targetRegion && !new RegExp(`targetRegion\\s*=\\s*${escapeRegExp(targetRegion)}|targetRegion=${escapeRegExp(targetRegion)}|region ${escapeRegExp(targetRegion)}`, "i").test(repaired)) {
     additions.push(`Hard region lock: targetRegion=${targetRegion}; people, faces, clothing, homes, streets, phones, UI habits, and voice identity must match the target market.`);
   }
-  if (currencySymbol && !repaired.includes(currencySymbol)) {
+  if (!moneyVisualsDisabled && currencySymbol && !repaired.includes(currencySymbol)) {
     additions.push(`Hard currency lock: any money-related page, balance, withdrawal screen, reward counter, payout UI, cash/coin overlay, or top balance overlay must visibly use ${currencySymbol}${currencyName ? ` (${currencyName})` : ""} only; no exact payout amount.`);
   }
-  if (currencySymbol) {
+  if (!moneyVisualsDisabled && currencySymbol) {
     additions.push(`Forbidden currency repair: do not show ${forbiddenCurrencies}; use only ${currencySymbol} for generic non-specific reward or withdrawal visuals.`);
   }
   if (localeIdentity && !repaired.includes(localeIdentity)) {
@@ -256,7 +260,9 @@ export function repairSeedancePromptContract(prompt, context = {}) {
     additions.push(`Voiceover performance repair: all spoken lines and audio direction for this slice must use ${voiceoverPerformance}; avoid slow, flat, neutral explanatory delivery.`);
   }
   if (isOpeningSlice && !/Opening hook repair|first 1-2 seconds|first two seconds|high-impact attention hook/i.test(repaired)) {
-    additions.push(`Opening hook repair: ${openingHookRepair}; do not begin with a slow walking setup or calm explanation.`);
+    additions.push(moneyVisualsDisabled
+      ? "Opening hook repair: the first 1-2 seconds must begin with a high-impact narrative conflict, decisive facial reaction, or concrete character action; do not show balance, reward, cash, coin, payout, or withdrawal imagery, and do not begin with a slow walking setup or calm explanation."
+      : `Opening hook repair: ${openingHookRepair}; do not begin with a slow walking setup or calm explanation.`);
   }
   if (!/no burned subtitles|no captions|no dense text blocks/i.test(repaired)) {
     additions.push("Subtitle repair: no burned subtitles, no captions, no dense text blocks, no paragraph text; if visible text appears, keep only 1-3 short UI words in the target language.");
@@ -298,26 +304,30 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
   const localeIdentity = cleanString(plan.localeIdentity) || cleanString(context.localeIdentity);
   const sourceSlice = context.sourceSlice || {};
   const isOpeningSlice = Boolean(context.isOpeningSlice || context.segmentIndex === 1 || plan.segmentIndex === 1);
-  const sourceOpportunities = [
-    ...normalizeConversionEffectOpportunities(sourceSlice.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
-    ...normalizeConversionEffectOpportunities(plan.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
-    ...normalizeConversionEffectOpportunities(context.conversionEffectOpportunities, { targetLanguage, currencySymbol })
-  ];
+  const moneyVisualsDisabled = Boolean(context.disableMandatoryMoneyVisuals || plan.disableMandatoryMoneyVisuals);
+  const sourceOpportunities = moneyVisualsDisabled
+    ? []
+    : [
+        ...normalizeConversionEffectOpportunities(sourceSlice.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
+        ...normalizeConversionEffectOpportunities(plan.conversionEffectOpportunities, { targetLanguage, currencySymbol }),
+        ...normalizeConversionEffectOpportunities(context.conversionEffectOpportunities, { targetLanguage, currencySymbol })
+      ];
   const sourceMoneyVisuals = sourceOpportunities
     .map((item) => conversionEffectToMoneyVisual(item.effect))
     .filter(Boolean);
-  const openingMoneyVisuals = isOpeningSlice && context.enableOpeningConversionEffects !== false
+  const openingMoneyVisuals = !moneyVisualsDisabled && isOpeningSlice && context.enableOpeningConversionEffects !== false
     ? ["top_balance_growth", "continuous_earnings_rise", "real_cash_sound_cue"]
     : [];
-  const isMandatoryMoneyVisualCarrier = Boolean(context.mandatoryMoneyVisualCarrier ?? isOpeningSlice);
-  const mandatoryMoneyVisuals = context.disableMandatoryMoneyVisuals || !isMandatoryMoneyVisualCarrier
+  const isMandatoryMoneyVisualCarrier = !moneyVisualsDisabled
+    && Boolean(context.mandatoryMoneyVisualCarrier ?? isOpeningSlice);
+  const mandatoryMoneyVisuals = !isMandatoryMoneyVisualCarrier
     ? []
     : MANDATORY_HIGH_ATTRACTION_MONEY_VISUALS;
   const moneyVisuals = uniqueList([
     ...mandatoryMoneyVisuals,
     ...normalizeStringList(plan.moneyVisuals),
     ...normalizeStringList(context.moneyVisuals),
-    ...moneyVisualsFromSignals(plan.conversionSignals || sourceSlice.conversionSignals),
+    ...(moneyVisualsDisabled ? [] : moneyVisualsFromSignals(plan.conversionSignals || sourceSlice.conversionSignals)),
     ...sourceMoneyVisuals,
     ...openingMoneyVisuals
   ]);
@@ -366,6 +376,7 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     voiceoverPerformance: cleanString(context.voiceoverPerformance) || cleanString(plan.voiceoverPerformance),
     openingHookRepair: cleanString(context.openingHookRepair) || cleanString(plan.openingHookRepair),
     mandatoryMoneyVisualCarrier: isMandatoryMoneyVisualCarrier,
+    disableMandatoryMoneyVisuals: moneyVisualsDisabled,
     truthRules: context.truthRules,
     allowExactMoneyAmounts: context.allowExactMoneyAmounts
   });

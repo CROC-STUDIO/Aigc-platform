@@ -24,7 +24,8 @@ const RETRYABLE_ERROR_CODES = new Set([
   "upstream_timeout",
   "provider_timeout",
   "rate_limited",
-  "temporarily_unavailable"
+  "temporarily_unavailable",
+  "continuity_reference_failed"
 ]);
 
 function taskUid(task = {}) {
