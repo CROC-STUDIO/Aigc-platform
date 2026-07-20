@@ -490,6 +490,72 @@ test("deriveSeedanceSlicesForGeneration derives slices from storySegments when s
   assert.equal(slices[0].sliceSplitReason, "claim changes into app proof");
 });
 
+test("deriveSeedanceSlicesForGeneration links an ordered continuity chain across story segments", () => {
+  const slices = deriveSeedanceSlicesForGeneration({
+    sourceAssemblyMode: "continuous_story",
+    continuityPlan: {
+      groups: [{
+        continuityGroupId: "cg_1",
+        storySegmentIndexes: [1, 2],
+        globalAnchors: {
+          protagonist: "same delivery worker",
+          wardrobe: "blue rain jacket",
+          voice: "same Mandarin speaker"
+        }
+      }]
+    },
+    storySegments: [
+      {
+        storySegmentIndex: 1,
+        continuityGroupId: "cg_1",
+        startSec: 0,
+        endSec: 16,
+        durationSec: 16,
+        ...sevenDimensions,
+        startFrameState: { pose: "standing beside the scooter" },
+        endFrameState: { pose: "raises the phone", phoneUi: "reward popup open" }
+      },
+      {
+        storySegmentIndex: 2,
+        continuityGroupId: "cg_1",
+        startSec: 16,
+        endSec: 26,
+        durationSec: 10,
+        ...sevenDimensions,
+        startFrameState: { pose: "phone remains raised", phoneUi: "reward popup open" },
+        endFrameState: { pose: "taps withdraw" }
+      }
+    ]
+  });
+
+  assert.equal(slices.length, 3);
+  assert.deepEqual(slices.map((slice) => slice.seedanceSliceIndex), [1, 2, 3]);
+  assert.deepEqual(slices.map((slice) => slice.storySegmentIndex), [1, 1, 2]);
+  assert.deepEqual(slices.map((slice) => slice.continuityGroupId), ["cg_1", "cg_1", "cg_1"]);
+  assert.deepEqual(slices.map((slice) => slice.continuitySliceId), [
+    "cg_1_slice_1",
+    "cg_1_slice_2",
+    "cg_1_slice_3"
+  ]);
+  assert.deepEqual(slices.map((slice) => slice.continuitySequence), [1, 2, 3]);
+  assert.deepEqual(slices.map((slice) => slice.previousSliceId), ["", "cg_1_slice_1", "cg_1_slice_2"]);
+  assert.deepEqual(slices.map((slice) => slice.continuityMode), [
+    "independent_slice",
+    "continuous_from_previous",
+    "continuous_from_previous"
+  ]);
+  assert.equal(slices[2].continuityReferenceNeeded, true);
+  assert.deepEqual(slices[2].globalContinuityAnchors, {
+    protagonist: "same delivery worker",
+    wardrobe: "blue rain jacket",
+    voice: "same Mandarin speaker"
+  });
+  assert.deepEqual(slices[2].startFrameState, {
+    pose: "phone remains raised",
+    phoneUi: "reward popup open"
+  });
+});
+
 test("deriveSeedanceSlicesForGeneration falls back to storySegments when explicit seedanceSlices are invalid", () => {
   const slices = deriveSeedanceSlicesForGeneration({
     storySegments: [
@@ -638,8 +704,61 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /subtitleWorkflow\.subtitleScript/);
   assert.match(prompt, /subtitles for post-processing/i);
   assert.match(prompt, /not burned/i);
+  assert.match(prompt, /sourceAssemblyMode/);
+  assert.match(prompt, /continuityPlan/);
+  assert.match(prompt, /continuityGroupId/);
+  assert.match(prompt, /startFrameState/);
+  assert.match(prompt, /endFrameState/);
   assert.doesNotMatch(prompt, /可选的 seedanceSlices 示例/);
   assert.doesNotMatch(prompt, /segmentRole/);
+});
+
+test("validateVideoDecomposition preserves continuity analysis fields", () => {
+  const normalized = validateVideoDecomposition("ref_continuity", {
+    ...sevenDimensions,
+    hook: "continuous drama opening",
+    sourceAssemblyMode: "mixed",
+    continuityPlan: {
+      groups: [{
+        continuityGroupId: "cg_drama",
+        storySegmentIndexes: [1, 2],
+        globalAnchors: { protagonist: "same worker", scene: "same apartment" }
+      }]
+    },
+    storySegments: [{
+      storySegmentIndex: 1,
+      continuityGroupId: "cg_drama",
+      continuityMode: "independent_slice",
+      boundaryType: "continuity_group_start",
+      startFrameState: { pose: "sitting" },
+      endFrameState: { pose: "stands up" },
+      continuityReferenceNeeded: false,
+      globalContinuityAnchors: { protagonist: "same worker" },
+      startSec: 0,
+      endSec: 10,
+      durationSec: 10,
+      ...sevenDimensions
+    }]
+  });
+
+  assert.equal(normalized.sourceAssemblyMode, "mixed");
+  assert.deepEqual(normalized.continuityPlan.groups, [{
+    continuityGroupId: "cg_drama",
+    storySegmentIndexes: [1, 2],
+    globalAnchors: { protagonist: "same worker", scene: "same apartment" }
+  }]);
+  assert.deepEqual(normalized.storySegments[0], {
+    ...normalized.storySegments[0],
+    continuityGroupId: "cg_drama",
+    continuityMode: "independent_slice",
+    boundaryType: "continuity_group_start",
+    startFrameState: { pose: "sitting" },
+    endFrameState: { pose: "stands up" },
+    continuityReferenceNeeded: false,
+    globalContinuityAnchors: { protagonist: "same worker" }
+  });
+  assert.equal(normalized.seedanceSlices[0].continuityGroupId, "cg_drama");
+  assert.equal(normalized.seedanceSlices[0].continuitySliceId, "cg_drama_slice_1");
 });
 
 test("compact decomposition prompt keeps downstream-required story segment contract", () => {

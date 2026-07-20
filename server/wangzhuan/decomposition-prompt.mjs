@@ -26,6 +26,8 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   sourceVideoProfile: "裂变分析：整条参考视频的素材类型、主角/场景、产品露出方式、主要转化承诺与节奏概览",
   wholeVideoConversion: "裂变分析：整条视频的转化策略、核心转化语气、信任建立方式、奖励/提现证明和 CTA 承接",
   wholeVideoSummary: "裂变分析：先理解整条视频后给出的完整故事线摘要，不要直接按 UI/特效碎片拆段",
+  sourceAssemblyMode: "整片组装模式：continuous_story / independent_segments / mixed。按人物、动作、空间、UI、声音和因果关系判断，不能只看转场或镜头切换",
+  continuityPlan: "连续性计划：独立于 storySegments 输出 groups；每组包含 continuityGroupId、storySegmentIndexes、globalAnchors，支持任意 N 段连续链",
   storySegments: "裂变分析：按真实叙事 beat 拆分；每段必须包含数字 startSec/endSec/durationSec（单位秒，使用原视频时间轴，禁止所有段都写 0-15s），并包含 scene/subject/action/camera/lighting/style/quality 七维以及 coreHook、explosivePoint、segmentPurpose、timelineItems、conversionSignals、conversionEffectOpportunities、sliceSplitHints",
   timelineItems: "裂变分析：App UI、reward animation、cash/coin、subtitle/title、withdrawal、CTA overlay 等时间轴事件；除非改变叙事 beat，否则放在这里而不是新 storySegment",
   conversionSignals: "裂变分析：视频中真实观察到的提现成功、收益数字、情绪口播、现金金币反馈、快速奖励线索等转化信号",
@@ -59,7 +61,7 @@ export const DECOMPOSITION_SYSTEM_PROMPT = [
 ].join("\n");
 
 const CORE_DECOMPOSITION_FIELDS = ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"];
-const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
+const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "sourceAssemblyMode", "continuityPlan", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
 const CONDENSED_OPTIONAL_FIELDS = ["phoneUi", "protagonist", "voiceover", "onscreenText", "ctaMoment", "endingMoment", "continuityAnchors", "actionReference", "cameraReference", "textElements", "effectReference", "doNotCopyElements", "rewardFeedback", "cta"];
 
 function pickSchemaHints(fields = []) {
@@ -84,6 +86,7 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
     "4. 必须输出 storySegments；每段必须包含数字 startSec、endSec、durationSec，以及 scene、subject、action、camera、lighting、style、quality。",
     "5. 当某个 storySegment 超过 15 秒时，必须给出 sliceSplitHints，切点基于叙事转折，不要只因为字幕/UI/特效出现就切段。",
     "6. seedanceSlices 可选；如果不输出，后端会基于 storySegments + sliceSplitHints 自动派生生成切片。",
+    "7. 必须输出 sourceAssemblyMode 与 continuityPlan；连续组按人物、服装、场景、UI、镜头、声音和动作状态判断，不能按固定 30 秒或两段限制。",
     "",
     "参考视频信息：",
     videoProbePrompt(probe),
@@ -138,6 +141,9 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "If a storySegment is longer than 15 seconds, sliceSplitHints are mandatory: provide exact narrative splitSec suggestions such as claim -> proof, proof -> CTA, or setup -> payoff; never split only because UI/subtitle/effect appears.",
     "seedanceSlices are optional: if you can output high-quality executable 5-15s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
     "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
+    "sourceAssemblyMode is mandatory: continuous_story, independent_segments, or mixed. Scene cuts alone do not prove that segments are independent.",
+    "continuityPlan is mandatory and independent from storySegments: groups contain continuityGroupId, storySegmentIndexes, and globalAnchors; continuous chains may contain any number of Seedance slices.",
+    "For continuous boundaries include boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
     "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
     "Voiceover energy analysis: if there is human speaking, record emotion, speaking speed, rhythm, and infectiousness; mark whether fission should upgrade it to high-energy, fast-paced, emotionally expressive delivery.",
     "Net-earning visual analysis:提现成功、收益数字增长、顶部余额快速增长、真钞、金币、现金雨、金币爆发、满屏撒钱/撒金币都必须进入 conversionSignals 或 conversionEffectOpportunities；不要只写 generic reward feedback。",
@@ -170,6 +176,21 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
         mainPersuasionPath: "...",
         globalRhythm: "..."
       },
+      sourceAssemblyMode: "continuous_story",
+      continuityPlan: {
+        groups: [{
+          continuityGroupId: "cg_1",
+          storySegmentIndexes: [1, 2, 3],
+          globalAnchors: {
+            protagonist: "...",
+            wardrobe: "...",
+            scene: "...",
+            productUi: "...",
+            camera: "...",
+            voiceAndAudio: "..."
+          }
+        }]
+      },
       storySegments: [{
         storySegmentIndex: 1,
         startSec: 0,
@@ -188,6 +209,12 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
         segmentConversionStyle: "...",
         segmentRhythm: "...",
         segmentStructureSkeleton: "...",
+        continuityGroupId: "cg_1",
+        continuityMode: "independent_slice",
+        boundaryType: "continuity_group_start",
+        startFrameState: { pose: "...", gaze: "...", phoneUi: "..." },
+        endFrameState: { pose: "...", gaze: "...", phoneUi: "..." },
+        continuityReferenceNeeded: false,
         conversionSignals: {},
         conversionEffectOpportunities: [],
         openingHookIntensity: "...",
@@ -220,7 +247,9 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "7. protagonist/voiceover/onscreenText 能判断时必须填写；人物要有职业，口播要按段写功能与节奏。",
     "8. phoneUi/rewardFeedback/ctaMoment/endingMoment 能判断时必须填写具体 UI、按钮、数字、触发画面。",
     "9. continuityAnchors 必须总结后续裂变应保持一致的主角职业/外观、服装、地点、手机 UI 状态和最后关键帧。",
-    "10. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-15s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
-    "11. 只返回 JSON 对象。"
+    "10. sourceAssemblyMode 与 continuityPlan 必填；连续性分组独立于故事分段，支持超过 30 秒、超过两段的连续链。",
+    "11. 连续边界必须描述 startFrameState/endFrameState，包括人物姿态与视线、服装、场景灯光、镜头位置与运动方向、手机 UI、物体/特效状态和声音状态。",
+    "12. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-15s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
+    "13. 只返回 JSON 对象。"
   ].join("\n");
 }

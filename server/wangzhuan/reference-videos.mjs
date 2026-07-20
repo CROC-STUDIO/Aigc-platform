@@ -95,9 +95,13 @@ const FISSION_DECOMPOSITION_FIELDS = Object.freeze([
   "sourceVideoProfile",
   "wholeVideoConversion",
   "wholeVideoSummary",
+  "sourceAssemblyMode",
+  "continuityPlan",
   "storySegments",
   "seedanceSlices"
 ]);
+
+export const DECOMPOSITION_PROMPT_VERSION = "fission_decomposition_v3_continuity";
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -509,7 +513,7 @@ export function decompositionCacheKey(probe = {}, request = {}, llmConfig = {}) 
     targetRegion: request.targetRegion || "",
     targetRegions: request.targetRegions || request.regions || [],
     knowledgeNotesHash: sha256Normalized(request.knowledgeNotes),
-    promptVersion: "fission_decomposition_v2"
+    promptVersion: DECOMPOSITION_PROMPT_VERSION
   });
 }
 

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decompositionCacheKey } from "../../server/wangzhuan/reference-videos.mjs";
+import {
+  DECOMPOSITION_PROMPT_VERSION,
+  decompositionCacheKey
+} from "../../server/wangzhuan/reference-videos.mjs";
+
+test("decomposition cache version includes the continuity contract", () => {
+  assert.equal(DECOMPOSITION_PROMPT_VERSION, "fission_decomposition_v3_continuity");
+});
 
 test("decomposition cache key differs when knowledgeNotes changes", () => {
   const probe = { fileHash: "abc" };

@@ -18,6 +18,9 @@ export const FISSION_ANALYSIS_PROMPT_REQUIREMENTS = Object.freeze([
   "Output seedanceSlices as executable generation slices in source-video order; each seedanceSlice must include numeric startSec, endSec, durationSec, and sliceDurationSec. Keep every generated slice between 5 and 15 seconds, splitting longer story beats by narrative turning points.",
   "Observed conversionSignals must distinguish withdrawalSuccess, earningsNumber, emotionalVoiceover, cashCoinFeedback, and fastRewardCue.",
   "conversionEffectOpportunities are allowed fission placements; keep them separate from observed conversionSignals.",
+  "Classify sourceAssemblyMode as continuous_story, independent_segments, or mixed; scene cuts alone do not prove independence.",
+  "Output continuityPlan.groups independently from storySegments. Each group must list continuityGroupId, storySegmentIndexes, and globalAnchors for identity, wardrobe, scene, product/UI, camera, voice, and audio continuity.",
+  "Each continuous story segment or Seedance slice must preserve continuityGroupId, continuityMode, boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
   "Seedance prompts must use no burned subtitles, no captions, and no dense text blocks; subtitle text belongs in subtitleWorkflow.subtitleScript."
 ]);
 
@@ -72,6 +75,113 @@ function normalizeArray(value) {
 
 function normalizeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeStructuredValue(value) {
+  if (value && typeof value === "object") return value;
+  return cleanString(value);
+}
+
+function normalizeContinuityFields(value = {}) {
+  const fields = {};
+  for (const field of [
+    "continuityGroupId",
+    "continuitySliceId",
+    "previousSliceId",
+    "continuityMode",
+    "boundaryType"
+  ]) {
+    if (Object.hasOwn(value || {}, field)) fields[field] = cleanString(value[field]);
+  }
+  if (Object.hasOwn(value || {}, "continuitySequence")) {
+    fields.continuitySequence = numberOrFallback(value.continuitySequence, 0);
+  }
+  for (const field of ["startFrameState", "endFrameState", "globalContinuityAnchors"]) {
+    if (Object.hasOwn(value || {}, field)) fields[field] = normalizeStructuredValue(value[field]);
+  }
+  if (Object.hasOwn(value || {}, "continuityReferenceNeeded")) {
+    fields.continuityReferenceNeeded = normalizeBooleanLike(value.continuityReferenceNeeded, false);
+  }
+  return fields;
+}
+
+function normalizeContinuityPlan(value) {
+  const input = normalizeObject(value);
+  const groups = normalizeArray(input.groups).map((group) => ({
+    continuityGroupId: cleanString(group?.continuityGroupId),
+    storySegmentIndexes: normalizeArray(group?.storySegmentIndexes)
+      .map((index) => numberOrFallback(index, 0))
+      .filter((index) => index > 0),
+    globalAnchors: normalizeStructuredValue(group?.globalAnchors)
+  })).filter((group) => group.continuityGroupId);
+  return { groups };
+}
+
+function continuityGroupForStorySegment(continuityPlan, storySegmentIndex) {
+  return continuityPlan.groups.find((group) => group.storySegmentIndexes.includes(storySegmentIndex));
+}
+
+function applyContinuityPlanToStorySegments(storySegments, continuityPlan) {
+  return storySegments.map((segment) => {
+    const group = continuityGroupForStorySegment(continuityPlan, segment.storySegmentIndex);
+    if (!group) return segment;
+    return {
+      ...segment,
+      continuityGroupId: segment.continuityGroupId || group.continuityGroupId,
+      globalContinuityAnchors: Object.hasOwn(segment, "globalContinuityAnchors")
+        ? segment.globalContinuityAnchors
+        : group.globalAnchors
+    };
+  });
+}
+
+function inheritStoryContinuity(slice, storySegments) {
+  const segment = storySegments.find((item) => item.storySegmentIndex === slice.storySegmentIndex);
+  if (!segment) return slice;
+  const inherited = normalizeContinuityFields(segment);
+  return {
+    ...inherited,
+    ...slice,
+    ...(Object.hasOwn(slice, "globalContinuityAnchors")
+      ? {}
+      : Object.hasOwn(inherited, "globalContinuityAnchors")
+        ? { globalContinuityAnchors: inherited.globalContinuityAnchors }
+        : {})
+  };
+}
+
+function linkContinuitySlices(slices, storySegments, continuityPlan, enabled) {
+  if (!enabled) return slices;
+  const linked = slices.map((slice, index) => ({
+    ...inheritStoryContinuity(slice, storySegments),
+    seedanceSliceIndex: index + 1
+  }));
+  const groupSequences = new Map();
+
+  for (const slice of linked) {
+    const groupId = cleanString(slice.continuityGroupId);
+    if (!groupId) continue;
+    const group = continuityPlan.groups.find((item) => item.continuityGroupId === groupId);
+    const sequence = (groupSequences.get(groupId)?.length || 0) + 1;
+    const continuitySliceId = cleanString(slice.continuitySliceId) || `${groupId}_slice_${sequence}`;
+    const prior = groupSequences.get(groupId)?.at(-1);
+    slice.continuityGroupId = groupId;
+    slice.continuitySliceId = continuitySliceId;
+    slice.continuitySequence = sequence;
+    slice.previousSliceId = prior?.continuitySliceId || "";
+    slice.continuityMode = prior ? "continuous_from_previous" : "independent_slice";
+    slice.boundaryType = prior
+      ? "continuity_handoff"
+      : cleanString(slice.boundaryType) || "continuity_group_start";
+    slice.continuityReferenceNeeded = Boolean(prior);
+    if (!Object.hasOwn(slice, "globalContinuityAnchors") && group) {
+      slice.globalContinuityAnchors = group.globalAnchors;
+    }
+    const existing = groupSequences.get(groupId) || [];
+    existing.push(slice);
+    groupSequences.set(groupId, existing);
+  }
+  return linked;
 }
 
 function hasSevenDimensions(input) {
@@ -172,6 +282,7 @@ function normalizeStorySegment(segment, index = 0, options = {}) {
     segmentConversionStyle: cleanString(segment?.segmentConversionStyle),
     segmentRhythm: cleanString(segment?.segmentRhythm),
     segmentStructureSkeleton: cleanString(segment?.segmentStructureSkeleton),
+    ...normalizeContinuityFields(segment),
     timelineItems: normalizeArray(segment?.timelineItems),
     conversionSignals: normalizeStructuredList(segment?.conversionSignals),
     conversionEffectOpportunities: normalizeStructuredList(segment?.conversionEffectOpportunities),
@@ -208,6 +319,7 @@ function normalizeSeedanceSlice(slice, index = 0) {
     ...copySevenDimensions(slice),
     coreHook: cleanString(slice?.coreHook),
     explosivePoint: cleanString(slice?.explosivePoint),
+    ...normalizeContinuityFields(slice),
     conversionSignals: normalizeStructuredList(slice?.conversionSignals),
     conversionEffectOpportunities: normalizeStructuredList(slice?.conversionEffectOpportunities),
     voiceoverObserved: normalizeStructuredList(slice?.voiceoverObserved),
@@ -275,6 +387,7 @@ function buildGeneratedSlice(segment, startSec, endSec, seedanceSliceIndex, slic
     ...copySevenDimensions(segment),
     coreHook: segment.coreHook,
     explosivePoint: segment.explosivePoint,
+    ...normalizeContinuityFields(segment),
     conversionSignals: segment.conversionSignals,
     conversionEffectOpportunities: segment.conversionEffectOpportunities,
     voiceoverObserved: segment.voiceoverObserved,
@@ -411,11 +524,13 @@ function summarizeSliceSplitReason(sliceCount, usedHints = []) {
 
 export function normalizeFissionAnalysis(input = {}, options = {}) {
   const strictStorySegmentTiming = Boolean(options.strictStorySegmentTiming);
-  const storySegments = Array.isArray(input?.storySegments)
+  const continuityPlan = normalizeContinuityPlan(input?.continuityPlan);
+  const normalizedStorySegments = Array.isArray(input?.storySegments)
     ? input.storySegments.map((segment, index) => normalizeStorySegment(segment, index, {
         strictTiming: strictStorySegmentTiming
       }))
     : [];
+  const storySegments = applyContinuityPlanToStorySegments(normalizedStorySegments, continuityPlan);
   if (strictStorySegmentTiming) {
     assertChronologicalStorySegments(storySegments);
   }
@@ -440,10 +555,24 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
     seedanceSlices = fallbackStorySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
   }
 
+  const sourceAssemblyMode = cleanString(input?.sourceAssemblyMode);
+  const hasContinuityContract = Boolean(sourceAssemblyMode
+    || continuityPlan.groups.length
+    || fallbackStorySegments.some((segment) => segment.continuityGroupId)
+    || seedanceSlices.some((slice) => slice.continuityGroupId));
+  seedanceSlices = linkContinuitySlices(
+    seedanceSlices,
+    fallbackStorySegments,
+    continuityPlan,
+    hasContinuityContract
+  );
+
   return {
     sourceVideoProfile: normalizeSourceVideoProfile(input?.sourceVideoProfile),
     wholeVideoConversion: normalizeWholeVideoConversion(input?.wholeVideoConversion),
     wholeVideoSummary: cleanString(input?.wholeVideoSummary),
+    ...(sourceAssemblyMode ? { sourceAssemblyMode } : {}),
+    ...(continuityPlan.groups.length ? { continuityPlan } : {}),
     storySegments: fallbackStorySegments,
     seedanceSlices
   };
@@ -493,7 +622,13 @@ export function buildSeedanceSlicesFromAnalysis(analysis, options = {}) {
     return normalized.seedanceSlices;
   }
 
-  return normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
+  return linkContinuitySlices(
+    normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options)),
+    normalized.storySegments,
+    normalized.continuityPlan || { groups: [] },
+    Boolean(normalized.sourceAssemblyMode || normalized.continuityPlan
+      || normalized.storySegments.some((segment) => segment.continuityGroupId))
+  );
 }
 
 export function deriveSeedanceSlicesForGeneration(analysis, options = {}) {
@@ -504,5 +639,11 @@ export function deriveSeedanceSlicesForGeneration(analysis, options = {}) {
   if (normalized.seedanceSlices.length > 0) {
     return normalized.seedanceSlices;
   }
-  return normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options));
+  return linkContinuitySlices(
+    normalized.storySegments.flatMap((segment) => splitStorySegmentIntoSeedanceSlices(segment, options)),
+    normalized.storySegments,
+    normalized.continuityPlan || { groups: [] },
+    Boolean(normalized.sourceAssemblyMode || normalized.continuityPlan
+      || normalized.storySegments.some((segment) => segment.continuityGroupId))
+  );
 }
