@@ -22,6 +22,7 @@ export const FISSION_ANALYSIS_PROMPT_REQUIREMENTS = Object.freeze([
   "Treat shot/reverse-shot coverage, alternating members of the same cast, fixed wardrobe and relationships, shared room tone, and persistent HUD/UI as one continuity group; a focal-subject cut alone does not start a new group.",
   "Output continuityPlan.groups independently from storySegments. Each group must list continuityGroupId, storySegmentIndexes, and globalAnchors for identity, wardrobe, scene, product/UI, camera, voice, and audio continuity.",
   "Each continuous story segment or Seedance slice must preserve continuityGroupId, continuityMode, boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
+  "For continuous live-action story groups, output narrativePacingPlan with appliesToContinuityGroupIds, centralConflict, relationshipMap, beatSheet, reversalPoints, cliffhangerBoundaries, and compressionWarnings. Enter conflict or decisive action in the first second, add a new action, fact, accusation, evidence item, decision, or relationship change every 2-4 seconds, escalate or reverse the situation every 6-10 seconds, and remove dead air, greetings, walking transitions, and repeated explanation without changing cast, wardrobe, or scene merely to simulate pace.",
   "Seedance prompts must use no burned subtitles, no captions, and no dense text blocks; subtitle text belongs in subtitleWorkflow.subtitleScript."
 ]);
 
@@ -620,6 +621,7 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
   }
 
   const sourceAssemblyMode = normalizeSourceAssemblyMode(input?.sourceAssemblyMode);
+  const narrativePacingPlan = normalizeObject(input?.narrativePacingPlan);
   const hasContinuityContract = Boolean(sourceAssemblyMode
     || continuityPlan.groups.length
     || fallbackStorySegments.some((segment) => segment.continuityGroupId)
@@ -637,6 +639,7 @@ export function normalizeFissionAnalysis(input = {}, options = {}) {
     wholeVideoSummary: cleanString(input?.wholeVideoSummary),
     ...(sourceAssemblyMode ? { sourceAssemblyMode } : {}),
     ...(continuityPlan.groups.length ? { continuityPlan } : {}),
+    ...(Object.keys(narrativePacingPlan).length ? { narrativePacingPlan } : {}),
     storySegments: fallbackStorySegments,
     seedanceSlices
   };

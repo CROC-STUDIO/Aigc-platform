@@ -6,8 +6,8 @@ import {
   decompositionCacheKey
 } from "../../server/wangzhuan/reference-videos.mjs";
 
-test("decomposition cache version includes the continuity contract", () => {
-  assert.equal(DECOMPOSITION_PROMPT_VERSION, "fission_decomposition_v4_continuity_schema");
+test("decomposition cache version includes continuity and narrative pacing contracts", () => {
+  assert.equal(DECOMPOSITION_PROMPT_VERSION, "fission_decomposition_v5_narrative_pacing");
 });
 
 test("decomposition cache key differs when knowledgeNotes changes", () => {

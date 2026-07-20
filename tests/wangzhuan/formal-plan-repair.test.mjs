@@ -56,6 +56,25 @@ test("repairFormalPlanContract makes continuity override adjacent-slice diversit
   assert.equal(repaired.characterDiversityPlan.currentSlice, "");
 });
 
+test("repairSeedancePromptContract appends the required compact narrative pacing contract", () => {
+  const repaired = repairSeedancePromptContract("The same couple argues in the room.", {
+    narrativePacingRequired: true,
+    narrativePacingPlan: {
+      centralConflict: "a hidden debt breaks trust",
+      beatSheet: [{ startSec: 0, endSec: 3, change: "the accusation interrupts dinner" }],
+      reversalPoints: [{ timestampSec: 8, reveal: "phone evidence reverses the accusation" }],
+      compressionWarnings: ["remove repeated explanations"]
+    }
+  });
+
+  assert.match(repaired, /Narrative pacing requirement/);
+  assert.match(repaired, /first second/i);
+  assert.match(repaired, /every 2-4 seconds/i);
+  assert.match(repaired, /every 6-10 seconds/i);
+  assert.match(repaired, /a hidden debt breaks trust/);
+  assert.match(repaired, /remove dead air/i);
+});
+
 test("repairFormalPlanContract honors an explicit opening-slice money visual opt-out", () => {
   const repaired = repairFormalPlanContract({
     segmentIndex: 1,

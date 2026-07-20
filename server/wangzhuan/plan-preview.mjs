@@ -39,6 +39,14 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   ending: "Optional ending beat metadata in primary language; can be empty at draft time, but confirmation repair fills a neutral non-forcing value for QC contract if no rendered ending card/beat is required",
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
   seedancePrompt: "Current-slice 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
+  sliceBeatScript: [{
+    timeRange: "0-3s",
+    visualBeat: "Visible action or new story information",
+    subjectAction: "Concrete body, prop, phone, or reaction action",
+    camera: "Shot size, angle, movement, focus, and cut",
+    productOrUiBeat: "Product/UI change or empty",
+    audioOrVoiceover: "One short causal dialogue or sound beat"
+  }],
   negativePrompt: "Things to avoid in generation",
   segmentRole: "Role of this slice: hook_slice, proof_slice, withdrawal_slice, cta_slice, or continuity_slice",
   sliceDurationSec: "Current slice duration in seconds; prefer 10-15 seconds for multi-slice net-earning materials when feasible",
@@ -458,6 +466,36 @@ function storySegmentForSlice(decomposition = {}, currentSlice = {}) {
   return decomposition.storySegments.find((segment) => Number(segment?.storySegmentIndex || 0) === storySegmentIndex) || null;
 }
 
+function narrativePacingPlanForSlice(decomposition = {}, currentSlice = {}, currentStorySegment = null) {
+  const plan = decomposition?.narrativePacingPlan;
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return {};
+  const groupIds = Array.isArray(plan.appliesToContinuityGroupIds)
+    ? plan.appliesToContinuityGroupIds.map(cleanString).filter(Boolean)
+    : [];
+  const storySegmentIndexes = Array.isArray(plan.storySegmentIndexes)
+    ? plan.storySegmentIndexes.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+    : [];
+  const continuityGroupId = cleanString(currentSlice?.continuityGroupId)
+    || cleanString(currentStorySegment?.continuityGroupId);
+  const storySegmentIndex = Number(currentSlice?.storySegmentIndex || currentStorySegment?.storySegmentIndex || 0);
+  if (continuityGroupId && groupIds.length && !groupIds.includes(continuityGroupId)) return {};
+  if (storySegmentIndex && storySegmentIndexes.length && !storySegmentIndexes.includes(storySegmentIndex)) return {};
+  return plan;
+}
+
+function isNarrativeStorySlice(currentStorySegment = {}, narrativePacingPlan = {}) {
+  if (Object.keys(narrativePacingPlan).length) return true;
+  const timelineItems = Array.isArray(currentStorySegment?.timelineItems) ? currentStorySegment.timelineItems : [];
+  if (timelineItems.some((item) => cleanString(item?.type).toLowerCase() === "drama_action")) return true;
+  return /drama|story|dialogue|argument|conflict|confront|short.?drama|剧情|短剧|争吵|冲突|对峙/i.test([
+    currentStorySegment?.style,
+    currentStorySegment?.segmentPurpose,
+    currentStorySegment?.segmentStructureSkeleton,
+    currentStorySegment?.coreHook,
+    currentStorySegment?.action
+  ].map(cleanString).join(" "));
+}
+
 function summarizeAdjacentStorySegment(segment = {}) {
   if (!segment || typeof segment !== "object") return null;
   return {
@@ -556,6 +594,7 @@ function compactSliceContext(slice = {}) {
 
 export function buildCompactDecompositionForSlice(decomposition = {}, currentSlice = {}) {
   const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
+  const narrativePacingPlan = narrativePacingPlanForSlice(decomposition, currentSlice, currentStorySegment);
   const storySegments = Array.isArray(decomposition?.storySegments) ? decomposition.storySegments : [];
   const currentIndex = currentStorySegment
     ? storySegments.findIndex((segment) => segment === currentStorySegment)
@@ -565,6 +604,7 @@ export function buildCompactDecompositionForSlice(decomposition = {}, currentSli
     wholeVideoConversion: decomposition?.wholeVideoConversion || {},
     sourceAssemblyMode: decomposition?.sourceAssemblyMode || "",
     continuityPlan: decomposition?.continuityPlan || { groups: [] },
+    narrativePacingPlan,
     storySegments: currentStorySegment ? [compactStorySegment(currentStorySegment)] : [],
     adjacentStorySegments: {
       previous: currentIndex > 0 ? summarizeAdjacentStorySegment(storySegments[currentIndex - 1]) : null,
@@ -603,6 +643,7 @@ function buildCompactSchemaHint() {
     subtitles: ["short primaryLanguage subtitle lines"],
     imagePrompt: "first frame: new person + new scene + product exposure",
     seedancePrompt: "shot-by-shot Seedance formula; no burned subtitles; no dense/gibberish UI text",
+    sliceBeatScript: [{ timeRange: "0-3s", visualBeat: "one visible causal change", subjectAction: "concrete action", camera: "shot/cut", audioOrVoiceover: "one short beat" }],
     negativePrompt: "avoid list",
     segmentRole: "hook_slice|proof_slice|withdrawal_slice|cta_slice|continuity_slice",
     sliceDurationSec: "current slice seconds",
@@ -631,6 +672,8 @@ function buildRepairContext(input = {}) {
   const localeContext = resolvePlanLocaleContext(input.batch || {}, input.branch || {});
   const validationContext = resolveSeedancePlanValidationContext(input);
   const currentSlice = input.currentSlice || {};
+  const currentStorySegment = storySegmentForSlice(input.decomposition || {}, currentSlice);
+  const narrativePacingPlan = narrativePacingPlanForSlice(input.decomposition || {}, currentSlice, currentStorySegment);
   const isContinuousSlice = currentSlice.continuityMode === "continuous_from_previous"
     || Boolean(String(currentSlice.previousSliceId || "").trim());
   return {
@@ -655,6 +698,8 @@ function buildRepairContext(input = {}) {
     startFrameState: currentSlice.startFrameState,
     endFrameState: currentSlice.endFrameState,
     globalContinuityAnchors: currentSlice.globalContinuityAnchors,
+    narrativePacingRequired: isNarrativeStorySlice(currentStorySegment || {}, narrativePacingPlan),
+    narrativePacingPlan,
     characterDiversity: !isContinuousSlice && hasMeaningfulDiversityVariables(currentSlice.variableLayers)
       ? JSON.stringify({ variableLayers: currentSlice.variableLayers })
       : ""
@@ -715,6 +760,7 @@ export function validateSeedancePlan(plan = {}, context = {}) {
     ending: cleanString(plan.ending || plan.cta),
     imagePrompt: cleanString(plan.imagePrompt),
     seedancePrompt: cleanString(plan.seedancePrompt),
+    sliceBeatScript: Array.isArray(plan.sliceBeatScript) ? plan.sliceBeatScript : [],
     negativePrompt: cleanString(plan.negativePrompt),
     mediaRefs: resolveBranchMediaRefs(context.branch || {}, {
       productIcon: cleanString(plan.mediaRefs?.productIcon),
@@ -799,6 +845,8 @@ export function buildSeedancePlanMessages({
   const schemaHint = compactPrompt ? buildCompactSchemaHint() : SEEDANCE_PLAN_SCHEMA_HINT;
   const requiredDisclaimers = [...new Set((promptChannelRules.rules || []).flatMap((rule) => rule.requiredDisclaimers || []))];
   const currentStorySegment = storySegmentForSlice(decomposition, currentSlice);
+  const narrativePacingPlan = narrativePacingPlanForSlice(decomposition, currentSlice, currentStorySegment);
+  const narrativePacingRequired = isNarrativeStorySlice(currentStorySegment || {}, narrativePacingPlan);
   const isContinuousSlice = String(currentSlice?.continuityMode || "") === "continuous_from_previous"
     || Boolean(String(currentSlice?.previousSliceId || "").trim());
   const continuityPromptRule = isContinuousSlice
@@ -815,6 +863,7 @@ export function buildSeedancePlanMessages({
     totalSegmentCount: Number(totalSegmentCount || 0) || null,
     currentSlice: currentSlice || null,
     wholeVideoConversion: decomposition?.wholeVideoConversion,
+    narrativePacingPlan,
     targetSegmentCount: targetSegmentCount || "follow_decomposition",
     currentStorySegment,
     timelineItems: currentStorySegment?.timelineItems || currentSlice?.timelineItems || [],
@@ -848,6 +897,7 @@ export function buildSeedancePlanMessages({
           globalContinuityAnchors: currentSlice?.globalContinuityAnchors
         },
         targetSegmentCount: targetSegmentCount || "follow_decomposition",
+        narrativePacingPlan,
         conversionEffectOpportunities: currentStorySegment?.conversionEffectOpportunities || currentSlice?.conversionEffectOpportunities || [],
         variableLayers: currentStorySegment?.variableLayers || currentSlice?.variableLayers || {}
       }
@@ -873,6 +923,10 @@ export function buildSeedancePlanMessages({
     JSON.stringify(fissionSliceContext, null, 2),
     "",
     continuityPromptRule,
+    "",
+    narrativePacingRequired
+      ? "紧凑剧情硬规则：首秒直接进入冲突、决定性动作或新事实；每 2-4 秒必须新增动作、事实、指控、证据、决定或关系变化；每 6-10 秒必须升级矛盾或完成一次反转；删除空镜、寒暄、走路过场、重复解释和无信息反应。紧凑感必须来自同一因果链，不得靠换人、换装、换场或无意义大喊制造假节奏；非最终连续切片在未完成动作、质问、证据揭晓前或强反应上结束。"
+      : "",
     "",
     formatSeedanceEnergyRules(),
     "",
@@ -990,6 +1044,7 @@ export function buildSeedancePlanMessages({
       "CTA/Ending：默认空；只有 channelRules、customPrompt 或 truthRules 明确要求才写。ctaAsset/endingAsset 只可在最终切片末尾作为视觉参考，必须由该 Seedance 分片自身呈现，后处理不会追加这些产品图片。",
       "人物差异：不同切片必须换人物/场景/服装/声音，除非当前切片明确是连续性切片；sliceDiversity 写明差异。",
       "Seedance 公式：每个镜头写 主体 + 运动 + 环境 + 运镜/切镜 + 美学描述 + 音频/文字，并说明该镜头转化功能。",
+	      narrativePacingRequired ? "紧凑剧情：首秒入冲突或决定性动作；每 2-4 秒一个因果变化，每 6-10 秒一次升级或反转；删除空镜、寒暄、走路过场、重复解释和无信息反应；不得靠换人换场制造假节奏。" : "",
 	      formatSeedanceEnergyRules({ compact: true }),
       "",
       "当前参考拆解精简：",

@@ -97,11 +97,12 @@ const FISSION_DECOMPOSITION_FIELDS = Object.freeze([
   "wholeVideoSummary",
   "sourceAssemblyMode",
   "continuityPlan",
+  "narrativePacingPlan",
   "storySegments",
   "seedanceSlices"
 ]);
 
-export const DECOMPOSITION_PROMPT_VERSION = "fission_decomposition_v4_continuity_schema";
+export const DECOMPOSITION_PROMPT_VERSION = "fission_decomposition_v5_narrative_pacing";
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;

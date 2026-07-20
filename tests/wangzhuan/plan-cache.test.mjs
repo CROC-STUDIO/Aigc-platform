@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { planCacheKey } from "../../server/wangzhuan/plan-cache.mjs";
+import { PLAN_PROMPT_VERSION, planCacheKey } from "../../server/wangzhuan/plan-cache.mjs";
+
+test("plan cache version includes the narrative pacing contract", () => {
+  assert.equal(PLAN_PROMPT_VERSION, "seedance_plan_v2_narrative_pacing");
+});
 import { generateSeedancePlan } from "../../server/wangzhuan/plan-preview.mjs";
 
 test("plan cache key changes by slice params", () => {

@@ -28,6 +28,7 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   wholeVideoSummary: "裂变分析：先理解整条视频后给出的完整故事线摘要，不要直接按 UI/特效碎片拆段",
   sourceAssemblyMode: "整片组装模式：continuous_story / independent_segments / mixed。按人物、动作、空间、UI、声音和因果关系判断，不能只看转场或镜头切换",
   continuityPlan: "连续性计划：独立于 storySegments 输出 groups；每组包含 continuityGroupId、storySegmentIndexes、globalAnchors，支持任意 N 段连续链",
+  narrativePacingPlan: "紧凑剧情计划：连续真人剧情必填；包含 appliesToContinuityGroupIds、centralConflict、relationshipMap、beatSheet、reversalPoints、cliffhangerBoundaries、compressionWarnings；首秒进入冲突或决定性动作，每 2-4 秒新增动作/事实/指控/证据/决定/关系变化，每 6-10 秒升级或反转，删除空镜、寒暄、走路过场和重复解释；不得靠换人、换装、换场制造假节奏",
   storySegments: "裂变分析：按真实叙事 beat 拆分；每段必须包含数字 startSec/endSec/durationSec（单位秒，使用原视频时间轴，禁止所有段都写 0-15s），并包含 scene/subject/action/camera/lighting/style/quality 七维以及 coreHook、explosivePoint、segmentPurpose、timelineItems、conversionSignals、conversionEffectOpportunities、sliceSplitHints",
   timelineItems: "裂变分析：App UI、reward animation、cash/coin、subtitle/title、withdrawal、CTA overlay 等时间轴事件；除非改变叙事 beat，否则放在这里而不是新 storySegment",
   conversionSignals: "裂变分析：视频中真实观察到的提现成功、收益数字、情绪口播、现金金币反馈、快速奖励线索等转化信号",
@@ -61,7 +62,7 @@ export const DECOMPOSITION_SYSTEM_PROMPT = [
 ].join("\n");
 
 const CORE_DECOMPOSITION_FIELDS = ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"];
-const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "sourceAssemblyMode", "continuityPlan", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
+const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "sourceAssemblyMode", "continuityPlan", "narrativePacingPlan", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
 const CONDENSED_OPTIONAL_FIELDS = ["phoneUi", "protagonist", "voiceover", "onscreenText", "ctaMoment", "endingMoment", "continuityAnchors", "actionReference", "cameraReference", "textElements", "effectReference", "doNotCopyElements", "rewardFeedback", "cta"];
 
 function pickSchemaHints(fields = []) {
@@ -74,6 +75,7 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
     ...CORE_DECOMPOSITION_FIELDS,
     "sourceAssemblyMode",
     "continuityPlan",
+    "narrativePacingPlan",
     "storySegments",
     "sliceSplitHints",
     "seedanceSlices"
@@ -90,6 +92,7 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
     "6. seedanceSlices 可选；如果不输出，后端会基于 storySegments + sliceSplitHints 自动派生生成切片。",
     "7. 必须输出 sourceAssemblyMode 与 continuityPlan.groups；每组严格使用 continuityGroupId、storySegmentIndexes、globalAnchors，不能改名为 continuousGroups 或只给时间范围。",
     "8. 同一场景中的正反打（shot/reverse-shot）、多人交替出镜、固定人物关系与服装、持续 HUD/环境音仍属于同一连续组；不要因为焦点人物切换就拆组。只有切到独立产品 UI、内容库、品牌落版或真实时空重置时才新建连续组。",
+    "9. 连续真人剧情必须输出 narrativePacingPlan：首秒进入冲突或决定性动作，每 2-4 秒新增动作、事实、指控、证据、决定或关系变化，每 6-10 秒升级或反转；删除空镜、寒暄、走路过场和重复解释，但不得靠换人、换装、换场制造假节奏。",
     "",
     "参考视频信息：",
     videoProbePrompt(probe),
@@ -148,6 +151,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "Shot/reverse-shot coverage, alternating members of the same cast, fixed character relationships and wardrobe, shared room tone, and a persistent HUD/UI remain one continuity group; changing the focal person alone is not a group boundary.",
     "continuityPlan is mandatory and independent from storySegments: groups contain continuityGroupId, storySegmentIndexes, and globalAnchors; continuous chains may contain any number of Seedance slices.",
     "For continuous boundaries include boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
+    "For continuous live-action story groups, narrativePacingPlan is mandatory: list appliesToContinuityGroupIds, centralConflict, relationshipMap, beatSheet, reversalPoints, cliffhangerBoundaries, and compressionWarnings. Enter conflict or decisive action in the first second, create one causal story change every 2-4 seconds, escalate or reverse every 6-10 seconds, and remove dead air, greetings, walking transitions, and repeated explanation without changing cast, wardrobe, or scene merely to simulate pace.",
     "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
     "Voiceover energy analysis: if there is human speaking, record emotion, speaking speed, rhythm, and infectiousness; mark whether fission should upgrade it to high-energy, fast-paced, emotionally expressive delivery.",
     "Net-earning visual analysis:提现成功、收益数字增长、顶部余额快速增长、真钞、金币、现金雨、金币爆发、满屏撒钱/撒金币都必须进入 conversionSignals 或 conversionEffectOpportunities；不要只写 generic reward feedback。",
@@ -194,6 +198,15 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
             voiceAndAudio: "..."
           }
         }]
+      },
+      narrativePacingPlan: {
+        appliesToContinuityGroupIds: ["cg_1"],
+        centralConflict: "...",
+        relationshipMap: ["..."],
+        beatSheet: [{ startSec: 0, endSec: 3, change: "...", causalLink: "..." }],
+        reversalPoints: [{ timestampSec: 8, reveal: "..." }],
+        cliffhangerBoundaries: [{ timestampSec: 14, unresolvedAction: "..." }],
+        compressionWarnings: ["remove greetings, walking transitions, and repeated explanation"]
       },
       storySegments: [{
         storySegmentIndex: 1,
@@ -254,6 +267,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "10. sourceAssemblyMode 与 continuityPlan 必填；连续性分组独立于故事分段，支持超过 30 秒、超过两段的连续链。",
     "11. 连续边界必须描述 startFrameState/endFrameState，包括人物姿态与视线、服装、场景灯光、镜头位置与运动方向、手机 UI、物体/特效状态和声音状态。",
     "12. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-15s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
-    "13. 只返回 JSON 对象。"
+    "13. 连续真人剧情必须输出 narrativePacingPlan，并把紧凑感落实为逐拍因果推进，不得仅写“节奏快”。",
+    "14. 只返回 JSON 对象。"
   ].join("\n");
 }

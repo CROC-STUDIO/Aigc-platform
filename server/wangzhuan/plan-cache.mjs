@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { wangzhuanPaths, writeAtomicJson } from "./storage.mjs";
 
 const PLAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const PLAN_PROMPT_VERSION = "seedance_plan_v1";
+export const PLAN_PROMPT_VERSION = "seedance_plan_v2_narrative_pacing";
 
 function stableJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);

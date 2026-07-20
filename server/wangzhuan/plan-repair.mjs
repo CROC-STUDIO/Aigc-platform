@@ -206,6 +206,10 @@ export function repairSeedancePromptContract(prompt, context = {}) {
   const previousSliceId = cleanString(context.previousSliceId);
   const isContinuousSlice = cleanString(context.continuityMode) === "continuous_from_previous"
     || Boolean(previousSliceId);
+  const narrativePacingRequired = Boolean(context.narrativePacingRequired);
+  const narrativePacingPlan = context.narrativePacingPlan && typeof context.narrativePacingPlan === "object"
+    ? context.narrativePacingPlan
+    : {};
   const moneyVisualsDisabled = Boolean(context.disableMandatoryMoneyVisuals);
   const voiceoverPerformance = cleanString(context.voiceoverPerformance)
     || (moneyVisualsDisabled
@@ -255,6 +259,12 @@ export function repairSeedancePromptContract(prompt, context = {}) {
       ? JSON.stringify(context.endFrameState)
       : cleanString(context.endFrameState);
     additions.push(`Continuity preservation requirement: continue from previousSliceId=${previousSliceId || "previous slice"}; keep the same ensemble identity, character relationships, wardrobe, scene, lighting, product/UI state, voice, and room tone. Global anchors: ${anchors || "preserve prior established anchors"}. Start frame state: ${startState || "continue the approved prior tail frame"}. End frame state: ${endState || "advance the same scene without resetting identity"}. Any generic instruction to change person, scene, clothing, camera setup, or voice is overridden for this slice.`);
+  }
+  if (narrativePacingRequired && !/Narrative pacing requirement/i.test(repaired)) {
+    const pacingPlanText = Object.keys(narrativePacingPlan).length
+      ? JSON.stringify(narrativePacingPlan)
+      : "preserve the source conflict and causal story progression";
+    additions.push(`Narrative pacing requirement: enter conflict, decisive action, or new information in the first second; every 2-4 seconds add a concrete action, fact, accusation, evidence item, decision, or relationship change; every 6-10 seconds escalate or reverse the situation. Remove dead air, greetings, walking transitions, repeated explanations, and reactions that add no information. Keep one causal chain and do not change cast, wardrobe, or scene merely to simulate pace. End a non-final continuous slice on an unfinished action, question, evidence reveal, or decisive reaction. Pacing plan: ${pacingPlanText}.`);
   }
   if (!/Voiceover performance repair|high-energy|fast-paced|emotionally expressive|contagious/i.test(repaired)) {
     additions.push(`Voiceover performance repair: all spoken lines and audio direction for this slice must use ${voiceoverPerformance}; avoid slow, flat, neutral explanatory delivery.`);
@@ -370,6 +380,8 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
     startFrameState: context.startFrameState ?? sourceSlice.startFrameState,
     endFrameState: context.endFrameState ?? sourceSlice.endFrameState,
     globalContinuityAnchors: context.globalContinuityAnchors ?? sourceSlice.globalContinuityAnchors,
+    narrativePacingRequired: context.narrativePacingRequired,
+    narrativePacingPlan: context.narrativePacingPlan,
     moneyVisuals,
     conversionEffectOpportunities: repairedOpportunities,
     isOpeningSlice,
@@ -388,6 +400,7 @@ export function repairFormalPlanContract(plan = {}, context = {}) {
       ? "Repair applied: this slice carries the final-video requirement for at least one visible high-attraction wangzhuan visual such as real cash, coins, cash rain, coin burst, full-screen money rain, or full-screen coin rain."
       : "",
     "Repair applied: voiceover must be high-energy, fast-paced, emotionally expressive, and contagious instead of slow neutral explanation.",
+    context.narrativePacingRequired ? "Repair applied: narrative pacing must advance through causal story changes every 2-4 seconds, with escalation or reversal every 6-10 seconds and no dead air." : "",
     isOpeningSlice ? "Repair applied: opening slice must start with a high-impact hook scene in the first 1-2 seconds and front-load reward/cash/coin feedback where natural." : "",
     currencySymbol ? `Repair applied: money-related visuals must use ${currencySymbol} only and avoid exact payout amounts.` : "",
     "Repair applied: Seedance prompt must avoid burned subtitles; subtitle scripts remain post-process fields."

@@ -22,9 +22,14 @@ function baseInput(options = {}) {
     decomposition: {
       sourceVideoProfile: { style: "ugc" },
       wholeVideoConversion: { coreConversionTone: "fast reward proof" },
+      narrativePacingPlan: {
+        appliesToContinuityGroupIds: ["cg_story"],
+        centralConflict: "a secret debt breaks trust",
+        beatSheet: [{ startSec: 4, endSec: 7, change: "phone proof interrupts the accusation" }]
+      },
       storySegments: [
         { storySegmentIndex: 1, summary: "开场冲突", timelineItems: [{ content: "opening" }] },
-        { storySegmentIndex: 2, summary: "产品承接", timelineItems: [{ content: "current slice detail" }] },
+        { storySegmentIndex: 2, continuityGroupId: "cg_story", summary: "产品承接", timelineItems: [{ content: "current slice detail" }] },
         { storySegmentIndex: 3, summary: "结尾转化", timelineItems: [{ content: "ending" }] }
       ],
       seedanceSlices: [
@@ -42,7 +47,7 @@ function baseInput(options = {}) {
     branchVariantIndex: 1,
     segmentIndex: 2,
     sliceDurationSec: 12,
-    currentSlice: { seedanceSliceIndex: 2, storySegmentIndex: 2, durationSec: 12 },
+    currentSlice: { seedanceSliceIndex: 2, storySegmentIndex: 2, continuityGroupId: "cg_story", durationSec: 12 },
     options
   };
 }
@@ -56,6 +61,8 @@ test("compact plan prompt keeps current story segment detail only", () => {
   assert.match(text, /产品承接/);
   assert.match(text, /current slice detail/);
   assert.match(text, /adjacentStorySegments/);
+  assert.match(text, /narrativePacingPlan/);
+  assert.match(text, /a secret debt breaks trust/);
   assert.doesNotMatch(text, /"timelineItems":\s*\[\s*\{\s*"content":\s*"opening"/);
   assert.doesNotMatch(text, /"timelineItems":\s*\[\s*\{\s*"content":\s*"ending"/);
 });

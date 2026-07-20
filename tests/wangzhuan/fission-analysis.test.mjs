@@ -743,6 +743,9 @@ test("FISSION_ANALYSIS_PROMPT_REQUIREMENTS covers production fission analysis ru
   assert.match(text, /conversionEffectOpportunities/);
   assert.match(text, /shot\/reverse-shot/i);
   assert.match(text, /focal-subject cut alone does not start a new group/i);
+  assert.match(text, /narrativePacingPlan/);
+  assert.match(text, /2-4 seconds/i);
+  assert.match(text, /6-10 seconds/i);
   assert.match(text, /no burned subtitles/i);
   assert.match(text, /no captions/i);
   assert.match(text, /subtitleWorkflow\.subtitleScript/);
@@ -783,6 +786,10 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /continuityPlan/);
   assert.match(prompt, /continuityGroupId/);
   assert.match(prompt, /Shot\/reverse-shot/i);
+  assert.match(prompt, /narrativePacingPlan/);
+  assert.match(prompt, /2-4 seconds/i);
+  assert.match(prompt, /6-10 seconds/i);
+  assert.match(prompt, /dead air/i);
   assert.match(prompt, /startFrameState/);
   assert.match(prompt, /endFrameState/);
   assert.doesNotMatch(prompt, /可选的 seedanceSlices 示例/);
@@ -800,6 +807,13 @@ test("validateVideoDecomposition preserves continuity analysis fields", () => {
         storySegmentIndexes: [1, 2],
         globalAnchors: { protagonist: "same worker", scene: "same apartment" }
       }]
+    },
+    narrativePacingPlan: {
+      appliesToContinuityGroupIds: ["cg_drama"],
+      centralConflict: "the same couple confronts a hidden debt",
+      beatSheet: [{ startSec: 0, endSec: 3, change: "accusation interrupts the room" }],
+      reversalPoints: [{ timestampSec: 8, reveal: "phone evidence changes who has leverage" }],
+      compressionWarnings: ["remove repeated explanation"]
     },
     storySegments: [{
       storySegmentIndex: 1,
@@ -823,6 +837,8 @@ test("validateVideoDecomposition preserves continuity analysis fields", () => {
     storySegmentIndexes: [1, 2],
     globalAnchors: { protagonist: "same worker", scene: "same apartment" }
   }]);
+  assert.equal(normalized.narrativePacingPlan.centralConflict, "the same couple confronts a hidden debt");
+  assert.equal(normalized.narrativePacingPlan.beatSheet[0].change, "accusation interrupts the room");
   assert.deepEqual(normalized.storySegments[0], {
     ...normalized.storySegments[0],
     continuityGroupId: "cg_drama",
@@ -857,6 +873,10 @@ test("compact decomposition prompt keeps downstream-required story segment contr
   assert.match(prompt, /storySegmentIndexes/);
   assert.match(prompt, /globalAnchors/);
   assert.match(prompt, /正反打|shot\/reverse-shot/i);
+  assert.match(prompt, /narrativePacingPlan/);
+  assert.match(prompt, /每 2-4 秒/);
+  assert.match(prompt, /每 6-10 秒/);
+  assert.match(prompt, /空镜|重复解释/);
 });
 
 test("reference video decomposition validation preserves fission fields", () => {

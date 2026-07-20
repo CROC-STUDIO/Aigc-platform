@@ -31,8 +31,16 @@ test("Seedance plan prompt includes fission story segment and carrier context", 
     },
     decomposition: {
       wholeVideoConversion: { coreConversionTone: "fast proof with drama hook" },
+      narrativePacingPlan: {
+        appliesToContinuityGroupIds: ["cg_story"],
+        centralConflict: "a family accusation escalates when phone evidence appears",
+        beatSheet: [{ startSec: 0, endSec: 3, change: "one accusation changes the relationship" }],
+        reversalPoints: [{ timestampSec: 8, reveal: "the accused person reveals proof" }],
+        compressionWarnings: ["remove greetings and repeated explanation"]
+      },
       storySegments: [{
         storySegmentIndex: 1,
+        continuityGroupId: "cg_story",
         segmentRhythm: "fast opening",
         segmentStructureSkeleton: "conflict hook -> reward proof",
         timelineItems: [{ startSec: 0, endSec: 2, type: "drama_action", content: "conflict" }],
@@ -46,6 +54,7 @@ test("Seedance plan prompt includes fission story segment and carrier context", 
     sliceDurationSec: 12,
     currentSlice: {
       storySegmentIndex: 1,
+      continuityGroupId: "cg_story",
       durationSec: 12,
       conversionEffectOpportunities: [{ effect: "coin_burst", placement: "phone tap" }]
     },
@@ -64,6 +73,11 @@ test("Seedance plan prompt includes fission story segment and carrier context", 
   assert.match(text, /high-energy, fast-paced, emotionally expressive, contagious delivery/);
   assert.match(text, /优先按已有 seedanceSlices 执行/);
   assert.match(text, /基于 storySegments \+ sliceSplitHints 自动切片/);
+  assert.match(text, /narrativePacingPlan/);
+  assert.match(text, /a family accusation escalates/);
+  assert.match(text, /每 2-4 秒/);
+  assert.match(text, /每 6-10 秒/);
+  assert.match(text, /删除空镜、寒暄、走路过场、重复解释/);
 });
 
 test("continuous slices preserve identity scene UI voice and audio instead of applying diversity", () => {
@@ -200,6 +214,92 @@ test("continuous plan repair suppresses empty diversity and preserves continuity
     clothingChangedFromPrevious: false,
     voiceChangedFromPrevious: false
   });
+});
+
+test("story plan repair enforces compact causal beats in the final Seedance prompt", async () => {
+  const context = {
+    callWangzhuanLlm: async () => JSON.stringify({
+      hook: "A confrontation begins",
+      body: "The same argument continues",
+      voiceover: "Tell me the truth",
+      subtitles: ["Tell me the truth"],
+      cta: "",
+      ending: "",
+      imagePrompt: "The same couple in one living room.",
+      seedancePrompt: "A couple argues in a living room.",
+      negativePrompt: "No identity drift."
+    })
+  };
+
+  const plan = await generateSeedancePlan(context, {
+    batch: { templateSnapshot: { draft: { productName: "App", language: "en-US", regions: ["US"] } }, estimate: { request: {} } },
+    branch: { branchId: "b1", productName: "App", languages: ["en-US"], regions: ["US"], truthRules: {} },
+    decomposition: {
+      sourceAssemblyMode: "mixed",
+      narrativePacingPlan: {
+        appliesToContinuityGroupIds: ["cg_story"],
+        centralConflict: "a hidden debt turns the couple against each other",
+        beatSheet: [{ startSec: 0, endSec: 3, change: "an accusation interrupts the room" }],
+        reversalPoints: [{ timestampSec: 8, reveal: "phone evidence reverses the accusation" }],
+        compressionWarnings: ["remove repeated explanations"]
+      },
+      storySegments: [{
+        storySegmentIndex: 1,
+        continuityGroupId: "cg_story",
+        timelineItems: [{ type: "drama_action", content: "confrontation" }]
+      }]
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12,
+    currentSlice: {
+      storySegmentIndex: 1,
+      continuityGroupId: "cg_story",
+      continuityMode: "independent_slice"
+    }
+  });
+
+  assert.match(plan.seedancePrompt, /Narrative pacing requirement/);
+  assert.match(plan.seedancePrompt, /first second/i);
+  assert.match(plan.seedancePrompt, /every 2-4 seconds/i);
+  assert.match(plan.seedancePrompt, /every 6-10 seconds/i);
+  assert.match(plan.seedancePrompt, /hidden debt/);
+  assert.match(plan.seedancePrompt, /remove dead air/i);
+});
+
+test("product UI slices do not inherit the live-action narrative pacing rule", () => {
+  const messages = buildSeedancePlanMessages({
+    batch: {
+      templateSnapshot: { draft: { productName: "App", language: "en-US", regions: ["US"] } },
+      estimate: { request: {} }
+    },
+    branch: { branchId: "b1", productName: "App", languages: ["en-US"], regions: ["US"], truthRules: {} },
+    decomposition: {
+      sourceAssemblyMode: "mixed",
+      narrativePacingPlan: {
+        appliesToContinuityGroupIds: ["cg_story"],
+        centralConflict: "a hidden debt breaks trust"
+      },
+      storySegments: [{
+        storySegmentIndex: 2,
+        continuityGroupId: "cg_product",
+        style: "full-screen product UI demo",
+        timelineItems: [{ type: "app_ui", content: "content library" }]
+      }]
+    },
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 2,
+    sliceDurationSec: 8,
+    currentSlice: {
+      storySegmentIndex: 2,
+      continuityGroupId: "cg_product",
+      segmentRole: "proof_slice"
+    }
+  });
+
+  assert.doesNotMatch(messagesText(messages), /紧凑剧情硬规则/);
 });
 
 test("generateSeedancePlan repairs prompt before returning validated plan", async () => {
