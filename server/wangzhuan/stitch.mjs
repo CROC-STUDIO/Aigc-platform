@@ -29,6 +29,7 @@ import { classifyStitchSelection } from "./segment-recovery.mjs";
 import { buildExpandedOutputName, expansionTimeoutMs, renderExpandedVideo } from "./output-expansion.mjs";
 import { writeVolcengineSubtitleArtifacts } from "./subtitles.mjs";
 import { resolveVolcengineAsrConfig, transcribeVolcengineAudio } from "./volcengine-asr.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 
 const STITCH_READY_TASK_STATUSES = new Set(["downloaded", "succeeded", "qc"]);
 const FAILED_TASK_STATUSES = new Set(["failed", "skipped", "stopped"]);
@@ -240,7 +241,7 @@ export async function assertDecodableVideo(filePath, { timeoutMs = DEFAULT_STITC
   }
   let stderr = "";
   try {
-    const result = await execFileAsync("ffmpeg", [
+    const result = await runFfmpeg([
       "-nostdin",
       "-v", "error",
       "-i", filePath,
@@ -396,7 +397,7 @@ async function applyDisclaimerOverlay(context, sourcePath, targetPath, overlay, 
     tempPath
   ];
   try {
-    await execFileAsync("ffmpeg", args, {
+    await runFfmpeg(args, {
       timeout: timeoutMs,
       killSignal: "SIGKILL",
       windowsHide: true,
@@ -420,7 +421,7 @@ async function applyVolcengineSubtitles(context, batch, outputId, sourcePath, { 
   const outputDir = join(batchDir(context, batch.batchId), "postprocess-subtitles", outputId);
   const audioPath = join(outputDir, "source.mp3");
   await mkdir(outputDir, { recursive: true });
-  await execFileAsync("ffmpeg", [
+  await runFfmpeg([
     "-y", "-i", sourcePath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", audioPath
   ], { timeout: timeoutMs, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
   const audioStorage = await syncWangzhuanAsset(context, audioPath, "pipeline_subtitle_audio", { required: true });
@@ -443,7 +444,7 @@ async function applyVolcengineSubtitles(context, batch, outputId, sourcePath, { 
   const workDir = await mkdtemp(join(dirname(sourcePath), ".wz-subtitles-"));
   const tempPath = join(workDir, "subtitled.mp4");
   try {
-    await execFileAsync("ffmpeg", [
+    await runFfmpeg([
       "-y", "-i", sourcePath,
       "-vf", `ass=${artifacts.assPath.replace(/\\/g, "/").replace(/:/g, "\\:")}`,
       "-map", "0:v:0", "-map", "0:a?",
@@ -459,6 +460,7 @@ async function applyVolcengineSubtitles(context, batch, outputId, sourcePath, { 
   return {
     enabled: true,
     status: "succeeded",
+    mode: "burned_in",
     cueCount: artifacts.cueCount,
     transcriptPath: userRelative(context, artifacts.transcriptPath),
     srtPath: userRelative(context, artifacts.srtPath),
@@ -873,7 +875,8 @@ async function createFailedReport(context, batch, group, segmentOutputs, preflig
 
 async function concatSegmentVideos(outputPath, segmentPaths, {
   timeoutMs = DEFAULT_STITCH_TIMEOUT_MS,
-  canvas = null
+  canvas = null,
+  overlay = null
 } = {}) {
   if (!ffmpegAvailableSync()) {
     throw new WangzhuanError("stitcher_unavailable", "ffmpeg 不可用，无法拼接视频");
@@ -896,7 +899,7 @@ async function concatSegmentVideos(outputPath, segmentPaths, {
     await mkdir(dirname(outputPath), { recursive: true });
 
     const runConcat = async (args) => {
-      await execFileAsync("ffmpeg", args, {
+      await runFfmpeg(args, {
         timeout: timeoutMs,
         killSignal: "SIGKILL",
         windowsHide: true,
@@ -906,21 +909,51 @@ async function concatSegmentVideos(outputPath, segmentPaths, {
 
     let copyError = null;
     try {
-      await runConcat([
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listPath,
-        "-c", "copy",
-        "-movflags", "+faststart",
-        tempPath
-      ]);
+      if (overlay?.imagePath) {
+        const overlayWidth = Math.max(1, canvasWidth - Math.max(0, Number(overlay.horizontalMargin || 50) * 2));
+        const boxHeight = Math.max(24, Number(overlay.boxHeight || 88));
+        const xExpr = overlay.position === "bottom_left" ? String(Math.max(0, Number(overlay.horizontalMargin || 50))) : "(W-w)/2";
+        const bottomMargin = Math.max(0, Number(overlay.bottomMargin || 3));
+        await runConcat([
+          "-y",
+          "-f", "concat",
+          "-safe", "0",
+          "-i", listPath,
+          "-loop", "1",
+          "-framerate", "30",
+          "-i", overlay.imagePath,
+          "-filter_complex", `[1:v]scale=${overlayWidth}:${boxHeight}:force_original_aspect_ratio=decrease[ov];[0:v][ov]overlay=x=${xExpr}:y=H-h-${bottomMargin}:format=auto:shortest=1[vout]`,
+          "-map", "[vout]",
+          "-map", "0:a?",
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "18",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-ar", "44100",
+          "-ac", "2",
+          "-shortest",
+          "-movflags", "+faststart",
+          tempPath
+        ]);
+      } else {
+        await runConcat([
+          "-y",
+          "-f", "concat",
+          "-safe", "0",
+          "-i", listPath,
+          "-c", "copy",
+          "-movflags", "+faststart",
+          tempPath
+        ]);
+      }
       await assertDecodableVideo(tempPath, { timeoutMs });
     } catch (error) {
       copyError = error;
       await rm(tempPath, { force: true }).catch(() => {});
       // Prefer a full re-encode when stream copy produces undecodable output
       // (common with mixed audio presence / timestamp discontinuities).
+      if (overlay?.imagePath) throw error;
       try {
         await runConcat([
           "-y",
@@ -1005,7 +1038,7 @@ async function createPostProcessEndingVideo(context, batchId, outputId, ending, 
     target
   );
   try {
-    await execFileAsync("ffmpeg", args, {
+    await runFfmpeg(args, {
       timeout: timeoutMs,
       killSignal: "SIGKILL",
       windowsHide: true,
@@ -1027,7 +1060,7 @@ async function createPostProcessEndingVideo(context, batchId, outputId, ending, 
 
 async function deriveExpandedOutputs(context, batch, originalOutput, sequenceState, {
   sourceHealth = null,
-  concurrency = 2
+  concurrency = 1
 } = {}) {
   const expansionSizes = resolveBatchPostProcess(batch).expansionSizes;
   if (!expansionSizes.length) return { outputs: [], failures: [] };
@@ -1136,26 +1169,29 @@ async function createSucceededStitchOutput(context, batch, group, segmentOutputs
     ? {
         enabled: true,
         status: segmentSubtitleStatuses.every((item) => item.status === "succeeded") ? "succeeded" : "partial_failed",
-        mode: "segment_before_stitch",
+        mode: "burned_in",
         segmentCount: segmentSubtitleStatuses.length,
         failedCount: segmentSubtitleStatuses.filter((item) => item.status !== "succeeded").length
       }
-    : { enabled: false, status: "disabled", mode: "segment_before_stitch" };
+    : { enabled: false, status: "disabled", mode: "burned_in" };
   const postProcessFailures = [];
   const timeoutMs = postProcessTimeoutMs(totalDurationSec);
   try {
-    // Always concat first, then overlay in a second pass. The old single-pass
-    // concat+overlay+-c:a copy path produced undecodable outputs on Lavc59.
-    await concatSegmentVideos(target, segmentPaths, { canvas });
-    if (disclaimerOverlay.applied) {
-      const overlayImagePath = resolveDisclaimerOverlayImagePath(context, disclaimerOverlay);
-      if (!overlayImagePath) {
-        throw new WangzhuanError("missing_required_file", "免责声明贴片 PNG 不存在，请选择模板或上传 PNG", {
-          imageStoredPath: disclaimerOverlay.imageStoredPath || ""
-        });
-      }
-      await applyDisclaimerOverlay(context, target, target, disclaimerOverlay, { timeoutMs });
+    const overlayImagePath = disclaimerOverlay.applied
+      ? resolveDisclaimerOverlayImagePath(context, disclaimerOverlay)
+      : "";
+    if (disclaimerOverlay.applied && !overlayImagePath) {
+      throw new WangzhuanError("missing_required_file", "免责声明贴片 PNG 不存在，请选择模板或上传 PNG", {
+        imageStoredPath: disclaimerOverlay.imageStoredPath || ""
+      });
     }
+    // Keep concat copy when no visual filter is needed. When a disclaimer is
+    // required, concatenate and encode the overlay in one FFmpeg pass.
+    await concatSegmentVideos(target, segmentPaths, {
+      canvas,
+      overlay: overlayImagePath ? { ...disclaimerOverlay, imagePath: overlayImagePath } : null,
+      timeoutMs
+    });
     for (const segmentOutput of segmentOutputs) {
       if (segmentOutput.subtitlePostProcess?.enabled && segmentOutput.subtitlePostProcess.status !== "succeeded") {
         postProcessFailures.push({

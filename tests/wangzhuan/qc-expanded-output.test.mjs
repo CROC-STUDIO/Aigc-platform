@@ -25,6 +25,8 @@ test("expanded videos skip repeated model QC and become downloadable after passi
 test("expanded video parent eligibility is explicit", () => {
   const output = { kind: "expanded_video", parentOutputId: "out_abcd_001" };
   assert.equal(qcPathHelpers.expandedParentStatus(output, new Map([["out_abcd_001", { qcStatus: "pass" }]])).status, "pass");
-  assert.equal(qcPathHelpers.expandedParentStatus(output, new Map([["out_abcd_001", { qcStatus: "fail" }]])).status, "fail");
+  assert.equal(qcPathHelpers.expandedParentStatus(output, new Map([["out_abcd_001", { qcStatus: "warn" }]])).status, "pass");
+  assert.equal(qcPathHelpers.expandedParentStatus(output, new Map([["out_abcd_001", { qcStatus: "fail" }]])).status, "pass");
+  assert.equal(qcPathHelpers.expandedParentStatus(output, new Map([["out_abcd_001", { qcStatus: "manual_required" }]])).status, "pass");
   assert.equal(qcPathHelpers.expandedParentStatus({ kind: "expanded_video" }, new Map()).status, "fail");
 });

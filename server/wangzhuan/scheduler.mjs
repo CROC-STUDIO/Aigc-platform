@@ -7,11 +7,12 @@ import {
 } from "./mysql-facts.mjs";
 import { retryFailedGenerationTask } from "./pipeline.mjs";
 import { runBatchQc } from "./qc.mjs";
-import { pollUpstreamBatch } from "./upstream-poll.mjs";
+import { pollUpstreamBatch, reconcileUnknownSubmission } from "./upstream-poll.mjs";
 
 const DEFAULT_DEPS = Object.freeze({
   retryFailedGenerationTask,
   pollUpstreamBatch,
+  reconcileUnknownSubmission,
   runBatchQc
 });
 
@@ -41,9 +42,11 @@ export async function runUpstreamPollJob(context, job, deps = DEFAULT_DEPS) {
     error.code = "invalid_scheduler_payload";
     throw error;
   }
-  const result = await deps.pollUpstreamBatch(context, batchId);
+  const result = job.payload?.mode === "submission_reconciliation"
+    ? await deps.reconcileUnknownSubmission(context, batchId, job.payload?.taskUid || "")
+    : await deps.pollUpstreamBatch(context, batchId);
   const batch = result.batch;
-  if (!result.needsPoll && batch?.status === "qc") {
+  if (!result.needsPoll && !result.needsReconciliation && batch?.status === "qc") {
     const qc = await deps.runBatchQc(context, batchId);
     return {
       ...result,
@@ -90,7 +93,7 @@ export async function runDueSchedulerJob(context, options = {}) {
       result = await runUpstreamPollJob(jobContext, job);
       if (leaseLost) throw Object.assign(new Error(`scheduler job lease lost: ${job.jobUid}`), { code: "scheduler_job_claim_lost" });
       settling = true;
-      if (result.needsPoll) {
+      if (result.needsPoll || result.needsReconciliation) {
         await rescheduleSchedulerJob(job, { workerId, delayMs: options.upstreamPollDelayMs || 30_000 });
       } else {
         await completeSchedulerJob(job, { workerId });

@@ -383,7 +383,10 @@ async function ensureUser(conn, context) {
 
 async function ensureProject(conn, context, userId) {
   const root = baseProjectRoot(context);
-  const projectKey = `root:${sha256Hex(root)}`;
+  const requestedProjectKey = String(context.projectKey || context.currentProjectKey?.() || "").trim().toLowerCase();
+  const projectKey = /^root:[a-f0-9]{64}$/.test(requestedProjectKey)
+    ? requestedProjectKey
+    : `root:${sha256Hex(root)}`;
   const [rows] = await conn.execute(
     "SELECT id FROM projects WHERE project_key = ? AND deleted_at IS NULL LIMIT 1",
     [projectKey]
@@ -3738,30 +3741,66 @@ export function isAutomaticSeedanceRetryEligible(task = {}) {
   return !["asset_review_pending", "submission_unknown"].includes(String(task.errorCode || ""));
 }
 
+const MAX_SUBMISSION_RECONCILIATION_ATTEMPTS = 20;
+
+function submissionReconciliationJobUid(batchId, taskUidValue) {
+  const value = `job_submission_reconcile_${batchId}_${taskUidValue}`;
+  return value.length <= 80 ? value : `job_submission_reconcile_${sha256Hex(value).slice(0, 48)}`;
+}
+
+function shouldScheduleSubmissionReconciliation(task = {}) {
+  return task.status === "failed"
+    && task.errorCode === "submission_unknown"
+    && Number(task.responseSummary?.submissionReconciliationAttempts || 0) < MAX_SUBMISSION_RECONCILIATION_ATTEMPTS;
+}
+
 async function syncSchedulerJobs(conn, batch, runId) {
   for (const task of Array.isArray(batch.tasks) ? batch.tasks : []) {
     const uidValue = taskUid(task);
-    if (!uidValue
-      || task.status !== "failed"
-      || !isAutomaticSeedanceRetryEligible(task)
-      || Number(task.attempts || 0) >= Number(task.maxAttempts || 2)) continue;
-    const taskDbId = await findTaskDbId(conn, runId, uidValue);
+    if (!uidValue) continue;
+    let taskDbId = null;
+    if (task.status === "failed"
+      && isAutomaticSeedanceRetryEligible(task)
+      && Number(task.attempts || 0) < Number(task.maxAttempts || 2)) {
+      taskDbId ||= await findTaskDbId(conn, runId, uidValue);
+      await conn.execute(
+        `INSERT INTO ${schedulerJobsTableName}
+          (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
+        VALUES (?, 'task_retry', 'pending', ?, ?, ?, 0, ?, 0, 3, 'exponential', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+        ON DUPLICATE KEY UPDATE
+          payload_json = VALUES(payload_json),
+          run_after = IF(status = 'running', run_after, VALUES(run_after)),
+          status = IF(status = 'running', status, VALUES(status)),
+          updated_at = UTC_TIMESTAMP(3)`,
+        [retrySchedulerJobUid(uidValue, Number(task.attempts || 0) + 1), runId, taskDbId,
+          json({ batchId: batch.batchId, taskUid: uidValue, errorCode: task.errorCode || null }),
+          mysqlDate(task.nextAttemptAt) || mysqlDate(new Date(Date.now() + 60_000))]
+      );
+    }
+    if (shouldScheduleSubmissionReconciliation(task)) {
+      taskDbId ||= await findTaskDbId(conn, runId, uidValue);
+      await conn.execute(
+        `INSERT INTO ${schedulerJobsTableName}
+          (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
+        VALUES (?, 'upstream_poll', 'pending', ?, ?, ?, -10, UTC_TIMESTAMP(3), 0, 1000, 'fixed', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+        ON DUPLICATE KEY UPDATE
+          payload_json = VALUES(payload_json),
+          run_after = IF(status = 'running', run_after, VALUES(run_after)),
+          status = IF(status = 'running', status, VALUES(status)),
+          updated_at = UTC_TIMESTAMP(3)`,
+        [submissionReconciliationJobUid(batch.batchId, uidValue), runId, taskDbId,
+          json({ batchId: batch.batchId, taskUid: uidValue, mode: "submission_reconciliation" })]
+      );
+    }
+  }
+  if (!(Array.isArray(batch.tasks) ? batch.tasks : []).some(shouldScheduleSubmissionReconciliation)) {
     await conn.execute(
-      `INSERT INTO ${schedulerJobsTableName}
-        (job_uid, job_type, status, run_id, task_id, payload_json, priority, run_after, attempts, max_attempts, backoff_strategy, created_at, updated_at)
-      VALUES (?, 'task_retry', 'pending', ?, ?, ?, 0, ?, 0, 3, 'exponential', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
-      ON DUPLICATE KEY UPDATE
-        payload_json = VALUES(payload_json),
-        run_after = IF(status = 'running', run_after, VALUES(run_after)),
-        status = IF(status = 'running', status, VALUES(status)),
-        updated_at = UTC_TIMESTAMP(3)`,
-      [
-        retrySchedulerJobUid(uidValue, Number(task.attempts || 0) + 1),
-        runId,
-        taskDbId,
-        json({ batchId: batch.batchId, taskUid: uidValue, errorCode: task.errorCode || null }),
-        mysqlDate(task.nextAttemptAt) || mysqlDate(new Date(Date.now() + 60_000))
-      ]
+      `UPDATE ${schedulerJobsTableName}
+       SET status = 'canceled', updated_at = UTC_TIMESTAMP(3)
+       WHERE run_id = ? AND job_type = 'upstream_poll'
+         AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.mode')) = 'submission_reconciliation'
+         AND status = 'pending'`,
+      [runId]
     );
   }
   await syncUpstreamPollJob(conn, batch, runId);
@@ -5025,12 +5064,14 @@ export async function markSeedanceTaskSubmissionSent(context, options = {}) {
     if (!row) throw seedanceSubmissionClaimError("Seedance submission claim expired before request send");
     const sentAt = options.sentAt || new Date().toISOString();
     const attemptNo = Math.max(Number(row.attempts || 0) + 1, Number(options.attemptNo || 0));
+    const submissionRequestId = `seedance_${sha256Hex(`${options.batchId}:${taskUidValue}:${attemptNo}`).slice(0, 32)}`;
     const requestSummary = {
       ...(options.requestSummary || {}),
       batchId: options.batchId,
       generationTaskId: taskUidValue,
       submissionPhase: "sent",
       submissionSentAt: sentAt,
+      submissionRequestId,
       submissionPayloadHash: sha256Hex(json(options.requestSummary || {}))
     };
     const [updated] = await conn.execute(
@@ -5059,7 +5100,7 @@ export async function markSeedanceTaskSubmissionSent(context, options = {}) {
       [row.id, attemptNo, options.provider || "seedance", mysqlDate(sentAt), json(requestSummary)]
     );
     await conn.commit();
-    return { skipped: false, attemptNo, sentAt };
+    return { skipped: false, attemptNo, sentAt, submissionRequestId };
   } catch (error) {
     await conn.rollback();
     throw error;

@@ -111,6 +111,7 @@ const els = {
   cta: $("#wzCta"),
   ending: $("#wzEnding"),
   uploadSeedanceAssetsBtn: $("#wzUploadSeedanceAssetsBtn"),
+  retryAssetReviewsBtn: $("#wzRetryAssetReviewsBtn"),
   variantPrompt: $("#wzVariantPrompt"),
   customPrompt: $("#wzCustomPrompt"),
   negativePrompt: $("#wzNegativePrompt"),
@@ -198,6 +199,7 @@ const state = {
   postProcessEndingAsset: null,
   expansionSizes: [],
   confirmPlanSubmitting: false,
+  assetReviewRetrying: false,
   loggedTaskFailures: new Set()
 };
 
@@ -1705,6 +1707,66 @@ function currentDraft() {
   };
 }
 
+function branchReferenceAssetKeys(branch = {}) {
+  return [...new Set([
+    ...Object.keys(branch.assetFileNames || {}),
+    ...Object.keys(branch.assetUrls || {}),
+    ...Object.keys(branch.assetStorageKeys || {}),
+    ...Object.keys(branch.assetStoredPaths || {}),
+    ...Object.keys(branch.assetRelativePaths || {})
+  ])].filter((assetKey) => branchHasReferenceAsset(branch, assetKey));
+}
+
+function assetReviewCanRetry(branch = {}, assetKey = "", review = {}) {
+  return Boolean(
+    review.assetId
+    || branch.assetStorageKeys?.[assetKey]
+    || branch.assetStoredPaths?.[assetKey]
+    || branch.assetRelativePaths?.[assetKey]
+  );
+}
+
+function assetReviewStatusLabel(review = {}) {
+  if (isAssetReviewApproved(review.status) && review.assetId) return "审核通过";
+  const status = String(review.status || "pending").trim().toLowerCase();
+  if (["rejected", "reject"].includes(status)) return "审核拒绝";
+  if (["failed", "fail", "error"].includes(status)) return "审核失败";
+  if (["running", "processing"].includes(status)) return "审核中";
+  if (status === "queued") return "排队审核";
+  return "待审核";
+}
+
+function assetReviewReason(review = {}) {
+  if (review.reviewReason) return review.reviewReason;
+  if (isAssetReviewApproved(review.status) && review.assetId) return "";
+  return review.assetId ? "等待审核完成" : "缺少 Seedance assetId";
+}
+
+function assetReviewBlockers() {
+  return state.branches.flatMap((branch) => branchReferenceAssetKeys(branch)
+    .map((assetKey) => {
+      const review = branch.assetReviews?.[assetKey] || {};
+      return {
+        branchId: branch.branchId || "",
+        branchLabel: branch.branchLabel || branch.branchId || "默认分支",
+        assetKey,
+        fileName: branch.assetFileNames?.[assetKey] || assetKey,
+        review,
+        retryable: assetReviewCanRetry(branch, assetKey, review)
+      };
+    })
+    .filter((item) => !(isAssetReviewApproved(item.review.status) && item.review.assetId)));
+}
+
+function hasConfirmedAssetReviews() {
+  const batch = state.batchDetail?.batch || state.batchDetail || {};
+  if (batch.assetReviewConfirmedAt || batch.request?.assetReviewConfirmed) return true;
+  const references = state.branches.flatMap((branch) => branchReferenceAssetKeys(branch)
+    .map((assetKey) => branch.assetReviews?.[assetKey] || {}));
+  return references.length > 0
+    && references.every((review) => isAssetReviewApproved(review.status) && review.assetId);
+}
+
 function renderAssetReviewState() {
   const branch = activeBranch();
   for (const [assetKey, selector] of assetInputs) {
@@ -1725,29 +1787,51 @@ function renderAssetReviewState() {
     }
     const keys = branchAssetEntryKeys(branch, assetKey);
     const storedItems = keys
-      .map((key) => ({ key, name: branch.assetFileNames[key] }))
+      .map((key) => ({
+        key,
+        name: branch.assetFileNames[key],
+        review: branch.assetReviews?.[key] || {},
+        pendingUpload: Boolean(getPendingAssetFile(branch.branchId, key) && !branch.assetStorageKeys?.[key])
+      }))
       .filter((item) => item.name);
     const names = storedItems.map((item) => item.name);
-    const pendingCount = storedItems.filter((item) => getPendingAssetFile(branch.branchId, item.key) && !branch.assetStorageKeys?.[item.key]).length;
-    const failed = keys
-      .map((key) => branch.assetReviews?.[key])
-      .filter((review) => review?.status && !isAssetReviewApproved(review.status));
+    const pendingCount = storedItems.filter((item) => item.pendingUpload).length;
+    const blocked = storedItems.filter((item) => !item.pendingUpload && !(isAssetReviewApproved(item.review.status) && item.review.assetId));
     const countLabel = names.length ? `${names.length} 个文件` : "未选择";
-    const stateLabel = failed.length
-      ? "有审核风险"
+    const stateLabel = state.assetReviewRetrying && blocked.length
+      ? "重新审核中"
+      : (blocked.length
+        ? `${blocked.length} 个待审核`
       : (keys.length
-        ? (pendingCount ? "已记录，待上传" : "已记录")
-        : "");
+        ? (pendingCount ? "已记录，待上传" : "审核通过")
+        : ""));
     status.textContent = stateLabel ? `${countLabel} · ${stateLabel}` : countLabel;
     fileList.innerHTML = names.length
       ? storedItems.map((item) => `
           <span class="wz-v2-asset-file">
-            <span>${escapeHtml(item.name)}</span>
+            <span class="wz-v2-asset-file-name">${escapeHtml(item.name)}</span>
+            <span class="wz-v2-asset-review ${item.pendingUpload
+              ? "is-pending"
+              : (isAssetReviewApproved(item.review.status) && item.review.assetId
+                ? "is-approved"
+                : (["failed", "fail", "error", "rejected", "reject"].includes(String(item.review.status || "").toLowerCase()) ? "is-failed" : "is-pending"))}">
+              ${escapeHtml(item.pendingUpload ? "待上传" : assetReviewStatusLabel(item.review))}${!item.pendingUpload && assetReviewReason(item.review) ? ` · ${escapeHtml(assetReviewReason(item.review))}` : ""}
+            </span>
             <button type="button" class="wz-v2-asset-remove" data-remove-asset-key="${escapeHtml(item.key)}" aria-label="删除 ${escapeHtml(item.name)}">×</button>
           </span>
         `).join("")
       : "";
     slot.dataset.hasAsset = names.length ? "1" : "0";
+    slot.dataset.hasReviewBlocker = blocked.length ? "1" : "0";
+  }
+  if (els.retryAssetReviewsBtn) {
+    const blockers = assetReviewBlockers();
+    const retryableCount = blockers.filter((item) => item.retryable).length;
+    els.retryAssetReviewsBtn.hidden = !blockers.length;
+    els.retryAssetReviewsBtn.disabled = state.assetReviewRetrying || !retryableCount;
+    els.retryAssetReviewsBtn.textContent = state.assetReviewRetrying
+      ? "审核重试中..."
+      : `重试审核（${retryableCount}）`;
   }
 }
 
@@ -1980,32 +2064,41 @@ function renderPlanEditors(plans = []) {
   }
   els.planBox.className = "wz-list";
   els.planBox.innerHTML = `${testBlock}${plans.map((plan, index) => `
-    <section class="wz-v2-plan-editor" data-plan-id="${plan.planId || ""}">
-      <h3>Prompt ${index + 1}${plan.branchLabel ? ` · ${plan.branchLabel}` : ""}</h3>
-      <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${escapeHtml(plan.hook || "")}</textarea></label>
-      <label>正文脚本 <textarea data-plan-field="body" class="wz-json-box compact">${escapeHtml(plan.body || "")}</textarea></label>
-      <label>口播 <textarea data-plan-field="voiceover" class="wz-json-box compact">${escapeHtml(plan.voiceover || "")}</textarea></label>
-      <label>字幕脚本（后处理） <textarea data-plan-field="subtitles" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitles))}</textarea></label>
-      <label>CTA <textarea data-plan-field="cta" class="wz-json-box compact">${escapeHtml(plan.cta || "")}</textarea></label>
-      <label>Ending <textarea data-plan-field="ending" class="wz-json-box compact">${escapeHtml(plan.ending || "")}</textarea></label>
-      <label>首帧 Image Prompt <textarea data-plan-field="imagePrompt" class="wz-json-box compact">${escapeHtml(plan.imagePrompt || "")}</textarea></label>
-      <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
-      <label>切片角色 <input data-plan-field="segmentRole" value="${escapeHtml(plan.segmentRole || "")}" placeholder="hook_slice / proof_slice / withdrawal_slice" /></label>
-      <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="5" max="30" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
-      <label>Story Segment <input data-plan-field="storySegmentIndex" type="number" min="1" value="${escapeHtml(plan.storySegmentIndex || "")}" /></label>
-      <label>Seedance Slice <input data-plan-field="seedanceSliceIndex" type="number" min="1" value="${escapeHtml(plan.seedanceSliceIndex || "")}" /></label>
-      <label>拆解决定模板 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="reference_fission" readonly /></label>
-      <label>转化特效机会 <textarea data-plan-field="conversionEffectOpportunities" class="wz-json-box compact">${escapeHtml(planJsonListValue(plan.conversionEffectOpportunities))}</textarea></label>
-      <label>提现展示 <textarea data-plan-field="withdrawalVisual" class="wz-json-box compact">${escapeHtml(plan.withdrawalVisual || "")}</textarea></label>
-      <label>字幕后处理 <select data-plan-field="postSubtitleRequired">
-        <option value="true"${planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>需要后处理字幕</option>
-        <option value="false"${!planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>不做后处理字幕</option>
-      </select></label>
-      <label>字幕服务商 <input data-plan-field="subtitleProvider" value="${escapeHtml(plan.subtitleWorkflow?.provider || "pixel_tech")}" /></label>
-      <label>后处理字幕 <textarea data-plan-field="subtitleScript" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitleWorkflow?.subtitleScript))}</textarea></label>
-      <label>切片差异 JSON <textarea data-plan-field="sliceDiversity" class="wz-json-box compact">${escapeHtml(sliceDiversityValue(plan.sliceDiversity))}</textarea></label>
-      <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${escapeHtml(plan.negativePrompt || "")}</textarea></label>
-    </section>
+    <details class="wz-v2-plan-editor" data-plan-id="${plan.planId || ""}"${index === 0 ? " open" : ""}>
+      <summary class="wz-v2-plan-summary">
+        <strong>Prompt ${index + 1}${plan.branchLabel ? ` · ${escapeHtml(plan.branchLabel)}` : ""}</strong>
+        <small>${escapeHtml([
+          plan.segmentRole || "",
+          plan.sliceDurationSec ? `${plan.sliceDurationSec}s` : "",
+          plan.seedanceSliceIndex ? `切片 ${plan.seedanceSliceIndex}` : ""
+        ].filter(Boolean).join(" · "))}</small>
+      </summary>
+      <div class="wz-v2-plan-fields">
+        <label>Hook <textarea data-plan-field="hook" class="wz-json-box compact">${escapeHtml(plan.hook || "")}</textarea></label>
+        <label>正文脚本 <textarea data-plan-field="body" class="wz-json-box compact">${escapeHtml(plan.body || "")}</textarea></label>
+        <label>口播 <textarea data-plan-field="voiceover" class="wz-json-box compact">${escapeHtml(plan.voiceover || "")}</textarea></label>
+        <label>字幕脚本（后处理） <textarea data-plan-field="subtitles" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitles))}</textarea></label>
+        <label>CTA <textarea data-plan-field="cta" class="wz-json-box compact">${escapeHtml(plan.cta || "")}</textarea></label>
+        <label>Ending <textarea data-plan-field="ending" class="wz-json-box compact">${escapeHtml(plan.ending || "")}</textarea></label>
+        <label>首帧 Image Prompt <textarea data-plan-field="imagePrompt" class="wz-json-box compact">${escapeHtml(plan.imagePrompt || "")}</textarea></label>
+        <label>Seedance Prompt <textarea data-plan-field="seedancePrompt" class="wz-json-box compact">${escapeHtml(plan.seedancePrompt || "")}</textarea></label>
+        <label>切片角色 <input data-plan-field="segmentRole" value="${escapeHtml(plan.segmentRole || "")}" placeholder="hook_slice / proof_slice / withdrawal_slice" /></label>
+        <label>切片时长（秒） <input data-plan-field="sliceDurationSec" type="number" min="5" max="30" value="${escapeHtml(plan.sliceDurationSec || "")}" /></label>
+        <label>Story Segment <input data-plan-field="storySegmentIndex" type="number" min="1" value="${escapeHtml(plan.storySegmentIndex || "")}" /></label>
+        <label>Seedance Slice <input data-plan-field="seedanceSliceIndex" type="number" min="1" value="${escapeHtml(plan.seedanceSliceIndex || "")}" /></label>
+        <label>拆解决定模板 <input data-plan-field="outputTemplateMode" value="${escapeHtml(plan.outputTemplateMode || "")}" placeholder="reference_fission" readonly /></label>
+        <label>转化特效机会 <textarea data-plan-field="conversionEffectOpportunities" class="wz-json-box compact">${escapeHtml(planJsonListValue(plan.conversionEffectOpportunities))}</textarea></label>
+        <label>提现展示 <textarea data-plan-field="withdrawalVisual" class="wz-json-box compact">${escapeHtml(plan.withdrawalVisual || "")}</textarea></label>
+        <label>字幕后处理 <select data-plan-field="postSubtitleRequired">
+          <option value="true"${planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>需要后处理字幕</option>
+          <option value="false"${!planSubtitlePostRequired(plan.subtitleWorkflow) ? " selected" : ""}>不做后处理字幕</option>
+        </select></label>
+        <label>字幕服务商 <input data-plan-field="subtitleProvider" value="${escapeHtml(plan.subtitleWorkflow?.provider || "pixel_tech")}" /></label>
+        <label>后处理字幕 <textarea data-plan-field="subtitleScript" class="wz-json-box compact">${escapeHtml(planListValue(plan.subtitleWorkflow?.subtitleScript))}</textarea></label>
+        <label>切片差异 JSON <textarea data-plan-field="sliceDiversity" class="wz-json-box compact">${escapeHtml(sliceDiversityValue(plan.sliceDiversity))}</textarea></label>
+        <label>Negative Prompt <textarea data-plan-field="negativePrompt" class="wz-json-box compact">${escapeHtml(plan.negativePrompt || "")}</textarea></label>
+      </div>
+    </details>
   `).join("")}`;
 }
 
@@ -2478,7 +2571,7 @@ function estimateRequest() {
     durationSec: compatibleDurationSecValue(),
     targetSegmentCount: targetSegmentCountValue(),
     variantCount: variantCountValue(),
-    requestedConcurrency: Number(value(els.requestedConcurrency) || 1),
+    requestedConcurrency: Number(value(els.requestedConcurrency) || 8),
     outputRatio: value(els.outputRatio),
     seedanceModel: selectedSeedanceModel(),
     decomposition: currentDecomposition(),
@@ -2523,7 +2616,8 @@ function estimateRequest() {
 }
 
 function expectedMinutes() {
-  return variantCountValue() * Number(value(els.requestedConcurrency) || 0) * 3;
+  const concurrency = Math.max(1, Number(value(els.requestedConcurrency) || 8));
+  return Math.max(1, Math.ceil((variantCountValue() * 3) / concurrency));
 }
 
 function planLlmConfig() {
@@ -2701,6 +2795,10 @@ function renderTasks() {
   const codexTestRunning = ["queued", "running"].includes(state.codexPromptTestJob?.status);
   const planBlockedByRewrite = !state.rewriteConfirmed;
   const planBlockedByDecomposition = !decompositionReady;
+  const assetReviewFailedTasks = tasksInBatch.filter((task) => task.status === "failed" && task.errorCode === "asset_review_pending");
+  const assetReviewReadyToResume = assetReviewFailedTasks.length > 0
+    && !assetReviewBlockers().length
+    && hasConfirmedAssetReviews();
   const planDisabled = planRetryable
     ? false
     : (planJobRunning || planUpstreamLocked || planBlockedByRewrite || planBlockedByDecomposition || codexTestRunning);
@@ -2740,6 +2838,9 @@ function renderTasks() {
     }
   }
   els.confirmPlanBtn.disabled = state.confirmPlanSubmitting || !plans.length || state.stalePlanPreview;
+  if (!state.confirmPlanSubmitting) {
+    els.confirmPlanBtn.textContent = assetReviewReadyToResume ? "审核通过，继续生成" : "确认 prompt 并生成视频";
+  }
   els.stopBatchBtn.disabled = !batch?.batchId || ["succeeded", "failed", "partial_failed", "stopped", "skipped"].includes(batch.status);
   els.runQcBtn.disabled = !batch?.batchId || !isBatchQcRunnable(batch, tasksInBatch, outputsInBatch);
   if (isRecoverableBackgroundJob(state.decompositionJob)) {
@@ -3071,12 +3172,31 @@ function renderReminders({ batch, plans } = {}) {
   if (!state.estimate) items.push("尚未生成 Seedance prompt");
   if (state.estimate?.confirmationRequired && !els.confirmLimits?.checked) items.push("本批任务较多，需要确认数量和消耗");
   if (state.stalePlanPreview) items.push("Seedance prompt 已失效，需要重新生成");
-  const failedAssets = state.branches.flatMap((branch) => Object.entries(branch.assetReviews || {})
-    .filter(([assetKey, review]) => branchHasReferenceAsset(branch, assetKey) && review?.status && !isAssetReviewApproved(review.status))
-    .map(([key, review]) => `${branch.branchLabel || branch.branchId}/${key}:${review.status}${review.reviewReason ? ` ${review.reviewReason}` : ""}`));
-  if (failedAssets.length) items.push(`素材审核未通过：${failedAssets.join("；")}`);
   if (plans?.length && !batch?.tasks?.length) items.push("Seedance prompt 已生成，待确认并提交 Seedance");
-  els.reminders.textContent = items.length ? items.join(" / ") : "当前无阻塞项";
+  const reviewBlockers = assetReviewBlockers();
+  const recoverableAssetFailures = (Array.isArray(batch?.tasks) ? batch.tasks : [])
+    .filter((task) => task.status === "failed" && task.errorCode === "asset_review_pending");
+  if (!reviewBlockers.length && recoverableAssetFailures.length && hasConfirmedAssetReviews()) {
+    items.push("素材审核通过，可继续生成失败片段");
+  }
+  const retryableCount = reviewBlockers.filter((item) => item.retryable).length;
+  els.reminders.classList.toggle("empty-line", !items.length && !reviewBlockers.length);
+  els.reminders.innerHTML = `
+    ${items.length ? `<div class="wz-v2-reminder-list">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${reviewBlockers.length ? `
+      <div class="wz-v2-review-alert" role="alert" aria-live="polite">
+        <strong>素材审核未完成</strong>
+        <span>${reviewBlockers.length} 个素材会阻塞 Seedance 提交。</span>
+        <ul>${reviewBlockers.slice(0, 3).map((item) => `
+          <li>${escapeHtml(item.branchLabel)} / ${escapeHtml(item.assetKey)}：${escapeHtml(assetReviewStatusLabel(item.review))}${assetReviewReason(item.review) ? ` · ${escapeHtml(assetReviewReason(item.review))}` : ""}</li>
+        `).join("")}${reviewBlockers.length > 3 ? `<li>另有 ${reviewBlockers.length - 3} 个待处理素材</li>` : ""}</ul>
+        <button type="button" class="mini" data-retry-asset-reviews ${state.assetReviewRetrying || !retryableCount ? "disabled" : ""}>
+          ${state.assetReviewRetrying ? "审核重试中..." : `重试审核（${retryableCount}）`}
+        </button>
+      </div>
+    ` : ""}
+    ${!items.length && !reviewBlockers.length ? "当前无阻塞项" : ""}
+  `;
 }
 
 async function uploadSeedanceAssetsForReview() {
@@ -3261,6 +3381,27 @@ async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
   return data;
 }
 
+function mergeAssetReviewResult(assetsByBranch = []) {
+  if (!Array.isArray(assetsByBranch) || !assetsByBranch.length) return;
+  const byBranchId = new Map(assetsByBranch.map((branch) => [branch.branchId, branch]));
+  state.branches = state.branches.map((branch, index) => {
+    const reviewBranch = byBranchId.get(branch.branchId);
+    if (!reviewBranch) return branch;
+    const assetReviews = { ...(branch.assetReviews || {}) };
+    for (const asset of Array.isArray(reviewBranch.assets) ? reviewBranch.assets : []) {
+      if (!asset?.key) continue;
+      assetReviews[asset.key] = {
+        ...(assetReviews[asset.key] || {}),
+        assetId: asset.assetId || "",
+        status: asset.status || "pending",
+        reviewReason: asset.reason || ""
+      };
+    }
+    return defaultBranchDraft(index, { ...branch, assetReviews });
+  });
+  activeBranch();
+}
+
 async function confirmSeedanceAssetReviews() {
   const batch = state.batchDetail?.batch || state.batchDetail;
   if (!batch?.batchId) {
@@ -3284,6 +3425,34 @@ async function confirmSeedanceAssetReviews() {
   }
   log("Seedance 素材审核结果已确认");
   renderBatchDetail(state.batchDetail);
+}
+
+async function retrySeedanceAssetReviews() {
+  if (state.assetReviewRetrying) return;
+  const retryable = assetReviewBlockers().filter((item) => item.retryable);
+  if (!retryable.length) {
+    showError({ message: "没有可重试的已上传素材，请重新选择文件并确认信息" }, "素材审核无法重试");
+    return;
+  }
+  clearError();
+  state.assetReviewRetrying = true;
+  renderAssetReviewState();
+  renderBatchDetail(state.batchDetail);
+  log(`正在重试 ${retryable.length} 个素材的审核`);
+  try {
+    await confirmSeedanceAssetReviews();
+  } catch (error) {
+    mergeAssetReviewResult(error.data?.assetsByBranch);
+    if (error?.code === "asset_review_pending") {
+      showError(error, "素材审核仍未通过");
+      return;
+    }
+    throw error;
+  } finally {
+    state.assetReviewRetrying = false;
+    renderAssetReviewState();
+    renderBatchDetail(state.batchDetail);
+  }
 }
 
 async function startDecompositionJob() {
@@ -3668,6 +3837,7 @@ async function confirmPlanAndGenerate() {
         plans,
         branchDrafts: estimateRequest().branches,
         postProcess: postProcessRequestFields(),
+        assetReviewConfirmed: hasConfirmedAssetReviews(),
         draftSignature: validateDraftSignature ? state.draftSignature : undefined,
         draftSignatureInput: validateDraftSignature ? planSignatureInput() : undefined
       })
@@ -3902,8 +4072,14 @@ for (const control of [
   control?.addEventListener("change", () => syncSubtitleStyleControls({}, control));
 }
 els.uploadSeedanceAssetsBtn?.addEventListener("click", () => uploadSeedanceAssetsForReview().catch((error) => showError(error, "Seedance 素材上传失败")));
+els.retryAssetReviewsBtn?.addEventListener("click", () => retrySeedanceAssetReviews().catch((error) => showError(error, "素材审核重试失败")));
 els.loadOlderLogsBtn?.addEventListener("click", loadOlderLogs);
 els.refreshRecentBtn?.addEventListener("click", () => loadRecentResults(1).catch((error) => showError(error, "最近结果加载失败")));
+els.reminders?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-retry-asset-reviews]");
+  if (!button || button.disabled) return;
+  retrySeedanceAssetReviews().catch((error) => showError(error, "素材审核重试失败"));
+});
 els.productLibrarySelect?.addEventListener("change", () => {
   showSelectedProductLibraryDetail().catch((error) => showError(error, "产品库详情加载失败"));
 });

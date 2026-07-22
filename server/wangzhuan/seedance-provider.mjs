@@ -407,6 +407,8 @@ function configuredProvider(context = {}, capability = {}) {
     endpoint: cleanString(capability.endpoint, cleanString(config.endpoint, cleanString(process.env.WANGZHUAN_SEEDANCE_ENDPOINT))).replace(/\/+$/, ""),
     submitPath: cleanString(capability.submitPath, cleanString(config.submitPath, DEFAULT_SUBMIT_PATH)),
     taskPollPath: cleanString(capability.taskPollPath, cleanString(config.taskPollPath, DEFAULT_TASK_POLL_PATH)),
+    reconcilePath: cleanString(capability.reconcilePath, cleanString(config.reconcilePath)),
+    reconcileMethod: cleanString(capability.reconcileMethod, cleanString(config.reconcileMethod, "GET")).toUpperCase(),
     model: cleanString(capability.model, cleanString(config.model, cleanString(process.env.WANGZHUAN_SEEDANCE_MODEL, DEFAULT_SEEDANCE_MODEL))),
     apiKeyEnv,
     apiKey,
@@ -430,6 +432,16 @@ function upstreamError(message, data = {}, code = "upstream_failed") {
 
 export function seedanceSubmitUrl(endpoint, submitPath = DEFAULT_SUBMIT_PATH) {
   return `${cleanString(endpoint).replace(/\/+$/, "")}/${cleanString(submitPath, DEFAULT_SUBMIT_PATH).replace(/^\/+/, "")}`;
+}
+
+export function seedanceReconcileUrl(endpoint, reconcilePath = "", requestId = "") {
+  const path = cleanString(reconcilePath);
+  if (!path) return "";
+  const encoded = encodeURIComponent(cleanString(requestId));
+  const resolved = path.includes(":requestId")
+    ? path.replaceAll(":requestId", encoded)
+    : `${path.replace(/\/+$/, "")}/${encoded}`;
+  return `${cleanString(endpoint).replace(/\/+$/, "")}/${resolved.replace(/^\/+/, "")}`;
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, provider, transportFailureCode = "upstream_failed") {
@@ -503,6 +515,25 @@ export function parseSeedanceSubmitResponse(payload = {}) {
   return {
     taskId,
     status: cleanString(body.status, "queued"),
+    responsePayload: payload
+  };
+}
+
+export function normalizeSeedanceReconciliationStatus(status = "") {
+  const value = cleanString(status).toLowerCase();
+  if (["queued", "pending", "running", "processing", "in_progress"].includes(value)) return value === "queued" || value === "pending" ? "queued" : "running";
+  if (["succeeded", "success", "completed", "done"].includes(value)) return "succeeded";
+  if (["not_found", "notfound", "not_created", "missing", "absent"].includes(value)) return "not_created";
+  return "unknown";
+}
+
+export function parseSeedanceReconciliationResponse(payload = {}) {
+  const body = unwrapUpstreamPayload(payload);
+  const taskId = cleanString(body.task_id, cleanString(body.id, cleanString(body.taskId)));
+  return {
+    status: normalizeSeedanceReconciliationStatus(body.status || body.state || body.task_status || body.result),
+    taskId,
+    videoUrl: extractSeedanceVideoUrl(payload),
     responsePayload: payload
   };
 }
@@ -699,7 +730,7 @@ function createTaiSeedanceProviderClient(context = {}, capability = {}) {
     provider: config.provider,
     model: config.model,
     config,
-    async createTask(payload) {
+    async createTask(payload, metadata = {}) {
       const args = ["aigc", "seedance"];
       const mode = payload.mode || "omni_reference";
       args.push("--mode", mode);
@@ -816,10 +847,19 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
     taskPollPath: config.taskPollPath,
     endpoint: config.endpoint,
     config,
-    async createTask(payload) {
+    async createTask(payload, metadata = {}) {
+      const requestHeaders = {
+        ...headers,
+        ...(cleanString(metadata.submissionRequestId)
+          ? {
+              "X-Idempotency-Key": cleanString(metadata.submissionRequestId),
+              "X-Request-ID": cleanString(metadata.submissionRequestId)
+            }
+          : {})
+      };
       const response = await fetchWithTimeout(fetchImpl, seedanceSubmitUrl(config.endpoint, config.submitPath), {
         method: "POST",
-        headers,
+        headers: requestHeaders,
         body: JSON.stringify(payload)
       }, config.timeoutMs, config.provider, "submission_unknown");
       return parseSeedanceSubmitResponse(await readJsonResponse(
@@ -828,6 +868,18 @@ export function createSeedanceProviderClient(context = {}, capability = {}) {
         "create_seedance_task",
         { submission: true }
       ));
+    },
+    async reconcileSubmission(request = {}) {
+      const requestId = cleanString(request.submissionRequestId);
+      const url = seedanceReconcileUrl(config.endpoint, config.reconcilePath, requestId);
+      if (!url) return { status: "unknown", taskId: "", responsePayload: { status: "unknown", reason: "reconcile_endpoint_not_configured" } };
+      const method = ["GET", "POST"].includes(config.reconcileMethod) ? config.reconcileMethod : "GET";
+      const response = await fetchWithTimeout(fetchImpl, url, {
+        method,
+        headers,
+        ...(method === "POST" ? { body: JSON.stringify({ request_id: requestId, submissionRequestId: requestId }) } : {})
+      }, config.pollTimeoutMs, config.provider);
+      return parseSeedanceReconciliationResponse(await readJsonResponse(response, config.provider, "reconcile_seedance_submission"));
     },
     async getTask(taskId) {
       const response = await fetchWithTimeout(fetchImpl, seedanceTaskUrl(config.endpoint, taskId, config.taskPollPath), {

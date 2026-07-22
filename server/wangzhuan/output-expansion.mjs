@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 import { WangzhuanError } from "./http.mjs";
 import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 
 const execFileAsync = promisify(execFile);
 const PRESET_SIZES = new Set(["800x800", "1280x720", "720x1280"]);
@@ -53,8 +54,10 @@ export function expansionModeLabel(mode) {
 }
 
 export function buildBlurPadFilter(width, height) {
+  const backgroundWidth = Math.max(2, Math.floor(width / 4 / 2) * 2);
+  const backgroundHeight = Math.max(2, Math.floor(height / 4 / 2) * 2);
   return [
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[bg]`,
+    `[0:v]scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,crop=${backgroundWidth}:${backgroundHeight},gblur=sigma=7:steps=1,scale=${width}:${height}:flags=bilinear[bg]`,
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`
   ].join(";");
@@ -91,7 +94,7 @@ async function inspectExpandedVideo(outputPath, targetWidth, targetHeight, timeo
       sizeBytes
     });
   }
-  await execFileAsync("ffmpeg", ["-nostdin", "-v", "error", "-i", outputPath, "-f", "null", "-"], {
+  await runFfmpeg(["-nostdin", "-v", "error", "-i", outputPath, "-f", "null", "-"], {
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 10 * 1024 * 1024
@@ -133,7 +136,7 @@ export async function renderExpandedVideo({ inputPath, targetWidth, targetHeight
   const outputPath = join(outputDir, fileName);
   const filter = buildBlurPadFilter(targetWidth, targetHeight);
   try {
-    await execFileAsync("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-i", inputPath,
       "-filter_complex", filter,

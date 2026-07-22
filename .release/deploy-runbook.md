@@ -21,6 +21,14 @@
 | 容器名 | `aigc-app`、`aigc-mysql` |
 | 编排文件 | 线上使用 `.release/docker-compose.prod.yml` 复制为 `docker-compose.yml` |
 
+## FFmpeg 后处理策略
+
+- FFmpeg 后处理默认全局串行，`AIGC_FFMPEG_MAX_CONCURRENCY=1`。
+- `AIGC_FFMPEG_LOCK_DIR` 必须位于 app 与候选容器共同挂载的项目数据卷内，避免两个容器各自启动编码任务。
+- 字幕必须烧录进视频画面；`SRT/ASS` 与转写 JSON 仅作为内部处理和排障工件，不作为交付字幕。免责声明仍在最终视频内嵌。
+- 扩尺寸继续使用高斯模糊，但先在四分之一分辨率生成背景再放大，以降低滤镜计算量。
+- 当前默认 `libx264`。只有在宿主机确认 `/dev/dri/renderD128`、VAAPI/QSV 驱动、Docker 设备映射和编码产物验收均通过后，才考虑启用硬件编码；不能仅设置环境变量替代能力验证。
+
 ## 发布原则
 
 - **不要**在正式目录 `git pull`

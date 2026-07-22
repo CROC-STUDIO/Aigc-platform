@@ -9,6 +9,7 @@ import { ensureAssetReviewsApproved, reviewSeedanceAsset, validateAssetReviewSta
 import { getChannelRules } from "./channel-rules.mjs";
 import { deriveSeedanceSlicesForGeneration, normalizeFissionAnalysis } from "./fission-analysis.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 import { makeGenerationTaskId, makeOutputId, makeScriptId } from "./ids.mjs";
 import {
   claimPendingSeedanceTasks,
@@ -45,6 +46,7 @@ import {
   validateBranchTruthRulesForPlan,
   validateSeedancePlan
 } from "./plan-preview.mjs";
+import { DEFAULT_LIMITS } from "./constants.mjs";
 import { copyrightMusicRestriction, repairFormalPlanContract } from "./plan-repair.mjs";
 import { listBackgroundJobs } from "./background-jobs.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
@@ -716,12 +718,14 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
   const retryInfo = task.retryInfo || task.responseSummary?.retryInfo;
   let payload;
   let result;
+  let requestSummary = {};
+  let submissionRequestId = "";
   let submissionMarkedSent = false;
   try {
     payload = await buildSeedanceTaskPayload(context, batch, task, provider);
-    const requestSummary = buildTaskRequestSummary(task, payload, provider);
+    requestSummary = buildTaskRequestSummary(task, payload, provider);
     try {
-      await markSeedanceTaskSubmissionSent(context, {
+      const submissionClaim = await markSeedanceTaskSubmissionSent(context, {
         batchId: batch.batchId,
         taskUid: task.generationTaskId,
         leaseOwner,
@@ -730,6 +734,8 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
         sentAt: now,
         requestSummary
       });
+      submissionRequestId = submissionClaim.submissionRequestId || requestSummary.submissionRequestId || "";
+      if (submissionRequestId) requestSummary.submissionRequestId = submissionRequestId;
       submissionMarkedSent = true;
     } catch (error) {
       if (!error.code) error.code = "database_unavailable";
@@ -741,7 +747,8 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
       generationTaskId: task.generationTaskId,
       scriptId: task.scriptId,
       branchId: task.branchId || "",
-      branchLabel: task.branchLabel || ""
+      branchLabel: task.branchLabel || "",
+      ...(submissionRequestId ? { submissionRequestId } : {})
     });
   } catch (error) {
     if (error?.seedanceSubmissionNotSent
@@ -764,13 +771,15 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
       errorMessage: submissionUnknown
         ? "Seedance 提交结果未知，已停止自动重试以避免重复扣费"
         : error?.message || "Seedance 上游请求失败",
-      requestSummary: buildTaskRequestSummary(task, payload, provider),
+      requestSummary: { ...requestSummary, ...(submissionRequestId ? { submissionRequestId } : {}) },
       responseSummary: {
+        ...(task.responseSummary || {}),
         status: submissionUnknown ? "submission_unknown" : "failed",
         upstreamCode: error?.data?.upstreamCode || error?.code || "",
         upstreamMessage: error?.data?.upstreamMessage || error?.message || "",
         httpStatus: error?.data?.status,
-        ...(retryInfo ? { retryInfo } : {})
+        ...(retryInfo ? { retryInfo } : {}),
+        ...(submissionRequestId ? { submissionRequestId } : {})
       }
     };
   }
@@ -788,10 +797,12 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
       finishedAt: now,
       errorCode: "submission_unknown",
       errorMessage: "Seedance 上游响应缺少 task id，已停止自动重试以避免重复扣费",
-      requestSummary: buildTaskRequestSummary(task, payload, provider),
+      requestSummary: { ...requestSummary, ...(submissionRequestId ? { submissionRequestId } : {}) },
       responseSummary: {
+        ...(task.responseSummary || {}),
         ...summarizeSeedanceResponse(result),
-        ...(retryInfo ? { retryInfo } : {})
+        ...(retryInfo ? { retryInfo } : {}),
+        ...(submissionRequestId ? { submissionRequestId } : {})
       }
     };
   }
@@ -810,10 +821,11 @@ async function submitTaskToSeedance(context, batch, task, provider, now, leaseOw
     errorCode: undefined,
     errorMessage: undefined,
     nextAttemptAt: undefined,
-    requestSummary: buildTaskRequestSummary(task, payload, provider),
+    requestSummary: { ...requestSummary, ...(submissionRequestId ? { submissionRequestId } : {}) },
     responseSummary: {
       ...summarizeSeedanceResponse(result),
-      ...(retryInfo ? { retryInfo } : {})
+      ...(retryInfo ? { retryInfo } : {}),
+      ...(submissionRequestId ? { submissionRequestId } : {})
     }
   };
 }
@@ -1674,8 +1686,8 @@ export function batchStatusAfterSeedanceSubmission(batchStatus, state = {}) {
 export function resolveSeedanceConcurrencyLimit(context = {}) {
   const configured = context.config?.wangzhuan?.limits?.maxConcurrency
     ?? context.config?.wangzhuan?.capabilities?.maxConcurrency
-    ?? 4;
-  return Math.max(1, Math.min(Number(configured) || 4, 50));
+    ?? DEFAULT_LIMITS.maxConcurrency;
+  return Math.max(1, Math.min(Number(configured) || DEFAULT_LIMITS.maxConcurrency, DEFAULT_LIMITS.maxConcurrency));
 }
 
 export function resolveSeedanceSubmissionLeaseSeconds(provider = {}) {
@@ -1703,7 +1715,10 @@ export async function submitPendingGenerationTasks(context, batchId) {
     });
   }
   const concurrencyLimit = resolveSeedanceConcurrencyLimit(context);
-  const requestedLimit = Math.max(1, Number(batch.estimate?.requestedConcurrency || batch.request?.requestedConcurrency || 1) || 1);
+  const requestedLimit = Math.max(1, Math.min(
+    Number(batch.estimate?.requestedConcurrency || batch.request?.requestedConcurrency || DEFAULT_LIMITS.maxConcurrency) || DEFAULT_LIMITS.maxConcurrency,
+    DEFAULT_LIMITS.maxConcurrency
+  ));
   const originalTasks = Array.isArray(batch.tasks) ? batch.tasks : [];
   const pendingIndexes = [];
   for (let index = 0; index < originalTasks.length; index += 1) {
@@ -2097,7 +2112,7 @@ async function prepareReplacementContinuityReference(context, batch, task, outpu
   }
   const target = join(batchDir(context, batch.batchId), "continuity", `${output.outputId}_last_frame.jpg`);
   await mkdir(dirname(target), { recursive: true });
-  await execFileAsync("ffmpeg", [
+  await runFfmpeg([
     "-y",
     "-sseof", "-0.2",
     "-i", sourcePath,
@@ -2299,9 +2314,16 @@ function isRecoverableConfirmedPlanPreSubmitFailure(task = {}) {
     && !hasSeedanceUpstreamIdentity(task);
 }
 
+function hasConfirmedSeedancePlan(batch = {}) {
+  if (batch.previewType !== "seedance_plan") return false;
+  if (batch.previewConfirmedAt) return true;
+  const plans = Array.isArray(batch.plans) ? batch.plans : [];
+  return plans.length > 0
+    && plans.every((plan) => plan?.planId && plan.status === "confirmed");
+}
+
 export function recoverConfirmedPlanPreSubmitFailures(batch = {}) {
-  if (!batch.previewConfirmedAt
-    || batch.previewType !== "seedance_plan"
+  if (!hasConfirmedSeedancePlan(batch)
     || !["partial_failed", "failed"].includes(batch.status)) {
     return { batch, recoveredTaskIds: [] };
   }
@@ -2440,8 +2462,7 @@ export async function applyConfirmedPlanEdits(context, batch, plans, confirmedPl
 
 async function confirmBatchPlanOnce(context, batchId, request) {
   const batch = await readBatch(context, batchId);
-  if (batch.previewConfirmedAt
-    && batch.previewType === "seedance_plan"
+  if (hasConfirmedSeedancePlan(batch)
     && batch.status !== "preview_required") {
     const confirmedPlanIds = currentPlanIds(batch, request);
     const plans = Array.isArray(batch.plans) ? batch.plans : [];

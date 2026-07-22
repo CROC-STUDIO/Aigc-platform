@@ -825,7 +825,7 @@ test("non-30 multi-slice batch stitches downloaded slices by branch variant", as
   });
 });
 
-test("15s multi-slice batch concatenates before applying disclaimer exactly once", async () => {
+test("15s multi-slice batch concatenates and embeds disclaimer in one encode", async () => {
   await withTempRoot(async (root) => {
     const ffmpegLog = join(root, "ffmpeg.log");
     const restorePath = await installFakeFfmpeg(root, { logPath: ffmpegLog });
@@ -859,7 +859,7 @@ test("15s multi-slice batch concatenates before applying disclaimer exactly once
       );
       assert.equal(stitched?.disclaimerOverlay?.applied, true);
       assert.ok(concatIndex >= 0);
-      assert.ok(overlayIndex > concatIndex);
+      assert.equal(overlayIndex, concatIndex);
       assert.equal(overlayCalls.length, 1);
     } finally {
       restorePath();
@@ -894,7 +894,7 @@ test("single 15s slice still applies disclaimer while materializing final segmen
   });
 });
 
-test("single slice appends independent Ending before applying the full-duration disclaimer", async () => {
+test("single slice appends independent Ending and embeds the full-duration disclaimer", async () => {
   await withTempRoot(async (root) => {
     const ffmpegLog = join(root, "ffmpeg.log");
     const restorePath = await installFakeFfmpeg(root, { logPath: ffmpegLog });
@@ -929,7 +929,7 @@ test("single slice appends independent Ending before applying the full-duration 
       assert.equal(stitched.disclaimerOverlay.applied, true);
       assert.ok(endingIndex >= 0);
       assert.ok(concatIndex > endingIndex);
-      assert.ok(overlayIndex > concatIndex);
+      assert.equal(overlayIndex, concatIndex);
     } finally {
       restorePath();
     }

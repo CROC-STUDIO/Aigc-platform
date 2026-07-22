@@ -29,6 +29,7 @@ import {
 } from "./decomposition-prompt.mjs";
 import { flattenDecompositionFieldValue } from "./decomposition-text.mjs";
 import { normalizeFissionAnalysis } from "./fission-analysis.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 
 const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/mov"]);
@@ -330,7 +331,7 @@ async function createReferenceVideoProxy(context, originalPath, targetPath, sett
   }
   let lastResult = null;
   for (const crf of settings.crfLadder) {
-    await execFileAsync("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-i",
       originalPath,
@@ -970,7 +971,7 @@ async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs
   await mkdir(frameDir, { recursive: true });
   try {
     const extractionPlan = buildBatchReferenceFrameExtractionPlan(frameDir, timestampsSec);
-    await execFileAsync("ffmpeg", [
+    await runFfmpeg([
       "-y",
       "-i",
       filePath,
@@ -1051,7 +1052,7 @@ async function ffmpegDetectReferenceVideoScenes(filePath, {
   timeoutMs = 25000,
   minGapSec = 0.8
 } = {}) {
-  const { stderr = "" } = await execFileAsync("ffmpeg", [
+  const { stderr = "" } = await runFfmpeg([
     "-hide_banner",
     "-i",
     filePath,

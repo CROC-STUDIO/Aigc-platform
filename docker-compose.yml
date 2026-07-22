@@ -50,6 +50,10 @@ services:
       AIGC_CONFIG_PATH: /data/app/config.json
       AIGC_USERS_PATH: /data/users/users.json
       AIGC_PROJECT_ROOT: /data/project-data
+      AIGC_FFMPEG_MAX_CONCURRENCY: ${AIGC_FFMPEG_MAX_CONCURRENCY:-1}
+      AIGC_FFMPEG_LOCK_DIR: ${AIGC_FFMPEG_LOCK_DIR:-/data/project-data/.aigc-ffmpeg.lock}
+      AIGC_FFMPEG_VIDEO_ENCODER: ${AIGC_FFMPEG_VIDEO_ENCODER:-libx264}
+      AIGC_FFMPEG_HWACCEL: ${AIGC_FFMPEG_HWACCEL:-none}
       AIGC_SCHEDULER_TABLE: ${AIGC_SCHEDULER_TABLE:-scheduler_jobs}
       AIGC_SESSION_COOKIE_NAME: ${AIGC_SESSION_COOKIE_NAME:-ad_session_codex}
       AIGC_PROJECT_ROOT_COOKIE_NAME: ${AIGC_PROJECT_ROOT_COOKIE_NAME:-ad_project_root_codex}

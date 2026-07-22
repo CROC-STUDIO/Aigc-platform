@@ -69,6 +69,15 @@ await withTempRoot(async (root) => {
   assert.equal(remoteOnlyById.get("download_status").status, "pass");
   assert.match(remoteOnlyById.get("download_status").message, /对象存储/);
 
+  const durationOnlyChecks = await deterministicVideoChecks(
+    { userProjectRoot: root, probeGeneratedVideo: async () => ({ durationSec: 34.321, width: 720, height: 1280, formatName: "mp4" }) },
+    { estimate: { durationSec: 32, request: { outputRatio: "9:16" } } },
+    { outputId: "out_duration_001", durationSec: 32, kind: "stitched_video", filePath: rel }
+  );
+  const durationOnly = new Map(durationOnlyChecks.map((item) => [item.checkId, item]));
+  assert.equal(durationOnly.get("duration_tolerance").status, "pass");
+  assert.match(durationOnly.get("duration_tolerance").message, /仅记录不参与 QC 判定/);
+
   const missingLocalChecks = await deterministicVideoChecks(
     context,
     { estimate: { durationSec: 15, request: { outputRatio: "9:16" } } },

@@ -20,7 +20,7 @@ export const DEFAULT_LIMITS = Object.freeze({
   confirmGenerationTasks: 10,
   hardGenerationTasks: 50,
   confirm30sSegments: 20,
-  maxConcurrency: 4,
+  maxConcurrency: 8,
   maxRetryPerTask: 1,
   maxRemixRegions: 8
 });

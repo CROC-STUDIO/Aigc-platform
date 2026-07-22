@@ -28,3 +28,22 @@ test("runUpstreamPollJob runs QC when upstream polling reaches qc without anothe
   assert.equal(result.batch.status, "succeeded");
   assert.equal(result.qc.reports[0].qcStatus, "pass");
 });
+
+test("runUpstreamPollJob routes submission reconciliation jobs without invoking normal polling", async () => {
+  const calls = [];
+  const batchId = "wzb_reconcile_001";
+  const result = await runUpstreamPollJob({}, {
+    jobType: "upstream_poll",
+    payload: { batchId, taskUid: "gen_reconcile_001", mode: "submission_reconciliation" }
+  }, {
+    pollUpstreamBatch: async () => {
+      throw new Error("normal poll should not run");
+    },
+    reconcileUnknownSubmission: async (_context, id, taskUid) => {
+      calls.push([id, taskUid]);
+      return { batch: { batchId: id, status: "partial_failed" }, needsReconciliation: true };
+    }
+  });
+  assert.deepEqual(calls, [[batchId, "gen_reconcile_001"]]);
+  assert.equal(result.needsReconciliation, true);
+});

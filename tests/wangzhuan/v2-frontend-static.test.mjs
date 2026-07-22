@@ -146,7 +146,7 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /产品录屏（最多 2 个）[\s\S]*id="wzProductRecordingFile"[^>]*multiple/);
   assert.match(html, /CTA 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzCtaAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(html, /Ending 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzEndingAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
-  assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="1"/);
+  assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="8"/);
   assert.match(html, /id="wzSubtitleFontSizeRange" type="range" min="20" max="60" step="1" value="40"/);
   assert.match(html, /id="wzSubtitleFontSizeNumber" type="number" min="20" max="60" step="1" value="40"/);
   assert.doesNotMatch(html, /同时生成数量/);
@@ -242,7 +242,8 @@ test("wangzhuan v2 script submits array-compatible selects and uses background j
   assert.match(js, /async function uploadSeedanceAssetsForReview\(\)[\s\S]*await markPlanMaybeStale\(\)/);
   assert.doesNotMatch(js, /state\.stalePlanPreview = Boolean\(state\.draftSignature && state\.batchDetail\)/);
   assert.match(js, /import \{ branchHasReferenceAsset, pruneOrphanAssetReviews \} from "\.\/wangzhuan-branch-assets\.js"/);
-  assert.match(js, /\.filter\(\(\[assetKey, review\]\) => branchHasReferenceAsset\(branch, assetKey\)/);
+  assert.match(js, /function branchReferenceAssetKeys\([^)]*branch[^)]*\)[\s\S]*\.filter\(\(assetKey\) => branchHasReferenceAsset\(branch, assetKey\)\)/);
+  assert.match(js, /function assetReviewBlockers\(\)[\s\S]*branchReferenceAssetKeys\(branch\)/);
   assert.match(startPlanJobSource, /state\.stalePlanPreview \|\| !state\.estimate\?\.estimateId\s*\? await estimateBatch\(\)\s*:\s*state\.estimate/);
   assert.match(js, /function shouldValidatePlanSignature\([^)]*batch[^)]*\)[\s\S]*return !hasConfirmedVideoGeneration\(batch\)/);
   assert.match(js, /if \(!shouldValidatePlanSignature\(\)\) \{\s*state\.stalePlanPreview = false;\s*renderTasks\(\);\s*return;\s*\}/);
@@ -391,6 +392,40 @@ test("wangzhuan v2 error display includes asset review failure details", async (
   assert.match(js, /assetKey/);
   assert.match(js, /fileName/);
   assert.match(js, /requestId:/);
+});
+
+test("wangzhuan v2 turns blocking asset reviews into an actionable retry flow", async () => {
+  const html = await readText("public/wangzhuan-v2.html");
+  const js = await readText("public/wangzhuan-v2.js");
+  const css = await readText("public/styles.css");
+
+  assert.match(html, /id="wzRetryAssetReviewsBtn"/);
+  assert.match(js, /assetReviewRetrying:\s*false/);
+  assert.match(js, /function assetReviewBlockers\(/);
+  assert.match(js, /retryAssetReviewsBtn/);
+  assert.match(js, /data-retry-asset-reviews/);
+  assert.doesNotMatch(js, /data-retry-asset-review="/);
+  assert.match(js, /function mergeAssetReviewResult\(/);
+  assert.match(js, /error\.data\?\.assetsByBranch/);
+  assert.match(js, /await confirmSeedanceAssetReviews\(\)/);
+  assert.match(js, /素材审核仍未通过/);
+  assert.match(js, /function hasConfirmedAssetReviews\(/);
+  assert.match(js, /assetReviewConfirmed:\s*hasConfirmedAssetReviews\(\)/);
+  assert.match(js, /审核通过，可继续生成失败片段/);
+  assert.match(css, /\.wz-v2-review-alert/);
+  assert.match(css, /\.wz-v2-asset-review/);
+});
+
+test("generated Seedance prompts use collapsible editors instead of a flat list", async () => {
+  const js = await readText("public/wangzhuan-v2.js");
+  const css = await readText("public/styles.css");
+
+  assert.match(js, /<details class="wz-v2-plan-editor"/);
+  assert.match(js, /index === 0 \? " open" : ""/);
+  assert.match(js, /<summary class="wz-v2-plan-summary">/);
+  assert.match(js, /<div class="wz-v2-plan-fields">/);
+  assert.match(css, /\.wz-v2-plan-summary/);
+  assert.match(css, /\.wz-v2-plan-fields/);
 });
 
 test("wangzhuan v2 restores the latest plan job signature from batch detail", async () => {

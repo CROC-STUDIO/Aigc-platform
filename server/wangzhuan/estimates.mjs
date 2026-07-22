@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { effectiveLimits } from "./config.mjs";
 import { branchSummaries, normalizeBranchDrafts } from "./branches.mjs";
 import {
+  DEFAULT_LIMITS,
   hasAnyStrongTruthRule,
   PROMISE_LEVELS,
   TARGET_CHANNELS
@@ -173,9 +174,10 @@ function validateEstimateRequest(request, limits) {
     throw new WangzhuanError("validation_error", "durationSec 只能是 15 或 30", { field: "durationSec" });
   }
   const variantCount = normalizeInteger(request.variantCount, "variantCount", 1, limits.hardGenerationTasks);
+  const maxConcurrency = Math.min(limits.maxConcurrency, DEFAULT_LIMITS.maxConcurrency);
   const requestedConcurrency = request.requestedConcurrency === undefined
-    ? 1
-    : normalizeInteger(request.requestedConcurrency, "requestedConcurrency", 1, limits.maxConcurrency);
+    ? maxConcurrency
+    : normalizeInteger(request.requestedConcurrency, "requestedConcurrency", 1, maxConcurrency);
   const supportedRatios = ["9:16", "1:1", "16:9"];
   if (!supportedRatios.includes(request.outputRatio)) {
     throw new WangzhuanError("validation_error", "outputRatio 不在支持范围内", { field: "outputRatio", supportedRatios });

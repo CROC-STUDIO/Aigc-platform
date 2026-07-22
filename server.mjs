@@ -13,6 +13,11 @@ import { handleWangzhuanRequest } from "./server/wangzhuan/router.mjs";
 import { WangzhuanError } from "./server/wangzhuan/http.mjs";
 import { runDueSchedulerJobs } from "./server/wangzhuan/scheduler.mjs";
 import { resolveProjectFilePath } from "./server/project-file-paths.mjs";
+import {
+  normalizeLegacyProjectKeys,
+  normalizeProjectKey,
+  resolveProjectByKey
+} from "./server/project-scope.mjs";
 import { createAuthStore, publicUser } from "./server/auth-store.mjs";
 import { loadEnvFile, loadRuntimeConfig } from "./server/runtime-config.mjs";
 import {
@@ -42,6 +47,7 @@ const USER_PROFILES_PATH = process.env.AIGC_USER_PROFILES_PATH ? resolveAppPath(
 const TRIAL_USAGE_PATH = process.env.AIGC_TRIAL_USAGE_PATH ? resolveAppPath(process.env.AIGC_TRIAL_USAGE_PATH) : join(__dirname, "trial-usage.json");
 const SESSION_COOKIE_NAME = String(process.env.AIGC_SESSION_COOKIE_NAME || "ad_session").trim() || "ad_session";
 const PROJECT_ROOT_COOKIE_NAME = String(process.env.AIGC_PROJECT_ROOT_COOKIE_NAME || "ad_project_root").trim() || "ad_project_root";
+const PROJECT_KEY_COOKIE_NAME = String(process.env.AIGC_PROJECT_KEY_COOKIE_NAME || `${PROJECT_ROOT_COOKIE_NAME}_key`).trim() || `${PROJECT_ROOT_COOKIE_NAME}_key`;
 const CONFIG_DIR = dirname(CONFIG_PATH);
 let projectRoot = process.env.AIGC_PROJECT_ROOT ? resolveAppPath(process.env.AIGC_PROJECT_ROOT) : resolve(__dirname, "..");
 let savedProjects = [];
@@ -408,6 +414,10 @@ function currentBaseProjectRoot() {
   return requestScope.getStore()?.baseProjectRoot || projectRoot;
 }
 
+function currentProjectKey() {
+  return requestScope.getStore()?.projectKey || projectKeyForRoot(currentBaseProjectRoot());
+}
+
 function sessionKey() {
   return `${currentUserId()}::${resolve(currentBaseProjectRoot())}`;
 }
@@ -517,16 +527,24 @@ function projectPathForConfig(value) {
 }
 
 function normalizeProjects(items) {
-  const seen = new Set();
   const normalized = [];
   for (const item of items ?? []) {
     const path = resolveConfiguredProjectPath(item.path ?? item.projectRoot);
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
-    normalized.push({ name: String(item.name ?? basename(path) ?? path).trim() || basename(path), path });
+    if (!path) continue;
+    const legacyProjectKeys = normalizeLegacyProjectKeys(item.legacyProjectKeys);
+    const existing = normalized.find((project) => project.path === path);
+    if (existing) {
+      existing.legacyProjectKeys = normalizeLegacyProjectKeys([...existing.legacyProjectKeys, ...legacyProjectKeys]);
+      continue;
+    }
+    normalized.push({
+      name: String(item.name ?? basename(path) ?? path).trim() || basename(path),
+      path,
+      legacyProjectKeys
+    });
   }
   if (!normalized.some((item) => item.path === projectRoot)) {
-    normalized.unshift({ name: basename(projectRoot), path: projectRoot });
+    normalized.unshift({ name: basename(projectRoot), path: projectRoot, legacyProjectKeys: [] });
   }
   return normalized;
 }
@@ -535,7 +553,8 @@ function projectList() {
   savedProjects = normalizeProjects(savedProjects);
   const activeBase = resolve(currentBaseProjectRoot());
   return savedProjects.map((item) => ({
-    ...item,
+    name: item.name,
+    path: item.path,
     projectKey: sha256Hex(item.path),
     active: item.path === activeBase,
     userPath: userProjectRoot(item.path, currentUserId())
@@ -2904,10 +2923,8 @@ async function updateConfig(body) {
 }
 
 async function switchProject(body) {
-  const requestedKey = String(body.projectKey ?? "").trim().replace(/^root:/, "");
-  const keyedProject = requestedKey
-    ? savedProjects.find((item) => sha256Hex(item.path) === requestedKey)
-    : null;
+  const requestedKey = normalizeProjectKey(body.projectKey);
+  const keyedProject = requestedKey ? resolveProjectByKey(savedProjects, requestedKey) : null;
   if (requestedKey && !keyedProject) throw new Error("Project not found");
   const nextRoot = resolve(String(keyedProject?.path ?? body.projectRoot ?? "").trim());
   if (!nextRoot) throw new Error("Project root is required");
@@ -2916,6 +2933,7 @@ async function switchProject(body) {
     if (scoped) {
       scoped.baseProjectRoot = nextRoot;
       scoped.userProjectRoot = await ensureUserProjectScope(scoped.userId);
+      scoped.projectKey = `root:${requestedKey}`;
     }
     return { ok: true, projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), projects: projectList() };
   }
@@ -2935,6 +2953,7 @@ async function switchProject(body) {
   if (scoped) {
     scoped.baseProjectRoot = nextRoot;
     scoped.userProjectRoot = await ensureUserProjectScope(scoped.userId);
+    scoped.projectKey = projectKeyForRoot(nextRoot);
   }
   return { ok: true, projectRoot: dirs().projectRoot, baseProjectRoot: currentBaseProjectRoot(), projects: projectList() };
 }
@@ -4110,13 +4129,21 @@ async function withRequestScope(req, res, handler, options = {}) {
   const cookieBase = cookies[PROJECT_ROOT_COOKIE_NAME] ? resolve(cookies[PROJECT_ROOT_COOKIE_NAME]) : projectRoot;
   const configuredBase = savedProjects.some((item) => item.path === cookieBase) ? cookieBase : projectRoot;
   const allowedBase = await firstUsableProjectRoot(configuredBase);
+  const cookieProject = resolveProjectByKey(savedProjects, cookies[PROJECT_KEY_COOKIE_NAME]);
+  const cookieProjectKey = normalizeProjectKey(cookies[PROJECT_KEY_COOKIE_NAME]);
+  const selectedProjectKey = cookieProject?.path === allowedBase && cookieProjectKey
+    ? `root:${cookieProjectKey}`
+    : projectKeyForRoot(allowedBase);
   if (cookies[PROJECT_ROOT_COOKIE_NAME] !== allowedBase) {
     appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(allowedBase)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+  }
+  if (cookies[PROJECT_KEY_COOKIE_NAME] !== selectedProjectKey) {
+    appendCookie(res, `${PROJECT_KEY_COOKIE_NAME}=${encodeURIComponent(selectedProjectKey)}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
   }
   const scopedProjectRoot = userProjectRoot(allowedBase, userId);
   await ensureProjectStructure(scopedProjectRoot);
   await ensureProjectStructure(allowedBase);
-  return requestScope.run({ userId, user: publicUser(user), baseProjectRoot: allowedBase, userProjectRoot: scopedProjectRoot }, handler);
+  return requestScope.run({ userId, user: publicUser(user), baseProjectRoot: allowedBase, userProjectRoot: scopedProjectRoot, projectKey: selectedProjectKey }, handler);
 }
 
 async function serveStatic(req, res, pathname) {
@@ -4152,6 +4179,7 @@ async function handleRequest(req, res) {
         currentUserId,
         currentProjectRoot,
         currentBaseProjectRoot,
+        projectKey: currentProjectKey(),
         getLegacyRunState: getRunState,
         config: appConfig
       });
@@ -4178,6 +4206,7 @@ async function handleRequest(req, res) {
     if (req.method === "POST" && url.pathname === "/api/projects/switch") {
       const result = await switchProject(await readJson(req));
       appendCookie(res, `${PROJECT_ROOT_COOKIE_NAME}=${encodeURIComponent(currentBaseProjectRoot())}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      appendCookie(res, `${PROJECT_KEY_COOKIE_NAME}=${encodeURIComponent(currentProjectKey())}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
       return sendJson(res, result);
     }
     if (req.method === "POST" && url.pathname === "/api/projects/create") {
@@ -4296,8 +4325,7 @@ function projectKeyForRoot(root) {
 
 function baseRootForProjectKey(projectKey) {
   if (!projectKey) return currentBaseProjectRoot();
-  const candidates = savedProjects.map((item) => item.path);
-  return candidates.find((item) => projectKeyForRoot(item) === projectKey) || currentBaseProjectRoot();
+  return resolveProjectByKey(savedProjects, projectKey)?.path || currentBaseProjectRoot();
 }
 
 function schedulerContext(job = {}) {
@@ -4308,6 +4336,7 @@ function schedulerContext(job = {}) {
     user: { userId, username: userId, role: "admin", isAdmin: true },
     userProjectRoot: userProjectRoot(baseRoot, userId),
     sharedProjectRoot: baseRoot,
+    projectKey: job.projectKey || projectKeyForRoot(baseRoot),
     config: appConfig,
     currentUserId: () => userId,
     currentProjectRoot: () => userProjectRoot(baseRoot, userId),

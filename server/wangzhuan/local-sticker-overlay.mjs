@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { WangzhuanError } from "./http.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 
 const execFileAsync = promisify(execFile);
 const VIDEO_DATA_PATTERN = /^data:(?:video\/(mp4|quicktime|webm|x-m4v)|application\/octet-stream);base64,([a-z0-9+/=\s]+)$/i;
@@ -150,12 +151,12 @@ export async function renderLocalStickerVideo({ inputPath, stickerPath = "", out
     "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
     "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-shortest", outputPath
   );
-  await execFileAsync("ffmpeg", args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
+  await runFfmpeg(args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
   const output = await inspectMedia(outputPath);
   if (!(output.durationSec > 0) || !(output.sizeBytes > 1024) || output.width !== input.width || output.height !== input.height) {
     throw new WangzhuanError("local_video_edit_failed", "输出视频校验失败", { width: output.width, height: output.height });
   }
-  await execFileAsync("ffmpeg", ["-nostdin", "-v", "error", "-i", outputPath, "-f", "null", "-"], {
+  await runFfmpeg(["-nostdin", "-v", "error", "-i", outputPath, "-f", "null", "-"], {
     timeout: timeoutMs,
     maxBuffer: 10 * 1024 * 1024
   });

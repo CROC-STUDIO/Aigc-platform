@@ -66,13 +66,28 @@
       "variant": 3,
       "total": 6
     },
-    "upstreamPollConcurrency": 3
+    "limits": {
+      "maxConcurrency": 2
+    },
+    "upstreamPollConcurrency": 2
   },
-  "projectRoot": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P",
+  "projectRoot": "../project-data/PROJECT_ROOT_P",
   "projects": [
     {
       "name": "PROJECT_ROOT_P",
-      "path": "C:\\Users\\Touka\\Desktop\\PROJECT_ROOT_P"
+      "path": "../project-data/PROJECT_ROOT_P",
+      "legacyProjectKeys": [
+        "7e35e0d0778de1240a8b91722061e4a890fd38ca5d5f939e1cc694752acee5e2",
+        "d6ce4e41f71792e98325015ae5551007eb630edf2cdf972eae5e5c17a6b7fa1b"
+      ]
+    },
+    {
+      "name": "project-data",
+      "path": "../project-data",
+      "legacyProjectKeys": [
+        "016da4dc7f40a8e7ca4dc85f821e5b958a79d3f6488608fd85fe3c25bd50079a",
+        "89fd2e5de9bc2b8a502f0511da824b5848bda1e295bb3eae6abd68ba12014b28"
+      ]
     },
     {
       "name": "鍖呭寘4",
@@ -88,7 +103,11 @@
     },
     {
       "name": "puzzle",
-      "path": "../project-data/puzzle"
+      "path": "../project-data/puzzle",
+      "legacyProjectKeys": [
+        "6f947cd7f5188320e1173a75ab764595bac65af8d1429ee27d724d268c2ae4cf",
+        "e0de26e92343ccfe8b4ca581a0d0197d929670e16d5e83a77fa4399cfcae12b1"
+      ]
     },
     {
       "name": "缃戣禋涓氬姟",

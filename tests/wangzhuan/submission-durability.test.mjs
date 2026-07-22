@@ -6,7 +6,11 @@ import test from "node:test";
 
 import * as mysqlFacts from "../../server/wangzhuan/mysql-facts.mjs";
 import * as pipeline from "../../server/wangzhuan/pipeline.mjs";
-import { createSeedanceProviderClient } from "../../server/wangzhuan/seedance-provider.mjs";
+import {
+  createSeedanceProviderClient,
+  normalizeSeedanceReconciliationStatus,
+  seedanceReconcileUrl
+} from "../../server/wangzhuan/seedance-provider.mjs";
 
 const pipelineSource = await readFile(
   new URL("../../server/wangzhuan/pipeline.mjs", import.meta.url),
@@ -98,7 +102,7 @@ test("a durable prior confirmation can resume submission after an interrupted ow
     "async function confirmBatchPlanOnce",
     "export async function confirmBatchPlan"
   );
-  const resumeCheck = confirmOnceBody.indexOf("previewConfirmedAt");
+  const resumeCheck = confirmOnceBody.indexOf("hasConfirmedSeedancePlan(batch)");
   const invalidState = confirmOnceBody.indexOf('batch.status !== "preview_required"');
 
   assert.ok(resumeCheck >= 0, "confirmed batches need an explicit resume path");
@@ -181,7 +185,7 @@ test("confirmed plan recovery only requeues local asset review failures without 
   }
 });
 
-test("confirming an already confirmed batch persists local recovery before Seedance submission", async (t) => {
+test("legacy confirmed plans without a confirmation timestamp can resume local recovery", async (t) => {
   t.mock.method(console, "warn", () => {});
   const root = await mkdtemp(join(tmpdir(), "wz-confirm-resume-"));
   const promptPath = "prompts/gen_test_001_seedance.txt";
@@ -218,7 +222,6 @@ test("confirming an already confirmed batch persists local recovery before Seeda
     userId: "admin",
     status: "partial_failed",
     previewType: "seedance_plan",
-    previewConfirmedAt: "2026-07-17T05:49:00.000Z",
     plans: [
       { planId: "plan_test_001", status: "confirmed" },
       { planId: "plan_test_002", status: "confirmed" }
@@ -571,4 +574,14 @@ test("submission_unknown is excluded from automatic task retry scheduling", asyn
   );
   assert.match(eligibilityBody, /submission_unknown/);
   assert.match(schedulerBody, /isAutomaticSeedanceRetryEligible\(task\)/);
+});
+
+test("submission reconciliation uses a stable request URL and never maps unknown to retry", () => {
+  assert.equal(
+    seedanceReconcileUrl("https://seedance.example/api", "/submissions/:requestId", "seedance_abc"),
+    "https://seedance.example/api/submissions/seedance_abc"
+  );
+  assert.equal(normalizeSeedanceReconciliationStatus("queued"), "queued");
+  assert.equal(normalizeSeedanceReconciliationStatus("not_found"), "not_created");
+  assert.equal(normalizeSeedanceReconciliationStatus("504"), "unknown");
 });

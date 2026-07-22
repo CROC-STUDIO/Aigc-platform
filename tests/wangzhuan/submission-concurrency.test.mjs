@@ -404,7 +404,8 @@ test("Seedance global concurrency reads limits before legacy capabilities", () =
   assert.equal(typeof pipeline.resolveSeedanceConcurrencyLimit, "function");
   assert.equal(pipeline.resolveSeedanceConcurrencyLimit({ config: { wangzhuan: { limits: { maxConcurrency: 2 }, capabilities: { maxConcurrency: 4 } } } }), 2);
   assert.equal(pipeline.resolveSeedanceConcurrencyLimit({ config: { wangzhuan: { capabilities: { maxConcurrency: 3 } } } }), 3);
-  assert.equal(pipeline.resolveSeedanceConcurrencyLimit({}), 4);
+  assert.equal(pipeline.resolveSeedanceConcurrencyLimit({}), 8);
+  assert.equal(pipeline.resolveSeedanceConcurrencyLimit({ config: { wangzhuan: { limits: { maxConcurrency: 20 } } } }), 8);
 });
 
 test("Seedance submission lease covers provider timeout with writeback buffer", () => {

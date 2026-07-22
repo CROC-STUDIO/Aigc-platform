@@ -55,6 +55,8 @@ test("stitch applies segment subtitles before creating stitched outputs", async 
   assert.ok(segmentSubtitleIndex >= 0, "segment ASR subtitle post-processing should be present");
   assert.ok(stitchOutputIndex > segmentSubtitleIndex, "segment subtitles must be applied before stitched output creation");
   assert.doesNotMatch(stitchedOutputSource, /applyVolcengineSubtitles/);
+  assert.match(source, /"-vf", `ass=/);
+  assert.match(source, /mode: "burned_in"/);
   assert.doesNotMatch(source, /subtitleScriptFromPlan|applyScriptSubtitles/);
 });
 
@@ -123,6 +125,37 @@ test("concat then disclaimer overlay stays decodable (two-phase stitch)", async 
     assert.ok(health.durationSec > 0);
     assert.notEqual(health.profile, "unknown");
     assert.notEqual(health.pixFmt, "unknown");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("concat and disclaimer overlay stay decodable in one encode pass", async (t) => {
+  if (!await ffmpegAvailable()) {
+    t.skip("ffmpeg/ffprobe not available");
+    return;
+  }
+  const root = await mkdtemp(join(tmpdir(), "wz-stitch-one-pass-"));
+  try {
+    const dir = join(root, "media");
+    await mkdir(dir, { recursive: true });
+    const seg1 = join(dir, "seg1.mp4");
+    const seg2 = join(dir, "seg2.mp4");
+    const overlay = join(dir, "overlay.png");
+    const output = join(dir, "stitched.mp4");
+    await createTinyVideo(seg1);
+    await createTinyVideo(seg2);
+    await createTinyOverlay(overlay);
+
+    await __stitchTestHooks.concatSegmentVideos(output, [seg1, seg2], {
+      canvas: { width: 160, height: 284 },
+      overlay: { imagePath: overlay, boxHeight: 24, horizontalMargin: 10, bottomMargin: 2 },
+      timeoutMs: 30000
+    });
+    const health = await __stitchTestHooks.assertDecodableVideo(output, { timeoutMs: 30000 });
+    assert.equal(health.width, 160);
+    assert.equal(health.height, 284);
+    assert.ok(health.durationSec > 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -191,7 +191,10 @@
               </section>
 
               <section class="wz-v2-subband flat">
-                <h3>我方产品素材资产</h3>
+                <div class="wz-v2-subband-head">
+                  <h3>我方产品素材资产</h3>
+                  <button id="wzRetryAssetReviewsBtn" class="mini ghost" type="button" hidden>重试审核</button>
+                </div>
                 <div class="wz-asset-grid">
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">产品 Logo（最多 9 个）</span><input id="wzProductIconFile" type="file" accept="image/png,image/jpeg,image/webp" multiple /></label>
                   <label class="wz-asset-slot"><span class="wz-asset-slot-label">产品截图（最多 9 个）</span><input id="wzProductScreenshotFile" type="file" accept="image/png,image/jpeg,image/webp" multiple /></label>
@@ -355,7 +358,7 @@
                 </select>
               </label>
               <label>裂变数量 <input id="wzVariantCount" type="number" min="1" max="10" value="3" /></label>
-              <input id="wzRequestedConcurrency" type="hidden" value="1" />
+              <input id="wzRequestedConcurrency" type="hidden" value="8" />
               <input id="wzSeedanceModel" type="hidden" value="dreamina-seedance-2-0-fast-260128" />
             </div>
             <details class="wz-details wz-postprocess-settings" open>

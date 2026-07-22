@@ -7,6 +7,7 @@ import { reviewSeedanceAsset, waitForSeedanceAssetReview } from "./asset-review.
 import {
   findContinuitySourceTask,
   readBatch as readPipelineBatch,
+  retryFailedGenerationTask,
   submitPendingGenerationTasks,
   taskNeedsContinuityReference,
   writeBatch,
@@ -25,10 +26,12 @@ import {
 } from "./stitch.mjs";
 import { syncWangzhuanAsset, toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { WangzhuanError } from "./http.mjs";
+import { runFfmpeg } from "./ffmpeg-runner.mjs";
 
 const ACTIVE_POLL_BATCH_STATUSES = new Set(["running", "stitching"]);
 const PENDING_SUBMISSION_BATCH_STATUSES = new Set(["queued", "running", "stitching", "qc", "partial_failed"]);
 const MAX_SUCCEEDED_WITHOUT_VIDEO_URL_POLLS = 30;
+const MAX_SUBMISSION_RECONCILIATION_ATTEMPTS = 20;
 const execFileAsync = promisify(execFile);
 const UPSTREAM_POLL_IN_FLIGHT = new Map();
 
@@ -139,7 +142,7 @@ async function extractContinuityFrame(context, batch, sourceTask) {
   }
   const target = continuityFramePath(context, batch.batchId, sourceTask.generationTaskId);
   await mkdir(dirname(target), { recursive: true });
-  await execFileAsync("ffmpeg", [
+  await runFfmpeg([
     "-y",
     "-sseof", "-0.2",
     "-i", sourcePath,
@@ -200,6 +203,146 @@ function generationTaskPollChanged(before = {}, after = {}) {
     || Number(before.missingVideoUrlPolls || 0) !== Number(after.missingVideoUrlPolls || 0)
     || Boolean(before.responseSummary?.waitingForVideoUrl) !== Boolean(after.responseSummary?.waitingForVideoUrl)
     || Boolean(before.responseSummary?.videoUrlStored) !== Boolean(after.responseSummary?.videoUrlStored);
+}
+
+function normalizeReconciliationResult(result = {}) {
+  const raw = String(result.status || result.state || "").toLowerCase();
+  if (["queued", "pending"].includes(raw)) return "queued";
+  if (["running", "processing", "in_progress"].includes(raw)) return "running";
+  if (["succeeded", "success", "completed", "done"].includes(raw)) return "succeeded";
+  if (["not_found", "notfound", "not_created", "missing", "absent"].includes(raw)) return "not_created";
+  return "unknown";
+}
+
+async function reconcileUnknownSubmissionBatch(context, batchId, taskUid) {
+  let batch = await readBatch(context, batchId);
+  const unknownTasks = (Array.isArray(batch.tasks) ? batch.tasks : [])
+    .filter((task) => task.status === "failed"
+      && task.errorCode === "submission_unknown"
+      && (!taskUid || task.generationTaskId === taskUid));
+  if (!unknownTasks.length) return { batch, needsReconciliation: false, reconciledCount: 0 };
+  const provider = createSeedanceProviderClient(context);
+  const now = new Date().toISOString();
+  const retryTaskIds = [];
+  let changed = false;
+  const tasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((task) => {
+    if (!unknownTasks.some((candidate) => candidate.generationTaskId === task.generationTaskId)) return task;
+    const previousAttempts = Number(task.responseSummary?.submissionReconciliationAttempts || 0);
+    if (previousAttempts >= MAX_SUBMISSION_RECONCILIATION_ATTEMPTS) return task;
+    changed = true;
+    return {
+      ...task,
+      responseSummary: {
+        ...(task.responseSummary || {}),
+        submissionReconciliationAttempts: previousAttempts + 1,
+        submissionReconciliationLastAttemptAt: now
+      }
+    };
+  });
+  if (changed) {
+    batch = await writeBatch(context, { ...batch, tasks }, "scheduler_retry");
+  }
+  for (const task of unknownTasks) {
+    const current = (Array.isArray(batch.tasks) ? batch.tasks : []).find((item) => item.generationTaskId === task.generationTaskId) || task;
+    let result = { status: "unknown", responsePayload: { reason: "provider_reconcile_not_available" } };
+    try {
+      if (typeof provider?.reconcileSubmission === "function") {
+        result = await provider.reconcileSubmission({
+          submissionRequestId: current.requestSummary?.submissionRequestId || current.responseSummary?.submissionRequestId || "",
+          batchId,
+          generationTaskId: current.generationTaskId,
+          attemptNo: Number(current.attempts || 0),
+          requestSummary: current.requestSummary || {}
+        });
+      }
+    } catch (error) {
+      result = { status: "unknown", responsePayload: { errorCode: error?.code || "reconciliation_failed", errorMessage: error?.message || "" } };
+    }
+    const status = normalizeReconciliationResult(result);
+    const responseSummary = {
+      ...(current.responseSummary || {}),
+      reconciliationStatus: status,
+      reconciliationResponse: {
+        status: result.status || status,
+        taskId: result.taskId || "",
+        videoUrlStored: Boolean(result.videoUrl),
+        errorCode: result.responsePayload?.errorCode || "",
+        errorMessage: result.responsePayload?.errorMessage || ""
+      },
+      ...(result.taskId ? { seedanceTaskId: result.taskId } : {}),
+      ...(result.videoUrl ? { videoUrlStored: true } : {})
+    };
+    if (status === "succeeded" && result.videoUrl && typeof provider?.downloadVideo === "function") {
+      try {
+        const buffer = await provider.downloadVideo(result.videoUrl);
+        const outputPath = await writeSegmentBuffer(context, batchId, current.generationTaskId, buffer);
+        const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((item) => item.generationTaskId === current.generationTaskId
+          ? {
+              ...item,
+              status: "downloaded",
+              outputPath,
+              remoteUrlStored: true,
+              finishedAt: now,
+              errorCode: "",
+              errorMessage: "",
+              responseSummary
+            }
+          : item);
+        batch = await writeBatch(context, { ...batch, tasks: nextTasks }, "downloaded_output");
+        continue;
+      } catch (error) {
+        responseSummary.reconciliationDownloadError = error?.message || "对账成功结果下载失败";
+      }
+    }
+    if ((status === "queued" || status === "running" || status === "succeeded") && result.taskId) {
+      const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((item) => item.generationTaskId === current.generationTaskId
+        ? {
+            ...item,
+            status: "waiting_upstream",
+            seedanceTaskId: result.taskId,
+            providerJobId: result.taskId,
+            errorCode: "",
+            errorMessage: "",
+            finishedAt: "",
+            responseSummary
+          }
+        : item);
+      batch = await writeBatch(context, { ...batch, tasks: nextTasks }, "scheduler_retry");
+      continue;
+    }
+    if (status === "not_created" && Number(current.responseSummary?.submissionReconciliationRetryCount || 0) < 1) {
+      const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((item) => item.generationTaskId === current.generationTaskId
+        ? {
+            ...item,
+            errorCode: "submission_not_created",
+            errorMessage: "对账确认 Seedance 未创建任务，允许自动重试一次",
+            responseSummary: { ...responseSummary, submissionReconciliationRetryCount: 1 }
+          }
+        : item);
+      batch = await writeBatch(context, { ...batch, tasks: nextTasks }, "scheduler_retry");
+      retryTaskIds.push(current.generationTaskId);
+    } else {
+      const nextTasks = (Array.isArray(batch.tasks) ? batch.tasks : []).map((item) => item.generationTaskId === current.generationTaskId
+        ? { ...item, responseSummary }
+        : item);
+      batch = await writeBatch(context, { ...batch, tasks: nextTasks }, "scheduler_retry");
+    }
+  }
+  for (const generationTaskId of retryTaskIds) {
+    batch = (await retryFailedGenerationTask(context, batchId, generationTaskId, { automatic: true, triggerName: "scheduler_retry" })).batch;
+  }
+  if (!retryTaskIds.length
+    && !(Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "pending" || task.status === "waiting_upstream")) {
+    if ((Number(batch.estimate?.durationSec) === 30 || hasMultiSliceStitchGroups(batch)) && isBatchReadyForStitch(batch)) {
+      batch = (await stitchBatchSegments(context, batchId, { replaceDerivedOutputs: true })).batch;
+    } else {
+      batch = await finalizeSegmentBatch(context, batchId);
+    }
+  }
+  const needsReconciliation = (Array.isArray(batch.tasks) ? batch.tasks : []).some((task) => task.status === "failed"
+    && task.errorCode === "submission_unknown"
+    && Number(task.responseSummary?.submissionReconciliationAttempts || 0) < MAX_SUBMISSION_RECONCILIATION_ATTEMPTS);
+  return { batch, needsReconciliation, reconciledCount: unknownTasks.length };
 }
 
 function isApprovedContinuityReference(reference = {}) {
@@ -609,6 +752,13 @@ export function pollUpstreamBatch(context, batchId) {
   return runPollSingleFlight(
     pollSingleFlightKey(context, batchId),
     () => pollUpstreamBatchOnce(context, batchId)
+  );
+}
+
+export function reconcileUnknownSubmission(context, batchId, taskUid) {
+  return runPollSingleFlight(
+    `${pollSingleFlightKey(context, batchId)}:submission-reconciliation:${taskUid || "batch"}`,
+    () => reconcileUnknownSubmissionBatch(context, batchId, taskUid)
   );
 }
 

@@ -1,0 +1,16 @@
+{
+  "productName": "DramaPerks: Short Dramas",
+  "description": "DramaPerks offers bite-sized short dramas with HD streaming, fast loading, smart recommendations, viewing points, daily check-ins, tasks, and redeemable bonuses.",
+  "coreSellingPoints": [
+    "Bite-sized short dramas for quick viewing anytime",
+    "Earn points by watching and completing daily tasks",
+    "Daily check-ins with an extra gift pack for a 7-day streak",
+    "Trending drama categories updated daily",
+    "HD streaming, fast loading, and smart recommendations"
+  ],
+  "sourceUrl": "https://play.google.com/store/apps/details?id=com.dramaperks.shortdrama.free",
+  "store": "google_play",
+  "developer": "semanticgravity",
+  "category": "Entertainment",
+  "status": "collected_local_assets"
+}
