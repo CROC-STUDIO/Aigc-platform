@@ -57,6 +57,7 @@ import {
   reviewParsedProductLinkAssets
 } from "./product-link-codex.mjs";
 import { autoGenerateSeedancePrompt } from "./auto-seedance-prompt.mjs";
+import { generateStorySeedWithLuna } from "./story-seeds.mjs";
 import { pollUpstreamBatch } from "./upstream-poll.mjs";
 import { adminTemplateAction, listTemplates, saveTemplate } from "./templates.mjs";
 import {
@@ -413,6 +414,10 @@ export async function handleWangzhuanRequest(req, res, url, context) {
         ...publicLlmConfig(scoped.config),
         ...publicQcLlmConfig(scoped.config)
       }, requestId);
+    }
+    if (req.method === "POST" && url.pathname === "/api/wangzhuan/story-seeds") {
+      const createStorySeed = scoped.createStorySeed || context.createStorySeed || generateStorySeedWithLuna;
+      return sendOk(res, await createStorySeed(scoped, await context.readJson(req)), requestId);
     }
     if (req.method === "POST" && url.pathname === "/api/wangzhuan/reference-videos/reuse-check") {
       const runFindReusable = scoped.findReusableReferenceVideo || context.findReusableReferenceVideo || findReusableReferenceVideo;

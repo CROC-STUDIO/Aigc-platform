@@ -1,10 +1,13 @@
 {
   "productName": "DramaGold",
-  "description": "DramaGold is a short drama platform with HD viewing, rewards for watching or completing tasks, gold coin balance, withdrawal-style messaging, and launcher app behavior.",
+  "description": "Enjoy HD short dramas and earn easy money while you watch!",
   "coreSellingPoints": [
-    "HD short dramas",
-    "Watch and task rewards",
-    "Gold coin balance",
-    "Launcher app positioning"
-  ]
+    "Enjoy HD short dramas",
+    "Earn while watching"
+  ],
+  "sourceUrl": "https://play.google.com/store/apps/details?id=com.deama.gold.shortreel",
+  "store": "google_play",
+  "developer": "Xfreebies",
+  "category": "Entertainment",
+  "status": "collected_local_assets"
 }

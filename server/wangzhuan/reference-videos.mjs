@@ -9,7 +9,7 @@ import { effectiveLimits } from "./config.mjs";
 import { WangzhuanError } from "./http.mjs";
 import { callLlmStreaming, geminiStreamGenerateContentUrl } from "./llm-stream.mjs";
 import { invokeLlmWithRetry } from "./llm-invoke.mjs";
-import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, isRetryableLlmError, resolveLlmConfig, llmSupportsVideoUrl } from "./llm-config.mjs";
+import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, llmUsesSkylinkGptFrameInput, isRetryableLlmError, resolveLlmConfig, llmSupportsVideoUrl } from "./llm-config.mjs";
 import { writeSseDelta, writeSseDone, writeSseError, writeSseLog } from "./sse.mjs";
 import {
   hasWangzhuanFactsStore,
@@ -65,16 +65,6 @@ const DECOMPOSITION_FIELD_ALIASES = Object.freeze({
   hook: ["hook", "钩子", "前三秒钩子", "开头钩子", "吸引点"],
   phoneUi: ["phoneUi", "phone_ui", "手机界面", "产品界面", "App界面", "APP界面"],
   protagonist: ["protagonist", "mainCharacter", "main_character", "人物", "主角", "具体人物", "人物拆解"],
-  voiceover: ["voiceover", "voice_over", "口播", "旁白", "口播内容", "口播功能"],
-  onscreenText: ["onscreenText", "on_screen_text", "subtitles", "字幕", "屏幕文字", "画面文字", "贴纸文案"],
-  ctaMoment: ["ctaMoment", "cta_moment", "CTA时刻", "CTA出现时机", "行动号召时刻"],
-  endingMoment: ["endingMoment", "ending_moment", "Ending时刻", "结尾", "收尾画面"],
-  continuityAnchors: ["continuityAnchors", "continuity_anchors", "连续性锚点", "连贯锚点", "关键帧锚点"],
-  actionReference: ["actionReference", "action_reference", "动作参考", "Seedance动作参考", "人物动作参考"],
-  cameraReference: ["cameraReference", "camera_reference", "运镜参考", "镜头参考", "Seedance运镜参考"],
-  textElements: ["textElements", "text_elements", "文字生成", "文字元素", "字幕元素", "画面文字元素"],
-  effectReference: ["effectReference", "effect_reference", "特效参考", "转场参考", "动效参考"],
-  doNotCopyElements: ["doNotCopyElements", "do_not_copy_elements", "不要复制元素", "不得复刻元素", "竞品禁用元素"],
   rewardFeedback: ["rewardFeedback", "reward_feedback", "奖励反馈", "收益反馈", "金币反馈"],
   cta: ["cta", "CTA", "行动号召", "下载引导"],
 });
@@ -665,16 +655,6 @@ export function validateVideoDecomposition(referenceVideoId, decomposition = {})
     ...(normalized.appIconArea ? { appIconArea: normalized.appIconArea } : {}),
     ...(normalized.phoneUi ? { phoneUi: String(normalized.phoneUi) } : {}),
     ...(normalized.protagonist ? { protagonist: String(normalized.protagonist) } : {}),
-    ...(normalized.voiceover ? { voiceover: String(normalized.voiceover) } : {}),
-    ...(normalized.onscreenText ? { onscreenText: String(normalized.onscreenText) } : {}),
-    ...(normalized.ctaMoment ? { ctaMoment: String(normalized.ctaMoment) } : {}),
-    ...(normalized.endingMoment ? { endingMoment: String(normalized.endingMoment) } : {}),
-    ...(normalized.continuityAnchors ? { continuityAnchors: String(normalized.continuityAnchors) } : {}),
-    ...(normalized.actionReference ? { actionReference: String(normalized.actionReference) } : {}),
-    ...(normalized.cameraReference ? { cameraReference: String(normalized.cameraReference) } : {}),
-    ...(normalized.textElements ? { textElements: String(normalized.textElements) } : {}),
-    ...(normalized.effectReference ? { effectReference: String(normalized.effectReference) } : {}),
-    ...(normalized.doNotCopyElements ? { doNotCopyElements: String(normalized.doNotCopyElements) } : {}),
     ...(normalized.rewardFeedback ? { rewardFeedback: String(normalized.rewardFeedback) } : {}),
     ...(normalized.cta ? { cta: String(normalized.cta) } : {}),
     ...(normalized.disclaimer ? { disclaimer: String(normalized.disclaimer) } : {}),
@@ -959,11 +939,6 @@ function buildSceneAwareFrameTimestamps(durationSec, sceneCutsSec = [], options 
   return reduceSceneAwareSamples(samples, duration, maxFrames, [forcedStart, forcedEnd]);
 }
 
-function llmUsesGptFrameOnlyDecomposition(llmConfig = {}) {
-  return String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
-    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
-}
-
 async function ffmpegExtractReferenceFrames(filePath, timestampsSec, { timeoutMs = 20000 } = {}) {
   const frames = [];
   const frameDir = join(parse(filePath).dir, "llm-frames");
@@ -1101,7 +1076,7 @@ async function collectReferenceVideoVisionInputs(context, probe, llmConfig = {})
   // 拆解只有两种输入模式：① 公网 URL（模型可读视频链接时，如 doubao / gemini）；
   // ② 场景感知抽帧（模型不吃视频链接、或拿不到公网 URL 时）。
   // 不再使用「整段视频 base64 内联」这种慢模式。
-  const frameOnlyModel = llmUsesGptFrameOnlyDecomposition(llmConfig);
+  const frameOnlyModel = llmUsesSkylinkGptFrameInput(llmConfig);
   let fileUrl = frameOnlyModel ? "" : resolveModelFileUrl(probe);
   const configuredFrameCount = clampInteger(
     context.config?.wangzhuan?.llm?.referenceFrameCount,
@@ -1451,8 +1426,7 @@ function modelInputMode(messages = []) {
 
 function shouldForceChatForFileUrl(llmConfig, messages) {
   return modelInputMode(messages) === "file_url"
-    && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
-    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
+    && llmUsesSkylinkGptFrameInput(llmConfig);
 }
 
 function redactedModelRequestBody(body) {

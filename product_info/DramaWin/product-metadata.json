@@ -1,11 +1,15 @@
 {
   "productName": "DramaWin",
-  "description": "DramaWin is a short drama and launcher app with selected mini-series, HD playback, watch-and-earn rewards, tasks, balance withdrawal-style messaging, watch history, and favorites.",
+  "description": "Watch short dramas, unlock episodes, earn rewards, and enjoy stories.",
   "coreSellingPoints": [
-    "Selected short dramas",
-    "HD playback",
-    "Watch-and-earn rewards",
-    "Launcher app behavior",
-    "Watch history and favorites"
-  ]
+    "Watch short dramas",
+    "Unlock episodes",
+    "Earn rewards",
+    "Enjoy stories"
+  ],
+  "sourceUrl": "https://play.google.com/store/apps/details?id=com.dramawin.lucky.shorts",
+  "store": "google_play",
+  "developer": "Xfreebies",
+  "category": "Entertainment",
+  "status": "collected_local_assets"
 }

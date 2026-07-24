@@ -1,0 +1,14 @@
+{
+  "productName": "LuckyReels",
+  "description": "Watch short dramas in HD, earn coins, and enjoy smooth viewing anytime.",
+  "coreSellingPoints": [
+    "Watch short dramas in HD",
+    "Earn coins while watching",
+    "Smooth viewing anytime"
+  ],
+  "sourceUrl": "https://play.google.com/store/apps/details?id=com.lucky.reels.prize.drama",
+  "store": "google_play",
+  "developer": "Appic Company",
+  "category": "Entertainment",
+  "status": "collected_local_assets"
+}

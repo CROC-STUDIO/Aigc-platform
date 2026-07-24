@@ -70,6 +70,10 @@ const els = {
   referenceUploadStatus: $("#wzReferenceUploadStatus"),
   referencePreview: $("#wzReferencePreview"),
   referenceBox: $("#wzReferenceBox"),
+  storyCorePlot: $("#wzStoryCorePlot"),
+  storyDurationSec: $("#wzStoryDurationSec"),
+  generateStorySeedBtn: $("#wzGenerateStorySeedBtn"),
+  storySeedBox: $("#wzStorySeedBox"),
   startNewTaskBtn: $("#wzStartNewTaskBtn"),
   saveDraftBtn: $("#wzSaveDraftBtn"),
   draftDecompositionBtn: $("#wzDraftDecompositionBtn"),
@@ -167,6 +171,7 @@ const els = {
 
 const state = {
   referenceVideo: null,
+  storySeed: null,
   referenceVideoCheckJob: null,
   decompositionJob: null,
   decompositionDraft: null,
@@ -616,7 +621,11 @@ function targetSegmentCountValue() {
 }
 
 function compatibleDurationSecValue() {
-  return 15;
+  return Number(state.storySeed?.durationSec) === 30 ? 30 : 15;
+}
+
+function storyDurationSecValue() {
+  return Number(value(els.storyDurationSec)) === 15 ? 15 : 30;
 }
 
 function defaultBranchDraft(index = 0, seed = {}) {
@@ -1502,6 +1511,12 @@ function restoreV2FromBatchDetail(detail = {}) {
   const request = batch.request || batch.estimate?.request || {};
   const postProcess = request.postProcess || draft.postProcess || {};
   const referenceVideo = referenceVideoFromBatch(batch);
+  const storySeed = request.storySeed || batch.estimate?.request?.storySeed || null;
+  if (request.sourceType === "story_seed" && storySeed?.selectedVariantId) {
+    state.storySeed = storySeed;
+    renderStorySeed();
+    els.referenceBox.textContent = "已从任务管理恢复短剧剧情方案。";
+  }
   if (referenceVideo?.referenceVideoId) {
     state.referenceVideo = referenceVideo;
     renderVideoPreview(referenceVideoPreviewUrl(referenceVideo));
@@ -2304,6 +2319,8 @@ async function pollReferenceVideoCheckJob(jobId, localPreviewUrl = "") {
 async function uploadReferenceVideo() {
   const file = els.referenceFile?.files?.[0];
   if (!file) return;
+  state.storySeed = null;
+  renderStorySeed();
   const localUrl = URL.createObjectURL(file);
   renderVideoPreview(localUrl);
   els.referenceUploadStatus.textContent = "正在计算文件指纹...";
@@ -2468,6 +2485,58 @@ function currentDecomposition() {
   };
 }
 
+function renderStorySeed() {
+  const variants = state.storySeed?.variants || [];
+  if (!variants.length) {
+    els.storySeedBox.textContent = "尚未生成短剧剧情方案";
+    els.storySeedBox.classList.add("empty-line");
+    return;
+  }
+  els.storySeedBox.classList.remove("empty-line");
+  els.storySeedBox.innerHTML = variants.map((variant) => `
+    <article class="wz-plan-card">
+      <strong>${escapeHtml(variant.title)}</strong>
+      <p>${escapeHtml(variant.openingAction)}</p>
+      <small>反转物：${escapeHtml(variant.reversalObject)} · ${escapeHtml(variant.qualityGate.status)} · ${(variant.decomposition?.seedanceSlices || []).length} 个独立高潮</small>
+      <button class="mini ghost" type="button" data-story-variant-id="${escapeHtml(variant.variantId)}">使用此剧情</button>
+    </article>
+  `).join("");
+}
+
+async function generateStorySeed() {
+  setBusy(els.generateStorySeedBtn, true, "生成中");
+  try {
+    const data = await api("/api/wangzhuan/story-seeds", {
+      method: "POST",
+      body: JSON.stringify({
+        corePlot: value(els.storyCorePlot),
+        durationSec: storyDurationSecValue(),
+        language: languageValue()
+      })
+    });
+    state.storySeed = data;
+    renderStorySeed();
+    log(`已由 ${data.generationModel || "gpt-5.6-luna"} 生成 3 个短剧剧情方案`);
+  } finally {
+    setBusy(els.generateStorySeedBtn, false);
+  }
+}
+
+function selectStoryVariant(variantId) {
+  const selectedVariant = state.storySeed?.variants?.find((variant) => variant.variantId === variantId);
+  if (!selectedVariant) return;
+  state.storySeed = { ...state.storySeed, selectedVariantId: variantId };
+  state.referenceVideo = null;
+  state.decompositionDraft = selectedVariant.decomposition;
+  state.decompositionEditedFields.clear();
+  renderDecompositionForm(selectedVariant.decomposition);
+  els.referenceUploadStatus.textContent = `已使用短剧剧情：${selectedVariant.title}`;
+  els.referenceBox.textContent = "当前来源：短剧剧情方案";
+  renderStorySeed();
+  renderTasks();
+  markPlanMaybeStale();
+}
+
 function countSeedanceReferenceAssets(branch = activeBranch()) {
   const keys = new Set([
     ...Object.keys(branch.assetFileNames || {}),
@@ -2559,7 +2628,9 @@ function estimateRequest() {
   return {
     batchName: value($("#wzBatchName")),
     projectName: value($("#wzProjectName")),
-    referenceVideoId: state.referenceVideo?.referenceVideoId,
+    ...(state.storySeed?.selectedVariantId
+      ? { sourceType: "story_seed", storySeed: state.storySeed }
+      : { sourceType: "reference_video", referenceVideoId: state.referenceVideo?.referenceVideoId }),
     targetChannel: value(els.targetChannel),
     targetRegion: region,
     targetRegions: [region],
@@ -2571,7 +2642,7 @@ function estimateRequest() {
     durationSec: compatibleDurationSecValue(),
     targetSegmentCount: targetSegmentCountValue(),
     variantCount: variantCountValue(),
-    requestedConcurrency: Number(value(els.requestedConcurrency) || 8),
+    requestedConcurrency: Number(value(els.requestedConcurrency) || 3),
     outputRatio: value(els.outputRatio),
     seedanceModel: selectedSeedanceModel(),
     decomposition: currentDecomposition(),
@@ -2616,7 +2687,7 @@ function estimateRequest() {
 }
 
 function expectedMinutes() {
-  const concurrency = Math.max(1, Number(value(els.requestedConcurrency) || 8));
+  const concurrency = Math.max(1, Number(value(els.requestedConcurrency) || 3));
   return Math.max(1, Math.ceil((variantCountValue() * 3) / concurrency));
 }
 
@@ -3353,11 +3424,11 @@ async function saveDraft(sourceStep = "wzv2_manual_draft") {
 }
 
 async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
-  if (!state.referenceVideo?.referenceVideoId) {
+  if (!state.referenceVideo?.referenceVideoId && !state.storySeed?.selectedVariantId) {
     throw new WangzhuanApiError({
       code: "validation_error",
-      message: "请先上传参考视频",
-      data: { field: "referenceVideo.referenceVideoId" }
+      message: "请先上传参考视频或选择短剧剧情方案",
+      data: { field: "referenceVideo.referenceVideoId|storySeed.selectedVariantId" }
     }, 400);
   }
   const data = await api("/api/wangzhuan/batches/draft", {
@@ -3369,6 +3440,7 @@ async function saveDraftBatch(sourceStep = "wzv2_manual_draft") {
       batchName: value($("#wzBatchName")),
       referenceVideoId: state.referenceVideo?.referenceVideoId || "",
       referenceVideo: state.referenceVideo,
+      ...(state.storySeed?.selectedVariantId ? { sourceType: "story_seed", storySeed: state.storySeed } : {}),
       templateSnapshot: { draft: estimateRequest().templateSnapshot.draft },
       branches: estimateRequest().branches,
       branchDrafts: estimateRequest().branches,
@@ -3889,6 +3961,7 @@ function startNewTask() {
   batchDetailLoadOwner += 1;
   setPlanUpstreamLocked(false);
   state.referenceVideo = null;
+  state.storySeed = null;
   resetDecompositionDraft({ clearForm: true });
   state.estimate = null;
   state.planJob = null;
@@ -3910,6 +3983,8 @@ function startNewTask() {
   els.referenceFile.value = "";
   renderVideoPreview("");
   els.referenceBox.textContent = "未上传参考视频";
+  if (els.storyCorePlot) els.storyCorePlot.value = "";
+  renderStorySeed();
   els.referenceUploadStatus.textContent = "选中文件后自动上传、检查和预览。";
   els.draftDecompositionBtn.disabled = true;
   els.decompositionStatus.hidden = false;
@@ -3991,6 +4066,11 @@ async function markPlanMaybeStale() {
 }
 
 els.checkReferenceBtn?.addEventListener("click", () => els.referenceFile?.click());
+els.generateStorySeedBtn?.addEventListener("click", () => generateStorySeed().catch((error) => showError(error, "短剧剧情生成失败")));
+els.storySeedBox?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-story-variant-id]");
+  if (button) selectStoryVariant(button.dataset.storyVariantId || "");
+});
 els.referenceFile?.addEventListener("change", uploadReferenceVideo);
 bindReferenceDropUpload();
 els.decompositionForm?.addEventListener("input", (event) => {

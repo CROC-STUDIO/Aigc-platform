@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_LLM_CONFIG,
   isRetryableLlmError,
   llmUsesGeminiCompat,
   llmUsesGeminiNativeApi,
-  llmUsesSkylinkGeminiChatBridge
+  llmUsesSkylinkGeminiChatBridge,
+  llmUsesSkylinkGptFrameInput,
+  resolveLlmConfig
 } from "../../server/wangzhuan/llm-config.mjs";
 import { WangzhuanError } from "../../server/wangzhuan/http.mjs";
 import { callLlmStreaming } from "../../server/wangzhuan/llm-stream.mjs";
@@ -27,6 +30,18 @@ const googleGemini = {
   timeoutMs: 30000,
   apiKey: "test-key"
 };
+
+test("GPT-5.4 is the default decomposition model", () => {
+  assert.equal(DEFAULT_LLM_CONFIG.model, "gpt-5.4");
+  assert.equal(resolveLlmConfig().model, "gpt-5.4");
+});
+
+test("Skylink GPT frame input recognizes Terra and Luna", () => {
+  assert.equal(llmUsesSkylinkGptFrameInput({ provider: "skylink", model: "gpt-5.6-terra" }), true);
+  assert.equal(llmUsesSkylinkGptFrameInput({ provider: "SKYLINK", model: "GPT-5.6-LUNA" }), true);
+  assert.equal(llmUsesSkylinkGptFrameInput({ provider: "openai", model: "gpt-5.6-terra" }), false);
+  assert.equal(llmUsesSkylinkGptFrameInput({ provider: "skylink", model: "gemini-3.1-pro-preview" }), false);
+});
 
 test("isRetryableLlmError covers timeout, 429, invalid_json and schema_invalid", () => {
   assert.equal(isRetryableLlmError(new WangzhuanError("model_failed", "timeout", { reason: "timeout" })), true);

@@ -12,6 +12,7 @@ import {
 } from "./mysql-facts.mjs";
 import { toProjectRelative, wangzhuanPaths } from "./storage.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
+import { normalizeStorySeedSelection } from "./story-seeds.mjs";
 
 function currentUserId(context) {
   return context.userId ?? context.currentUserId?.() ?? context.user?.userId ?? context.user?.username ?? "local";
@@ -133,7 +134,9 @@ function requestSnapshotFromDraft(request = {}, referenceVideo = {}) {
     branches: Array.isArray(request.branches) ? request.branches : [],
     branchDrafts: Array.isArray(request.branchDrafts) ? request.branchDrafts : [],
     ...(hasUsableDecomposition(request.decomposition) ? { decomposition: request.decomposition } : {}),
-    referenceVideoId: referenceVideo.referenceVideoId
+    sourceType: normalizeString(request.sourceType, 32) || "reference_video",
+    ...(request.storySeed ? { storySeed: request.storySeed } : {}),
+    ...(referenceVideo?.referenceVideoId ? { referenceVideoId: referenceVideo.referenceVideoId } : {})
   };
 }
 
@@ -150,8 +153,11 @@ function resolveBranchDrafts(request = {}, templateSnapshot = null, existing = [
 
 function buildDraftBatch(context, existing, request = {}) {
   const now = new Date().toISOString();
-  const referenceVideo = ensureReferenceVideo(request);
-  const requestSnapshot = requestSnapshotFromDraft(request, referenceVideo);
+  const isStorySeed = request.sourceType === "story_seed";
+  const storySeed = isStorySeed ? normalizeStorySeedSelection(request.storySeed) : null;
+  const referenceVideo = isStorySeed ? null : ensureReferenceVideo(request);
+  const decompositionRequest = isStorySeed ? storySeed.selectedVariant.decomposition : request.decomposition;
+  const requestSnapshot = requestSnapshotFromDraft({ ...request, storySeed, decomposition: decompositionRequest }, referenceVideo);
   const batchId = existing?.batchId || makeBatchId();
   const status = resolveDraftSaveStatus(request, existing?.status);
   const batchName = requestSnapshot.batchName || existing?.userBatchName || existing?.displayBatchName || "";
@@ -159,8 +165,8 @@ function buildDraftBatch(context, existing, request = {}) {
     ? request.templateSnapshot
     : existing?.templateSnapshot || null;
   const branchDrafts = resolveBranchDrafts(request, templateSnapshot, existing?.branchDrafts);
-  const decomposition = request.decomposition !== undefined
-    ? (hasUsableDecomposition(request.decomposition) ? request.decomposition : null)
+  const decomposition = decompositionRequest !== undefined
+    ? (hasUsableDecomposition(decompositionRequest) ? decompositionRequest : null)
     : existing?.decomposition || null;
   return {
     batchId,

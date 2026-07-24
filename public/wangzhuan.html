@@ -152,11 +152,13 @@
                 <div class="wz-node-body">
                   <details class="wz-details wz-advanced-settings wz-decompose-llm-settings">
                     <summary>拆解模型设置</summary>
-                    <p class="wz-field-hint">开始解析前可选择拆解模型；默认 GPT-5.4，也可切换 Gemini 3.5 Flash。</p>
+                    <p class="wz-field-hint">开始解析前可选择拆解模型；默认 GPT-5.4。</p>
                     <div class="wz-inline-form">
                       <label>模型服务商 <input id="wzLlmProvider" type="text" value="skylink" placeholder="例如 skylink / openai" /></label>
                       <label>拆解模型
                         <select id="wzLlmModel">
+                          <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                          <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
                           <option value="gpt-5.4" selected>GPT-5.4</option>
                           <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                         </select>
@@ -661,5 +663,3 @@
     <script src="/wangzhuan.js?v=20260626-stepview-recheck" type="module"></script>
   </body>
 </html>
-
-

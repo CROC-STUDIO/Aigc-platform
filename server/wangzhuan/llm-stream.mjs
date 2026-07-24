@@ -1,5 +1,5 @@
 import { WangzhuanError } from "./http.mjs";
-import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge } from "./llm-config.mjs";
+import { llmUsesGeminiNativeApi, llmUsesSkylinkGeminiChatBridge, llmUsesSkylinkGptFrameInput } from "./llm-config.mjs";
 
 function numberOrZero(value) {
   const n = Number(value);
@@ -62,8 +62,7 @@ function modelInputMode(messages = []) {
 
 function shouldForceChatForFileUrl(llmConfig, messages) {
   return modelInputMode(messages) === "file_url"
-    && String(llmConfig.provider || "").trim().toLowerCase() === "skylink"
-    && /^gpt-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(String(llmConfig.model || "").trim());
+    && llmUsesSkylinkGptFrameInput(llmConfig);
 }
 
 function shouldFallbackFromResponsesStream(error) {

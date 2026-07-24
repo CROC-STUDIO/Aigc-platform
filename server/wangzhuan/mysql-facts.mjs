@@ -1465,6 +1465,11 @@ function pickUsableDecomposition(...candidates) {
   return null;
 }
 
+function storySeedDecomposition(request = {}) {
+  if (request?.sourceType !== "story_seed") return null;
+  return request.storySeed?.selectedVariant?.decomposition;
+}
+
 function resolveTemplateSnapshotForBatch(batch = {}) {
   if (batch.templateSnapshot?.draft) return batch.templateSnapshot;
   const fromRequest = inlineTemplateSnapshotFromRequest(batch.request || {});
@@ -1619,7 +1624,11 @@ export async function loadEstimateFromMysql(context, estimateId) {
       templateSnapshot: templateSnapshotFromEstimateRow(row) || inlineTemplateSnapshotFromRequest(requestPayload),
       referenceVideo: referenceSnapshotFromEstimateRow(row),
       source: remixSourceSnapshotFromEstimateRow(row),
-      decomposition: parseJsonValue(row.decomposition_json, null),
+      decomposition: pickUsableDecomposition(
+        parseJsonValue(row.decomposition_json, null),
+        requestPayload.decomposition,
+        storySeedDecomposition(requestPayload)
+      ),
       userId: currentUserId(context),
       projectRoot: projectRoot(context),
       createdAt: isoDate(row.created_at),
@@ -2373,7 +2382,9 @@ async function loadBatchByRunRow(conn, facts, run) {
   const decomposition = pickUsableDecomposition(
     parseJsonValue(run.decomposition_json, null),
     request.decomposition,
-    estimateRequest.decomposition
+    estimateRequest.decomposition,
+    storySeedDecomposition(request),
+    storySeedDecomposition(estimateRequest)
   );
   const batch = {
     batchId: run.run_uid,

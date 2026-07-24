@@ -14,6 +14,48 @@ function messagesText(messages) {
   return messages.map((message) => message.content).join("\n\n");
 }
 
+test("Seedance plan prompt tolerates a missing decomposition", () => {
+  assert.doesNotThrow(() => buildSeedancePlanMessages({
+    batch: {
+      batchId: "wzb_missing_decomposition",
+      templateSnapshot: { draft: { productName: "Drama App", language: "zh-CN", regions: ["CN"] } },
+      estimate: { request: { language: "zh-CN", targetRegions: ["CN"] } }
+    },
+    branch: {
+      branchId: "branch_1",
+      productName: "Drama App",
+      languages: ["zh-CN"],
+      regions: ["CN"],
+      truthRules: {}
+    },
+    decomposition: null,
+    channelRules: { rules: [] },
+    branchVariantIndex: 1,
+    segmentIndex: 1,
+    sliceDurationSec: 12,
+    currentSlice: {}
+  }));
+});
+
+test("short drama Seedance plans reserve market rules for the final app introduction", () => {
+  const batch = {
+    request: { sourceType: "story_seed" },
+    templateSnapshot: { draft: { language: "zh-CN", regions: ["US"], currencySymbol: "$" } },
+    estimate: { request: { sourceType: "story_seed", targetChannel: "meta_ads", promiseLevel: "strong_conversion" } }
+  };
+  const branch = { branchId: "branch_1", languages: ["zh-CN"], regions: ["US"], currencySymbol: "$", truthRules: {} };
+  const messages = buildSeedancePlanMessages({ batch, branch, decomposition: { storySegments: [] }, channelRules: { rules: [{ channel: "meta_ads" }] }, branchVariantIndex: 1, segmentIndex: 1, sliceDurationSec: 10, currentSlice: {} });
+  const text = messagesText(messages);
+  assert.match(text, /恰好 4-5 个/);
+  assert.match(text, /不要使用投放渠道、目标地区、币种/);
+  assert.doesNotMatch(text, /targetChannel=meta_ads/);
+  const finalText = messagesText(buildSeedancePlanMessages({ batch, branch, decomposition: { storySegments: [] }, channelRules: { rules: [{ channel: "meta_ads" }] }, branchVariantIndex: 1, segmentIndex: 3, sliceDurationSec: 10, currentSlice: {}, isFinalSeedanceSlice: true }));
+  assert.match(finalText, /前 6-7 秒必须完成独立剧集高潮与反转/);
+  assert.match(finalText, /最后 3-4 秒允许/);
+  assert.match(finalText, /targetChannel=meta_ads/);
+  assert.throws(() => validateSeedancePlan({ hook: "h", body: "b", imagePrompt: "i", seedancePrompt: "p", negativePrompt: "n", sliceBeatScript: [{}, {}, {}] }, { isStorySeed: true }), { code: "schema_invalid" });
+});
+
 test("Seedance plan prompt includes fission story segment and carrier context", () => {
   const messages = buildSeedancePlanMessages({
     batch: {

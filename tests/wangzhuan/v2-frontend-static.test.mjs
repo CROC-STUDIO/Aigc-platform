@@ -87,12 +87,15 @@ test("wangzhuan v2 mobile navigation keeps five workbenches clear of page conten
 
 test("wangzhuan v2 page uses required native controls and field labels", async () => {
   const html = await readText("public/wangzhuan-v2.html");
+  const js = await readText("public/wangzhuan-v2.js");
   assert.match(html, /id="wzReferencePreview"/);
   assert.match(html, /参考视频与 AI 拆解/);
   assert.match(html, /拖拽或选择参考视频/);
   assert.match(html, /<input id="wzProjectName" type="hidden"/);
   assert.doesNotMatch(html, /当前项目/);
   assert.match(html, /id="wzProductLibrarySelect"/);
+  assert.match(html, /id="wzStoryDurationSec"/);
+  assert.match(html, /<option value="30" selected>30 秒（3 个独立高潮）<\/option>/);
   assert.match(html, /id="wzApplyProductLibraryBtn"/);
   assert.match(html, /id="wzProductLibraryDetail"/);
   assert.match(html, /应用产品信息和图片/);
@@ -146,7 +149,12 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /产品录屏（最多 2 个）[\s\S]*id="wzProductRecordingFile"[^>]*multiple/);
   assert.match(html, /CTA 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzCtaAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(html, /Ending 图（仅图片，仅用于最后一个 Seedance 分片）[\s\S]*id="wzEndingAssetFile"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
-  assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="8"/);
+  assert.match(html, /id="wzRequestedConcurrency" type="hidden" value="3"/);
+  assert.match(js, /requestedConcurrency:\s*Number\(value\(els\.requestedConcurrency\) \|\| 3\)/);
+  assert.match(js, /function storyDurationSecValue\(\)[\s\S]*return Number\(value\(els\.storyDurationSec\)\) === 15 \? 15 : 30/);
+  assert.match(js, /function compatibleDurationSecValue\(\)[\s\S]*state\.storySeed\?\.durationSec\) === 30 \? 30 : 15/);
+  assert.match(js, /corePlot: value\(els\.storyCorePlot\),\s*durationSec: storyDurationSecValue\(\)/);
+  assert.doesNotMatch(js, /requestedConcurrency:\s*Number\(value\(els\.requestedConcurrency\) \|\| 8\)/);
   assert.match(html, /id="wzSubtitleFontSizeRange" type="range" min="20" max="60" step="1" value="40"/);
   assert.match(html, /id="wzSubtitleFontSizeNumber" type="number" min="20" max="60" step="1" value="40"/);
   assert.doesNotMatch(html, /同时生成数量/);
@@ -159,7 +167,9 @@ test("wangzhuan v2 page uses required native controls and field labels", async (
   assert.match(html, /id="wzCodexTestStoreLink" type="url"/);
   assert.match(html, /<option value="gemini-3\.1-pro-preview">Gemini 3\.1 Pro Preview<\/option>/);
   assert.match(html, /id="wzGeminiDecompositionHint"[\s\S]*视频拆解通常需要 1-3 分钟/);
-  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.4" selected>GPT-5\.4<\/option>/);
+  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.6-terra">GPT-5\.6 Terra<\/option>/);
+  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.6-luna">GPT-5\.6 Luna<\/option>/);
+  assert.match(html, /<select id="wzLlmModel">[\s\S]*<option value="gpt-5\.4" selected>GPT-5\.4<\/option>[\s\S]*<\/select>/);
   assert.match(html, /<select id="wzPlanLlmModel">[\s\S]*<option value="gpt-5\.4" selected>GPT-5\.4<\/option>/);
   assert.doesNotMatch(html, /<option value="gemini-3\.5-flash"/);
   assert.doesNotMatch(html, /Gemini 3\.5 Flash/);

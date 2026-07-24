@@ -288,7 +288,7 @@ test("decomposition honors explicit zero retries", async () => {
   }
 });
 
-test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", async () => {
+test("gpt-5.6-terra decomposition uses scene-aware frames and no video file_url", async () => {
   const root = await mkdtemp(join(tmpdir(), "wz-ref-gpt55-"));
   const calls = [];
   const frameRequests = [];
@@ -303,7 +303,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
       calls.push({ url: String(url), body });
       assert.doesNotMatch(String(url), /\/responses$/);
       assert.match(String(url), /\/chat\/completions$/);
-      assert.equal(body.model, "gpt-5.5");
+      assert.equal(body.model, "gpt-5.6-terra");
       const parts = body.messages?.flatMap((message) => message.content || []) || [];
       assert.equal(parts.some((part) => part?.type === "file"), false);
       assert.equal(parts.filter((part) => part?.type === "image_url").length, 4);
@@ -364,7 +364,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
       llmConfig: {
         provider: "skylink",
         endpoint: "https://skylink-gateway.com/api/v1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         apiKey: "test-key",
         maxRetries: 0
       }
@@ -382,7 +382,7 @@ test("gpt-5.5 decomposition uses scene-aware frames and no video file_url", asyn
       llmConfig: {
         provider: "skylink",
         endpoint: "https://skylink-gateway.com/api/v1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         apiKey: "test-key",
         maxRetries: 0
       }

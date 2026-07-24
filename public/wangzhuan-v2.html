@@ -92,6 +92,17 @@
                   </div>
                   <div id="wzReferencePreview" class="wz-v2-preview empty-line">未上传参考视频</div>
                 </div>
+                <div class="wz-inline-form">
+                  <label>短剧剧情点 <input id="wzStoryCorePlot" type="text" maxlength="80" placeholder="例如：婚内背叛" /></label>
+                  <label>短剧时长
+                    <select id="wzStoryDurationSec">
+                      <option value="30" selected>30 秒（3 个独立高潮）</option>
+                      <option value="15">15 秒（1 个独立高潮）</option>
+                    </select>
+                  </label>
+                  <button id="wzGenerateStorySeedBtn" class="mini ghost" type="button">生成剧情方案</button>
+                </div>
+                <div id="wzStorySeedBox" class="wz-list empty-line">尚未生成短剧剧情方案</div>
                 <input id="wzProjectName" type="hidden" value="default" />
                 <input id="wzGenerationMode" type="hidden" value="reference_batch" />
               </div>
@@ -107,6 +118,8 @@
                     <input id="wzLlmProvider" type="hidden" value="skylink" />
                     <label>模型名称
                       <select id="wzLlmModel">
+                        <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                        <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
                         <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
                         <option value="gpt-5.5">GPT-5.5</option>
                         <option value="gpt-5.4" selected>GPT-5.4</option>
@@ -358,7 +371,7 @@
                 </select>
               </label>
               <label>裂变数量 <input id="wzVariantCount" type="number" min="1" max="10" value="3" /></label>
-              <input id="wzRequestedConcurrency" type="hidden" value="8" />
+              <input id="wzRequestedConcurrency" type="hidden" value="3" />
               <input id="wzSeedanceModel" type="hidden" value="dreamina-seedance-2-0-fast-260128" />
             </div>
             <details class="wz-details wz-postprocess-settings" open>

@@ -8,7 +8,11 @@ import {
   normalizeFissionAnalysis,
   splitStorySegmentIntoSeedanceSlices
 } from "../../server/wangzhuan/fission-analysis.mjs";
-import { buildCompactDecompositionUserPrompt, buildDecompositionUserPrompt } from "../../server/wangzhuan/decomposition-prompt.mjs";
+import {
+  DECOMPOSITION_JSON_SCHEMA_HINT,
+  buildCompactDecompositionUserPrompt,
+  buildDecompositionUserPrompt
+} from "../../server/wangzhuan/decomposition-prompt.mjs";
 import { validateVideoDecomposition } from "../../server/wangzhuan/reference-videos.mjs";
 
 const sevenDimensions = {
@@ -763,9 +767,9 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /storySegments/);
   assert.match(prompt, /startSec\/endSec\/durationSec/);
   assert.match(prompt, /seedanceSlices are optional/i);
-  assert.match(prompt, /sliceSplitHints are mandatory/i);
   assert.match(prompt, /backend will derive generation slices from storySegments plus sliceSplitHints/i);
-  assert.match(prompt, /5-15s slices/i);
+  assert.match(prompt, /sliceSplitHints/);
+  assert.match(prompt, /5 and 15 seconds/i);
   assert.match(prompt, /timelineItems/);
   assert.match(prompt, /conversionSignals/);
   assert.match(prompt, /conversionEffectOpportunities/);
@@ -778,10 +782,22 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /withdrawal visual/i);
   assert.match(prompt, /CTA overlay/i);
   assert.match(prompt, /timelineItems unless they change the narrative beat/i);
-  assert.match(prompt, /scene\/subject\/action\/camera\/lighting\/style\/quality\/hook/);
+  for (const field of ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"]) {
+    assert.match(prompt, new RegExp(`"${field}"`));
+  }
   assert.match(prompt, /subtitleWorkflow\.subtitleScript/);
-  assert.match(prompt, /subtitles for post-processing/i);
-  assert.match(prompt, /not burned/i);
+  assert.match(prompt, /no burned subtitles/i);
+  assert.equal(prompt.match(/subtitleWorkflow\.subtitleScript/g)?.length, 1);
+  assert.doesNotMatch(prompt, /模型配置：provider=/);
+  assert.doesNotMatch(prompt, /actionReference|cameraReference|textElements|effectReference|doNotCopyElements|ctaMoment|endingMoment|continuityAnchors|onscreenText/);
+  const optionalFieldsStart = prompt.indexOf("其他可选字段（能观察到再填，保持简短但具体）：");
+  const optionalFieldsEnd = prompt.indexOf("裂变 JSON 主结构最小示例：");
+  const optionalFields = prompt.slice(optionalFieldsStart, optionalFieldsEnd);
+  assert.match(optionalFields, /"phoneUi"/);
+  assert.match(optionalFields, /"protagonist"/);
+  assert.match(optionalFields, /"rewardFeedback"/);
+  assert.match(optionalFields, /"cta"/);
+  assert.doesNotMatch(optionalFields, /"voiceover"|"onscreenText"|"actionReference"|"doNotCopyElements"/);
   assert.match(prompt, /sourceAssemblyMode/);
   assert.match(prompt, /continuityPlan/);
   assert.match(prompt, /continuityGroupId/);
@@ -794,6 +810,26 @@ test("formal decomposition prompt asks for whole-video-first fission analysis", 
   assert.match(prompt, /endFrameState/);
   assert.doesNotMatch(prompt, /可选的 seedanceSlices 示例/);
   assert.doesNotMatch(prompt, /segmentRole/);
+});
+
+test("decomposition schema hint removes legacy optional field definitions", () => {
+  for (const field of [
+    "voiceover",
+    "onscreenText",
+    "ctaMoment",
+    "endingMoment",
+    "continuityAnchors",
+    "actionReference",
+    "cameraReference",
+    "textElements",
+    "effectReference",
+    "doNotCopyElements"
+  ]) {
+    assert.equal(Object.hasOwn(DECOMPOSITION_JSON_SCHEMA_HINT, field), false);
+  }
+  for (const field of ["phoneUi", "protagonist", "rewardFeedback", "cta"]) {
+    assert.equal(Object.hasOwn(DECOMPOSITION_JSON_SCHEMA_HINT, field), true);
+  }
 });
 
 test("validateVideoDecomposition preserves continuity analysis fields", () => {
@@ -934,6 +970,46 @@ test("reference video decomposition validation preserves fission fields", () => 
   assert.equal(normalized.seedanceSlices[0].scene, "room");
   assert.equal(normalized.scene, "room");
   assert.deepEqual(normalized.missingFields, []);
+});
+
+test("reference video decomposition drops removed legacy optional fields", () => {
+  const normalized = validateVideoDecomposition("ref_legacy_fields", {
+    ...sevenDimensions,
+    hook: "reward proof hook",
+    phoneUi: "visible reward dashboard",
+    protagonist: "night-shift worker",
+    rewardFeedback: "coin progress appears after tap",
+    cta: "download button appears at end",
+    voiceover: "legacy voiceover field",
+    onscreenText: "legacy onscreen text field",
+    ctaMoment: "legacy cta moment",
+    endingMoment: "legacy ending moment",
+    continuityAnchors: "legacy continuity anchors",
+    actionReference: "legacy action reference",
+    cameraReference: "legacy camera reference",
+    textElements: "legacy text elements",
+    effectReference: "legacy effect reference",
+    doNotCopyElements: "legacy do not copy"
+  });
+
+  assert.equal(normalized.phoneUi, "visible reward dashboard");
+  assert.equal(normalized.protagonist, "night-shift worker");
+  assert.equal(normalized.rewardFeedback, "coin progress appears after tap");
+  assert.equal(normalized.cta, "download button appears at end");
+  for (const field of [
+    "voiceover",
+    "onscreenText",
+    "ctaMoment",
+    "endingMoment",
+    "continuityAnchors",
+    "actionReference",
+    "cameraReference",
+    "textElements",
+    "effectReference",
+    "doNotCopyElements"
+  ]) {
+    assert.equal(Object.hasOwn(normalized, field), false);
+  }
 });
 
 test("reference video decomposition backfills required fields from storySegments", () => {

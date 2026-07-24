@@ -1,11 +1,13 @@
 export const DEFAULT_LLM_CONFIG = Object.freeze({
   provider: "skylink",
   endpoint: "https://skylink-gateway.com/api/v1",
-  model: "gemini-3.5-flash",
+  model: "gpt-5.4",
   temperature: 0.2,
   timeoutMs: 300000,
   maxRetries: 3
 });
+
+const SKYLINK_GPT_FRAME_MODEL_PATTERN = /^(?:gpt-5\.(?:4|5)(?:-(?:mini|nano))?|gpt-5\.6-(?:luna|terra))$/i;
 
 export const DEFAULT_QC_LLM_CONFIG = Object.freeze({
   ...DEFAULT_LLM_CONFIG,
@@ -52,10 +54,15 @@ export function isRetryableLlmError(error) {
 function normalizeModel(provider, model) {
   const cleanModel = cleanString(model, DEFAULT_LLM_CONFIG.model);
   const cleanProvider = cleanString(provider).toLowerCase();
-  if (cleanProvider === "skylink" && /^GPT-5\.(?:4|5)(?:-(?:mini|nano))?$/i.test(cleanModel)) {
+  if (cleanProvider === "skylink" && SKYLINK_GPT_FRAME_MODEL_PATTERN.test(cleanModel)) {
     return cleanModel.toLowerCase();
   }
   return cleanModel;
+}
+
+export function llmUsesSkylinkGptFrameInput(llmConfig = {}) {
+  return cleanString(llmConfig.provider).toLowerCase() === "skylink"
+    && SKYLINK_GPT_FRAME_MODEL_PATTERN.test(cleanString(llmConfig.model));
 }
 
 export function llmUsesGeminiCompat(llmConfig = {}) {

@@ -11,16 +11,6 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   hook: "前三秒钩子：保留参考视频的结构逻辑，但不照搬竞品文案；写清靠人物、职业身份、字幕、奖励反馈还是痛点触发",
   phoneUi: "可选，手机/产品界面：页面模块、按钮、数字/金币/进度条/提现入口等可见信息",
   protagonist: "可选但能判断时必须填写：人物职业/身份、年龄段、外观、服装、情绪、姿态、手持物、是否延续到后续镜头",
-  voiceover: "可选但能判断时必须填写：按时间段拆分口播/旁白的功能、语气、节奏、大意；只写话术功能，不复述竞品原文案",
-  onscreenText: "可选但能判断时必须填写：屏幕字幕/贴纸/按钮文案的出现时机、位置、功能和视觉层级",
-  ctaMoment: "可选，CTA 出现的具体时刻、触发画面、按钮/字幕/口播承接方式",
-  endingMoment: "可选，Ending 收束画面、下载/奖励结果展示方式",
-  continuityAnchors: "可选，后续裂变或 30s 分段需保持一致的主角职业/外观、服装、地点、手机 UI 状态、最后关键帧",
-  actionReference: "Seedance 动作参考：可复用的人物/手部/手机操作/奖励反馈动作链，不照搬竞品品牌和原文案",
-  cameraReference: "Seedance 运镜参考：景别、构图、镜头移动、切镜节奏",
-  textElements: "Seedance 文字生成参考：字幕、气泡台词、按钮文案、CTA 的位置/层级/功能，不照搬竞品原文案",
-  effectReference: "Seedance 特效参考：转场、金币/余额反馈、弹窗、强调动画、音效/节奏点",
-  doNotCopyElements: "不得复刻：竞品品牌、logo、水印、UI 细节、原字幕/口播文案、人物身份或独有包装",
   rewardFeedback: "可选，奖励反馈：金币、余额、进度、到账感、弹窗或按钮反馈如何出现",
   cta: "可选，行动号召结构：出现时机、位置、按钮/字幕/口播表达方式",
   sourceVideoProfile: "裂变分析：整条参考视频的素材类型、主角/场景、产品露出方式、主要转化承诺与节奏概览",
@@ -36,7 +26,7 @@ export const DECOMPOSITION_JSON_SCHEMA_HINT = Object.freeze({
   openingHookIntensity: "裂变分析：前三秒吸引力强度，必须判断是否有强冲突、提现成功感、收益数字增长、金币/现金雨、金币爆发、满屏撒钱/撒金币、人物惊讶反应；如果参考视频开头偏慢，也要标注可裂变增强机会",
   voiceoverPerformance: "裂变分析：人物口播的情绪、语速、感染力、能量水平和节奏；必须明确是高亢快节奏、平稳说明、疑虑转化还是弱口播，并说明后续裂变是否应增强",
   sliceSplitHints: "裂变分析：Seedance 5-15s 子段建议切点，必须基于叙事转折而不是 UI/字幕/特效独立出现；当某个 storySegment 超过 15 秒时，必须给出可执行 splitSec 建议，供后端优先按较短相邻切片派生",
-  seedanceSlices: "裂变分析：可选输出的 Seedance 子段；如果模型能稳定给出可执行切片，则按 storySegments 顺序输出 seedanceSliceIndex/storySegmentIndex/startSec/endSec/durationSec/sliceDurationSec，单片 5-30 秒；若未输出，将由后端基于 storySegments + sliceSplitHints 自动派生；字幕不烧录，字幕文本进入 subtitleWorkflow.subtitleScript 或 subtitles 供后处理"
+  seedanceSlices: "裂变分析：可选输出的 Seedance 子段；如果模型能稳定给出可执行切片，则按 storySegments 顺序输出 seedanceSliceIndex/storySegmentIndex/startSec/endSec/durationSec/sliceDurationSec，单片 5-30 秒；若未输出，将由后端基于 storySegments + sliceSplitHints 自动派生"
 });
 
 export const DECOMPOSITION_ANTI_GENERALIZATION_PHRASES = Object.freeze([
@@ -58,18 +48,18 @@ export const DECOMPOSITION_SYSTEM_PROMPT = [
   "拆解目标是学习参考视频的镜头结构、时间节奏、人物设定、口播/字幕功能和转化逻辑，供后续产品改写与裂变子节点复用。",
   "严禁脚本泛化：每个字段都要基于参考视频里真实可见/可听的内容写具体细节，禁止空泛模板句。",
   "输出字段必须至少包含：scene, subject, action, camera, lighting, style, quality, hook。",
-  "有真人时必须推断或合理补全人物职业/身份，并写入 subject；有口播时必须按时间段细化 voiceover，并把关键口播功能同步写入 action。"
+  "有真人时必须推断或合理补全人物职业/身份，并写入 subject；有口播时必须按时间段把口播功能同步写入 action、voiceoverObserved 或 voiceoverPerformance。"
 ].join("\n");
 
 const CORE_DECOMPOSITION_FIELDS = ["scene", "subject", "action", "camera", "lighting", "style", "quality", "hook"];
 const DOWNSTREAM_CRITICAL_FIELDS = ["sourceVideoProfile", "wholeVideoConversion", "wholeVideoSummary", "sourceAssemblyMode", "continuityPlan", "narrativePacingPlan", "storySegments", "timelineItems", "conversionSignals", "conversionEffectOpportunities", "sliceSplitHints", "seedanceSlices"];
-const CONDENSED_OPTIONAL_FIELDS = ["phoneUi", "protagonist", "voiceover", "onscreenText", "ctaMoment", "endingMoment", "continuityAnchors", "actionReference", "cameraReference", "textElements", "effectReference", "doNotCopyElements", "rewardFeedback", "cta"];
+const CONDENSED_OPTIONAL_FIELDS = ["phoneUi", "protagonist", "rewardFeedback", "cta"];
 
 function pickSchemaHints(fields = []) {
   return Object.fromEntries(fields.map((field) => [field, DECOMPOSITION_JSON_SCHEMA_HINT[field]]));
 }
 
-export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt) {
+export function buildCompactDecompositionUserPrompt(probe, request = {}, _llmConfig = {}, videoProbePrompt) {
   const notes = String(request.knowledgeNotes || "").trim();
   const requiredHint = pickSchemaHints([
     ...CORE_DECOMPOSITION_FIELDS,
@@ -102,15 +92,13 @@ export function buildCompactDecompositionUserPrompt(probe, request = {}, llmConf
     "",
     notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
     "",
-    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
-    "",
     "只返回 JSON 对象。"
   ].join("\n");
 }
 
-export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}, videoProbePrompt, options = {}) {
+export function buildDecompositionUserPrompt(probe, request = {}, _llmConfig = {}, videoProbePrompt, options = {}) {
   if (options?.compact) {
-    return buildCompactDecompositionUserPrompt(probe, request, llmConfig, videoProbePrompt);
+    return buildCompactDecompositionUserPrompt(probe, request, _llmConfig, videoProbePrompt);
   }
   const notes = String(request.knowledgeNotes || "").trim();
   const durationHint = probe.durationSec
@@ -129,29 +117,14 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "1. 以参考视频为准做“结构学习 + 细节提炼”，不是写通用广告脚本。",
     "2. 按参考视频时间轴裂变拆分：action 必须分段，每段对应可见的镜头/动作/口播/字幕变化，方便后续 3.1/3.2/3.3 裂变和 30s 分段。",
     "3. subject 与 protagonist 必须细化人物：职业/身份优先（如网约车司机、便利店店员、健身博主、退休夫妻），再写性别、年龄段、外观、服装、情绪、手持物。",
-    "4. voiceover 与 action 必须细化口播：按时间段写口播功能（痛点/质疑/惊喜/引导下载）、语气、节奏、是否与字幕叠加；只写功能，不复述竞品原话。",
-    "5. hook/scene/style/onscreenText 也要落到参考视频的具体画面，不要抽象概括。",
+    "4. action、voiceoverObserved 与 voiceoverPerformance 必须细化口播：按时间段写口播功能（痛点/质疑/惊喜/引导下载）、语气、节奏、是否与字幕叠加；只写功能，不复述竞品原话。",
+    "5. hook/scene/style 也要落到参考视频的具体画面，不要抽象概括。",
     "",
     "【反泛化 — 禁止写法】",
     `以下写法视为不合格，必须改写成可见细节：${DECOMPOSITION_ANTI_GENERALIZATION_PHRASES.join("、")}。`,
     "不要写“展示产品优势”“吸引用户下载”这类空话；要写成谁、在什么场景、做什么动作、看到什么 UI/奖励反馈、口播/字幕承担什么转化功能。",
     "",
     "【Fission analysis requirements】",
-    "First understand whole video, then split: first understand whole video, then split by real narrative beats.",
-    "App UI/reward animation/cash/coin/subtitle/title/withdrawal/CTA overlay should be timelineItems unless narrative beat changes.",
-    "Do not create a new story segment only because an app UI, reward animation, cash/coin effect, subtitle card, title card, withdrawal visual, or CTA overlay appears; keep these in timelineItems unless they change the narrative beat.",
-    "Keep old fields scene/subject/action/camera/lighting/style/quality/hook for compatibility.",
-    "If output storySegments, each segment includes seven dimensions: scene, subject, action, camera, lighting, style, quality.",
-    "storySegments timing is mandatory: each segment must include numeric startSec, endSec, durationSec in source-video seconds; segments must be chronological and non-overlapping.",
-    "storySegments are mandatory when using fission analysis: each segment must be executable on the source-video timeline.",
-    "If a storySegment is longer than 15 seconds, sliceSplitHints are mandatory: provide exact narrative splitSec suggestions such as claim -> proof, proof -> CTA, or setup -> payoff; never split only because UI/subtitle/effect appears.",
-    "seedanceSlices are optional: if you can output high-quality executable 5-15s slices, include seedanceSliceIndex, storySegmentIndex, startSec, endSec, durationSec, sliceDurationSec; if omitted, backend will derive generation slices from storySegments plus sliceSplitHints.",
-    "Seedance subtitles are not burned; subtitle text goes into subtitleWorkflow.subtitleScript or subtitles for post-processing.",
-    "sourceAssemblyMode is mandatory: continuous_story, independent_segments, or mixed. Scene cuts alone do not prove that segments are independent.",
-    "Shot/reverse-shot coverage, alternating members of the same cast, fixed character relationships and wardrobe, shared room tone, and a persistent HUD/UI remain one continuity group; changing the focal person alone is not a group boundary.",
-    "continuityPlan is mandatory and independent from storySegments: groups contain continuityGroupId, storySegmentIndexes, and globalAnchors; continuous chains may contain any number of Seedance slices.",
-    "For continuous boundaries include boundaryType, startFrameState, endFrameState, continuityReferenceNeeded, and globalContinuityAnchors.",
-    "For continuous live-action story groups, narrativePacingPlan is mandatory: list appliesToContinuityGroupIds, centralConflict, relationshipMap, beatSheet, reversalPoints, cliffhangerBoundaries, and compressionWarnings. Enter conflict or decisive action in the first second, create one causal story change every 2-4 seconds, escalate or reverse every 6-10 seconds, and remove dead air, greetings, walking transitions, and repeated explanation without changing cast, wardrobe, or scene merely to simulate pace.",
     "Opening and voiceover analysis: explicitly judge whether the first 1-3 seconds are high-impact or slow; record openingHookIntensity and any fission opportunity to add reward/cash/coin feedback at the start.",
     "Voiceover energy analysis: if there is human speaking, record emotion, speaking speed, rhythm, and infectiousness; mark whether fission should upgrade it to high-energy, fast-paced, emotionally expressive delivery.",
     "Net-earning visual analysis:提现成功、收益数字增长、顶部余额快速增长、真钞、金币、现金雨、金币爆发、满屏撒钱/撒金币都必须进入 conversionSignals 或 conversionEffectOpportunities；不要只写 generic reward feedback。",
@@ -243,16 +216,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
       seedanceSlices: []
     }, null, 2),
     "",
-    "Seedance decomposition dimensions:",
-    "- actionReference = 动作参考：提炼人物/手部/手机操作/奖励反馈的可复用动作链。",
-    "- cameraReference = 运镜参考：提炼景别、构图、镜头移动、切镜节奏。",
-    "- textElements = 文字生成：提炼字幕、气泡台词、按钮文案、CTA 的位置、层级和功能，不照搬竞品原文案。",
-    "- effectReference = 特效参考：提炼金币/余额反馈、弹窗、转场、强调动画、音效节奏点。",
-    "- doNotCopyElements = 不得复刻：竞品品牌、logo、水印、UI 细节、原字幕/口播文案、人物身份或独有包装。",
-    "",
     notes ? `业务经验规则：\n${notes}` : "业务经验规则：未填写",
-    "",
-    `模型配置：provider=${llmConfig.provider || "unknown"}，model=${llmConfig.model || "unknown"}`,
     "",
     "【字段填写要求】",
     "1. 必须结合上传视频/抽帧画面判断镜头、节奏、人物、口播、产品露出、CTA 和 ending，不要只依据元数据。",
@@ -261,13 +225,7 @@ export function buildDecompositionUserPrompt(probe, request = {}, llmConfig = {}
     "4. subject 必须包含人物职业/身份；无真人时说明主体类型。",
     "5. action 必须按时间顺序分段，格式建议：「0-3s：…；3-8s：…；8-15s：…」，每段包含动作、口播功能、字幕/UI/奖励反馈。",
     "6. style 必须说明素材形态与口播/字幕关系；有口播时禁止只写“自然口播”。",
-    "7. protagonist/voiceover/onscreenText 能判断时必须填写；人物要有职业，口播要按段写功能与节奏。",
-    "8. phoneUi/rewardFeedback/ctaMoment/endingMoment 能判断时必须填写具体 UI、按钮、数字、触发画面。",
-    "9. continuityAnchors 必须总结后续裂变应保持一致的主角职业/外观、服装、地点、手机 UI 状态和最后关键帧。",
-    "10. sourceAssemblyMode 与 continuityPlan 必填；连续性分组独立于故事分段，支持超过 30 秒、超过两段的连续链。",
-    "11. 连续边界必须描述 startFrameState/endFrameState，包括人物姿态与视线、服装、场景灯光、镜头位置与运动方向、手机 UI、物体/特效状态和声音状态。",
-    "12. seedanceSlices 不是必填；只有在你能稳定给出高质量可执行 5-15s 切片时才输出，否则留空，由后端基于 storySegments + sliceSplitHints 自动派生。",
-    "13. 连续真人剧情必须输出 narrativePacingPlan，并把紧凑感落实为逐拍因果推进，不得仅写“节奏快”。",
-    "14. 只返回 JSON 对象。"
+    "7. phoneUi/protagonist/rewardFeedback/cta 能判断时必须填写具体 UI、按钮、数字、人物和触发画面。",
+    "8. 只返回 JSON 对象。"
   ].join("\n");
 }

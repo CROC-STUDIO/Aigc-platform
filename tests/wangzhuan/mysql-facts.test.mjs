@@ -179,6 +179,44 @@ function fakeBatchPool() {
   };
 }
 
+function fakeStorySeedEstimatePool() {
+  const decomposition = {
+    subject: "Mara, the CFO",
+    scene: "hospital delivery ward",
+    action: "shows the newborn wristband as proof"
+  };
+  const row = {
+    estimate_uid: "est_story_seed_001",
+    estimate_type: "batch",
+    request_hash: "story-seed-hash",
+    request_json: JSON.stringify({
+      sourceType: "story_seed",
+      storySeed: { selectedVariant: { decomposition } }
+    }),
+    estimate_json: JSON.stringify({ estimate: { durationSec: 15 } }),
+    status: "confirmed",
+    created_at: "2026-07-23 06:23:15.000",
+    decomposition_json: null
+  };
+  const connection = {
+    release() {},
+    async execute(sql) {
+      const text = String(sql);
+      if (text.includes("SELECT id FROM app_users")) return [[{ id: 11 }]];
+      if (text.includes("SELECT id FROM projects WHERE project_key")) return [[{ id: 22 }]];
+      if (text.includes("INSERT INTO project_members")) return [{ affectedRows: 1 }];
+      if (text.includes("FROM work_estimates we")) return [[row]];
+      throw new Error(`unexpected SQL: ${text}`);
+    }
+  };
+  return {
+    async getConnection() {
+      return connection;
+    },
+    async end() {}
+  };
+}
+
 test.afterEach(async () => {
   await mysqlFacts.closeWangzhuanFactsPool();
 });
@@ -228,4 +266,16 @@ test("getBatchDetail exposes recovery eligibility and availability", async () =>
   assert.equal(detail.batch.tasks[0].retryEligibility.status, "waiting_predecessor");
   assert.equal(detail.batch.tasks[0].availability, "waiting_predecessor");
   assert.deepEqual(detail.batch.tasks[0].attemptHistory.map((item) => item.attemptNo), [1, 2]);
+});
+
+test("story seed estimate restores its selected variant decomposition", async () => {
+  mysqlFacts.setWangzhuanFactsPoolForTest(fakeStorySeedEstimatePool());
+
+  const estimate = await mysqlFacts.loadEstimateFromMysql(context(), "est_story_seed_001");
+
+  assert.deepEqual(estimate.decomposition, {
+    subject: "Mara, the CFO",
+    scene: "hospital delivery ward",
+    action: "shows the newborn wristband as proof"
+  });
 });

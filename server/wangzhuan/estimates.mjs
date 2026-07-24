@@ -34,6 +34,7 @@ import { DEFAULT_SEEDANCE_MODEL, resolveSeedanceModel } from "./seedance-provide
 import { preflightStitcher } from "./stitch.mjs";
 import { recordTelemetryEvent } from "./telemetry.mjs";
 import { normalizeBatchPostProcess } from "./postprocess.mjs";
+import { normalizeStorySeedSelection } from "./story-seeds.mjs";
 import { writeSseDelta, writeSseDone, writeSseError, writeSseLog, writeSseReset } from "./sse.mjs";
 
 const MODEL_IMAGE = "gpt-image-2";
@@ -152,8 +153,8 @@ function validateEstimateRequest(request, limits) {
     requireField(request, "templateId");
     requireField(request, "versionId");
   }
+  const sourceType = request.sourceType === "story_seed" ? "story_seed" : "reference_video";
   const required = [
-    "referenceVideoId",
     "targetChannel",
     "targetRegion",
     "language",
@@ -162,6 +163,8 @@ function validateEstimateRequest(request, limits) {
     "variantCount",
     "outputRatio"
   ];
+  if (sourceType === "reference_video") required.unshift("referenceVideoId");
+  if (sourceType === "story_seed") requireField(request, "storySeed");
   for (const field of required) requireField(request, field);
   if (!TARGET_CHANNELS.includes(request.targetChannel)) {
     throw new WangzhuanError("validation_error", "targetChannel 不在合同枚举内", { field: "targetChannel" });
@@ -184,7 +187,15 @@ function validateEstimateRequest(request, limits) {
   }
   const targetRegions = normalizeStringList(request.targetRegions, normalizeStringList(request.targetRegion, ["US"]));
   const languages = normalizeStringList(request.languages, normalizeStringList(request.language, ["en-US"]));
-  return { durationSec, variantCount, requestedConcurrency, targetRegions, languages };
+  return {
+    durationSec,
+    variantCount,
+    requestedConcurrency,
+    targetRegions,
+    languages,
+    sourceType,
+    storySeed: sourceType === "story_seed" ? normalizeStorySeedSelection(request.storySeed) : null
+  };
 }
 
 function computeCounts(durationSec, variantCount, branchCount = 1) {
@@ -257,11 +268,22 @@ async function estimateBatchOnce(context, request = {}) {
         draft: request.templateSnapshot.draft
       };
   validateTemplateForPromise(template, request.promiseLevel);
-  const referenceVideo = await loadReferenceVideoProbe(context, request.referenceVideoId);
-  if (referenceVideo.status === "fail") {
+  const referenceVideo = normalized.sourceType === "story_seed"
+    ? null
+    : await loadReferenceVideoProbe(context, request.referenceVideoId);
+  if (referenceVideo?.status === "fail") {
     throw new WangzhuanError("invalid_video", "参考视频检查未通过", { referenceVideoId: referenceVideo.referenceVideoId });
   }
-  const decomposition = await loadReferenceDecomposition(context, request.referenceVideoId);
+  const decomposition = normalized.sourceType === "story_seed"
+    ? normalized.storySeed.selectedVariant.decomposition
+    : await loadReferenceDecomposition(context, request.referenceVideoId);
+  if (normalized.sourceType === "story_seed" && normalized.storySeed.durationSec !== normalized.durationSec) {
+    throw new WangzhuanError("validation_error", "短剧剧情方案时长与当前生成时长不一致，请重新生成剧情方案", {
+      field: "storySeed.durationSec",
+      storyDurationSec: normalized.storySeed.durationSec,
+      durationSec: normalized.durationSec
+    });
+  }
   const branches = normalizeBranchDrafts(template.draft, request.branches);
   const branchCount = Math.max(1, branches.length);
   const capabilities = capabilitySnapshot(context, normalized.durationSec);
@@ -334,7 +356,10 @@ async function estimateBatchOnce(context, request = {}) {
   const normalizedRequest = {
     templateId: request.templateId,
     versionId: request.versionId,
-    referenceVideoId: request.referenceVideoId,
+    sourceType: normalized.sourceType,
+    ...(normalized.sourceType === "story_seed"
+      ? { storySeed: normalized.storySeed }
+      : { referenceVideoId: request.referenceVideoId }),
     targetChannel: request.targetChannel,
     targetRegion: normalized.targetRegions[0] || String(request.targetRegion),
     targetRegions: normalized.targetRegions,

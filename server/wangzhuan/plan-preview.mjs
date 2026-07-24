@@ -39,14 +39,7 @@ const SEEDANCE_PLAN_SCHEMA_HINT = Object.freeze({
   ending: "Optional ending beat metadata in primary language; can be empty at draft time, but confirmation repair fills a neutral non-forcing value for QC contract if no rendered ending card/beat is required",
   imagePrompt: "First-frame image prompt using Seedance formula: new subject + motion + new environment + aesthetics; must redesign identity, scene, clothing and props; if reference assets exist, use 图片n labels from slot guide",
   seedancePrompt: "Current-slice 9:16 Seedance omni_reference prompt; write shot-by-shot using subject + motion + environment + camera/cut + aesthetics + audio/text; reuse only the reference structure, pacing, shot functions and conversion logic; use 图片n/视频n labels when reference assets exist",
-  sliceBeatScript: [{
-    timeRange: "0-3s",
-    visualBeat: "Visible action or new story information",
-    subjectAction: "Concrete body, prop, phone, or reaction action",
-    camera: "Shot size, angle, movement, focus, and cut",
-    productOrUiBeat: "Product/UI change or empty",
-    audioOrVoiceover: "One short causal dialogue or sound beat"
-  }],
+  sliceBeatScript: "Exactly 4-5 ordered shots, each with timeRange, visualBeat, subjectAction, camera, productOrUiBeat, and audioOrVoiceover",
   negativePrompt: "Things to avoid in generation",
   segmentRole: "Role of this slice: hook_slice, proof_slice, withdrawal_slice, cta_slice, or continuity_slice",
   sliceDurationSec: "Current slice duration in seconds; prefer 10-15 seconds for multi-slice net-earning materials when feasible",
@@ -264,6 +257,8 @@ function resolveSeedancePlanValidationContext(input = {}) {
   const explicitSubtitleWorkflow = resolveNormalizedSubtitleWorkflow(input.subtitleWorkflow, branchSubtitleWorkflow);
   const forceContinuity = String(input.currentSlice?.continuityMode || "") === "continuous_from_previous"
     || Boolean(String(input.currentSlice?.previousSliceId || "").trim());
+  const isStorySeed = input.batch?.request?.sourceType === "story_seed"
+    || input.batch?.estimate?.request?.sourceType === "story_seed";
   return {
     branch,
     branchId: branch.branchId,
@@ -280,6 +275,8 @@ function resolveSeedancePlanValidationContext(input = {}) {
       || cleanString(branch.withdrawalVisual)
       || cleanString(draft.withdrawalVisual),
     subtitleWorkflow: explicitSubtitleWorkflow,
+    isStorySeed,
+    isStoryAppIntroduction: isStorySeed && Boolean(input.isFinalSeedanceSlice),
     forceContinuity,
     sliceDiversity: {
       ...normalizeObject(draft.sliceDiversity),
@@ -308,16 +305,17 @@ function regionLabel(code = "") {
 }
 
 export function formatProtagonistFissionGuide(decomposition = {}, branchVariantIndex = 1, variantPrompt = "") {
-  const subject = cleanString(decomposition.subject);
-  const protagonist = cleanString(decomposition.protagonist);
-  const scene = cleanString(decomposition.scene);
-  const action = cleanString(decomposition.action);
-  const camera = cleanString(decomposition.camera);
-  const lighting = cleanString(decomposition.lighting);
-  const style = cleanString(decomposition.style);
-  const quality = cleanString(decomposition.quality);
-  const voiceover = cleanString(decomposition.voiceover);
-  const continuity = cleanString(decomposition.continuityAnchors);
+  const source = normalizeObject(decomposition);
+  const subject = cleanString(source.subject);
+  const protagonist = cleanString(source.protagonist);
+  const scene = cleanString(source.scene);
+  const action = cleanString(source.action);
+  const camera = cleanString(source.camera);
+  const lighting = cleanString(source.lighting);
+  const style = cleanString(source.style);
+  const quality = cleanString(source.quality);
+  const voiceover = cleanString(source.voiceover);
+  const continuity = cleanString(source.continuityAnchors);
   const variantIndex = Number(branchVariantIndex) || 1;
   const customVariantPrompt = cleanString(variantPrompt);
 
@@ -643,7 +641,7 @@ function buildCompactSchemaHint() {
     subtitles: ["short primaryLanguage subtitle lines"],
     imagePrompt: "first frame: new person + new scene + product exposure",
     seedancePrompt: "shot-by-shot Seedance formula; no burned subtitles; no dense/gibberish UI text",
-    sliceBeatScript: [{ timeRange: "0-3s", visualBeat: "one visible causal change", subjectAction: "concrete action", camera: "shot/cut", audioOrVoiceover: "one short beat" }],
+    sliceBeatScript: "Exactly 4-5 ordered shots with timeRange, visualBeat, subjectAction, camera, productOrUiBeat, and audioOrVoiceover",
     negativePrompt: "avoid list",
     segmentRole: "hook_slice|proof_slice|withdrawal_slice|cta_slice|continuity_slice",
     sliceDurationSec: "current slice seconds",
@@ -671,6 +669,8 @@ function hasMeaningfulDiversityVariables(value) {
 function buildRepairContext(input = {}) {
   const localeContext = resolvePlanLocaleContext(input.batch || {}, input.branch || {});
   const validationContext = resolveSeedancePlanValidationContext(input);
+  const isStorySeed = validationContext.isStorySeed;
+  const isStoryAppIntroduction = validationContext.isStoryAppIntroduction;
   const currentSlice = input.currentSlice || {};
   const currentStorySegment = storySegmentForSlice(input.decomposition || {}, currentSlice);
   const narrativePacingPlan = narrativePacingPlanForSlice(input.decomposition || {}, currentSlice, currentStorySegment);
@@ -678,13 +678,14 @@ function buildRepairContext(input = {}) {
     || Boolean(String(currentSlice.previousSliceId || "").trim());
   return {
     targetLanguage: localeContext.primaryLanguage,
-    targetRegion: localeContext.primaryRegion,
-    currencySymbol: localeContext.currencySymbol,
+    targetRegion: isStorySeed && !isStoryAppIntroduction ? "" : localeContext.primaryRegion,
+    currencySymbol: isStorySeed && !isStoryAppIntroduction ? "" : localeContext.currencySymbol,
     currencyName: "",
     sourceSlice: input.currentSlice,
     sliceDurationSec: input.sliceDurationSec,
-    mandatoryMoneyVisualCarrier: Boolean(input.mandatoryMoneyVisualCarrier || input.segmentIndex === 1),
-    moneyVisuals: validationContext.moneyVisuals,
+    mandatoryMoneyVisualCarrier: isStorySeed ? false : Boolean(input.mandatoryMoneyVisualCarrier || input.segmentIndex === 1),
+    moneyVisuals: isStorySeed ? [] : validationContext.moneyVisuals,
+    disableMandatoryMoneyVisuals: isStorySeed,
     conversionEffectOpportunities: input.currentSlice?.conversionEffectOpportunities || input.conversionEffectOpportunities || [],
     isFinalSeedanceSlice: Boolean(input.isFinalSeedanceSlice),
     totalSegmentCount: Number(input.totalSegmentCount || 0) || undefined,
@@ -751,6 +752,14 @@ export function validateSeedancePlan(plan = {}, context = {}) {
       missingFields
     });
   }
+  if (context.isStorySeed && (!Array.isArray(plan.sliceBeatScript) || plan.sliceBeatScript.length < 4 || plan.sliceBeatScript.length > 5)) {
+    throw new WangzhuanError("schema_invalid", "短剧高潮分片必须包含 4-5 个镜头", {
+      branchId: context.branchId,
+      branchVariantIndex: context.branchVariantIndex,
+      segmentIndex: context.segmentIndex,
+      field: "sliceBeatScript"
+    });
+  }
   return sanitizePlanAssetReferences({
     hook: cleanString(plan.hook),
     body: cleanString(plan.body),
@@ -808,9 +817,13 @@ export function buildSeedancePlanMessages({
   knowledgeNotes = "",
   options = {}
 }) {
+  decomposition = normalizeObject(decomposition);
   const draft = batch.templateSnapshot?.draft || {};
   const assetUrls = branch.assetUrls || {};
   const localeContext = resolvePlanLocaleContext(batch, branch);
+  const isStorySeed = batch.request?.sourceType === "story_seed"
+    || batch.estimate?.request?.sourceType === "story_seed";
+  const isStoryAppIntroduction = isStorySeed && Boolean(isFinalSeedanceSlice);
   const decompositionDriven = Array.isArray(decomposition?.seedanceSlices) && decomposition.seedanceSlices.length > 0
     || Array.isArray(decomposition?.storySegments) && decomposition.storySegments.length > 0;
   const outputTemplateMode = decompositionDriven
@@ -826,7 +839,9 @@ export function buildSeedancePlanMessages({
     branch.subtitleWorkflow,
     resolveNormalizedSubtitleWorkflow(draft.subtitleWorkflow)
   );
-  const localeGuideText = formatPlanLocaleGuide(localeContext);
+  const localeGuideText = isStorySeed
+    ? `主语言 primaryLanguage=${localeContext.primaryLanguage}。所有口播与可见短文字使用该语言；不要生成密集文字。`
+    : formatPlanLocaleGuide(localeContext);
   const referenceSlotGuide = buildReferenceAssetSlotGuide(assetUrls, branch.assetFileNames || {});
   const referenceSlotGuideText = formatReferenceAssetSlotGuide(referenceSlotGuide);
   const notes = cleanString(knowledgeNotes);
@@ -839,7 +854,9 @@ export function buildSeedancePlanMessages({
   const promptDecomposition = compactPrompt
     ? buildCompactDecompositionForSlice(decomposition, currentSlice)
     : (decomposition || {});
-  const promptChannelRules = compactPrompt
+  const promptChannelRules = isStorySeed && !isStoryAppIntroduction
+    ? { rules: [] }
+    : compactPrompt
     ? filterChannelRulesForBranch(channelRules, branch)
     : channelRules;
   const schemaHint = compactPrompt ? buildCompactSchemaHint() : SEEDANCE_PLAN_SCHEMA_HINT;
@@ -1105,10 +1122,34 @@ export function buildSeedancePlanMessages({
     ].filter(Boolean).join("\n");
   }
 
+  if (isStorySeed) {
+    promptText = [
+      "任务：为当前 8-15 秒独立短剧剧集高潮生成严格 JSON 预案。当前片段不承接其他片段的人物、场景、服装、动作或尾帧。",
+      "剧情要求：首秒进入公开压迫、夺权、羞辱、阻拦或证据被抢的具体动作；中段持续升级；反转物在后半段可见并改变权力关系；结尾停在未完成清算、质问或强反应。",
+      "镜头硬规则：sliceBeatScript 必须恰好 4-5 个按时间顺序排列的镜头；每个镜头都填写 timeRange、visualBeat、subjectAction、camera、productOrUiBeat、audioOrVoiceover。seedancePrompt 必须按同样的 4-5 个镜头描述，每镜头只使用一个主运镜。",
+      isStoryAppIntroduction
+        ? `前 6-7 秒必须完成独立剧集高潮与反转；最后 3-4 秒允许从剧情悬念自然切到 App 介绍：只在这段产品承接中使用 productName=${branch.productName || draft.productName || ""}、primaryLanguage=${localeContext.primaryLanguage}、regions=${localeContext.regions.join(",")}、currencySymbol=${localeContext.currencySymbol}、targetChannel=${localeContext.targetChannel} 和已审核素材 slot。App 介绍要有足够时长呈现产品价值与自然动作承接，不能覆盖前面的高潮、不能编造金额或收益承诺。`
+        : "不要使用投放渠道、目标地区、币种、收益、提现、奖励、产品营销、CTA、承诺等级或市场化参数；不要生成金额、App UI、广告话术、密集文字、免责声明或水印。",
+      "保留当前主语言用于自然对白和必要的极短可见文字；人物、场景、服装、道具必须服务于当前独立高潮。",
+      "当前短剧拆解：",
+      JSON.stringify(promptDecomposition, null, 2),
+      "当前高潮切片：",
+      JSON.stringify(promptFissionSliceContext, null, 2),
+      `branchVariantIndex=${branchVariantIndex}; segmentIndex=${segmentIndex}; totalSegmentCount=${totalSegmentCount || ""}; sliceDurationSec=${currentSliceDurationSec}s`,
+      "输出 JSON 字段：",
+      JSON.stringify(schemaHint, null, 2),
+      "只返回 JSON 对象。"
+    ].join("\n\n");
+  }
+
   return [
     {
       role: "system",
-      content: compactPrompt
+      content: isStorySeed
+        ? isStoryAppIntroduction
+          ? "你是短剧导演与 Seedance 分镜编剧。前 6-7 秒保持独立剧集高潮；最后 3-4 秒允许用市场信息做完整自然的 App 介绍。每段必须有恰好 4-5 个镜头。"
+          : "你是短剧导演与 Seedance 分镜编剧。按当前独立剧集高潮输出严格 JSON；每段必须有恰好 4-5 个镜头，不要加入投放市场或网赚营销参数。"
+        : compactPrompt
         ? "你是网赚广告 Seedance 前置参数策划专家。按当前切片输出严格 JSON；重构人物/场景/表达；遵守语言地区币种、素材 slot、无烧录字幕、无密集 UI/免责声明文字。"
         : [
             "你是网赚广告 Seedance 前置参数策划专家。",
@@ -1180,6 +1221,7 @@ function buildSeedanceBranchPlanMessages(input = {}) {
   });
   const userMessage = messages.find((message) => message.role === "user");
   if (userMessage) {
+    const isStorySeed = input.batch?.request?.sourceType === "story_seed" || input.batch?.estimate?.request?.sourceType === "story_seed";
     userMessage.content = [
       userMessage.content,
       "",
@@ -1192,6 +1234,7 @@ function buildSeedanceBranchPlanMessages(input = {}) {
       `6. ${formatSeedanceEnergyRules({ batch: true, compact: true })}`,
       "7. 每个 slice 的 seedancePrompt 只描述该 slice 自己，不得把其他 slice 的镜头写入当前 prompt。",
       "8. subtitleWorkflow.subtitleScript 独立输出字幕脚本；seedancePrompt 仍必须避免烧录字幕和大量画面文字。",
+      isStorySeed ? "9. 短剧来源中，只有最后一个 slice 的最后 3-4 秒允许使用产品名、语言、地区、币种、渠道和审核素材做完整 App 介绍；该 slice 的前 6-7 秒仍须完成剧情高潮。此前所有高潮片段不得使用市场或网赚营销参数。" : "",
       "",
       "variantCount：",
       String(variantCount),
@@ -1238,6 +1281,7 @@ function buildSeedanceVariantPlanMessages(input = {}) {
   });
   const userMessage = messages.find((message) => message.role === "user");
   if (userMessage) {
+    const isStorySeed = input.batch?.request?.sourceType === "story_seed" || input.batch?.estimate?.request?.sourceType === "story_seed";
     userMessage.content = [
       userMessage.content,
       "",
@@ -1248,6 +1292,7 @@ function buildSeedanceVariantPlanMessages(input = {}) {
       "4. 每个 slice 的 seedancePrompt 只描述该 slice 自己，不得把其他 slice 的镜头写入当前 prompt。",
       "5. subtitleWorkflow.subtitleScript 独立输出字幕脚本；seedancePrompt 仍必须避免烧录字幕和大量画面文字。",
       `6. ${formatSeedanceEnergyRules({ batch: true, compact: true })}`,
+      isStorySeed ? "7. 短剧来源中，只有最后一个 slice 的最后 3-4 秒允许使用产品名、语言、地区、币种、渠道和审核素材做完整 App 介绍；该 slice 的前 6-7 秒仍须完成剧情高潮。此前所有高潮片段不得使用市场或网赚营销参数。" : "",
       "",
       "branchVariantIndex：",
       String(branchVariantIndex),

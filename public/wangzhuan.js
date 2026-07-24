@@ -55,7 +55,7 @@ import {
   showActiveLockFromError
 } from "./wangzhuan-task-nav.js";
 
-const LLM_MODEL_OPTIONS = Object.freeze(["gpt-5.4", "gemini-3.5-flash"]);
+const LLM_MODEL_OPTIONS = Object.freeze(["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4", "gemini-3.5-flash"]);
 const DEFAULT_LLM_MODEL = "gpt-5.4";
 
 function normalizeLlmModelChoice(value, fallback = DEFAULT_LLM_MODEL) {
