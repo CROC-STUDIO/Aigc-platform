@@ -1380,9 +1380,11 @@ async function listVideoFiles(dir) {
 
 function inferBatchFromOutputName(name) {
   const stem = parse(name).name;
+  const roleShowcaseBatch = stem.match(/^(role_showcase_(?:\d{8}_\d{4,6}|\d{12,14}))(?:_|$)/);
+  if (roleShowcaseBatch) return roleShowcaseBatch[1];
   const timeBatch = stem.match(/^(\d{8}_\d{4,6}|\d{12,14})(?:_|$)/);
   if (timeBatch) return timeBatch[1];
-  const markers = ["_\u6e38\u620f\u6f2b\u5267", "_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
+  const markers = ["_\u6e38\u620f\u6f2b\u5267", "_\u89d2\u8272\u5c55\u793a", "_heroIcon_", "_Icon_Head_", "_\u7ade\u54c1\u7d20\u6750"];
   const indexes = markers.map((marker) => stem.indexOf(marker)).filter((index) => index > 0);
   if (!indexes.length) return "ungrouped";
   return stem.slice(0, Math.min(...indexes));
@@ -2424,6 +2426,16 @@ function nextAvailableFilePath(targetPath) {
   return join(parsed.dir, `${parsed.name}_${Date.now()}${parsed.ext}`);
 }
 
+function roleShowcaseOutputFileName(body = {}, batchTag = "") {
+  const roleNames = Array.isArray(body.roleNames) ? body.roleNames : [];
+  const rawRoleName = String(roleNames[0] || body.roleName || "角色").trim();
+  const roleStem = parse(rawRoleName).name || rawRoleName || "角色";
+  const roleName = sanitizeSegment(roleStem).slice(0, 48) || "角色";
+  const showcaseIndex = Math.max(1, Math.min(999, Number.parseInt(String(body.showcaseIndex || "1"), 10) || 1));
+  const repeatIndex = Math.max(1, Math.min(999, Number.parseInt(String(body.repeatIndex || "1"), 10) || 1));
+  return `${sanitizeSegment(batchTag)}_${roleName}_角色展示_${showcaseIndex}_${repeatIndex}.mp4`;
+}
+
 async function generateComicVideo(body = {}) {
   const prompt = String(body.prompt ?? "").trim();
   if (!prompt) throw new Error("请先生成或填写 Seedance 提示词");
@@ -2500,7 +2512,10 @@ async function generateComicVideo(body = {}) {
   if (lastRawError) throw new Error(`Seedance 2.0 生成提交失败：${summarizeErrorText(lastRawError)}。完整错误已保存到 ${join(workDir, "seedance_error.txt")}`);
   const raw = `${stdout}\n${stderr}`.trim();
   const taskId = raw.match(/Task:\s*(.+)/)?.[1]?.trim() || raw.match(/task[_-]?id[:：]\s*(\S+)/i)?.[1]?.trim() || "";
-  const output = nextAvailableFilePath(join(outputDir, `${batchTag}_游戏漫剧_Seedance2.mp4`));
+  const outputName = String(batchTag).startsWith("role_showcase_")
+    ? roleShowcaseOutputFileName(body, batchTag)
+    : `${batchTag}_游戏漫剧_Seedance2.mp4`;
+  const output = nextAvailableFilePath(join(outputDir, outputName));
   const videoUrl = taskId ? await pollSeedanceVideoUrl(taskId, `comic_${batchTag}`, output) : parseSeedanceVideoUrl(raw);
   if (!videoUrl) throw new Error(`No Seedance video URL returned\n${raw}`);
   if (!taskId) await downloadVerifiedVideo(videoUrl, output, `comic_${batchTag}`);

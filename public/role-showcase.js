@@ -480,6 +480,7 @@ async function generateVideo() {
       ...selectedItems(state.materials.scenes, state.selectedScenes),
       ...selectedItems(state.materials.logos, state.selectedLogos)
     ];
+    const selectedRoles = selectedItems(state.materials.roles, state.selectedRoles);
     let lastResult = null;
     for (let index = 0; index < repeatCount; index += 1) {
       els.generateStatus.textContent = `正在生成视频 ${index + 1}/${repeatCount}...`;
@@ -492,6 +493,9 @@ async function generateVideo() {
           duration: 15,
           videoModel: els.videoModel.value,
           batchTag,
+          roleNames: selectedRoles.map((item) => item.title || item.name).filter(Boolean),
+          showcaseIndex: 1,
+          repeatIndex: index + 1,
           assetPaths: selected.map((item) => item.sourcePath || item.path).filter(Boolean)
         })
       });
